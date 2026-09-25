@@ -1,0 +1,31 @@
+{
+  "update": {
+    "checking": "Checking for Updates…",
+    "contacting": "Contacting update server…",
+    "available": "Update Available",
+    "upToDate": "You're Up to Date",
+    "failed": "Update Failed",
+    "skip": "Skip This Version",
+    "remind": "Remind Me Later",
+    "retry": "Try Again",
+    "install": "Install Update",
+    "restart": "Restart & Apply",
+    "downloading": "Downloading Update",
+    "starting": "Starting download…",
+    "progress": "{{percent}}% · {{written}} of {{total}}",
+    "downloaded": "Downloaded {{written}}",
+    "verifying": "Verifying Update",
+    "checksum": "Checking the checksum…",
+    "installing": "Installing Update",
+    "unpacking": "Unpacking and staging…",
+    "ready": "Update Ready",
+    "adminPrompt": "BarSQL needs your password to install the update.",
+    "during": "During {{stage}}: {{message}}",
+    "stage": {
+      "check": "check",
+      "download": "download",
+      "verify": "verify",
+      "install": "install"
+    }
+  }
+}

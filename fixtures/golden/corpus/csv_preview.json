@@ -1,0 +1,2211 @@
+[
+  {
+    "name": "basic",
+    "content": "id,name,price,active,created\n1,Ann,10.5,true,2024-01-01\n2,Bob,,false,2024-01-02 10:00:00\n3,\"Cy, Jr\",7,TRUE,\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "name",
+            "price",
+            "active",
+            "created"
+          ],
+          "rows": [
+            [
+              "1",
+              "Ann",
+              "10.5",
+              "true",
+              "2024-01-01"
+            ],
+            [
+              "2",
+              "Bob",
+              "",
+              "false",
+              "2024-01-02 10:00:00"
+            ],
+            [
+              "3",
+              "Cy, Jr",
+              "7",
+              "TRUE",
+              ""
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text",
+            "float",
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "TEXT",
+            "DOUBLE",
+            "TINYINT(1)",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 108,
+          "truncated": false,
+          "totalRows": 3
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "name",
+            "price",
+            "active",
+            "created"
+          ],
+          "rows": [
+            [
+              "1",
+              "Ann",
+              "10.5",
+              "true",
+              "2024-01-01"
+            ],
+            [
+              "2",
+              "Bob",
+              "",
+              "false",
+              "2024-01-02 10:00:00"
+            ],
+            [
+              "3",
+              "Cy, Jr",
+              "7",
+              "TRUE",
+              ""
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text",
+            "float",
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "text",
+            "double precision",
+            "boolean",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 108,
+          "truncated": false,
+          "totalRows": 3
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "name",
+            "price",
+            "active",
+            "created"
+          ],
+          "rows": [
+            [
+              "1",
+              "Ann",
+              "10.5",
+              "true",
+              "2024-01-01"
+            ],
+            [
+              "2",
+              "Bob",
+              "",
+              "false",
+              "2024-01-02 10:00:00"
+            ],
+            [
+              "3",
+              "Cy, Jr",
+              "7",
+              "TRUE",
+              ""
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text",
+            "float",
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT",
+            "REAL",
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 108,
+          "truncated": false,
+          "totalRows": 3
+        }
+      }
+    }
+  },
+  {
+    "name": "semicolon",
+    "content": "a;b;c\n1;2;3\n4;5;6\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3"
+            ],
+            [
+              "4",
+              "5",
+              "6"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "BIGINT",
+            "BIGINT"
+          ],
+          "delimiter": ";",
+          "totalBytes": 18,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3"
+            ],
+            [
+              "4",
+              "5",
+              "6"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "bigint",
+            "bigint"
+          ],
+          "delimiter": ";",
+          "totalBytes": 18,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3"
+            ],
+            [
+              "4",
+              "5",
+              "6"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": ";",
+          "totalBytes": 18,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "tab",
+    "content": "a\tb\n1\t2\n3\t4\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "BIGINT"
+          ],
+          "delimiter": "\t",
+          "totalBytes": 12,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "bigint"
+          ],
+          "delimiter": "\t",
+          "totalBytes": 12,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": "\t",
+          "totalBytes": 12,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "pipe_explicit",
+    "content": "a|b\n1|2\n",
+    "options": {
+      "delimiter": "|",
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "int"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "BIGINT"
+          ],
+          "delimiter": "|",
+          "totalBytes": 8,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "int"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "bigint"
+          ],
+          "delimiter": "|",
+          "totalBytes": 8,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "int"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": "|",
+          "totalBytes": 8,
+          "truncated": false,
+          "totalRows": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "quoted_newlines",
+    "content": "id,note\n1,\"line1\nline2\"\n2,\"with \"\"quotes\"\"\"\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "note"
+          ],
+          "rows": [
+            [
+              "1",
+              "line1\nline2"
+            ],
+            [
+              "2",
+              "with \"quotes\""
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 44,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "note"
+          ],
+          "rows": [
+            [
+              "1",
+              "line1\nline2"
+            ],
+            [
+              "2",
+              "with \"quotes\""
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 44,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "note"
+          ],
+          "rows": [
+            [
+              "1",
+              "line1\nline2"
+            ],
+            [
+              "2",
+              "with \"quotes\""
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 44,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "bom",
+    "content": "﻿id,name\n1,a\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 15,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 15,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 15,
+          "truncated": false,
+          "totalRows": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "crlf",
+    "content": "id,name\r\n1,a\r\n2,b\r\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 19,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 19,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 19,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "formula_guard",
+    "content": "id,val\n1,'=SUM(A1)\n2,'-5\n3,-5\n4,'+x\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "val"
+          ],
+          "rows": [
+            [
+              "1",
+              "'=SUM(A1)"
+            ],
+            [
+              "2",
+              "'-5"
+            ],
+            [
+              "3",
+              "-5"
+            ],
+            [
+              "4",
+              "'+x"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 36,
+          "truncated": false,
+          "totalRows": 4
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "val"
+          ],
+          "rows": [
+            [
+              "1",
+              "'=SUM(A1)"
+            ],
+            [
+              "2",
+              "'-5"
+            ],
+            [
+              "3",
+              "-5"
+            ],
+            [
+              "4",
+              "'+x"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 36,
+          "truncated": false,
+          "totalRows": 4
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "val"
+          ],
+          "rows": [
+            [
+              "1",
+              "'=SUM(A1)"
+            ],
+            [
+              "2",
+              "'-5"
+            ],
+            [
+              "3",
+              "-5"
+            ],
+            [
+              "4",
+              "'+x"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 36,
+          "truncated": false,
+          "totalRows": 4
+        }
+      }
+    }
+  },
+  {
+    "name": "empty_vs_quoted",
+    "content": "id,val\n1,\n2,\"\"\n3,NULL\n",
+    "options": {
+      "hasHeader": true,
+      "nullLiteral": "NULL"
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "val"
+          ],
+          "rows": [
+            [
+              "1",
+              ""
+            ],
+            [
+              "2",
+              ""
+            ],
+            [
+              "3",
+              "NULL"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 22,
+          "truncated": false,
+          "totalRows": 3
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "val"
+          ],
+          "rows": [
+            [
+              "1",
+              ""
+            ],
+            [
+              "2",
+              ""
+            ],
+            [
+              "3",
+              "NULL"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 22,
+          "truncated": false,
+          "totalRows": 3
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "val"
+          ],
+          "rows": [
+            [
+              "1",
+              ""
+            ],
+            [
+              "2",
+              ""
+            ],
+            [
+              "3",
+              "NULL"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 22,
+          "truncated": false,
+          "totalRows": 3
+        }
+      }
+    }
+  },
+  {
+    "name": "no_header",
+    "content": "1,2\n3,4\n",
+    "options": {
+      "hasHeader": false
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "col1",
+            "col2"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "BIGINT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 8,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "col1",
+            "col2"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "bigint"
+          ],
+          "delimiter": ",",
+          "totalBytes": 8,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "col1",
+            "col2"
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": ",",
+          "totalBytes": 8,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "ragged",
+    "content": "a,b,c\n1,2\n3,4,5,6\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              ""
+            ],
+            [
+              "3",
+              "4",
+              "5"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "BIGINT",
+            "BIGINT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 18,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              ""
+            ],
+            [
+              "3",
+              "4",
+              "5"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "bigint",
+            "bigint"
+          ],
+          "delimiter": ",",
+          "totalBytes": 18,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              ""
+            ],
+            [
+              "3",
+              "4",
+              "5"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": ",",
+          "totalBytes": 18,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "numbers",
+    "content": "i,big,dec,exp,zero,neg,thousands\n1,9223372036854775807,1.50,1e3,007,-5,\"1,000\"\n2,9223372036854775808,-0.25,2.5E-3,0,-0,\"2,000\"\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "i",
+            "big",
+            "dec",
+            "exp",
+            "zero",
+            "neg",
+            "thousands"
+          ],
+          "rows": [
+            [
+              "1",
+              "9223372036854775807",
+              "1.50",
+              "1e3",
+              "007",
+              "-5",
+              "1,000"
+            ],
+            [
+              "2",
+              "9223372036854775808",
+              "-0.25",
+              "2.5E-3",
+              "0",
+              "-0",
+              "2,000"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "float",
+            "float",
+            "float",
+            "int",
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "BIGINT",
+            "DOUBLE",
+            "DOUBLE",
+            "DOUBLE",
+            "BIGINT",
+            "BIGINT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 127,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "i",
+            "big",
+            "dec",
+            "exp",
+            "zero",
+            "neg",
+            "thousands"
+          ],
+          "rows": [
+            [
+              "1",
+              "9223372036854775807",
+              "1.50",
+              "1e3",
+              "007",
+              "-5",
+              "1,000"
+            ],
+            [
+              "2",
+              "9223372036854775808",
+              "-0.25",
+              "2.5E-3",
+              "0",
+              "-0",
+              "2,000"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "float",
+            "float",
+            "float",
+            "int",
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "bigint",
+            "double precision",
+            "double precision",
+            "double precision",
+            "bigint",
+            "bigint",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 127,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "i",
+            "big",
+            "dec",
+            "exp",
+            "zero",
+            "neg",
+            "thousands"
+          ],
+          "rows": [
+            [
+              "1",
+              "9223372036854775807",
+              "1.50",
+              "1e3",
+              "007",
+              "-5",
+              "1,000"
+            ],
+            [
+              "2",
+              "9223372036854775808",
+              "-0.25",
+              "2.5E-3",
+              "0",
+              "-0",
+              "2,000"
+            ]
+          ],
+          "inferredTypes": [
+            "int",
+            "float",
+            "float",
+            "float",
+            "int",
+            "int",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "REAL",
+            "REAL",
+            "REAL",
+            "INTEGER",
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 127,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "dates",
+    "content": "d,dt,ts,t,mixed\n2024-02-29,2024-02-29 13:45:30,2024-02-29T13:45:30Z,13:45:30,2024-02-29\n2024-03-01,2024-03-01 00:00:00,0001-01-01T00:00:00Z,00:00:01,nope\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "d",
+            "dt",
+            "ts",
+            "t",
+            "mixed"
+          ],
+          "rows": [
+            [
+              "2024-02-29",
+              "2024-02-29 13:45:30",
+              "2024-02-29T13:45:30Z",
+              "13:45:30",
+              "2024-02-29"
+            ],
+            [
+              "2024-03-01",
+              "2024-03-01 00:00:00",
+              "0001-01-01T00:00:00Z",
+              "00:00:01",
+              "nope"
+            ]
+          ],
+          "inferredTypes": [
+            "date",
+            "timestamp",
+            "timestamp",
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "DATE",
+            "DATETIME",
+            "DATETIME",
+            "TEXT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 154,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "d",
+            "dt",
+            "ts",
+            "t",
+            "mixed"
+          ],
+          "rows": [
+            [
+              "2024-02-29",
+              "2024-02-29 13:45:30",
+              "2024-02-29T13:45:30Z",
+              "13:45:30",
+              "2024-02-29"
+            ],
+            [
+              "2024-03-01",
+              "2024-03-01 00:00:00",
+              "0001-01-01T00:00:00Z",
+              "00:00:01",
+              "nope"
+            ]
+          ],
+          "inferredTypes": [
+            "date",
+            "timestamp",
+            "timestamp",
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "date",
+            "timestamp",
+            "timestamp",
+            "text",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 154,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "d",
+            "dt",
+            "ts",
+            "t",
+            "mixed"
+          ],
+          "rows": [
+            [
+              "2024-02-29",
+              "2024-02-29 13:45:30",
+              "2024-02-29T13:45:30Z",
+              "13:45:30",
+              "2024-02-29"
+            ],
+            [
+              "2024-03-01",
+              "2024-03-01 00:00:00",
+              "0001-01-01T00:00:00Z",
+              "00:00:01",
+              "nope"
+            ]
+          ],
+          "inferredTypes": [
+            "date",
+            "timestamp",
+            "timestamp",
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "TEXT",
+            "TEXT",
+            "TEXT",
+            "TEXT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 154,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "booleans",
+    "content": "a,b,c\ntrue,yes,1\nfalse,no,0\nTRUE,Y,1\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "true",
+              "yes",
+              "1"
+            ],
+            [
+              "false",
+              "no",
+              "0"
+            ],
+            [
+              "TRUE",
+              "Y",
+              "1"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "bool",
+            "bool"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "TINYINT(1)",
+            "TINYINT(1)"
+          ],
+          "delimiter": ",",
+          "totalBytes": 37,
+          "truncated": false,
+          "totalRows": 3
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "true",
+              "yes",
+              "1"
+            ],
+            [
+              "false",
+              "no",
+              "0"
+            ],
+            [
+              "TRUE",
+              "Y",
+              "1"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "bool",
+            "bool"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "boolean",
+            "boolean"
+          ],
+          "delimiter": ",",
+          "totalBytes": 37,
+          "truncated": false,
+          "totalRows": 3
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "rows": [
+            [
+              "true",
+              "yes",
+              "1"
+            ],
+            [
+              "false",
+              "no",
+              "0"
+            ],
+            [
+              "TRUE",
+              "Y",
+              "1"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "bool",
+            "bool"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": ",",
+          "totalBytes": 37,
+          "truncated": false,
+          "totalRows": 3
+        }
+      }
+    }
+  },
+  {
+    "name": "skip_rows",
+    "content": "title line\n\nid,name\n1,a\n",
+    "options": {
+      "hasHeader": true,
+      "skipRows": 2
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 24,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 24,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 24,
+          "truncated": false,
+          "totalRows": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "trim",
+    "content": "  id , name \n 1 ,  a  \n",
+    "options": {
+      "hasHeader": true,
+      "trimSpace": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1 ",
+              "a  "
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 23,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1 ",
+              "a  "
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 23,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              "1 ",
+              "a  "
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 23,
+          "truncated": false,
+          "totalRows": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "duplicate_headers",
+    "content": "a,a,,b\n1,2,3,4\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "a_2",
+            "col3",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "BIGINT",
+            "BIGINT",
+            "BIGINT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 15,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "a_2",
+            "col3",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "bigint",
+            "bigint",
+            "bigint"
+          ],
+          "delimiter": ",",
+          "totalBytes": 15,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "a_2",
+            "col3",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "int",
+            "int",
+            "int"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "INTEGER",
+            "INTEGER",
+            "INTEGER"
+          ],
+          "delimiter": ",",
+          "totalBytes": 15,
+          "truncated": false,
+          "totalRows": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "unicode",
+    "content": "name,emoji\nhéllo,🌍\nЖ,✓\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "name",
+            "emoji"
+          ],
+          "rows": [
+            [
+              "héllo",
+              "🌍"
+            ],
+            [
+              "Ж",
+              "✓"
+            ]
+          ],
+          "inferredTypes": [
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "TEXT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 30,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "name",
+            "emoji"
+          ],
+          "rows": [
+            [
+              "héllo",
+              "🌍"
+            ],
+            [
+              "Ж",
+              "✓"
+            ]
+          ],
+          "inferredTypes": [
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "text",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 30,
+          "truncated": false,
+          "totalRows": 2
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "name",
+            "emoji"
+          ],
+          "rows": [
+            [
+              "héllo",
+              "🌍"
+            ],
+            [
+              "Ж",
+              "✓"
+            ]
+          ],
+          "inferredTypes": [
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "TEXT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 30,
+          "truncated": false,
+          "totalRows": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "header_only",
+    "content": "a,b\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": null,
+          "inferredTypes": [
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "TEXT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 4,
+          "truncated": false,
+          "totalRows": 0
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": null,
+          "inferredTypes": [
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "text",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 4,
+          "truncated": false,
+          "totalRows": 0
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": null,
+          "inferredTypes": [
+            "text",
+            "text"
+          ],
+          "sqlTypes": [
+            "TEXT",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 4,
+          "truncated": false,
+          "totalRows": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "empty",
+    "content": "",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "error": "the file is empty"
+      },
+      "postgres": {
+        "error": "the file is empty"
+      },
+      "sqlite": {
+        "error": "the file is empty"
+      }
+    }
+  },
+  {
+    "name": "bad_quote",
+    "content": "a,b\n1,\"unterminated\n",
+    "options": {
+      "hasHeader": true
+    },
+    "previews": {
+      "mysql": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "unterminated\n"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "TINYINT(1)",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 20,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "postgres": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "unterminated\n"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "boolean",
+            "text"
+          ],
+          "delimiter": ",",
+          "totalBytes": 20,
+          "truncated": false,
+          "totalRows": 1
+        }
+      },
+      "sqlite": {
+        "preview": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": [
+            [
+              "1",
+              "unterminated\n"
+            ]
+          ],
+          "inferredTypes": [
+            "bool",
+            "text"
+          ],
+          "sqlTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "delimiter": ",",
+          "totalBytes": 20,
+          "truncated": false,
+          "totalRows": 1
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,57 @@
+{
+  "folders": [
+    {
+      "id": "development",
+      "name": "Development"
+    },
+    {
+      "id": "production",
+      "name": "Production"
+    }
+  ],
+  "connections": [
+    {
+      "id": "postgres",
+      "name": "Postgres",
+      "driver": "postgres",
+      "color": "#ef4444",
+      "folderId": "production",
+      "database": "postgres",
+      "readOnly": true,
+      "host": "127.0.0.1",
+      "port": 55432,
+      "username": "postgres",
+      "password": "postgres",
+      "sslMode": "disable",
+      "schema": "public"
+    },
+    {
+      "id": "forum",
+      "name": "Forum",
+      "driver": "postgres",
+      "color": "#22c55e",
+      "folderId": "development",
+      "database": "forum",
+      "host": "127.0.0.1",
+      "port": 55432,
+      "username": "postgres",
+      "password": "postgres",
+      "sslMode": "disable",
+      "schema": "public"
+    },
+    {
+      "id": "postgres-dev",
+      "name": "Postgres",
+      "driver": "postgres",
+      "color": "#3b82f6",
+      "folderId": "development",
+      "database": "postgres",
+      "host": "127.0.0.1",
+      "port": 55432,
+      "username": "postgres",
+      "password": "postgres",
+      "sslMode": "disable",
+      "schema": "public"
+    }
+  ]
+}

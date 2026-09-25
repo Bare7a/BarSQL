@@ -1,0 +1,19 @@
+[package]
+name = "barsql-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+ryu-js.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlformat.workspace = true
+barsql-core.workspace = true
+barsql-db.workspace = true
+barsql-sql.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

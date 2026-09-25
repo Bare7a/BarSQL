@@ -1,0 +1,17 @@
+name: ✨ Feature request
+description: An idea that would make BarSQL better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like BarSQL to do?
+      description: The problem it solves, and how you picture it working.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: How you handle it today, or how other tools do it.

@@ -1,0 +1,392 @@
+[
+  {
+    "input": "SELECT 1",
+    "output": {
+      "mysql": [
+        "SELECT 1"
+      ],
+      "postgres": [
+        "SELECT 1"
+      ],
+      "sqlite": [
+        "SELECT 1"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 1;",
+    "output": {
+      "mysql": [
+        "SELECT 1"
+      ],
+      "postgres": [
+        "SELECT 1"
+      ],
+      "sqlite": [
+        "SELECT 1"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 1; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 1",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 1",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 1",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 1;\n\n  SELECT 2;\n",
+    "output": {
+      "mysql": [
+        "SELECT 1",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 1",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 1",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "  ;  ; SELECT 1 ;; ",
+    "output": {
+      "mysql": [
+        "SELECT 1"
+      ],
+      "postgres": [
+        "SELECT 1"
+      ],
+      "sqlite": [
+        "SELECT 1"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 'a;b'; SELECT \"c;d\"",
+    "output": {
+      "mysql": [
+        "SELECT 'a;b'",
+        "SELECT \"c;d\""
+      ],
+      "postgres": [
+        "SELECT 'a;b'",
+        "SELECT \"c;d\""
+      ],
+      "sqlite": [
+        "SELECT 'a;b'",
+        "SELECT \"c;d\""
+      ]
+    }
+  },
+  {
+    "input": "SELECT 'it''s; fine'; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 'it''s; fine'",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 'it''s; fine'",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 'it''s; fine'",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 1 -- comment; not a split\n; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 1 -- comment; not a split",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 1 -- comment; not a split",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 1 -- comment; not a split",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 1 /* block; comment */; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 1 /* block; comment */",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 1 /* block; comment */",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 1 /* block; comment */",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "/* nested /* comment; */ still; */ SELECT 1; SELECT 2",
+    "output": {
+      "mysql": [
+        "/* nested /* comment; */ still",
+        "*/ SELECT 1",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "/* nested /* comment; */ still; */ SELECT 1",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "/* nested /* comment; */ still",
+        "*/ SELECT 1",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT $$a;b$$; SELECT $tag$c;$$;d$tag$",
+    "output": {
+      "mysql": [
+        "SELECT $$a",
+        "b$$",
+        "SELECT $tag$c",
+        "$$",
+        "d$tag$"
+      ],
+      "postgres": [
+        "SELECT $$a;b$$",
+        "SELECT $tag$c;$$;d$tag$"
+      ],
+      "sqlite": [
+        "SELECT $$a;b$$",
+        "SELECT $tag$c;$$;d$tag$"
+      ]
+    }
+  },
+  {
+    "input": "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END $$ LANGUAGE plpgsql; SELECT f()",
+    "output": {
+      "mysql": [
+        "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1",
+        "END $$ LANGUAGE plpgsql",
+        "SELECT f()"
+      ],
+      "postgres": [
+        "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END $$ LANGUAGE plpgsql",
+        "SELECT f()"
+      ],
+      "sqlite": [
+        "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END $$ LANGUAGE plpgsql",
+        "SELECT f()"
+      ]
+    }
+  },
+  {
+    "input": "SELECT E'it\\'s; escaped'; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT E'it\\'s; escaped'",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT E'it\\'s; escaped'",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT E'it\\'s; escaped'",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 'back\\'slash; mysql'; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 'back\\'slash; mysql'",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 'back\\'slash",
+        "mysql'; SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 'back\\'slash",
+        "mysql'; SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 1 # hash comment; mysql\n; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 1 # hash comment; mysql",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 1 # hash comment",
+        "mysql",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 1 # hash comment",
+        "mysql",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "DELIMITER //\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END //\nDELIMITER ;\nCALL p();",
+    "output": {
+      "mysql": [
+        "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END",
+        "CALL p()"
+      ],
+      "postgres": [
+        "DELIMITER //\nCREATE PROCEDURE p() BEGIN SELECT 1",
+        "SELECT 2",
+        "END //\nDELIMITER",
+        "CALL p()"
+      ],
+      "sqlite": [
+        "DELIMITER //\nCREATE PROCEDURE p() BEGIN SELECT 1",
+        "SELECT 2",
+        "END //\nDELIMITER",
+        "CALL p()"
+      ]
+    }
+  },
+  {
+    "input": "SELECT `a;b` FROM t; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT `a;b` FROM t",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT `a;b` FROM t",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT `a;b` FROM t",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "CREATE TRIGGER t AFTER INSERT ON x BEGIN SELECT 1; END; SELECT 2",
+    "output": {
+      "mysql": [
+        "CREATE TRIGGER t AFTER INSERT ON x BEGIN SELECT 1",
+        "END",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "CREATE TRIGGER t AFTER INSERT ON x BEGIN SELECT 1",
+        "END",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "CREATE TRIGGER t AFTER INSERT ON x BEGIN SELECT 1",
+        "END",
+        "SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 'unterminated; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 'unterminated; SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 'unterminated; SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 'unterminated; SELECT 2"
+      ]
+    }
+  },
+  {
+    "input": "-- only a comment",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "SELECT 1\n-- trailing comment",
+    "output": {
+      "mysql": [
+        "SELECT 1\n-- trailing comment"
+      ],
+      "postgres": [
+        "SELECT 1\n-- trailing comment"
+      ],
+      "sqlite": [
+        "SELECT 1\n-- trailing comment"
+      ]
+    }
+  },
+  {
+    "input": "WITH a AS (SELECT 1) SELECT * FROM a; INSERT INTO t VALUES (';')",
+    "output": {
+      "mysql": [
+        "WITH a AS (SELECT 1) SELECT * FROM a",
+        "INSERT INTO t VALUES (';')"
+      ],
+      "postgres": [
+        "WITH a AS (SELECT 1) SELECT * FROM a",
+        "INSERT INTO t VALUES (';')"
+      ],
+      "sqlite": [
+        "WITH a AS (SELECT 1) SELECT * FROM a",
+        "INSERT INTO t VALUES (';')"
+      ]
+    }
+  },
+  {
+    "input": "SELECT 'héllo; 🌍'; SELECT 2",
+    "output": {
+      "mysql": [
+        "SELECT 'héllo; 🌍'",
+        "SELECT 2"
+      ],
+      "postgres": [
+        "SELECT 'héllo; 🌍'",
+        "SELECT 2"
+      ],
+      "sqlite": [
+        "SELECT 'héllo; 🌍'",
+        "SELECT 2"
+      ]
+    }
+  }
+]

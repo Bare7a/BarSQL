@@ -1,0 +1,271 @@
+{
+  "engine": "postgres",
+  "probes": [
+    {
+      "name": "syntax",
+      "sql": "SELEC 1",
+      "results": [
+        {
+          "statement": "SELEC 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "syntax error at or near \"SELEC\"",
+            "code": "42601",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "syntax_position",
+      "sql": "SELECT * FROM golden.customers WHERE",
+      "results": [
+        {
+          "statement": "SELECT * FROM golden.customers WHERE",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "syntax error at end of input",
+            "code": "42601",
+            "position": 37,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_table",
+      "sql": "SELECT * FROM golden.nope",
+      "results": [
+        {
+          "statement": "SELECT * FROM golden.nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "relation \"golden.nope\" does not exist",
+            "code": "42P01",
+            "position": 15,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_column",
+      "sql": "SELECT nope FROM golden.customers",
+      "results": [
+        {
+          "statement": "SELECT nope FROM golden.customers",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "column \"nope\" does not exist",
+            "code": "42703",
+            "hint": "Perhaps you meant to reference the column \"customers.name\".",
+            "position": 8,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "unique_violation",
+      "sql": "INSERT INTO golden.customers (email, name) VALUES ('a@x.io', 'Dup')",
+      "results": [
+        {
+          "statement": "INSERT INTO golden.customers (email, name) VALUES ('a@x.io', 'Dup')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "duplicate key value violates unique constraint \"customers_email_key\"",
+            "code": "23505",
+            "detail": "Key (email)=(a@x.io) already exists.",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "not_null_violation",
+      "sql": "INSERT INTO golden.customers (email, name, created_at) VALUES (NULL, 'x', '2024-01-01 00:00+00')",
+      "results": [
+        {
+          "statement": "INSERT INTO golden.customers (email, name, created_at) VALUES (NULL, 'x', '2024-01-01 00:00+00')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "null value in column \"email\" of relation \"customers\" violates not-null constraint",
+            "code": "23502",
+            "detail": "Failing row contains (4, null, x, null, 2024-01-01 00:00:00+00).",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fk_violation",
+      "sql": "INSERT INTO golden.orders (customer_id) VALUES (999)",
+      "results": [
+        {
+          "statement": "INSERT INTO golden.orders (customer_id) VALUES (999)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "insert or update on table \"orders\" violates foreign key constraint \"orders_customer_id_fkey\"",
+            "code": "23503",
+            "detail": "Key (customer_id)=(999) is not present in table \"customers\".",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "check_violation",
+      "sql": "INSERT INTO golden.customers (email, name, created_at) VALUES ('z@x.io', '', '2024-01-01 00:00+00')",
+      "results": [
+        {
+          "statement": "INSERT INTO golden.customers (email, name, created_at) VALUES ('z@x.io', '', '2024-01-01 00:00+00')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "new row for relation \"customers\" violates check constraint \"customers_name_check\"",
+            "code": "23514",
+            "detail": "Failing row contains (5, z@x.io, , null, 2024-01-01 00:00:00+00).",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "division_by_zero",
+      "sql": "SELECT 1/0",
+      "results": [
+        {
+          "statement": "SELECT 1/0",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "division by zero",
+            "code": "22012",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "invalid_input",
+      "sql": "SELECT 'abc'::int",
+      "results": [
+        {
+          "statement": "SELECT 'abc'::int",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "invalid input syntax for type integer: \"abc\"",
+            "code": "22P02",
+            "position": 8,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "raise_with_detail",
+      "sql": "DO $$ BEGIN RAISE EXCEPTION 'custom failure' USING DETAIL = 'some detail', HINT = 'some hint'; END $$",
+      "results": [
+        {
+          "statement": "DO $$ BEGIN RAISE EXCEPTION 'custom failure' USING DETAIL = 'some detail', HINT = 'some hint'; END $$",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "custom failure",
+            "code": "P0001",
+            "detail": "some detail",
+            "hint": "some hint",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "second_statement_fails",
+      "sql": "SELECT 1 AS ok; SELECT * FROM golden.nope; SELECT 2 AS never",
+      "results": [
+        {
+          "statement": "SELECT 1 AS ok",
+          "columns": [
+            "ok"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT * FROM golden.nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "relation \"golden.nope\" does not exist",
+            "code": "42P01",
+            "position": 15,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "multibyte_position",
+      "sql": "SELECT 'héllo 🌍' AS v, nope",
+      "results": [
+        {
+          "statement": "SELECT 'héllo 🌍' AS v, nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "column \"nope\" does not exist",
+            "code": "42703",
+            "position": 24,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    }
+  ],
+  "setup": [
+    "DROP SCHEMA IF EXISTS golden CASCADE",
+    "CREATE SCHEMA golden",
+    "CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA golden",
+    "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA golden",
+    "CREATE TYPE golden.mood AS ENUM ('sad', 'happy')",
+    "CREATE DOMAIN golden.posint AS integer CHECK (VALUE > 0)",
+    "CREATE TYPE golden.pair AS (a integer, b text)",
+    "CREATE TABLE golden.customers (\n\t\tid serial PRIMARY KEY,\n\t\temail text NOT NULL UNIQUE,\n\t\tname varchar(100) NOT NULL DEFAULT 'anon',\n\t\tmood golden.mood,\n\t\tcreated_at timestamptz NOT NULL DEFAULT now(),\n\t\tCONSTRAINT customers_name_check CHECK (length(name) > 0)\n\t)",
+    "COMMENT ON TABLE golden.customers IS 'Customers'",
+    "CREATE TABLE golden.orders (\n\t\tid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\t\tcustomer_id integer NOT NULL REFERENCES golden.customers (id) ON DELETE CASCADE,\n\t\ttotal numeric(12,2) NOT NULL DEFAULT 0,\n\t\tstatus text NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax numeric(12,2) GENERATED ALWAYS AS (total * 1.2) STORED\n\t)",
+    "CREATE INDEX orders_customer_idx ON golden.orders (customer_id)",
+    "CREATE UNIQUE INDEX orders_status_partial_idx ON golden.orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE INDEX customers_lower_email_idx ON golden.customers (lower(email))",
+    "CREATE VIEW golden.customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM golden.customers c LEFT JOIN golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE FUNCTION golden.touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.status := lower(NEW.status); RETURN NEW; END $$",
+    "CREATE TRIGGER orders_touch BEFORE INSERT OR UPDATE ON golden.orders FOR EACH ROW EXECUTE FUNCTION golden.touch()",
+    "CREATE FUNCTION golden.add(a integer, b integer DEFAULT 1) RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT a + b $$",
+    "CREATE PROCEDURE golden.reset_status(IN target text) LANGUAGE sql AS $$ UPDATE golden.orders SET status = target $$",
+    "INSERT INTO golden.customers (email, name, mood, created_at) VALUES ('a@x.io', 'Ann', 'happy', '2024-01-01 10:00:00+00'), ('b@x.io', 'Bob', 'sad', '2024-01-02 11:30:00+00')",
+    "INSERT INTO golden.orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE MATERIALIZED VIEW golden.order_counts AS SELECT customer_id, count(*) AS n FROM golden.orders GROUP BY customer_id"
+  ]
+}

@@ -1,0 +1,59 @@
+[package]
+name = "barsql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "A fast, native SQL client built with Rust and GPUI."
+homepage = "https://barsql.bare7a.eu"
+
+[[bin]]
+name = "BarSQL"
+path = "src/main.rs"
+
+[features]
+# Update check at launch. Release builds turn it on.
+production = []
+snapshot = ["barsql-ui/snapshot"]
+
+[dependencies]
+anyhow.workspace = true
+interprocess.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+barsql-app.workspace = true
+barsql-core.workspace = true
+barsql-ui.workspace = true
+
+[build-dependencies]
+embed-resource = "3"
+
+# Linux packages. cargo-deb resolves asset paths from this folder, cargo-generate-rpm from the repo root.
+[package.metadata.deb]
+maintainer = "Bare7a"
+copyright = "2026, Bare7a"
+section = "database"
+priority = "optional"
+depends = "$auto"
+recommends = "libwayland-client0, libvulkan1"
+assets = [
+    ["target/release/BarSQL", "usr/bin/BarSQL", "755"],
+    ["../../packaging/linux/BarSQL.desktop", "usr/share/applications/BarSQL.desktop", "644"],
+    ["../../packaging/linux/barsql-128.png", "usr/share/icons/hicolor/128x128/apps/BarSQL.png", "644"],
+    ["../../packaging/linux/barsql-256.png", "usr/share/icons/hicolor/256x256/apps/BarSQL.png", "644"],
+    ["../../packaging/linux/barsql-512.png", "usr/share/icons/hicolor/512x512/apps/BarSQL.png", "644"],
+]
+
+[package.metadata.generate-rpm]
+vendor = "Bare7a"
+assets = [
+    { source = "target/release/BarSQL", dest = "/usr/bin/BarSQL", mode = "755" },
+    { source = "packaging/linux/BarSQL.desktop", dest = "/usr/share/applications/BarSQL.desktop", mode = "644" },
+    { source = "packaging/linux/barsql-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/BarSQL.png", mode = "644" },
+    { source = "packaging/linux/barsql-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/BarSQL.png", mode = "644" },
+    { source = "packaging/linux/barsql-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/BarSQL.png", mode = "644" },
+]
+
+[package.metadata.generate-rpm.recommends]
+libwayland-client = "*"
+vulkan-loader = "*"

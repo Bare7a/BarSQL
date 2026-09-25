@@ -1,0 +1,31 @@
+{
+  "update": {
+    "checking": "Suche nach Updates…",
+    "contacting": "Verbindung zum Update-Server…",
+    "available": "Update verfügbar",
+    "upToDate": "Alles auf dem neuesten Stand",
+    "failed": "Update fehlgeschlagen",
+    "skip": "Diese Version überspringen",
+    "remind": "Später erinnern",
+    "retry": "Erneut versuchen",
+    "install": "Update installieren",
+    "restart": "Neu starten & anwenden",
+    "downloading": "Update wird heruntergeladen",
+    "starting": "Download startet…",
+    "progress": "{{percent}} % · {{written}} von {{total}}",
+    "downloaded": "{{written}} heruntergeladen",
+    "verifying": "Update wird geprüft",
+    "checksum": "Prüfsumme wird kontrolliert…",
+    "installing": "Update wird installiert",
+    "unpacking": "Entpacken und bereitstellen…",
+    "ready": "Update bereit",
+    "adminPrompt": "BarSQL benötigt Ihr Passwort, um das Update zu installieren.",
+    "during": "Fehler beim {{stage}}: {{message}}",
+    "stage": {
+      "check": "Suchen",
+      "download": "Herunterladen",
+      "verify": "Prüfen",
+      "install": "Installieren"
+    }
+  }
+}

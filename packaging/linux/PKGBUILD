@@ -1,0 +1,20 @@
+# release.yml runs makepkg on this in an Arch container, with the binary, BarSQL.desktop and the icons copied
+# next to it and BARSQL_VERSION set.
+pkgname=barsql
+pkgver=${BARSQL_VERSION:?}
+pkgrel=1
+pkgdesc='A fast, native SQL client built with Rust and GPUI.'
+arch=('x86_64')
+url='https://barsql.bare7a.eu'
+license=('GPL-3.0-only')
+depends=('fontconfig' 'freetype2' 'libxcb' 'libx11' 'libxkbcommon' 'libxkbcommon-x11')
+optdepends=('wayland: Wayland sessions' 'vulkan-icd-loader: Vulkan rendering')
+options=('!strip' '!debug')
+
+package() {
+  install -Dm755 "$startdir/BarSQL" "$pkgdir/usr/bin/BarSQL"
+  install -Dm644 "$startdir/BarSQL.desktop" "$pkgdir/usr/share/applications/BarSQL.desktop"
+  for size in 128 256 512; do
+    install -Dm644 "$startdir/barsql-$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/BarSQL.png"
+  done
+}

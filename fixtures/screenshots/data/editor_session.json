@@ -1,0 +1,39 @@
+{
+  "tabs": [
+    {
+      "id": "query-postgres",
+      "connectionId": "postgres",
+      "title": "Query 1 - Postgres",
+      "sql": "",
+      "color": "#ef4444"
+    },
+    {
+      "id": "query-forum",
+      "connectionId": "forum",
+      "title": "Query 1 - Forum",
+      "sql": "",
+      "color": "#22c55e"
+    },
+    {
+      "id": "get-all-posts",
+      "connectionId": "forum",
+      "title": "Get All Posts",
+      "sql": "SELECT * FROM posts p ORDER BY p.id;",
+      "color": "#22c55e",
+      "savedQueryId": "get-all-posts",
+      "savedSqlBaseline": "SELECT * FROM posts p ORDER BY p.id;"
+    },
+    {
+      "id": "users",
+      "connectionId": "forum",
+      "title": "users",
+      "sql": "",
+      "color": "#22c55e",
+      "tableView": {
+        "schema": "public",
+        "table": "users"
+      }
+    }
+  ],
+  "activeTab": "users"
+}

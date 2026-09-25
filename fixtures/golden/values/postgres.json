@@ -1,0 +1,2459 @@
+{
+  "engine": "postgres",
+  "serverVersion": "16",
+  "setup": [
+    "DROP SCHEMA IF EXISTS golden CASCADE",
+    "CREATE SCHEMA golden",
+    "CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA golden",
+    "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA golden",
+    "CREATE TYPE golden.mood AS ENUM ('sad', 'happy')",
+    "CREATE DOMAIN golden.posint AS integer CHECK (VALUE > 0)",
+    "CREATE TYPE golden.pair AS (a integer, b text)",
+    "CREATE TABLE golden.customers (\n\t\tid serial PRIMARY KEY,\n\t\temail text NOT NULL UNIQUE,\n\t\tname varchar(100) NOT NULL DEFAULT 'anon',\n\t\tmood golden.mood,\n\t\tcreated_at timestamptz NOT NULL DEFAULT now(),\n\t\tCONSTRAINT customers_name_check CHECK (length(name) > 0)\n\t)",
+    "COMMENT ON TABLE golden.customers IS 'Customers'",
+    "CREATE TABLE golden.orders (\n\t\tid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\t\tcustomer_id integer NOT NULL REFERENCES golden.customers (id) ON DELETE CASCADE,\n\t\ttotal numeric(12,2) NOT NULL DEFAULT 0,\n\t\tstatus text NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax numeric(12,2) GENERATED ALWAYS AS (total * 1.2) STORED\n\t)",
+    "CREATE INDEX orders_customer_idx ON golden.orders (customer_id)",
+    "CREATE UNIQUE INDEX orders_status_partial_idx ON golden.orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE INDEX customers_lower_email_idx ON golden.customers (lower(email))",
+    "CREATE VIEW golden.customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM golden.customers c LEFT JOIN golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE FUNCTION golden.touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.status := lower(NEW.status); RETURN NEW; END $$",
+    "CREATE TRIGGER orders_touch BEFORE INSERT OR UPDATE ON golden.orders FOR EACH ROW EXECUTE FUNCTION golden.touch()",
+    "CREATE FUNCTION golden.add(a integer, b integer DEFAULT 1) RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT a + b $$",
+    "CREATE PROCEDURE golden.reset_status(IN target text) LANGUAGE sql AS $$ UPDATE golden.orders SET status = target $$",
+    "INSERT INTO golden.customers (email, name, mood, created_at) VALUES ('a@x.io', 'Ann', 'happy', '2024-01-01 10:00:00+00'), ('b@x.io', 'Bob', 'sad', '2024-01-02 11:30:00+00')",
+    "INSERT INTO golden.orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE MATERIALIZED VIEW golden.order_counts AS SELECT customer_id, count(*) AS n FROM golden.orders GROUP BY customer_id"
+  ],
+  "timeZone": "UTC",
+  "probes": [
+    {
+      "name": "int2",
+      "sql": "SELECT 32767::int2 AS v",
+      "results": [
+        {
+          "statement": "SELECT 32767::int2 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT2"
+          ],
+          "rows": [
+            [
+              32767
+            ]
+          ],
+          "display": [
+            [
+              "32767"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int4_min",
+      "sql": "SELECT (-2147483648)::int4 AS v",
+      "results": [
+        {
+          "statement": "SELECT (-2147483648)::int4 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rows": [
+            [
+              -2147483648
+            ]
+          ],
+          "display": [
+            [
+              "-2147483648"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int8_safe",
+      "sql": "SELECT 9007199254740991::int8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 9007199254740991::int8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT8"
+          ],
+          "rows": [
+            [
+              9007199254740991
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740991"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int8_unsafe",
+      "sql": "SELECT 9007199254740992::int8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 9007199254740992::int8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT8"
+          ],
+          "rows": [
+            [
+              "9007199254740992"
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740992"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int8_max",
+      "sql": "SELECT 9223372036854775807::int8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 9223372036854775807::int8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT8"
+          ],
+          "rows": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "display": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int8_min",
+      "sql": "SELECT (-9223372036854775808)::int8 AS v",
+      "results": [
+        {
+          "statement": "SELECT (-9223372036854775808)::int8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT8"
+          ],
+          "rows": [
+            [
+              "-9223372036854775808"
+            ]
+          ],
+          "display": [
+            [
+              "-9223372036854775808"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "numeric_big",
+      "sql": "SELECT 12345678901234567890.123456789::numeric AS v",
+      "results": [
+        {
+          "statement": "SELECT 12345678901234567890.123456789::numeric AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "NUMERIC"
+          ],
+          "rows": [
+            [
+              "12345678901234567890.123456789"
+            ]
+          ],
+          "display": [
+            [
+              "12345678901234567890.123456789"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "numeric_scale",
+      "sql": "SELECT 1.5::numeric(10,2) AS v",
+      "results": [
+        {
+          "statement": "SELECT 1.5::numeric(10,2) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "NUMERIC"
+          ],
+          "rows": [
+            [
+              "1.50"
+            ]
+          ],
+          "display": [
+            [
+              "1.50"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "numeric_nan",
+      "sql": "SELECT 'NaN'::numeric AS v",
+      "results": [
+        {
+          "statement": "SELECT 'NaN'::numeric AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "NUMERIC"
+          ],
+          "rows": [
+            [
+              "NaN"
+            ]
+          ],
+          "display": [
+            [
+              "NaN"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float4",
+      "sql": "SELECT 1.1::float4 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1.1::float4 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT4"
+          ],
+          "rows": [
+            [
+              1.100000023841858
+            ]
+          ],
+          "display": [
+            [
+              "1.100000023841858"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float4_tiny",
+      "sql": "SELECT 0.000001::float4 AS v",
+      "results": [
+        {
+          "statement": "SELECT 0.000001::float4 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT4"
+          ],
+          "rows": [
+            [
+              9.999999974752427e-7
+            ]
+          ],
+          "display": [
+            [
+              "9.999999974752427e-7"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8",
+      "sql": "SELECT 0.1::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 0.1::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              0.1
+            ]
+          ],
+          "display": [
+            [
+              "0.1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8_sum",
+      "sql": "SELECT 0.1::float8 + 0.2::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 0.1::float8 + 0.2::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              0.30000000000000004
+            ]
+          ],
+          "display": [
+            [
+              "0.30000000000000004"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8_1e20",
+      "sql": "SELECT 1e20::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1e20::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              100000000000000000000
+            ]
+          ],
+          "display": [
+            [
+              "100000000000000000000"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8_1e21",
+      "sql": "SELECT 1e21::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1e21::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              1e+21
+            ]
+          ],
+          "display": [
+            [
+              "1e+21"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8_tiny",
+      "sql": "SELECT 1e-7::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1e-7::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              1e-7
+            ]
+          ],
+          "display": [
+            [
+              "1e-7"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8_negzero",
+      "sql": "SELECT '-0'::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT '-0'::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              -0
+            ]
+          ],
+          "display": [
+            [
+              "0"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float8_nan",
+      "sql": "SELECT 'NaN'::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT 'NaN'::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              {
+                "unencodable": "NaN"
+              }
+            ]
+          ],
+          "display": [
+            [
+              "NaN"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0,
+          "emitError": "json: unsupported value: NaN"
+        }
+      ]
+    },
+    {
+      "name": "float8_neg_inf",
+      "sql": "SELECT '-Infinity'::float8 AS v",
+      "results": [
+        {
+          "statement": "SELECT '-Infinity'::float8 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              {
+                "unencodable": "-Inf"
+              }
+            ]
+          ],
+          "display": [
+            [
+              "-Inf"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0,
+          "emitError": "json: unsupported value: -Inf"
+        }
+      ]
+    },
+    {
+      "name": "bool",
+      "sql": "SELECT true AS t, false AS f",
+      "results": [
+        {
+          "statement": "SELECT true AS t, false AS f",
+          "columns": [
+            "t",
+            "f"
+          ],
+          "columnTypes": [
+            "BOOL",
+            "BOOL"
+          ],
+          "rows": [
+            [
+              true,
+              false
+            ]
+          ],
+          "display": [
+            [
+              "true",
+              "false"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "text_unicode",
+      "sql": "SELECT E'héllo 🌍\\n\\ttab' AS v",
+      "results": [
+        {
+          "statement": "SELECT E'héllo 🌍\\n\\ttab' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              "héllo 🌍\n\ttab"
+            ]
+          ],
+          "display": [
+            [
+              "héllo 🌍\n\ttab"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "text_empty",
+      "sql": "SELECT ''::text AS v",
+      "results": [
+        {
+          "statement": "SELECT ''::text AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ],
+          "display": [
+            [
+              ""
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "char_padded",
+      "sql": "SELECT 'ab'::char(4) AS v",
+      "results": [
+        {
+          "statement": "SELECT 'ab'::char(4) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BPCHAR"
+          ],
+          "rows": [
+            [
+              "ab  "
+            ]
+          ],
+          "display": [
+            [
+              "ab  "
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "varchar",
+      "sql": "SELECT 'abc'::varchar(10) AS v",
+      "results": [
+        {
+          "statement": "SELECT 'abc'::varchar(10) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARCHAR"
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ],
+          "display": [
+            [
+              "abc"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "name",
+      "sql": "SELECT 'pg_class'::name AS v",
+      "results": [
+        {
+          "statement": "SELECT 'pg_class'::name AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "NAME"
+          ],
+          "rows": [
+            [
+              "pg_class"
+            ]
+          ],
+          "display": [
+            [
+              "pg_class"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "qchar",
+      "sql": "SELECT 'x'::\"char\" AS v",
+      "results": [
+        {
+          "statement": "SELECT 'x'::\"char\" AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "CHAR"
+          ],
+          "rows": [
+            [
+              "x"
+            ]
+          ],
+          "display": [
+            [
+              "x"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bytea_utf8",
+      "sql": "SELECT 'hello'::bytea AS v",
+      "results": [
+        {
+          "statement": "SELECT 'hello'::bytea AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BYTEA"
+          ],
+          "rows": [
+            [
+              "hello"
+            ]
+          ],
+          "display": [
+            [
+              "hello"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bytea_binary",
+      "sql": "SELECT '\\xdeadbeef'::bytea AS v",
+      "results": [
+        {
+          "statement": "SELECT '\\xdeadbeef'::bytea AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BYTEA"
+          ],
+          "rows": [
+            [
+              "\\xdeadbeef"
+            ]
+          ],
+          "display": [
+            [
+              "\\xdeadbeef"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bytea_empty",
+      "sql": "SELECT ''::bytea AS v",
+      "results": [
+        {
+          "statement": "SELECT ''::bytea AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BYTEA"
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ],
+          "display": [
+            [
+              ""
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "date",
+      "sql": "SELECT '2024-02-29'::date AS v",
+      "results": [
+        {
+          "statement": "SELECT '2024-02-29'::date AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "date_infinity",
+      "sql": "SELECT 'infinity'::date AS v",
+      "results": [
+        {
+          "statement": "SELECT 'infinity'::date AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "infinity"
+            ]
+          ],
+          "display": [
+            [
+              "infinity"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "date_bc",
+      "sql": "SELECT '0044-03-15 BC'::date AS v",
+      "results": [
+        {
+          "statement": "SELECT '0044-03-15 BC'::date AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "-0043-03-15T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "-0043-03-15T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "time",
+      "sql": "SELECT '13:45:30.123456'::time AS v",
+      "results": [
+        {
+          "statement": "SELECT '13:45:30.123456'::time AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIME"
+          ],
+          "rows": [
+            [
+              "13:45:30.123456"
+            ]
+          ],
+          "display": [
+            [
+              "13:45:30.123456"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timetz",
+      "sql": "SELECT '13:45:30+02'::timetz AS v",
+      "results": [
+        {
+          "statement": "SELECT '13:45:30+02'::timetz AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "1266"
+          ],
+          "rows": [
+            [
+              "13:45:30+02"
+            ]
+          ],
+          "display": [
+            [
+              "13:45:30+02"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timestamp",
+      "sql": "SELECT '2024-02-29 13:45:30.123456'::timestamp AS v",
+      "results": [
+        {
+          "statement": "SELECT '2024-02-29 13:45:30.123456'::timestamp AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timestamp_neg_infinity",
+      "sql": "SELECT '-infinity'::timestamp AS v",
+      "results": [
+        {
+          "statement": "SELECT '-infinity'::timestamp AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "-infinity"
+            ]
+          ],
+          "display": [
+            [
+              "-infinity"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timestamptz",
+      "sql": "SELECT '2024-02-29 13:45:30.123456+02'::timestamptz AS v",
+      "results": [
+        {
+          "statement": "SELECT '2024-02-29 13:45:30.123456+02'::timestamptz AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMPTZ"
+          ],
+          "rows": [
+            [
+              "2024-02-29T11:45:30.123456Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T11:45:30.123456Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "interval",
+      "sql": "SELECT '1 year 2 mons 3 days 04:05:06.789'::interval AS v",
+      "results": [
+        {
+          "statement": "SELECT '1 year 2 mons 3 days 04:05:06.789'::interval AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INTERVAL"
+          ],
+          "rows": [
+            [
+              "1 year 2 mons 3 days 04:05:06.789"
+            ]
+          ],
+          "display": [
+            [
+              "1 year 2 mons 3 days 04:05:06.789"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "uuid",
+      "sql": "SELECT 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid AS v",
+      "results": [
+        {
+          "statement": "SELECT 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "UUID"
+          ],
+          "rows": [
+            [
+              "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+            ]
+          ],
+          "display": [
+            [
+              "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "json",
+      "sql": "SELECT '{\"b\": 1, \"a\": [1, 2]}'::json AS v",
+      "results": [
+        {
+          "statement": "SELECT '{\"b\": 1, \"a\": [1, 2]}'::json AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "JSON"
+          ],
+          "rows": [
+            [
+              "{\"b\": 1, \"a\": [1, 2]}"
+            ]
+          ],
+          "display": [
+            [
+              "{\"b\": 1, \"a\": [1, 2]}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "jsonb",
+      "sql": "SELECT '{\"b\": 1, \"a\": [1, 2]}'::jsonb AS v",
+      "results": [
+        {
+          "statement": "SELECT '{\"b\": 1, \"a\": [1, 2]}'::jsonb AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "JSONB"
+          ],
+          "rows": [
+            [
+              "{\"a\": [1, 2], \"b\": 1}"
+            ]
+          ],
+          "display": [
+            [
+              "{\"a\": [1, 2], \"b\": 1}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "xml",
+      "sql": "SELECT '<a>1 &amp; 2</a>'::xml AS v",
+      "results": [
+        {
+          "statement": "SELECT '<a>1 &amp; 2</a>'::xml AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "XML"
+          ],
+          "rows": [
+            [
+              "<a>1 &amp; 2</a>"
+            ]
+          ],
+          "display": [
+            [
+              "<a>1 &amp; 2</a>"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "inet",
+      "sql": "SELECT '192.168.0.1/24'::inet AS v",
+      "results": [
+        {
+          "statement": "SELECT '192.168.0.1/24'::inet AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INET"
+          ],
+          "rows": [
+            [
+              "192.168.0.1/24"
+            ]
+          ],
+          "display": [
+            [
+              "192.168.0.1/24"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "cidr",
+      "sql": "SELECT '10.0.0.0/8'::cidr AS v",
+      "results": [
+        {
+          "statement": "SELECT '10.0.0.0/8'::cidr AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "CIDR"
+          ],
+          "rows": [
+            [
+              "10.0.0.0/8"
+            ]
+          ],
+          "display": [
+            [
+              "10.0.0.0/8"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "macaddr",
+      "sql": "SELECT '08:00:2b:01:02:03'::macaddr AS v",
+      "results": [
+        {
+          "statement": "SELECT '08:00:2b:01:02:03'::macaddr AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "MACADDR"
+          ],
+          "rows": [
+            [
+              "08:00:2b:01:02:03"
+            ]
+          ],
+          "display": [
+            [
+              "08:00:2b:01:02:03"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "money",
+      "sql": "SELECT 12.34::money AS v",
+      "results": [
+        {
+          "statement": "SELECT 12.34::money AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "790"
+          ],
+          "rows": [
+            [
+              "$12.34"
+            ]
+          ],
+          "display": [
+            [
+              "$12.34"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bit",
+      "sql": "SELECT B'1010'::bit(4) AS v",
+      "results": [
+        {
+          "statement": "SELECT B'1010'::bit(4) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIT"
+          ],
+          "rows": [
+            [
+              "1010"
+            ]
+          ],
+          "display": [
+            [
+              "1010"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "varbit",
+      "sql": "SELECT B'101'::varbit AS v",
+      "results": [
+        {
+          "statement": "SELECT B'101'::varbit AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARBIT"
+          ],
+          "rows": [
+            [
+              "101"
+            ]
+          ],
+          "display": [
+            [
+              "101"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int4_array",
+      "sql": "SELECT ARRAY[1, 2, NULL]::int4[] AS v",
+      "results": [
+        {
+          "statement": "SELECT ARRAY[1, 2, NULL]::int4[] AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "_INT4"
+          ],
+          "rows": [
+            [
+              "{1,2,NULL}"
+            ]
+          ],
+          "display": [
+            [
+              "{1,2,NULL}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "text_array",
+      "sql": "SELECT ARRAY['a', 'b c', 'd\"e', NULL]::text[] AS v",
+      "results": [
+        {
+          "statement": "SELECT ARRAY['a', 'b c', 'd\"e', NULL]::text[] AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "_TEXT"
+          ],
+          "rows": [
+            [
+              "{a,\"b c\",\"d\\\"e\",NULL}"
+            ]
+          ],
+          "display": [
+            [
+              "{a,\"b c\",\"d\\\"e\",NULL}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int4_array_2d",
+      "sql": "SELECT ARRAY[[1, 2], [3, 4]] AS v",
+      "results": [
+        {
+          "statement": "SELECT ARRAY[[1, 2], [3, 4]] AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "_INT4"
+          ],
+          "rows": [
+            [
+              "{{1,2},{3,4}}"
+            ]
+          ],
+          "display": [
+            [
+              "{{1,2},{3,4}}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "point",
+      "sql": "SELECT point(1.5, 2) AS v",
+      "results": [
+        {
+          "statement": "SELECT point(1.5, 2) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "POINT"
+          ],
+          "rows": [
+            [
+              "(1.5,2)"
+            ]
+          ],
+          "display": [
+            [
+              "(1.5,2)"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "tsvector",
+      "sql": "SELECT to_tsvector('simple', 'the quick fox') AS v",
+      "results": [
+        {
+          "statement": "SELECT to_tsvector('simple', 'the quick fox') AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TSVECTOR"
+          ],
+          "rows": [
+            [
+              "'fox':3 'quick':2 'the':1"
+            ]
+          ],
+          "display": [
+            [
+              "'fox':3 'quick':2 'the':1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int4range",
+      "sql": "SELECT int4range(1, 10) AS v",
+      "results": [
+        {
+          "statement": "SELECT int4range(1, 10) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT4RANGE"
+          ],
+          "rows": [
+            [
+              "[1,10)"
+            ]
+          ],
+          "display": [
+            [
+              "[1,10)"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "tstzrange",
+      "sql": "SELECT tstzrange('2024-01-01 00:00+00', '2024-02-01 00:00+00') AS v",
+      "results": [
+        {
+          "statement": "SELECT tstzrange('2024-01-01 00:00+00', '2024-02-01 00:00+00') AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TSTZRANGE"
+          ],
+          "rows": [
+            [
+              "[\"2024-01-01 00:00:00+00\",\"2024-02-01 00:00:00+00\")"
+            ]
+          ],
+          "display": [
+            [
+              "[\"2024-01-01 00:00:00+00\",\"2024-02-01 00:00:00+00\")"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "oid",
+      "sql": "SELECT 'pg_class'::regclass::oid AS v",
+      "results": [
+        {
+          "statement": "SELECT 'pg_class'::regclass::oid AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "OID"
+          ],
+          "rows": [
+            [
+              1259
+            ]
+          ],
+          "display": [
+            [
+              "1259"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "regclass",
+      "sql": "SELECT 'pg_class'::regclass AS v",
+      "results": [
+        {
+          "statement": "SELECT 'pg_class'::regclass AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "2205"
+          ],
+          "rows": [
+            [
+              "pg_class"
+            ]
+          ],
+          "display": [
+            [
+              "pg_class"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "pg_lsn",
+      "sql": "SELECT '16/B374D848'::pg_lsn AS v",
+      "results": [
+        {
+          "statement": "SELECT '16/B374D848'::pg_lsn AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "3220"
+          ],
+          "rows": [
+            [
+              "16/B374D848"
+            ]
+          ],
+          "display": [
+            [
+              "16/B374D848"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "enum",
+      "sql": "SELECT 'happy'::golden.mood AS v",
+      "results": [
+        {
+          "statement": "SELECT 'happy'::golden.mood AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "$userOid"
+          ],
+          "rows": [
+            [
+              "happy"
+            ]
+          ],
+          "display": [
+            [
+              "happy"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "domain",
+      "sql": "SELECT 5::golden.posint AS v",
+      "results": [
+        {
+          "statement": "SELECT 5::golden.posint AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rows": [
+            [
+              5
+            ]
+          ],
+          "display": [
+            [
+              "5"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "composite",
+      "sql": "SELECT ROW(1, 'x')::golden.pair AS v",
+      "results": [
+        {
+          "statement": "SELECT ROW(1, 'x')::golden.pair AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "$userOid"
+          ],
+          "rows": [
+            [
+              "(1,x)"
+            ]
+          ],
+          "display": [
+            [
+              "(1,x)"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "record",
+      "sql": "SELECT ROW(1, 'x') AS v",
+      "results": [
+        {
+          "statement": "SELECT ROW(1, 'x') AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "RECORD"
+          ],
+          "rows": [
+            [
+              "(1,x)"
+            ]
+          ],
+          "display": [
+            [
+              "(1,x)"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "hstore",
+      "sql": "SELECT 'a=>1, b=>NULL'::golden.hstore AS v",
+      "results": [
+        {
+          "statement": "SELECT 'a=>1, b=>NULL'::golden.hstore AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "$userOid"
+          ],
+          "rows": [
+            [
+              "\"a\"=>\"1\", \"b\"=>NULL"
+            ]
+          ],
+          "display": [
+            [
+              "\"a\"=>\"1\", \"b\"=>NULL"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "citext",
+      "sql": "SELECT 'MiXeD'::golden.citext AS v",
+      "results": [
+        {
+          "statement": "SELECT 'MiXeD'::golden.citext AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "$userOid"
+          ],
+          "rows": [
+            [
+              "MiXeD"
+            ]
+          ],
+          "display": [
+            [
+              "MiXeD"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "null_int",
+      "sql": "SELECT NULL::int4 AS v",
+      "results": [
+        {
+          "statement": "SELECT NULL::int4 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "null_unknown",
+      "sql": "SELECT NULL AS v",
+      "results": [
+        {
+          "statement": "SELECT NULL AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "unknown_literal",
+      "sql": "SELECT 'abc' AS v",
+      "results": [
+        {
+          "statement": "SELECT 'abc' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ],
+          "display": [
+            [
+              "abc"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "multi_columns",
+      "sql": "SELECT 1 AS a, 'x' AS b, NULL::text AS c, 2.5::float8 AS d",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a, 'x' AS b, NULL::text AS c, 2.5::float8 AS d",
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "columnTypes": [
+            "INT4",
+            "TEXT",
+            "TEXT",
+            "FLOAT8"
+          ],
+          "rows": [
+            [
+              1,
+              "x",
+              null,
+              2.5
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "x",
+              null,
+              "2.5"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "duplicate_names",
+      "sql": "SELECT 1 AS v, 2 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v, 2 AS v",
+          "columns": [
+            "v",
+            "v"
+          ],
+          "columnTypes": [
+            "INT4",
+            "INT4"
+          ],
+          "rows": [
+            [
+              1,
+              2
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "no_rows",
+      "sql": "SELECT 1 AS v WHERE false",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v WHERE false",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rowCount": 0,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "values",
+      "sql": "VALUES (1, 'a'), (2, 'b')",
+      "results": [
+        {
+          "statement": "VALUES (1, 'a'), (2, 'b')",
+          "columns": [
+            "column1",
+            "column2"
+          ],
+          "columnTypes": [
+            "INT4",
+            "TEXT"
+          ],
+          "rows": [
+            [
+              1,
+              "a"
+            ],
+            [
+              2,
+              "b"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "table_rows",
+      "sql": "SELECT * FROM golden.customers ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM golden.customers ORDER BY id",
+          "columns": [
+            "id",
+            "email",
+            "name",
+            "mood",
+            "created_at"
+          ],
+          "columnTypes": [
+            "INT4",
+            "TEXT",
+            "VARCHAR",
+            "$userOid",
+            "TIMESTAMPTZ"
+          ],
+          "rows": [
+            [
+              1,
+              "a@x.io",
+              "Ann",
+              "happy",
+              "2024-01-01T10:00:00Z"
+            ],
+            [
+              2,
+              "b@x.io",
+              "Bob",
+              "sad",
+              "2024-01-02T11:30:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a@x.io",
+              "Ann",
+              "happy",
+              "2024-01-01T10:00:00Z"
+            ],
+            [
+              "2",
+              "b@x.io",
+              "Bob",
+              "sad",
+              "2024-01-02T11:30:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "view_rows",
+      "sql": "SELECT * FROM golden.customer_totals ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM golden.customer_totals ORDER BY id",
+          "columns": [
+            "id",
+            "email",
+            "total"
+          ],
+          "columnTypes": [
+            "INT4",
+            "TEXT",
+            "NUMERIC"
+          ],
+          "rows": [
+            [
+              1,
+              "a@x.io",
+              "15.50"
+            ],
+            [
+              2,
+              "b@x.io",
+              "7.25"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a@x.io",
+              "15.50"
+            ],
+            [
+              "2",
+              "b@x.io",
+              "7.25"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "matview_rows",
+      "sql": "SELECT * FROM golden.order_counts ORDER BY customer_id",
+      "results": [
+        {
+          "statement": "SELECT * FROM golden.order_counts ORDER BY customer_id",
+          "columns": [
+            "customer_id",
+            "n"
+          ],
+          "columnTypes": [
+            "INT4",
+            "INT8"
+          ],
+          "rows": [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "sql": "SHOW server_encoding",
+      "results": [
+        {
+          "statement": "SHOW server_encoding",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "set",
+      "sql": "SET application_name = 'golden'",
+      "results": [
+        {
+          "statement": "SET application_name = 'golden'",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "insert",
+      "sql": "INSERT INTO golden.customers (email, name, created_at) VALUES ('c@x.io', 'Cy', '2024-03-01 00:00+00')",
+      "results": [
+        {
+          "statement": "INSERT INTO golden.customers (email, name, created_at) VALUES ('c@x.io', 'Cy', '2024-03-01 00:00+00')",
+          "rowCount": 0,
+          "affectedRows": 1,
+          "message": "1 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "insert_returning",
+      "sql": "INSERT INTO golden.customers (email, name, created_at) VALUES ('d@x.io', 'Di', '2024-03-02 00:00+00') RETURNING id, email, created_at",
+      "results": [
+        {
+          "statement": "INSERT INTO golden.customers (email, name, created_at) VALUES ('d@x.io', 'Di', '2024-03-02 00:00+00') RETURNING id, email, created_at",
+          "columns": [
+            "id",
+            "email",
+            "created_at"
+          ],
+          "columnTypes": [
+            "INT4",
+            "TEXT",
+            "TIMESTAMPTZ"
+          ],
+          "rows": [
+            [
+              4,
+              "d@x.io",
+              "2024-03-02T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "4",
+              "d@x.io",
+              "2024-03-02T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "sql": "UPDATE golden.orders SET total = total + 1 WHERE customer_id = 1",
+      "results": [
+        {
+          "statement": "UPDATE golden.orders SET total = total + 1 WHERE customer_id = 1",
+          "rowCount": 0,
+          "affectedRows": 2,
+          "message": "2 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "delete_returning",
+      "sql": "DELETE FROM golden.orders WHERE status = 'new' RETURNING id",
+      "results": [
+        {
+          "statement": "DELETE FROM golden.orders WHERE status = 'new' RETURNING id",
+          "columns": [
+            "id"
+          ],
+          "columnTypes": [
+            "INT8"
+          ],
+          "rows": [
+            [
+              1
+            ],
+            [
+              3
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ],
+            [
+              "3"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "call",
+      "sql": "CALL golden.reset_status('new')",
+      "results": [
+        {
+          "statement": "CALL golden.reset_status('new')",
+          "rowCount": 0,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "multi_statement",
+      "sql": "SELECT 1 AS a; SELECT 'b' AS b",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a",
+          "columns": [
+            "a"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 'b' AS b",
+          "columns": [
+            "b"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              "b"
+            ]
+          ],
+          "display": [
+            [
+              "b"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "explain_statement",
+      "sql": "EXPLAIN SELECT 1",
+      "results": [
+        {
+          "statement": "EXPLAIN SELECT 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "plan": true
+        }
+      ]
+    },
+    {
+      "name": "temp_table",
+      "sql": "CREATE TEMP TABLE golden_tmp (id int); INSERT INTO golden_tmp VALUES (1); SELECT * FROM golden_tmp; DROP TABLE golden_tmp",
+      "results": [
+        {
+          "statement": "CREATE TEMP TABLE golden_tmp (id int)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        },
+        {
+          "statement": "INSERT INTO golden_tmp VALUES (1)",
+          "rowCount": 0,
+          "affectedRows": 1,
+          "message": "1 row(s) affected"
+        },
+        {
+          "statement": "SELECT * FROM golden_tmp",
+          "columns": [
+            "id"
+          ],
+          "columnTypes": [
+            "INT4"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "DROP TABLE golden_tmp",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    }
+  ],
+  "localTimeZone": "UTC+03:00",
+  "localProbes": [
+    {
+      "name": "date",
+      "sql": "SELECT '2024-02-29'::date AS v",
+      "results": [
+        {
+          "statement": "SELECT '2024-02-29'::date AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timestamp",
+      "sql": "SELECT '2024-02-29 13:45:30.123456'::timestamp AS v",
+      "results": [
+        {
+          "statement": "SELECT '2024-02-29 13:45:30.123456'::timestamp AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timestamptz",
+      "sql": "SELECT '2024-02-29 13:45:30.123456+02'::timestamptz AS v",
+      "results": [
+        {
+          "statement": "SELECT '2024-02-29 13:45:30.123456+02'::timestamptz AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMPTZ"
+          ],
+          "rows": [
+            [
+              "2024-02-29T14:45:30.123456+03:00"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T14:45:30.123456+03:00"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "timestamptz_array",
+      "sql": "SELECT ARRAY['2024-02-29 13:45:30+02'::timestamptz] AS v",
+      "results": [
+        {
+          "statement": "SELECT ARRAY['2024-02-29 13:45:30+02'::timestamptz] AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "_TIMESTAMPTZ"
+          ],
+          "rows": [
+            [
+              "{\"2024-02-29 11:45:30+00\"}"
+            ]
+          ],
+          "display": [
+            [
+              "{\"2024-02-29 11:45:30+00\"}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    }
+  ]
+}

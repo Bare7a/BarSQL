@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=BarSQL
+Comment=A fast, native SQL client built with Rust and GPUI.
+Exec=BarSQL %f
+Terminal=false
+Type=Application
+Icon=BarSQL
+Categories=Development;Database;
+MimeType=application/vnd.sqlite3;application/x-sqlite3;
+StartupWMClass=BarSQL

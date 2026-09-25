@@ -1,0 +1,142 @@
+[
+  {
+    "input": "SELECT 1",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "EXPLAIN SELECT 1",
+    "output": {
+      "mysql": {
+        "analyze": false,
+        "sql": "EXPLAIN FORMAT=JSON SELECT 1"
+      },
+      "postgres": {
+        "analyze": false,
+        "sql": "EXPLAIN (FORMAT JSON) SELECT 1"
+      },
+      "sqlite": null
+    }
+  },
+  {
+    "input": "explain analyze select 1",
+    "output": {
+      "mysql": {
+        "analyze": true,
+        "sql": "explain analyze select 1"
+      },
+      "postgres": {
+        "analyze": true,
+        "sql": "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) select 1"
+      },
+      "sqlite": null
+    }
+  },
+  {
+    "input": "EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1",
+    "output": {
+      "mysql": null,
+      "postgres": {
+        "analyze": true,
+        "sql": "EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1"
+      },
+      "sqlite": null
+    }
+  },
+  {
+    "input": "EXPLAIN (ANALYZE false) SELECT 1",
+    "output": {
+      "mysql": null,
+      "postgres": {
+        "analyze": false,
+        "sql": "EXPLAIN (FORMAT JSON) SELECT 1"
+      },
+      "sqlite": null
+    }
+  },
+  {
+    "input": "EXPLAIN FORMAT=JSON SELECT 1",
+    "output": {
+      "mysql": {
+        "analyze": false,
+        "sql": "EXPLAIN FORMAT=JSON SELECT 1"
+      },
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "ANALYZE SELECT 1",
+    "output": {
+      "mysql": {
+        "analyze": true,
+        "sql": "ANALYZE FORMAT=JSON SELECT 1"
+      },
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "ANALYZE FORMAT=JSON SELECT 1",
+    "output": {
+      "mysql": {
+        "analyze": true,
+        "sql": "ANALYZE FORMAT=JSON SELECT 1"
+      },
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "EXPLAIN QUERY PLAN SELECT 1",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": {
+        "analyze": false,
+        "sql": "EXPLAIN QUERY PLAN SELECT 1"
+      }
+    }
+  },
+  {
+    "input": "EXPLAIN ANALYZE",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "DESCRIBE t",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "EXPLAIN t",
+    "output": {
+      "mysql": null,
+      "postgres": null,
+      "sqlite": null
+    }
+  },
+  {
+    "input": "/* c */ EXPLAIN SELECT 1",
+    "output": {
+      "mysql": {
+        "analyze": false,
+        "sql": "EXPLAIN FORMAT=JSON SELECT 1"
+      },
+      "postgres": {
+        "analyze": false,
+        "sql": "EXPLAIN (FORMAT JSON) SELECT 1"
+      },
+      "sqlite": null
+    }
+  }
+]

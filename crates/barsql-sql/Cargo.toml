@@ -1,0 +1,20 @@
+[package]
+name = "barsql-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+barsql-core.workspace = true
+
+[dev-dependencies]
+libc.workspace = true
+serde_json.workspace = true
+
+[[bench]]
+name = "lang_pipeline"
+harness = false

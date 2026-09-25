@@ -1,0 +1,682 @@
+{
+  "engine": "mysql",
+  "schema": "barsql_golden",
+  "setup": [
+    "DROP DATABASE IF EXISTS barsql_golden",
+    "CREATE DATABASE barsql_golden DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    "CREATE TABLE barsql_golden.customers (\n\t\t\tid INT AUTO_INCREMENT PRIMARY KEY,\n\t\t\temail VARCHAR(255) NOT NULL,\n\t\t\tname VARCHAR(100) NOT NULL DEFAULT 'anon',\n\t\t\tmood ENUM('sad', 'happy') NULL,\n\t\t\tcreated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\t\t\tUNIQUE KEY customers_email_uq (email),\n\t\t\tCONSTRAINT customers_name_check CHECK (CHAR_LENGTH(name) > 0)\n\t\t) ENGINE=InnoDB COMMENT='Customers'",
+    "CREATE TABLE barsql_golden.orders (\n\t\t\tid BIGINT AUTO_INCREMENT PRIMARY KEY,\n\t\t\tcustomer_id INT NOT NULL,\n\t\t\ttotal DECIMAL(12,2) NOT NULL DEFAULT 0,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'new',\n\t\t\ttotal_with_tax DECIMAL(12,2) AS (total * 1.2) STORED,\n\t\t\tKEY orders_customer_idx (customer_id),\n\t\t\tCONSTRAINT orders_customer_fk FOREIGN KEY (customer_id) REFERENCES barsql_golden.customers (id) ON DELETE CASCADE\n\t\t) ENGINE=InnoDB",
+    "CREATE INDEX orders_status_idx ON barsql_golden.orders (status, customer_id)",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER barsql_golden.orders_touch BEFORE INSERT ON barsql_golden.orders FOR EACH ROW SET NEW.status = LOWER(NEW.status)",
+    "CREATE FUNCTION barsql_golden.add_one(a INT) RETURNS INT DETERMINISTIC RETURN a + 1",
+    "CREATE PROCEDURE barsql_golden.reset_status(IN target VARCHAR(20)) UPDATE barsql_golden.orders SET status = target",
+    "INSERT INTO barsql_golden.customers (email, name, mood, created_at) VALUES ('a@x.io', 'Ann', 'happy', '2024-01-01 10:00:00'), ('b@x.io', 'Bob', 'sad', '2024-01-02 11:30:00')",
+    "INSERT INTO barsql_golden.orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE TABLE barsql_golden.types (\n\t\t\tid INT PRIMARY KEY,\n\t\t\tc_tinyint TINYINT, c_bool BOOLEAN, c_smallint SMALLINT, c_mediumint MEDIUMINT, c_int INT,\n\t\t\tc_bigint BIGINT, c_ubigint BIGINT UNSIGNED, c_decimal DECIMAL(20,5), c_float FLOAT, c_double DOUBLE,\n\t\t\tc_bit BIT(4), c_char CHAR(4), c_varchar VARCHAR(20), c_text TEXT, c_blob BLOB, c_binary BINARY(4),\n\t\t\tc_varbinary VARBINARY(8), c_date DATE, c_datetime DATETIME(6), c_timestamp TIMESTAMP(3) NULL,\n\t\t\tc_time TIME(3), c_year YEAR, c_json JSON, c_enum ENUM('sad', 'happy'), c_set SET('a', 'b', 'c'),\n\t\t\tc_point POINT\n\t\t)",
+    "INSERT INTO barsql_golden.types (id, c_tinyint, c_bool, c_smallint, c_mediumint, c_int, c_bigint, c_ubigint,\n\t\t\tc_decimal, c_float, c_double, c_bit, c_char, c_varchar, c_text, c_blob, c_binary, c_varbinary, c_date,\n\t\t\tc_datetime, c_timestamp, c_time, c_year, c_json, c_enum, c_set, c_point) VALUES\n\t\t\t(1, 127, TRUE, 32767, 8388607, 2147483647, 9007199254740993, 18446744073709551615, 12345.67890, 1.1, 0.1,\n\t\t\t b'1010', 'ab', 'héllo 🌍', 'line1\\nline2', 'blob-utf8', 'abcd', X'DEADBEEF', '2024-02-29',\n\t\t\t '2024-02-29 13:45:30.123456', '2024-02-29 13:45:30.123', '13:45:30.123', 2024, '{\"b\": 1, \"a\": [1, 2]}',\n\t\t\t 'happy', 'a,c', ST_GeomFromText('POINT(1 2)')),\n\t\t\t(2, -128, FALSE, -32768, -8388608, -2147483648, -9223372036854775808, 0, -0.00001, 3.40282e38, 1e21,\n\t\t\t b'0000', '', '', '', X'00FF', X'00000000', X'', '1000-01-01', '9999-12-31 23:59:59.999999',\n\t\t\t '1970-01-01 00:00:01.000', '-838:59:59.000', 1901, '[]', 'sad', '', ST_GeomFromText('POINT(0 0)'))",
+    "INSERT INTO barsql_golden.types (id) VALUES (3)",
+    "SET SESSION sql_mode = ''",
+    "INSERT INTO barsql_golden.types (id, c_date, c_datetime) VALUES (4, '0000-00-00', '0000-00-00 00:00:00')",
+    "SET SESSION sql_mode = DEFAULT"
+  ],
+  "schemas": [
+    "barsql_golden"
+  ],
+  "tables": [
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "customer_totals",
+        "type": "view"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "0"
+        },
+        {
+          "name": "email",
+          "dataType": "varchar",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "decimal",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "0.00"
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "customers",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "email",
+          "dataType": "varchar",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "name",
+          "dataType": "varchar",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "anon"
+        },
+        {
+          "name": "mood",
+          "dataType": "enum",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "datetime",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "customers_email_uq",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "columns": [
+            "email"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "method": "btree"
+        },
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "btree"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "customers_name_check",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "type": "CHECK",
+          "columns": null,
+          "definition": "CHECK (char_length(`name`) > 0)"
+        },
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "customers_email_uq",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "type": "UNIQUE",
+          "columns": [
+            "email"
+          ]
+        }
+      ],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "orders",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "bigint",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "customer_id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": true,
+          "foreignTable": "customers",
+          "foreignColumn": "id"
+        },
+        {
+          "name": "total",
+          "dataType": "decimal",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "0.00"
+        },
+        {
+          "name": "status",
+          "dataType": "varchar",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "new"
+        },
+        {
+          "name": "total_with_tax",
+          "dataType": "decimal",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "orders_customer_idx",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "customer_id"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "method": "btree"
+        },
+        {
+          "name": "orders_status_idx",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "status",
+            "customer_id"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "method": "btree"
+        },
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "btree"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "orders_customer_fk",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "type": "FOREIGN KEY",
+          "columns": [
+            "customer_id"
+          ],
+          "refTable": "customers",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ]
+        }
+      ],
+      "triggers": [
+        {
+          "name": "orders_touch",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "timing": "BEFORE",
+          "events": "INSERT"
+        }
+      ]
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "types",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "c_tinyint",
+          "dataType": "tinyint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_bool",
+          "dataType": "tinyint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_smallint",
+          "dataType": "smallint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_mediumint",
+          "dataType": "mediumint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_int",
+          "dataType": "int",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_bigint",
+          "dataType": "bigint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_ubigint",
+          "dataType": "bigint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_decimal",
+          "dataType": "decimal",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_float",
+          "dataType": "float",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_double",
+          "dataType": "double",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_bit",
+          "dataType": "bit",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_char",
+          "dataType": "char",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_varchar",
+          "dataType": "varchar",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_text",
+          "dataType": "text",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_blob",
+          "dataType": "blob",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_binary",
+          "dataType": "binary",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_varbinary",
+          "dataType": "varbinary",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_date",
+          "dataType": "date",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_datetime",
+          "dataType": "datetime",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_timestamp",
+          "dataType": "timestamp",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_time",
+          "dataType": "time",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_year",
+          "dataType": "year",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_json",
+          "dataType": "json",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_enum",
+          "dataType": "enum",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_set",
+          "dataType": "set",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_point",
+          "dataType": "point",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "types",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "btree"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "types",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ]
+        }
+      ],
+      "triggers": null
+    }
+  ],
+  "routines": [
+    {
+      "name": "add_one",
+      "schema": "barsql_golden",
+      "kind": "function",
+      "returnType": "int"
+    },
+    {
+      "name": "reset_status",
+      "schema": "barsql_golden",
+      "kind": "procedure"
+    }
+  ],
+  "ddl": [
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customer_totals",
+        "kind": "view"
+      },
+      "ddl": "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `barsql_golden`.`customer_totals` AS select `c`.`id` AS `id`,`c`.`email` AS `email`,coalesce(sum(`o`.`total`),0) AS `total` from (`barsql_golden`.`customers` `c` left join `barsql_golden`.`orders` `o` on((`o`.`customer_id` = `c`.`id`))) group by `c`.`id`,`c`.`email`;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customers",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE `customers` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,\n  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'anon',\n  `mood` enum('sad','happy') COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `customers_email_uq` (`email`),\n  CONSTRAINT `customers_name_check` CHECK ((char_length(`name`) > 0))\n) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Customers';"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customers_email_uq",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "CREATE UNIQUE INDEX `customers_email_uq` ON `barsql_golden`.`customers` (`email`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`customers` ADD PRIMARY KEY (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customers_name_check",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`customers`\n    ADD CONSTRAINT `customers_name_check` CHECK (char_length(`name`) > 0);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`customers`\n    ADD CONSTRAINT `PRIMARY` PRIMARY KEY (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customers_email_uq",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`customers`\n    ADD CONSTRAINT `customers_email_uq` UNIQUE (`email`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE `orders` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `customer_id` int NOT NULL,\n  `total` decimal(12,2) NOT NULL DEFAULT '0.00',\n  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'new',\n  `total_with_tax` decimal(12,2) GENERATED ALWAYS AS ((`total` * 1.2)) STORED,\n  PRIMARY KEY (`id`),\n  KEY `orders_customer_idx` (`customer_id`),\n  KEY `orders_status_idx` (`status`,`customer_id`),\n  CONSTRAINT `orders_customer_fk` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE\n) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders_customer_idx",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE INDEX `orders_customer_idx` ON `barsql_golden`.`orders` (`customer_id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders_status_idx",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE INDEX `orders_status_idx` ON `barsql_golden`.`orders` (`status`, `customer_id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`orders` ADD PRIMARY KEY (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders_customer_fk",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`orders`\n    ADD CONSTRAINT `orders_customer_fk` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`orders`\n    ADD CONSTRAINT `PRIMARY` PRIMARY KEY (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders_touch",
+        "kind": "trigger",
+        "table": "orders"
+      },
+      "ddl": "CREATE DEFINER=`root`@`%` TRIGGER `orders_touch` BEFORE INSERT ON `orders` FOR EACH ROW SET NEW.status = LOWER(NEW.status);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "types",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE `types` (\n  `id` int NOT NULL,\n  `c_tinyint` tinyint DEFAULT NULL,\n  `c_bool` tinyint(1) DEFAULT NULL,\n  `c_smallint` smallint DEFAULT NULL,\n  `c_mediumint` mediumint DEFAULT NULL,\n  `c_int` int DEFAULT NULL,\n  `c_bigint` bigint DEFAULT NULL,\n  `c_ubigint` bigint unsigned DEFAULT NULL,\n  `c_decimal` decimal(20,5) DEFAULT NULL,\n  `c_float` float DEFAULT NULL,\n  `c_double` double DEFAULT NULL,\n  `c_bit` bit(4) DEFAULT NULL,\n  `c_char` char(4) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n  `c_varchar` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n  `c_text` text COLLATE utf8mb4_unicode_ci,\n  `c_blob` blob,\n  `c_binary` binary(4) DEFAULT NULL,\n  `c_varbinary` varbinary(8) DEFAULT NULL,\n  `c_date` date DEFAULT NULL,\n  `c_datetime` datetime(6) DEFAULT NULL,\n  `c_timestamp` timestamp(3) NULL DEFAULT NULL,\n  `c_time` time(3) DEFAULT NULL,\n  `c_year` year DEFAULT NULL,\n  `c_json` json DEFAULT NULL,\n  `c_enum` enum('sad','happy') COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n  `c_set` set('a','b','c') COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n  `c_point` point DEFAULT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "index",
+        "table": "types"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`types` ADD PRIMARY KEY (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "constraint",
+        "table": "types"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`types`\n    ADD CONSTRAINT `PRIMARY` PRIMARY KEY (`id`);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "add_one",
+        "kind": "function"
+      },
+      "ddl": "CREATE DEFINER=`root`@`%` FUNCTION `add_one`(a INT) RETURNS int\n    DETERMINISTIC\nRETURN a + 1;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "reset_status",
+        "kind": "procedure"
+      },
+      "ddl": "CREATE DEFINER=`root`@`%` PROCEDURE `reset_status`(IN target VARCHAR(20))\nUPDATE barsql_golden.orders SET status = target;"
+    }
+  ]
+}

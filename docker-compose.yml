@@ -1,0 +1,65 @@
+# Databases for the E2E suites. Non-default ports, so they don't clash with a local Postgres or MySQL:
+#
+#   PostgreSQL -> 55432
+#   MySQL      -> 33306
+#   MariaDB    -> 33307
+#
+# The tests use these ports and credentials unless BARSQL_E2E_PG_PORT and friends say otherwise.
+#
+#   cargo xtask e2e up      # COMPOSE="podman compose" for Podman
+#   cargo xtask e2e         # driver, app and per-engine UI suites
+#   cargo xtask e2e down    # or `cargo xtask e2e all` for up, run and down in one go
+#
+# `up --wait` returns once every healthcheck passes.
+
+name: barsql-e2e
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: barsql_test
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d barsql_test"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    tmpfs:
+      # tmpfs is faster and leaves nothing to clean up between runs.
+      - /var/lib/postgresql/data
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: barsql_test
+    ports:
+      - "33306:3306"
+    command:
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: barsql_test
+    ports:
+      - "33307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql

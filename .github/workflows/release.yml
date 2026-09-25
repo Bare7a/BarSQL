@@ -1,0 +1,204 @@
+name: Release BarSQL
+
+# The updater reads these releases, so keep the asset names and one-entry archives stable. Nothing is published
+# unless the full test suite passes on Linux, macOS and Windows.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag, e.g. v1.0.0; leave empty to build the packages without publishing'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Match the tag against Cargo.toml
+        id: version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${INPUT_TAG// /}"
+            if [ -n "$tag" ] && [ "${tag#v}" = "$tag" ]; then
+              tag="v$tag"
+            fi
+          fi
+          if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
+            echo "::error::The tag $tag does not match Cargo.toml ($version). Run cargo xtask bump-version first."
+            exit 1
+          fi
+          # Never republish a version from a different commit.
+          if [ -n "$tag" ] && [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            existing="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | tail -n1 | cut -f1)"
+            if [ -n "$existing" ] && [ "$existing" != "$GITHUB_SHA" ]; then
+              echo "::error::$tag already points at ${existing:0:7}, not this commit. Run cargo xtask bump-version first."
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  tests:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    uses: ./.github/workflows/test.yml
+    with:
+      suite: all
+
+  build:
+    needs: version
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        include:
+          # Built on 22.04 so the binary also runs on distros with an older glibc.
+          - os: ubuntu-22.04
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install GPUI build dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libfontconfig-dev libfreetype-dev libwayland-dev \
+            libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libfuse2
+
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Add the macOS targets
+        if: matrix.target == 'macos'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # A tag can only use its own caches and master's, so only master saves one.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Install cargo-deb, cargo-generate-rpm and linuxdeploy
+        if: matrix.target == 'linux'
+        run: |
+          set -euo pipefail
+          cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.0
+          curl -fsSL -o "$RUNNER_TEMP/linuxdeploy" \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/linuxdeploy"
+          echo "LINUXDEPLOY=$RUNNER_TEMP/linuxdeploy" >> "$GITHUB_ENV"
+
+      - name: Install NSIS
+        if: matrix.target == 'windows'
+        uses: negrutiu/nsis-install@v3
+
+      - name: Package
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: scripts/package-${{ matrix.target }}.sh
+
+      - name: Show the libraries the Linux binary links
+        if: matrix.target == 'linux'
+        run: readelf -d target/package/linux/BarSQL | grep NEEDED
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.target }}
+          path: target/package/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # makepkg needs Arch and refuses to run as root.
+  arch:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist-linux
+          path: dist-linux
+
+      - name: Package
+        env:
+          BARSQL_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          cp packaging/linux/PKGBUILD packaging/linux/BarSQL.desktop packaging/linux/barsql-*.png "$stage/"
+          install -m 755 dist-linux/BarSQL "$stage/BarSQL"
+          useradd --create-home builder
+          chown -R builder "$stage"
+          (cd "$stage" && runuser -u builder -- env BARSQL_VERSION="$BARSQL_VERSION" makepkg --nodeps --noconfirm)
+          mkdir -p dist
+          mv "$stage/barsql-$BARSQL_VERSION-1-x86_64.pkg.tar.zst" dist/BarSQL.pkg.tar.zst
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-arch
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [version, tests, build, arch]
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # The updater verifies its download against this file.
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: BarSQL ${{ needs.version.outputs.tag }}
+          files: dist/*
+          generate_release_notes: true
+          draft: false

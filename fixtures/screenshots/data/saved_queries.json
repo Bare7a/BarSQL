@@ -1,0 +1,10 @@
+[
+  {
+    "id": "get-all-posts",
+    "name": "Get All Posts",
+    "connectionId": "forum",
+    "sql": "SELECT * FROM posts p ORDER BY p.id;",
+    "createdAt": "2026-09-25T09:00:00Z",
+    "updatedAt": "2026-09-25T09:00:00Z"
+  }
+]

@@ -1,0 +1,264 @@
+{
+  "engine": "mysql",
+  "probes": [
+    {
+      "name": "syntax",
+      "sql": "SELEC 1",
+      "results": [
+        {
+          "statement": "SELEC 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'SELEC 1' at line 1",
+            "code": "1064"
+          }
+        }
+      ]
+    },
+    {
+      "name": "syntax_position",
+      "sql": "SELECT * FROM barsql_golden.customers WHERE",
+      "results": [
+        {
+          "statement": "SELECT * FROM barsql_golden.customers WHERE",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '' at line 1",
+            "code": "1064"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_table",
+      "sql": "SELECT * FROM barsql_golden.nope",
+      "results": [
+        {
+          "statement": "SELECT * FROM barsql_golden.nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Table 'barsql_golden.nope' doesn't exist",
+            "code": "1146"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_column",
+      "sql": "SELECT nope FROM barsql_golden.customers",
+      "results": [
+        {
+          "statement": "SELECT nope FROM barsql_golden.customers",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Unknown column 'nope' in 'field list'",
+            "code": "1054"
+          }
+        }
+      ]
+    },
+    {
+      "name": "unique_violation",
+      "sql": "INSERT INTO barsql_golden.customers (email, name) VALUES ('a@x.io', 'Dup')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name) VALUES ('a@x.io', 'Dup')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Duplicate entry 'a@x.io' for key 'customers.customers_email_uq'",
+            "code": "1062"
+          }
+        }
+      ]
+    },
+    {
+      "name": "not_null_violation",
+      "sql": "INSERT INTO barsql_golden.customers (email, name) VALUES (NULL, 'x')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name) VALUES (NULL, 'x')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Column 'email' cannot be null",
+            "code": "1048"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fk_violation",
+      "sql": "INSERT INTO barsql_golden.orders (customer_id) VALUES (999)",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.orders (customer_id) VALUES (999)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Cannot add or update a child row: a foreign key constraint fails (`barsql_golden`.`orders`, CONSTRAINT `orders_customer_fk` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE)",
+            "code": "1452"
+          }
+        }
+      ]
+    },
+    {
+      "name": "check_violation",
+      "sql": "INSERT INTO barsql_golden.customers (email, name) VALUES ('z@x.io', '')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name) VALUES ('z@x.io', '')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Check constraint 'customers_name_check' is violated.",
+            "code": "3819"
+          }
+        }
+      ]
+    },
+    {
+      "name": "division_by_zero",
+      "sql": "SELECT 1/0 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1/0 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DECIMAL"
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "invalid_input",
+      "sql": "SELECT CAST('abc' AS SIGNED) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('abc' AS SIGNED) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              0
+            ]
+          ],
+          "display": [
+            [
+              "0"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "signal",
+      "sql": "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'custom failure'",
+      "results": [
+        {
+          "statement": "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'custom failure'",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "custom failure",
+            "code": "1644"
+          }
+        }
+      ]
+    },
+    {
+      "name": "second_statement_fails",
+      "sql": "SELECT 1 AS ok; SELECT * FROM barsql_golden.nope; SELECT 2 AS never",
+      "results": [
+        {
+          "statement": "SELECT 1 AS ok",
+          "columns": [
+            "ok"
+          ],
+          "columnTypes": [
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT * FROM barsql_golden.nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Table 'barsql_golden.nope' doesn't exist",
+            "code": "1146"
+          }
+        }
+      ]
+    },
+    {
+      "name": "multibyte_position",
+      "sql": "SELECT 'héllo 🌍' AS v, nope",
+      "results": [
+        {
+          "statement": "SELECT 'héllo 🌍' AS v, nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Unknown column 'nope' in 'field list'",
+            "code": "1054"
+          }
+        }
+      ]
+    }
+  ],
+  "setup": [
+    "DROP DATABASE IF EXISTS barsql_golden",
+    "CREATE DATABASE barsql_golden DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    "CREATE TABLE barsql_golden.customers (\n\t\t\tid INT AUTO_INCREMENT PRIMARY KEY,\n\t\t\temail VARCHAR(255) NOT NULL,\n\t\t\tname VARCHAR(100) NOT NULL DEFAULT 'anon',\n\t\t\tmood ENUM('sad', 'happy') NULL,\n\t\t\tcreated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\t\t\tUNIQUE KEY customers_email_uq (email),\n\t\t\tCONSTRAINT customers_name_check CHECK (CHAR_LENGTH(name) > 0)\n\t\t) ENGINE=InnoDB COMMENT='Customers'",
+    "CREATE TABLE barsql_golden.orders (\n\t\t\tid BIGINT AUTO_INCREMENT PRIMARY KEY,\n\t\t\tcustomer_id INT NOT NULL,\n\t\t\ttotal DECIMAL(12,2) NOT NULL DEFAULT 0,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'new',\n\t\t\ttotal_with_tax DECIMAL(12,2) AS (total * 1.2) STORED,\n\t\t\tKEY orders_customer_idx (customer_id),\n\t\t\tCONSTRAINT orders_customer_fk FOREIGN KEY (customer_id) REFERENCES barsql_golden.customers (id) ON DELETE CASCADE\n\t\t) ENGINE=InnoDB",
+    "CREATE INDEX orders_status_idx ON barsql_golden.orders (status, customer_id)",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER barsql_golden.orders_touch BEFORE INSERT ON barsql_golden.orders FOR EACH ROW SET NEW.status = LOWER(NEW.status)",
+    "CREATE FUNCTION barsql_golden.add_one(a INT) RETURNS INT DETERMINISTIC RETURN a + 1",
+    "CREATE PROCEDURE barsql_golden.reset_status(IN target VARCHAR(20)) UPDATE barsql_golden.orders SET status = target",
+    "INSERT INTO barsql_golden.customers (email, name, mood, created_at) VALUES ('a@x.io', 'Ann', 'happy', '2024-01-01 10:00:00'), ('b@x.io', 'Bob', 'sad', '2024-01-02 11:30:00')",
+    "INSERT INTO barsql_golden.orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE TABLE barsql_golden.types (\n\t\t\tid INT PRIMARY KEY,\n\t\t\tc_tinyint TINYINT, c_bool BOOLEAN, c_smallint SMALLINT, c_mediumint MEDIUMINT, c_int INT,\n\t\t\tc_bigint BIGINT, c_ubigint BIGINT UNSIGNED, c_decimal DECIMAL(20,5), c_float FLOAT, c_double DOUBLE,\n\t\t\tc_bit BIT(4), c_char CHAR(4), c_varchar VARCHAR(20), c_text TEXT, c_blob BLOB, c_binary BINARY(4),\n\t\t\tc_varbinary VARBINARY(8), c_date DATE, c_datetime DATETIME(6), c_timestamp TIMESTAMP(3) NULL,\n\t\t\tc_time TIME(3), c_year YEAR, c_json JSON, c_enum ENUM('sad', 'happy'), c_set SET('a', 'b', 'c'),\n\t\t\tc_point POINT\n\t\t)",
+    "INSERT INTO barsql_golden.types (id, c_tinyint, c_bool, c_smallint, c_mediumint, c_int, c_bigint, c_ubigint,\n\t\t\tc_decimal, c_float, c_double, c_bit, c_char, c_varchar, c_text, c_blob, c_binary, c_varbinary, c_date,\n\t\t\tc_datetime, c_timestamp, c_time, c_year, c_json, c_enum, c_set, c_point) VALUES\n\t\t\t(1, 127, TRUE, 32767, 8388607, 2147483647, 9007199254740993, 18446744073709551615, 12345.67890, 1.1, 0.1,\n\t\t\t b'1010', 'ab', 'héllo 🌍', 'line1\\nline2', 'blob-utf8', 'abcd', X'DEADBEEF', '2024-02-29',\n\t\t\t '2024-02-29 13:45:30.123456', '2024-02-29 13:45:30.123', '13:45:30.123', 2024, '{\"b\": 1, \"a\": [1, 2]}',\n\t\t\t 'happy', 'a,c', ST_GeomFromText('POINT(1 2)')),\n\t\t\t(2, -128, FALSE, -32768, -8388608, -2147483648, -9223372036854775808, 0, -0.00001, 3.40282e38, 1e21,\n\t\t\t b'0000', '', '', '', X'00FF', X'00000000', X'', '1000-01-01', '9999-12-31 23:59:59.999999',\n\t\t\t '1970-01-01 00:00:01.000', '-838:59:59.000', 1901, '[]', 'sad', '', ST_GeomFromText('POINT(0 0)'))",
+    "INSERT INTO barsql_golden.types (id) VALUES (3)",
+    "SET SESSION sql_mode = ''",
+    "INSERT INTO barsql_golden.types (id, c_date, c_datetime) VALUES (4, '0000-00-00', '0000-00-00 00:00:00')",
+    "SET SESSION sql_mode = DEFAULT"
+  ]
+}

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="panel" cx="50%" cy="45%" r="70%">
+      <stop offset="0" stop-color="#0c0d12"/>
+      <stop offset="1" stop-color="#07080c"/>
+    </radialGradient>
+    <mask id="letter">
+      <path fill="#fff" d="M150 116H262A82 82 0 0 1 262 280H150Z"/>
+      <path fill="#fff" d="M150 218H273A89 89 0 0 1 273 396H150Z"/>
+      <path fill="#000" d="M212 178H262A20 20 0 0 1 262 218H212Z"/>
+      <path fill="#000" d="M212 280H273A27 27 0 0 1 273 334H212Z"/>
+    </mask>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="38" fill="#448afb"/>
+  <rect x="25" y="25" width="462" height="462" rx="22" fill="url(#panel)"/>
+  <rect x="150" y="116" width="212" height="280" fill="#287ff7" mask="url(#letter)"/>
+</svg>

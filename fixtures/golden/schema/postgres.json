@@ -1,0 +1,2193 @@
+{
+  "engine": "postgres",
+  "schema": "golden",
+  "setup": [
+    "DROP SCHEMA IF EXISTS golden CASCADE",
+    "CREATE SCHEMA golden",
+    "CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA golden",
+    "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA golden",
+    "CREATE TYPE golden.mood AS ENUM ('sad', 'happy')",
+    "CREATE DOMAIN golden.posint AS integer CHECK (VALUE > 0)",
+    "CREATE TYPE golden.pair AS (a integer, b text)",
+    "CREATE TABLE golden.customers (\n\t\tid serial PRIMARY KEY,\n\t\temail text NOT NULL UNIQUE,\n\t\tname varchar(100) NOT NULL DEFAULT 'anon',\n\t\tmood golden.mood,\n\t\tcreated_at timestamptz NOT NULL DEFAULT now(),\n\t\tCONSTRAINT customers_name_check CHECK (length(name) > 0)\n\t)",
+    "COMMENT ON TABLE golden.customers IS 'Customers'",
+    "CREATE TABLE golden.orders (\n\t\tid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\t\tcustomer_id integer NOT NULL REFERENCES golden.customers (id) ON DELETE CASCADE,\n\t\ttotal numeric(12,2) NOT NULL DEFAULT 0,\n\t\tstatus text NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax numeric(12,2) GENERATED ALWAYS AS (total * 1.2) STORED\n\t)",
+    "CREATE INDEX orders_customer_idx ON golden.orders (customer_id)",
+    "CREATE UNIQUE INDEX orders_status_partial_idx ON golden.orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE INDEX customers_lower_email_idx ON golden.customers (lower(email))",
+    "CREATE VIEW golden.customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM golden.customers c LEFT JOIN golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE FUNCTION golden.touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.status := lower(NEW.status); RETURN NEW; END $$",
+    "CREATE TRIGGER orders_touch BEFORE INSERT OR UPDATE ON golden.orders FOR EACH ROW EXECUTE FUNCTION golden.touch()",
+    "CREATE FUNCTION golden.add(a integer, b integer DEFAULT 1) RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT a + b $$",
+    "CREATE PROCEDURE golden.reset_status(IN target text) LANGUAGE sql AS $$ UPDATE golden.orders SET status = target $$",
+    "INSERT INTO golden.customers (email, name, mood, created_at) VALUES ('a@x.io', 'Ann', 'happy', '2024-01-01 10:00:00+00'), ('b@x.io', 'Bob', 'sad', '2024-01-02 11:30:00+00')",
+    "INSERT INTO golden.orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE MATERIALIZED VIEW golden.order_counts AS SELECT customer_id, count(*) AS n FROM golden.orders GROUP BY customer_id"
+  ],
+  "schemas": [
+    "golden"
+  ],
+  "tables": [
+    {
+      "table": {
+        "schema": "golden",
+        "name": "customer_totals",
+        "type": "view"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "integer",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "email",
+          "dataType": "text",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "numeric",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "golden",
+        "name": "customers",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "integer",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false,
+          "defaultVal": "nextval('golden.customers_id_seq'::regclass)"
+        },
+        {
+          "name": "email",
+          "dataType": "text",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "name",
+          "dataType": "character varying(100)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "'anon'::character varying"
+        },
+        {
+          "name": "mood",
+          "dataType": "golden.mood",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "customers_email_key",
+          "schema": "golden",
+          "table": "customers",
+          "columns": [
+            "email"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "method": "btree"
+        },
+        {
+          "name": "customers_lower_email_idx",
+          "schema": "golden",
+          "table": "customers",
+          "columns": null,
+          "isPrimary": false,
+          "isUnique": false,
+          "method": "btree"
+        },
+        {
+          "name": "customers_pkey",
+          "schema": "golden",
+          "table": "customers",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "btree"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "customers_name_check",
+          "schema": "golden",
+          "table": "customers",
+          "type": "CHECK",
+          "columns": [
+            "name"
+          ],
+          "definition": "CHECK (length(name::text) > 0)"
+        },
+        {
+          "name": "customers_pkey",
+          "schema": "golden",
+          "table": "customers",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ],
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "customers_email_key",
+          "schema": "golden",
+          "table": "customers",
+          "type": "UNIQUE",
+          "columns": [
+            "email"
+          ],
+          "definition": "UNIQUE (email)"
+        }
+      ],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "golden",
+        "name": "order_counts",
+        "type": "materialized view"
+      },
+      "columns": [
+        {
+          "name": "customer_id",
+          "dataType": "integer",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "n",
+          "dataType": "bigint",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "golden",
+        "name": "orders",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "bigint",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "customer_id",
+          "dataType": "integer",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": true,
+          "foreignTable": "customers",
+          "foreignColumn": "id"
+        },
+        {
+          "name": "total",
+          "dataType": "numeric(12,2)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "0"
+        },
+        {
+          "name": "status",
+          "dataType": "text",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "'new'::text"
+        },
+        {
+          "name": "total_with_tax",
+          "dataType": "numeric(12,2)",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "(total * 1.2)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "orders_customer_idx",
+          "schema": "golden",
+          "table": "orders",
+          "columns": [
+            "customer_id"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "method": "btree"
+        },
+        {
+          "name": "orders_pkey",
+          "schema": "golden",
+          "table": "orders",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "btree"
+        },
+        {
+          "name": "orders_status_partial_idx",
+          "schema": "golden",
+          "table": "orders",
+          "columns": [
+            "customer_id",
+            "status"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "method": "btree"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "orders_customer_id_fkey",
+          "schema": "golden",
+          "table": "orders",
+          "type": "FOREIGN KEY",
+          "columns": [
+            "customer_id"
+          ],
+          "refTable": "customers",
+          "refColumns": [
+            "id"
+          ],
+          "definition": "FOREIGN KEY (customer_id) REFERENCES golden.customers(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "orders_pkey",
+          "schema": "golden",
+          "table": "orders",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ],
+          "definition": "PRIMARY KEY (id)"
+        }
+      ],
+      "triggers": [
+        {
+          "name": "orders_touch",
+          "schema": "golden",
+          "table": "orders",
+          "timing": "BEFORE",
+          "events": "INSERT, UPDATE"
+        }
+      ]
+    }
+  ],
+  "routines": [
+    {
+      "name": "add",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "a integer, b integer"
+    },
+    {
+      "name": "akeys",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "avals",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "citext",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "boolean"
+    },
+    {
+      "name": "citext",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "character"
+    },
+    {
+      "name": "citext",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "inet"
+    },
+    {
+      "name": "citext_cmp",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_eq",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_ge",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_gt",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_hash",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.citext"
+    },
+    {
+      "name": "citext_hash_extended",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "bigint",
+      "args": "golden.citext, bigint"
+    },
+    {
+      "name": "citext_larger",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_le",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_lt",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_ne",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_pattern_cmp",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_pattern_ge",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_pattern_gt",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_pattern_le",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_pattern_lt",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citext_smaller",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "citextin",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "cstring"
+    },
+    {
+      "name": "citextout",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "cstring",
+      "args": "golden.citext"
+    },
+    {
+      "name": "citextrecv",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.citext",
+      "args": "internal"
+    },
+    {
+      "name": "citextsend",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "bytea",
+      "args": "golden.citext"
+    },
+    {
+      "name": "defined",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, text"
+    },
+    {
+      "name": "delete",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "delete",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "golden.hstore, text"
+    },
+    {
+      "name": "delete",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "golden.hstore, text[]"
+    },
+    {
+      "name": "each",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF record",
+      "args": "hs golden.hstore, OUT key text, OUT value text"
+    },
+    {
+      "name": "exist",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, text"
+    },
+    {
+      "name": "exists_all",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, text[]"
+    },
+    {
+      "name": "exists_any",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, text[]"
+    },
+    {
+      "name": "fetchval",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text",
+      "args": "golden.hstore, text"
+    },
+    {
+      "name": "ghstore_compress",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "internal"
+    },
+    {
+      "name": "ghstore_consistent",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "internal, golden.hstore, smallint, oid, internal"
+    },
+    {
+      "name": "ghstore_decompress",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "internal"
+    },
+    {
+      "name": "ghstore_in",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.ghstore",
+      "args": "cstring"
+    },
+    {
+      "name": "ghstore_options",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "void",
+      "args": "internal"
+    },
+    {
+      "name": "ghstore_out",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "cstring",
+      "args": "golden.ghstore"
+    },
+    {
+      "name": "ghstore_penalty",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "internal, internal, internal"
+    },
+    {
+      "name": "ghstore_picksplit",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "internal, internal"
+    },
+    {
+      "name": "ghstore_same",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "golden.ghstore, golden.ghstore, internal"
+    },
+    {
+      "name": "ghstore_union",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.ghstore",
+      "args": "internal, internal"
+    },
+    {
+      "name": "gin_consistent_hstore",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "internal, smallint, golden.hstore, integer, internal, internal"
+    },
+    {
+      "name": "gin_extract_hstore",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "golden.hstore, internal"
+    },
+    {
+      "name": "gin_extract_hstore_query",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "golden.hstore, internal, smallint, internal, internal"
+    },
+    {
+      "name": "hs_concat",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hs_contained",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hs_contains",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "record"
+    },
+    {
+      "name": "hstore",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "text[]"
+    },
+    {
+      "name": "hstore",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "text, text"
+    },
+    {
+      "name": "hstore",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "text[], text[]"
+    },
+    {
+      "name": "hstore_cmp",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_eq",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_ge",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_gt",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_hash",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_hash_extended",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "bigint",
+      "args": "golden.hstore, bigint"
+    },
+    {
+      "name": "hstore_in",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "cstring"
+    },
+    {
+      "name": "hstore_le",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_lt",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_ne",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, golden.hstore"
+    },
+    {
+      "name": "hstore_out",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "cstring",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_recv",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "internal"
+    },
+    {
+      "name": "hstore_send",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "bytea",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_subscript_handler",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "internal",
+      "args": "internal"
+    },
+    {
+      "name": "hstore_to_array",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_to_json",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "json",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_to_json_loose",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "json",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_to_jsonb",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "jsonb",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_to_jsonb_loose",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "jsonb",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_to_matrix",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "hstore_version_diag",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "isdefined",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, text"
+    },
+    {
+      "name": "isexists",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.hstore, text"
+    },
+    {
+      "name": "populate_record",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "anyelement",
+      "args": "anyelement, golden.hstore"
+    },
+    {
+      "name": "regexp_match",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "regexp_match",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.citext, golden.citext, text"
+    },
+    {
+      "name": "regexp_matches",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF text[]",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "regexp_matches",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF text[]",
+      "args": "golden.citext, golden.citext, text"
+    },
+    {
+      "name": "regexp_replace",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text",
+      "args": "golden.citext, golden.citext, text"
+    },
+    {
+      "name": "regexp_replace",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text",
+      "args": "golden.citext, golden.citext, text, text"
+    },
+    {
+      "name": "regexp_split_to_array",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "regexp_split_to_array",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.citext, golden.citext, text"
+    },
+    {
+      "name": "regexp_split_to_table",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF text",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "regexp_split_to_table",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF text",
+      "args": "golden.citext, golden.citext, text"
+    },
+    {
+      "name": "replace",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text",
+      "args": "golden.citext, golden.citext, golden.citext"
+    },
+    {
+      "name": "reset_status",
+      "schema": "golden",
+      "kind": "procedure",
+      "args": "IN target text"
+    },
+    {
+      "name": "skeys",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF text",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "slice",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "golden.hstore, text[]"
+    },
+    {
+      "name": "slice_array",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text[]",
+      "args": "golden.hstore, text[]"
+    },
+    {
+      "name": "split_part",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text",
+      "args": "golden.citext, golden.citext, integer"
+    },
+    {
+      "name": "strpos",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "integer",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "svals",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "SETOF text",
+      "args": "golden.hstore"
+    },
+    {
+      "name": "tconvert",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "golden.hstore",
+      "args": "text, text"
+    },
+    {
+      "name": "texticlike",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "texticlike",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, text"
+    },
+    {
+      "name": "texticnlike",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "texticnlike",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, text"
+    },
+    {
+      "name": "texticregexeq",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "texticregexeq",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, text"
+    },
+    {
+      "name": "texticregexne",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, golden.citext"
+    },
+    {
+      "name": "texticregexne",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "boolean",
+      "args": "golden.citext, text"
+    },
+    {
+      "name": "touch",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "trigger"
+    },
+    {
+      "name": "translate",
+      "schema": "golden",
+      "kind": "function",
+      "returnType": "text",
+      "args": "golden.citext, golden.citext, text"
+    }
+  ],
+  "ddl": [
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customer_totals",
+        "kind": "view"
+      },
+      "ddl": "CREATE OR REPLACE VIEW \"golden\".\"customer_totals\" AS\n SELECT c.id,\n    c.email,\n    COALESCE(sum(o.total), 0::numeric) AS total\n   FROM golden.customers c\n     LEFT JOIN golden.orders o ON o.customer_id = c.id\n  GROUP BY c.id, c.email;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE \"golden\".\"customers\" (\n    \"id\" serial NOT NULL,\n    \"email\" text NOT NULL,\n    \"name\" character varying(100) DEFAULT 'anon'::character varying NOT NULL,\n    \"mood\" golden.mood,\n    \"created_at\" timestamp with time zone DEFAULT now() NOT NULL,\n    CONSTRAINT \"customers_name_check\" CHECK (length(name::text) > 0),\n    CONSTRAINT \"customers_pkey\" PRIMARY KEY (id),\n    CONSTRAINT \"customers_email_key\" UNIQUE (email)\n);\n\nCOMMENT ON TABLE \"golden\".\"customers\" IS 'Customers';"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers_email_key",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "CREATE UNIQUE INDEX customers_email_key ON golden.customers USING btree (email);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers_lower_email_idx",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "CREATE INDEX customers_lower_email_idx ON golden.customers USING btree (lower(email));"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers_pkey",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "CREATE UNIQUE INDEX customers_pkey ON golden.customers USING btree (id);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers_name_check",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE ONLY \"golden\".\"customers\"\n    ADD CONSTRAINT \"customers_name_check\" CHECK (length(name::text) > 0);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers_pkey",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE ONLY \"golden\".\"customers\"\n    ADD CONSTRAINT \"customers_pkey\" PRIMARY KEY (id);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "customers_email_key",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE ONLY \"golden\".\"customers\"\n    ADD CONSTRAINT \"customers_email_key\" UNIQUE (email);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "order_counts",
+        "kind": "materialized view"
+      },
+      "ddl": "CREATE MATERIALIZED VIEW \"golden\".\"order_counts\" AS\n SELECT customer_id,\n    count(*) AS n\n   FROM golden.orders\n  GROUP BY customer_id;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE \"golden\".\"orders\" (\n    \"id\" bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n    \"customer_id\" integer NOT NULL,\n    \"total\" numeric(12,2) DEFAULT 0 NOT NULL,\n    \"status\" text DEFAULT 'new'::text NOT NULL,\n    \"total_with_tax\" numeric(12,2) GENERATED ALWAYS AS ((total * 1.2)) STORED,\n    CONSTRAINT \"orders_customer_id_fkey\" FOREIGN KEY (customer_id) REFERENCES golden.customers(id) ON DELETE CASCADE,\n    CONSTRAINT \"orders_pkey\" PRIMARY KEY (id)\n);\n\nCREATE INDEX \"orders_customer_idx\" ON \"golden\".\"orders\" USING btree (\"customer_id\");\n\nCREATE UNIQUE INDEX \"orders_status_partial_idx\" ON \"golden\".\"orders\" USING btree (\"customer_id\", \"status\");"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders_customer_idx",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE INDEX orders_customer_idx ON golden.orders USING btree (customer_id);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders_pkey",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE UNIQUE INDEX orders_pkey ON golden.orders USING btree (id);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders_status_partial_idx",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE UNIQUE INDEX orders_status_partial_idx ON golden.orders USING btree (customer_id, status) WHERE (status <> 'cancelled'::text);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders_customer_id_fkey",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE ONLY \"golden\".\"orders\"\n    ADD CONSTRAINT \"orders_customer_id_fkey\" FOREIGN KEY (customer_id) REFERENCES golden.customers(id) ON DELETE CASCADE;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders_pkey",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE ONLY \"golden\".\"orders\"\n    ADD CONSTRAINT \"orders_pkey\" PRIMARY KEY (id);"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "orders_touch",
+        "kind": "trigger",
+        "table": "orders"
+      },
+      "ddl": "CREATE TRIGGER orders_touch BEFORE INSERT OR UPDATE ON golden.orders FOR EACH ROW EXECUTE FUNCTION golden.touch();"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "add",
+        "kind": "function",
+        "args": "a integer, b integer"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.add(a integer, b integer DEFAULT 1)\n RETURNS integer\n LANGUAGE sql\n IMMUTABLE\nAS $function$ SELECT a + b $function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "akeys",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.akeys(golden.hstore)\n RETURNS text[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_akeys$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "avals",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.avals(golden.hstore)\n RETURNS text[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_avals$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext",
+        "kind": "function",
+        "args": "boolean"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext(boolean)\n RETURNS golden.citext\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$booltext$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext",
+        "kind": "function",
+        "args": "character"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext(character)\n RETURNS golden.citext\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$rtrim1$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext",
+        "kind": "function",
+        "args": "inet"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext(inet)\n RETURNS golden.citext\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$network_show$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_cmp",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_cmp(golden.citext, golden.citext)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_cmp$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_eq",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_eq(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_eq$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_ge",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_ge(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_ge$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_gt",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_gt(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_gt$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_hash",
+        "kind": "function",
+        "args": "golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_hash(golden.citext)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_hash$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_hash_extended",
+        "kind": "function",
+        "args": "golden.citext, bigint"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_hash_extended(golden.citext, bigint)\n RETURNS bigint\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_hash_extended$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_larger",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_larger(golden.citext, golden.citext)\n RETURNS golden.citext\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_larger$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_le",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_le(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_le$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_lt",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_lt(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_lt$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_ne",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_ne(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_ne$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_pattern_cmp",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_pattern_cmp(golden.citext, golden.citext)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_pattern_cmp$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_pattern_ge",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_pattern_ge(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_pattern_ge$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_pattern_gt",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_pattern_gt(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_pattern_gt$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_pattern_le",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_pattern_le(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_pattern_le$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_pattern_lt",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_pattern_lt(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_pattern_lt$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citext_smaller",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citext_smaller(golden.citext, golden.citext)\n RETURNS golden.citext\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/citext', $function$citext_smaller$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citextin",
+        "kind": "function",
+        "args": "cstring"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citextin(cstring)\n RETURNS golden.citext\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$textin$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citextout",
+        "kind": "function",
+        "args": "golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citextout(golden.citext)\n RETURNS cstring\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$textout$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citextrecv",
+        "kind": "function",
+        "args": "internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citextrecv(internal)\n RETURNS golden.citext\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$textrecv$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "citextsend",
+        "kind": "function",
+        "args": "golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.citextsend(golden.citext)\n RETURNS bytea\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$textsend$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "defined",
+        "kind": "function",
+        "args": "golden.hstore, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.defined(golden.hstore, text)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_defined$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "delete",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.delete(golden.hstore, golden.hstore)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_delete_hstore$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "delete",
+        "kind": "function",
+        "args": "golden.hstore, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.delete(golden.hstore, text)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_delete$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "delete",
+        "kind": "function",
+        "args": "golden.hstore, text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.delete(golden.hstore, text[])\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_delete_array$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "each",
+        "kind": "function",
+        "args": "hs golden.hstore, OUT key text, OUT value text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.each(hs golden.hstore, OUT key text, OUT value text)\n RETURNS SETOF record\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_each$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "exist",
+        "kind": "function",
+        "args": "golden.hstore, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.exist(golden.hstore, text)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_exists$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "exists_all",
+        "kind": "function",
+        "args": "golden.hstore, text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.exists_all(golden.hstore, text[])\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_exists_all$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "exists_any",
+        "kind": "function",
+        "args": "golden.hstore, text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.exists_any(golden.hstore, text[])\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_exists_any$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "fetchval",
+        "kind": "function",
+        "args": "golden.hstore, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.fetchval(golden.hstore, text)\n RETURNS text\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_fetchval$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_compress",
+        "kind": "function",
+        "args": "internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_compress(internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_compress$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_consistent",
+        "kind": "function",
+        "args": "internal, golden.hstore, smallint, oid, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_consistent(internal, golden.hstore, smallint, oid, internal)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_consistent$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_decompress",
+        "kind": "function",
+        "args": "internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_decompress(internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_decompress$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_in",
+        "kind": "function",
+        "args": "cstring"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_in(cstring)\n RETURNS golden.ghstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_in$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_options",
+        "kind": "function",
+        "args": "internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_options(internal)\n RETURNS void\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/hstore', $function$ghstore_options$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_out",
+        "kind": "function",
+        "args": "golden.ghstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_out(golden.ghstore)\n RETURNS cstring\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_out$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_penalty",
+        "kind": "function",
+        "args": "internal, internal, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_penalty(internal, internal, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_penalty$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_picksplit",
+        "kind": "function",
+        "args": "internal, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_picksplit(internal, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_picksplit$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_same",
+        "kind": "function",
+        "args": "golden.ghstore, golden.ghstore, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_same(golden.ghstore, golden.ghstore, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_same$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "ghstore_union",
+        "kind": "function",
+        "args": "internal, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.ghstore_union(internal, internal)\n RETURNS golden.ghstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$ghstore_union$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "gin_consistent_hstore",
+        "kind": "function",
+        "args": "internal, smallint, golden.hstore, integer, internal, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.gin_consistent_hstore(internal, smallint, golden.hstore, integer, internal, internal)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$gin_consistent_hstore$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "gin_extract_hstore",
+        "kind": "function",
+        "args": "golden.hstore, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.gin_extract_hstore(golden.hstore, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$gin_extract_hstore$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "gin_extract_hstore_query",
+        "kind": "function",
+        "args": "golden.hstore, internal, smallint, internal, internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.gin_extract_hstore_query(golden.hstore, internal, smallint, internal, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$gin_extract_hstore_query$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hs_concat",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hs_concat(golden.hstore, golden.hstore)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_concat$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hs_contained",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hs_contained(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_contained$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hs_contains",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hs_contains(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_contains$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore",
+        "kind": "function",
+        "args": "record"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore(record)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/hstore', $function$hstore_from_record$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore",
+        "kind": "function",
+        "args": "text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore(text[])\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_from_array$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore",
+        "kind": "function",
+        "args": "text, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore(text, text)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/hstore', $function$hstore_from_text$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore",
+        "kind": "function",
+        "args": "text[], text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore(text[], text[])\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/hstore', $function$hstore_from_arrays$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_cmp",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_cmp(golden.hstore, golden.hstore)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_cmp$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_eq",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_eq(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_eq$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_ge",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_ge(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_ge$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_gt",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_gt(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_gt$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_hash",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_hash(golden.hstore)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_hash$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_hash_extended",
+        "kind": "function",
+        "args": "golden.hstore, bigint"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_hash_extended(golden.hstore, bigint)\n RETURNS bigint\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_hash_extended$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_in",
+        "kind": "function",
+        "args": "cstring"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_in(cstring)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_in$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_le",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_le(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_le$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_lt",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_lt(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_lt$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_ne",
+        "kind": "function",
+        "args": "golden.hstore, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_ne(golden.hstore, golden.hstore)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_ne$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_out",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_out(golden.hstore)\n RETURNS cstring\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_out$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_recv",
+        "kind": "function",
+        "args": "internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_recv(internal)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_recv$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_send",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_send(golden.hstore)\n RETURNS bytea\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_send$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_subscript_handler",
+        "kind": "function",
+        "args": "internal"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_subscript_handler(internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_subscript_handler$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_to_array",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_to_array(golden.hstore)\n RETURNS text[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_to_array$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_to_json",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_to_json(golden.hstore)\n RETURNS json\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_to_json$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_to_json_loose",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_to_json_loose(golden.hstore)\n RETURNS json\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_to_json_loose$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_to_jsonb",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_to_jsonb(golden.hstore)\n RETURNS jsonb\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_to_jsonb$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_to_jsonb_loose",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_to_jsonb_loose(golden.hstore)\n RETURNS jsonb\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_to_jsonb_loose$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_to_matrix",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_to_matrix(golden.hstore)\n RETURNS text[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_to_matrix$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "hstore_version_diag",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.hstore_version_diag(golden.hstore)\n RETURNS integer\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_version_diag$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "isdefined",
+        "kind": "function",
+        "args": "golden.hstore, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.isdefined(golden.hstore, text)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_defined$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "isexists",
+        "kind": "function",
+        "args": "golden.hstore, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.isexists(golden.hstore, text)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_exists$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "populate_record",
+        "kind": "function",
+        "args": "anyelement, golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.populate_record(anyelement, golden.hstore)\n RETURNS anyelement\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/hstore', $function$hstore_populate_record$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_match",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_match(golden.citext, golden.citext)\n RETURNS text[]\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_match( $1::pg_catalog.text, $2::pg_catalog.text, 'i' );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_match",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_match(golden.citext, golden.citext, text)\n RETURNS text[]\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_match( $1::pg_catalog.text, $2::pg_catalog.text, CASE WHEN pg_catalog.strpos($3, 'c') = 0 THEN  $3 || 'i' ELSE $3 END );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_matches",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_matches(golden.citext, golden.citext)\n RETURNS SETOF text[]\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT ROWS 1\nAS $function$\n    SELECT pg_catalog.regexp_matches( $1::pg_catalog.text, $2::pg_catalog.text, 'i' );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_matches",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_matches(golden.citext, golden.citext, text)\n RETURNS SETOF text[]\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT ROWS 10\nAS $function$\n    SELECT pg_catalog.regexp_matches( $1::pg_catalog.text, $2::pg_catalog.text, CASE WHEN pg_catalog.strpos($3, 'c') = 0 THEN  $3 || 'i' ELSE $3 END );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_replace",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_replace(golden.citext, golden.citext, text)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_replace( $1::pg_catalog.text, $2::pg_catalog.text, $3, 'i');\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_replace",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_replace(golden.citext, golden.citext, text, text)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_replace( $1::pg_catalog.text, $2::pg_catalog.text, $3, CASE WHEN pg_catalog.strpos($4, 'c') = 0 THEN  $4 || 'i' ELSE $4 END);\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_split_to_array",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_split_to_array(golden.citext, golden.citext)\n RETURNS text[]\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_split_to_array( $1::pg_catalog.text, $2::pg_catalog.text, 'i' );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_split_to_array",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_split_to_array(golden.citext, golden.citext, text)\n RETURNS text[]\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_split_to_array( $1::pg_catalog.text, $2::pg_catalog.text, CASE WHEN pg_catalog.strpos($3, 'c') = 0 THEN  $3 || 'i' ELSE $3 END );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_split_to_table",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_split_to_table(golden.citext, golden.citext)\n RETURNS SETOF text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_split_to_table( $1::pg_catalog.text, $2::pg_catalog.text, 'i' );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "regexp_split_to_table",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.regexp_split_to_table(golden.citext, golden.citext, text)\n RETURNS SETOF text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_split_to_table( $1::pg_catalog.text, $2::pg_catalog.text, CASE WHEN pg_catalog.strpos($3, 'c') = 0 THEN  $3 || 'i' ELSE $3 END );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "replace",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.replace(golden.citext, golden.citext, golden.citext)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.regexp_replace( $1::pg_catalog.text, pg_catalog.regexp_replace($2::pg_catalog.text, '([^a-zA-Z_0-9])', E'\\\\\\\\\\\\1', 'g'), $3::pg_catalog.text, 'gi' );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "reset_status",
+        "kind": "procedure",
+        "args": "IN target text"
+      },
+      "ddl": "CREATE OR REPLACE PROCEDURE golden.reset_status(IN target text)\n LANGUAGE sql\nAS $procedure$ UPDATE golden.orders SET status = target $procedure$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "skeys",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.skeys(golden.hstore)\n RETURNS SETOF text\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_skeys$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "slice",
+        "kind": "function",
+        "args": "golden.hstore, text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.slice(golden.hstore, text[])\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_slice_to_hstore$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "slice_array",
+        "kind": "function",
+        "args": "golden.hstore, text[]"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.slice_array(golden.hstore, text[])\n RETURNS text[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_slice_to_array$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "split_part",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, integer"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.split_part(golden.citext, golden.citext, integer)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT (pg_catalog.regexp_split_to_array( $1::pg_catalog.text, pg_catalog.regexp_replace($2::pg_catalog.text, '([^a-zA-Z_0-9])', E'\\\\\\\\\\\\1', 'g'), 'i'))[$3];\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "strpos",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.strpos(golden.citext, golden.citext)\n RETURNS integer\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.strpos( pg_catalog.lower( $1::pg_catalog.text ), pg_catalog.lower( $2::pg_catalog.text ) );\n$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "svals",
+        "kind": "function",
+        "args": "golden.hstore"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.svals(golden.hstore)\n RETURNS SETOF text\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/hstore', $function$hstore_svals$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "tconvert",
+        "kind": "function",
+        "args": "text, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.tconvert(text, text)\n RETURNS golden.hstore\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/hstore', $function$hstore_from_text$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticlike",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticlike(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticlike$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticlike",
+        "kind": "function",
+        "args": "golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticlike(golden.citext, text)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticlike$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticnlike",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticnlike(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticnlike$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticnlike",
+        "kind": "function",
+        "args": "golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticnlike(golden.citext, text)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticnlike$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticregexeq",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticregexeq(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticregexeq$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticregexeq",
+        "kind": "function",
+        "args": "golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticregexeq(golden.citext, text)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticregexeq$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticregexne",
+        "kind": "function",
+        "args": "golden.citext, golden.citext"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticregexne(golden.citext, golden.citext)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticregexne$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "texticregexne",
+        "kind": "function",
+        "args": "golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.texticregexne(golden.citext, text)\n RETURNS boolean\n LANGUAGE internal\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$texticregexne$function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "touch",
+        "kind": "function"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.touch()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$ BEGIN NEW.status := lower(NEW.status); RETURN NEW; END $function$;"
+    },
+    {
+      "ref": {
+        "schema": "golden",
+        "name": "translate",
+        "kind": "function",
+        "args": "golden.citext, golden.citext, text"
+      },
+      "ddl": "CREATE OR REPLACE FUNCTION golden.translate(golden.citext, golden.citext, text)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE STRICT\nAS $function$\n    SELECT pg_catalog.translate( pg_catalog.translate( $1::pg_catalog.text, pg_catalog.lower($2::pg_catalog.text), $3), pg_catalog.upper($2::pg_catalog.text), $3);\n$function$;"
+    }
+  ]
+}

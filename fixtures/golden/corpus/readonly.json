@@ -1,0 +1,729 @@
+[
+  {
+    "input": "SELECT 1",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "select * from t",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "  -- c\nSELECT 1",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "/* c */ SELECT 1",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "WITH a AS (SELECT 1) SELECT * FROM a",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "WITH a AS (DELETE FROM t RETURNING *) SELECT * FROM a",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "EXPLAIN SELECT 1",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "EXPLAIN ANALYZE SELECT 1",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "EXPLAIN ANALYZE DELETE FROM t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SHOW TABLES",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SHOW search_path",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "DESCRIBE t",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "DESC t",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "VALUES (1)",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "TABLE t",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "PRAGMA table_info(t)",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "PRAGMA journal_mode = WAL",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "PRAGMA foreign_keys",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "INSERT INTO t VALUES (1)",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "UPDATE t SET a = 1",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "DELETE FROM t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "DROP TABLE t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "CREATE TABLE t (a int)",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "ALTER TABLE t ADD c int",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "TRUNCATE t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "GRANT SELECT ON t TO u",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SET search_path = x",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "BEGIN",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "COMMIT",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1; DELETE FROM t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT 'DELETE FROM t'",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT * FROM t FOR UPDATE",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT nextval('s')",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT * INTO new_t FROM t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "COPY t TO STDOUT",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "CALL p()",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "DO $$ BEGIN END $$",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "LOCK TABLE t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "select 1 # comment",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT $$DELETE$$",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "USE db",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "ANALYZE t",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "VACUUM",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "REFRESH MATERIALIZED VIEW mv",
+    "output": {
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT pg_sleep(1)",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT * FROM t; ",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "",
+    "output": {
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      }
+    }
+  }
+]

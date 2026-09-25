@@ -1,0 +1,483 @@
+{
+  "engine": "sqlite",
+  "schema": "main",
+  "setup": [
+    "CREATE TABLE customers (\n\t\tid INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\temail TEXT NOT NULL UNIQUE,\n\t\tname TEXT NOT NULL DEFAULT 'anon' CHECK (length(name) > 0),\n\t\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n\t)",
+    "CREATE TABLE orders (\n\t\tid INTEGER PRIMARY KEY,\n\t\tcustomer_id INTEGER NOT NULL REFERENCES customers (id) ON DELETE CASCADE,\n\t\ttotal NUMERIC NOT NULL DEFAULT 0,\n\t\tstatus TEXT NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax NUMERIC GENERATED ALWAYS AS (total * 1.2) STORED\n\t)",
+    "CREATE INDEX orders_customer_idx ON orders (customer_id)",
+    "CREATE UNIQUE INDEX orders_status_partial_idx ON orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE VIEW customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM customers c LEFT JOIN orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER orders_touch AFTER INSERT ON orders BEGIN UPDATE orders SET status = lower(NEW.status) WHERE id = NEW.id; END",
+    "INSERT INTO customers (email, name, created_at) VALUES ('a@x.io', 'Ann', '2024-01-01 10:00:00'), ('b@x.io', 'Bob', '2024-01-02 11:30:00')",
+    "INSERT INTO orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE TABLE types (\n\t\tid INTEGER PRIMARY KEY, c_integer INTEGER, c_bigint BIGINT, c_real REAL, c_double DOUBLE,\n\t\tc_numeric NUMERIC, c_decimal DECIMAL(10,2), c_boolean BOOLEAN, c_text TEXT, c_varchar VARCHAR(20),\n\t\tc_blob BLOB, c_date DATE, c_datetime DATETIME, c_timestamp TIMESTAMP, c_time TIME, c_json JSON, c_untyped\n\t)",
+    "INSERT INTO types VALUES (1, 42, 9007199254740993, 1.1, 0.1, 12.50, 3.14159, 1, 'héllo 🌍', 'abc', X'68656C6C6F', '2024-02-29', '2024-02-29 13:45:30.123', '2024-02-29T13:45:30Z', '13:45:30', '{\"b\": 1, \"a\": [1, 2]}', 'text')",
+    "INSERT INTO types VALUES (2, -9223372036854775808, 9223372036854775807, 1e21, -0.0, '1e3', 'abc', 0, '', '', X'DEADBEEF', 1709214330, 1709214330123, 1709214330, 'not a time', '[]', 3.5)",
+    "INSERT INTO types (id) VALUES (3)",
+    "INSERT INTO types VALUES (4, 1.5, '12', 3, 4, 5, 6, 'true', X'00', 7, 'text-in-blob', 'not a date', '2024-02-29 13:45', '2024-02-29', NULL, NULL, X'00')"
+  ],
+  "schemas": [
+    "main"
+  ],
+  "tables": [
+    {
+      "table": {
+        "schema": "main",
+        "name": "customer_totals",
+        "type": "view"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INTEGER",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "email",
+          "dataType": "TEXT",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "main",
+        "name": "customers",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INTEGER",
+          "isNullable": true,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "email",
+          "dataType": "TEXT",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "name",
+          "dataType": "TEXT",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "'anon'"
+        },
+        {
+          "name": "created_at",
+          "dataType": "TEXT",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_customers_1",
+          "schema": "main",
+          "table": "customers",
+          "columns": [
+            "email"
+          ],
+          "isPrimary": false,
+          "isUnique": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "",
+          "schema": "main",
+          "table": "customers",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_customers_1",
+          "schema": "main",
+          "table": "customers",
+          "type": "UNIQUE",
+          "columns": [
+            "email"
+          ]
+        }
+      ],
+      "triggers": null
+    },
+    {
+      "table": {
+        "schema": "main",
+        "name": "orders",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INTEGER",
+          "isNullable": true,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "customer_id",
+          "dataType": "INTEGER",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": true,
+          "foreignTable": "customers",
+          "foreignColumn": "id"
+        },
+        {
+          "name": "total",
+          "dataType": "NUMERIC",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "0"
+        },
+        {
+          "name": "status",
+          "dataType": "TEXT",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "'new'"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "orders_status_partial_idx",
+          "schema": "main",
+          "table": "orders",
+          "columns": [
+            "customer_id",
+            "status"
+          ],
+          "isPrimary": false,
+          "isUnique": true
+        },
+        {
+          "name": "orders_customer_idx",
+          "schema": "main",
+          "table": "orders",
+          "columns": [
+            "customer_id"
+          ],
+          "isPrimary": false,
+          "isUnique": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "",
+          "schema": "main",
+          "table": "orders",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "",
+          "schema": "main",
+          "table": "orders",
+          "type": "FOREIGN KEY",
+          "columns": [
+            "customer_id"
+          ],
+          "refTable": "customers",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "triggers": [
+        {
+          "name": "orders_touch",
+          "schema": "main",
+          "table": "orders",
+          "timing": "AFTER",
+          "events": "INSERT"
+        }
+      ]
+    },
+    {
+      "table": {
+        "schema": "main",
+        "name": "types",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INTEGER",
+          "isNullable": true,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "c_integer",
+          "dataType": "INTEGER",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_bigint",
+          "dataType": "BIGINT",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_real",
+          "dataType": "REAL",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_double",
+          "dataType": "DOUBLE",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_numeric",
+          "dataType": "NUMERIC",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_decimal",
+          "dataType": "DECIMAL(10,2)",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_boolean",
+          "dataType": "BOOLEAN",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_text",
+          "dataType": "TEXT",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_varchar",
+          "dataType": "VARCHAR(20)",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_blob",
+          "dataType": "BLOB",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_date",
+          "dataType": "DATE",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_datetime",
+          "dataType": "DATETIME",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_timestamp",
+          "dataType": "TIMESTAMP",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_time",
+          "dataType": "TIME",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_json",
+          "dataType": "JSON",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "c_untyped",
+          "dataType": "",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "",
+          "schema": "main",
+          "table": "types",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ]
+        }
+      ],
+      "triggers": null
+    }
+  ],
+  "routines": null,
+  "ddl": [
+    {
+      "ref": {
+        "schema": "main",
+        "name": "customer_totals",
+        "kind": "view"
+      },
+      "ddl": "CREATE VIEW customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM customers c LEFT JOIN orders o ON o.customer_id = c.id GROUP BY c.id, c.email;"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "customers",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE customers (\n\t\tid INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\temail TEXT NOT NULL UNIQUE,\n\t\tname TEXT NOT NULL DEFAULT 'anon' CHECK (length(name) > 0),\n\t\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n\t);"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "sqlite_autoindex_customers_1",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "CREATE UNIQUE INDEX \"sqlite_autoindex_customers_1\" ON \"main\".\"customers\" (\"email\");"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "error": "object name is required"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "sqlite_autoindex_customers_1",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "CREATE TABLE customers (\n\t\tid INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\temail TEXT NOT NULL UNIQUE,\n\t\tname TEXT NOT NULL DEFAULT 'anon' CHECK (length(name) > 0),\n\t\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n\t);"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "orders",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE orders (\n\t\tid INTEGER PRIMARY KEY,\n\t\tcustomer_id INTEGER NOT NULL REFERENCES customers (id) ON DELETE CASCADE,\n\t\ttotal NUMERIC NOT NULL DEFAULT 0,\n\t\tstatus TEXT NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax NUMERIC GENERATED ALWAYS AS (total * 1.2) STORED\n\t);\n\nCREATE INDEX orders_customer_idx ON orders (customer_id);\n\nCREATE UNIQUE INDEX orders_status_partial_idx ON orders (customer_id, status) WHERE status <> 'cancelled';"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "orders_status_partial_idx",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE UNIQUE INDEX orders_status_partial_idx ON orders (customer_id, status) WHERE status <> 'cancelled';"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "orders_customer_idx",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE INDEX orders_customer_idx ON orders (customer_id);"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "error": "object name is required"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "error": "object name is required"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "orders_touch",
+        "kind": "trigger",
+        "table": "orders"
+      },
+      "ddl": "CREATE TRIGGER orders_touch AFTER INSERT ON orders BEGIN UPDATE orders SET status = lower(NEW.status) WHERE id = NEW.id; END;"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "types",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE types (\n\t\tid INTEGER PRIMARY KEY, c_integer INTEGER, c_bigint BIGINT, c_real REAL, c_double DOUBLE,\n\t\tc_numeric NUMERIC, c_decimal DECIMAL(10,2), c_boolean BOOLEAN, c_text TEXT, c_varchar VARCHAR(20),\n\t\tc_blob BLOB, c_date DATE, c_datetime DATETIME, c_timestamp TIMESTAMP, c_time TIME, c_json JSON, c_untyped\n\t);"
+    },
+    {
+      "ref": {
+        "schema": "main",
+        "name": "",
+        "kind": "constraint",
+        "table": "types"
+      },
+      "error": "object name is required"
+    }
+  ]
+}

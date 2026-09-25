@@ -1,0 +1,44 @@
+[
+  {
+    "input": "id = 1"
+  },
+  {
+    "input": "name LIKE 'a%'"
+  },
+  {
+    "error": "filter must be a single boolean expression: ';' is not allowed",
+    "input": "id = 1; DROP TABLE t"
+  },
+  {
+    "error": "filter must not contain comment markers",
+    "input": "1=1 -- comment"
+  },
+  {
+    "input": "id IN (SELECT id FROM x)"
+  },
+  {
+    "input": "a = 'x;y'"
+  },
+  {
+    "input": "(a = 1) OR (b = 2)"
+  },
+  {
+    "input": ""
+  },
+  {
+    "input": "   "
+  },
+  {
+    "input": "id = 1)"
+  },
+  {
+    "error": "filter must not contain comment markers",
+    "input": "a = 1 /* c */"
+  },
+  {
+    "input": "exists (select 1)"
+  },
+  {
+    "input": "id = 1 UNION SELECT 1"
+  }
+]

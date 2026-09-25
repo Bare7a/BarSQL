@@ -1,0 +1,56 @@
+name: 🐛 Bug report
+description: Something in BarSQL doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead. Screenshots help.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect to a PostgreSQL 17 database
+        2. Run …
+        3. See …
+
+  - type: input
+    id: version
+    attributes:
+      label: BarSQL version
+      description: Shown in About.
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Windows 11, Ubuntu 24.04 (Wayland)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      multiple: true
+      options:
+        - PostgreSQL
+        - MySQL
+        - MariaDB
+        - SQLite
+        - Not database-specific
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error message
+      description: Paste it as text. Leave out passwords and connection strings.
+      render: text

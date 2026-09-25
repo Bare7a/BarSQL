@@ -1,0 +1,308 @@
+{
+  "engine": "sqlite",
+  "driver": "sqlite",
+  "serverVersion": "3.53.4",
+  "plans": [
+    {
+      "statement": "SELECT * FROM customers",
+      "analyze": false,
+      "explainSql": "EXPLAIN QUERY PLAN SELECT * FROM customers",
+      "raw": {
+        "columns": [
+          "id",
+          "parent",
+          "notused",
+          "detail"
+        ],
+        "rows": [
+          [
+            2,
+            0,
+            216,
+            "SCAN customers"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlite",
+        "statement": "SELECT * FROM customers",
+        "explainSql": "EXPLAIN QUERY PLAN SELECT * FROM customers",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "SCAN",
+            "relation": "customers"
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "2|0|SCAN customers"
+      }
+    },
+    {
+      "statement": "SELECT c.email, sum(o.total) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+      "analyze": false,
+      "explainSql": "EXPLAIN QUERY PLAN SELECT c.email, sum(o.total) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+      "raw": {
+        "columns": [
+          "id",
+          "parent",
+          "notused",
+          "detail"
+        ],
+        "rows": [
+          [
+            9,
+            0,
+            212,
+            "SCAN c USING COVERING INDEX sqlite_autoindex_customers_1"
+          ],
+          [
+            11,
+            0,
+            61,
+            "SEARCH o USING INDEX orders_customer_idx (customer_id=?)"
+          ],
+          [
+            45,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlite",
+        "statement": "SELECT c.email, sum(o.total) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+        "explainSql": "EXPLAIN QUERY PLAN SELECT c.email, sum(o.total) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "SCAN",
+            "detail": "USING COVERING INDEX sqlite_autoindex_customers_1",
+            "relation": "c",
+            "index": "sqlite_autoindex_customers_1"
+          },
+          {
+            "label": "SEARCH",
+            "detail": "USING INDEX orders_customer_idx (customer_id=?)",
+            "relation": "o",
+            "index": "orders_customer_idx"
+          },
+          {
+            "label": "USE TEMP B-TREE FOR ORDER BY"
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "9|0|SCAN c USING COVERING INDEX sqlite_autoindex_customers_1\n11|0|SEARCH o USING INDEX orders_customer_idx (customer_id=?)\n45|0|USE TEMP B-TREE FOR ORDER BY"
+      }
+    },
+    {
+      "statement": "SELECT * FROM orders WHERE customer_id = 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN QUERY PLAN SELECT * FROM orders WHERE customer_id = 1",
+      "raw": {
+        "columns": [
+          "id",
+          "parent",
+          "notused",
+          "detail"
+        ],
+        "rows": [
+          [
+            3,
+            0,
+            61,
+            "SEARCH orders USING INDEX orders_customer_idx (customer_id=?)"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlite",
+        "statement": "SELECT * FROM orders WHERE customer_id = 1",
+        "explainSql": "EXPLAIN QUERY PLAN SELECT * FROM orders WHERE customer_id = 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "SEARCH",
+            "detail": "USING INDEX orders_customer_idx (customer_id=?)",
+            "relation": "orders",
+            "index": "orders_customer_idx"
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "3|0|SEARCH orders USING INDEX orders_customer_idx (customer_id=?)"
+      }
+    },
+    {
+      "statement": "WITH t AS (SELECT customer_id, count(*) AS n FROM orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN QUERY PLAN WITH t AS (SELECT customer_id, count(*) AS n FROM orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+      "raw": {
+        "columns": [
+          "id",
+          "parent",
+          "notused",
+          "detail"
+        ],
+        "rows": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE t"
+          ],
+          [
+            8,
+            2,
+            209,
+            "SCAN orders USING COVERING INDEX orders_customer_idx"
+          ],
+          [
+            37,
+            0,
+            82,
+            "SCAN t"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlite",
+        "statement": "WITH t AS (SELECT customer_id, count(*) AS n FROM orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+        "explainSql": "EXPLAIN QUERY PLAN WITH t AS (SELECT customer_id, count(*) AS n FROM orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "CO-ROUTINE t",
+            "children": [
+              {
+                "label": "SCAN",
+                "detail": "USING COVERING INDEX orders_customer_idx",
+                "relation": "orders",
+                "index": "orders_customer_idx"
+              }
+            ]
+          },
+          {
+            "label": "SCAN",
+            "relation": "t"
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "2|0|CO-ROUTINE t\n8|2|SCAN orders USING COVERING INDEX orders_customer_idx\n37|0|SCAN t"
+      }
+    },
+    {
+      "statement": "SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders)",
+      "analyze": false,
+      "explainSql": "EXPLAIN QUERY PLAN SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders)",
+      "raw": {
+        "columns": [
+          "id",
+          "parent",
+          "notused",
+          "detail"
+        ],
+        "rows": [
+          [
+            2,
+            0,
+            91,
+            "SEARCH customers USING INTEGER PRIMARY KEY (rowid=?)"
+          ],
+          [
+            6,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            8,
+            6,
+            209,
+            "SCAN orders USING COVERING INDEX orders_customer_idx"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlite",
+        "statement": "SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders)",
+        "explainSql": "EXPLAIN QUERY PLAN SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders)",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "SEARCH",
+            "detail": "USING INTEGER PRIMARY KEY (rowid=?)",
+            "relation": "customers"
+          },
+          {
+            "label": "LIST SUBQUERY 1",
+            "children": [
+              {
+                "label": "SCAN",
+                "detail": "USING COVERING INDEX orders_customer_idx",
+                "relation": "orders",
+                "index": "orders_customer_idx"
+              }
+            ]
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "2|0|SEARCH customers USING INTEGER PRIMARY KEY (rowid=?)\n6|0|LIST SUBQUERY 1\n8|6|SCAN orders USING COVERING INDEX orders_customer_idx"
+      }
+    },
+    {
+      "statement": "UPDATE orders SET total = total + 1 WHERE id = 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN QUERY PLAN UPDATE orders SET total = total + 1 WHERE id = 1",
+      "raw": {
+        "columns": [
+          "id",
+          "parent",
+          "notused",
+          "detail"
+        ],
+        "rows": [
+          [
+            4,
+            0,
+            33,
+            "SEARCH orders USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlite",
+        "statement": "UPDATE orders SET total = total + 1 WHERE id = 1",
+        "explainSql": "EXPLAIN QUERY PLAN UPDATE orders SET total = total + 1 WHERE id = 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "SEARCH",
+            "detail": "USING INTEGER PRIMARY KEY (rowid=?)",
+            "relation": "orders"
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "4|0|SEARCH orders USING INTEGER PRIMARY KEY (rowid=?)"
+      }
+    }
+  ]
+}

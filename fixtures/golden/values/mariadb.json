@@ -1,0 +1,2444 @@
+{
+  "engine": "mariadb",
+  "serverVersion": "11.8",
+  "setup": [
+    "DROP DATABASE IF EXISTS barsql_golden",
+    "CREATE DATABASE barsql_golden DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    "CREATE TABLE barsql_golden.customers (\n\t\t\tid INT AUTO_INCREMENT PRIMARY KEY,\n\t\t\temail VARCHAR(255) NOT NULL,\n\t\t\tname VARCHAR(100) NOT NULL DEFAULT 'anon',\n\t\t\tmood ENUM('sad', 'happy') NULL,\n\t\t\tcreated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\t\t\tUNIQUE KEY customers_email_uq (email),\n\t\t\tCONSTRAINT customers_name_check CHECK (CHAR_LENGTH(name) > 0)\n\t\t) ENGINE=InnoDB COMMENT='Customers'",
+    "CREATE TABLE barsql_golden.orders (\n\t\t\tid BIGINT AUTO_INCREMENT PRIMARY KEY,\n\t\t\tcustomer_id INT NOT NULL,\n\t\t\ttotal DECIMAL(12,2) NOT NULL DEFAULT 0,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'new',\n\t\t\ttotal_with_tax DECIMAL(12,2) AS (total * 1.2) STORED,\n\t\t\tKEY orders_customer_idx (customer_id),\n\t\t\tCONSTRAINT orders_customer_fk FOREIGN KEY (customer_id) REFERENCES barsql_golden.customers (id) ON DELETE CASCADE\n\t\t) ENGINE=InnoDB",
+    "CREATE INDEX orders_status_idx ON barsql_golden.orders (status, customer_id)",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER barsql_golden.orders_touch BEFORE INSERT ON barsql_golden.orders FOR EACH ROW SET NEW.status = LOWER(NEW.status)",
+    "CREATE FUNCTION barsql_golden.add_one(a INT) RETURNS INT DETERMINISTIC RETURN a + 1",
+    "CREATE PROCEDURE barsql_golden.reset_status(IN target VARCHAR(20)) UPDATE barsql_golden.orders SET status = target",
+    "INSERT INTO barsql_golden.customers (email, name, mood, created_at) VALUES ('a@x.io', 'Ann', 'happy', '2024-01-01 10:00:00'), ('b@x.io', 'Bob', 'sad', '2024-01-02 11:30:00')",
+    "INSERT INTO barsql_golden.orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE TABLE barsql_golden.types (\n\t\t\tid INT PRIMARY KEY,\n\t\t\tc_tinyint TINYINT, c_bool BOOLEAN, c_smallint SMALLINT, c_mediumint MEDIUMINT, c_int INT,\n\t\t\tc_bigint BIGINT, c_ubigint BIGINT UNSIGNED, c_decimal DECIMAL(20,5), c_float FLOAT, c_double DOUBLE,\n\t\t\tc_bit BIT(4), c_char CHAR(4), c_varchar VARCHAR(20), c_text TEXT, c_blob BLOB, c_binary BINARY(4),\n\t\t\tc_varbinary VARBINARY(8), c_date DATE, c_datetime DATETIME(6), c_timestamp TIMESTAMP(3) NULL,\n\t\t\tc_time TIME(3), c_year YEAR, c_json JSON, c_enum ENUM('sad', 'happy'), c_set SET('a', 'b', 'c'),\n\t\t\tc_point POINT, c_uuid UUID, c_inet6 INET6\n\t\t)",
+    "INSERT INTO barsql_golden.types (id, c_tinyint, c_bool, c_smallint, c_mediumint, c_int, c_bigint, c_ubigint,\n\t\t\tc_decimal, c_float, c_double, c_bit, c_char, c_varchar, c_text, c_blob, c_binary, c_varbinary, c_date,\n\t\t\tc_datetime, c_timestamp, c_time, c_year, c_json, c_enum, c_set, c_point, c_uuid, c_inet6) VALUES\n\t\t\t(1, 127, TRUE, 32767, 8388607, 2147483647, 9007199254740993, 18446744073709551615, 12345.67890, 1.1, 0.1,\n\t\t\t b'1010', 'ab', 'héllo 🌍', 'line1\\nline2', 'blob-utf8', 'abcd', X'DEADBEEF', '2024-02-29',\n\t\t\t '2024-02-29 13:45:30.123456', '2024-02-29 13:45:30.123', '13:45:30.123', 2024, '{\"b\": 1, \"a\": [1, 2]}',\n\t\t\t 'happy', 'a,c', ST_GeomFromText('POINT(1 2)'), '123e4567-e89b-12d3-a456-426614174000', '::ffff:192.168.0.1'),\n\t\t\t(2, -128, FALSE, -32768, -8388608, -2147483648, -9223372036854775808, 0, -0.00001, 3.40282e38, 1e21,\n\t\t\t b'0000', '', '', '', X'00FF', X'00000000', X'', '1000-01-01', '9999-12-31 23:59:59.999999',\n\t\t\t '1970-01-01 00:00:01.000', '-838:59:59.000', 1901, '[]', 'sad', '', ST_GeomFromText('POINT(0 0)'), '00000000-0000-0000-0000-000000000000', '::1')",
+    "INSERT INTO barsql_golden.types (id) VALUES (3)",
+    "SET SESSION sql_mode = ''",
+    "INSERT INTO barsql_golden.types (id, c_date, c_datetime) VALUES (4, '0000-00-00', '0000-00-00 00:00:00')",
+    "SET SESSION sql_mode = DEFAULT"
+  ],
+  "timeZone": "UTC",
+  "probes": [
+    {
+      "name": "c_tinyint",
+      "sql": "SELECT c_tinyint AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_tinyint AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TINYINT"
+          ],
+          "rows": [
+            [
+              127
+            ],
+            [
+              -128
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "127"
+            ],
+            [
+              "-128"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_bool",
+      "sql": "SELECT c_bool AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_bool AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TINYINT"
+          ],
+          "rows": [
+            [
+              1
+            ],
+            [
+              0
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ],
+            [
+              "0"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_smallint",
+      "sql": "SELECT c_smallint AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_smallint AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "SMALLINT"
+          ],
+          "rows": [
+            [
+              32767
+            ],
+            [
+              -32768
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "32767"
+            ],
+            [
+              "-32768"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_mediumint",
+      "sql": "SELECT c_mediumint AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_mediumint AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "MEDIUMINT"
+          ],
+          "rows": [
+            [
+              8388607
+            ],
+            [
+              -8388608
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "8388607"
+            ],
+            [
+              "-8388608"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_int",
+      "sql": "SELECT c_int AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_int AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT"
+          ],
+          "rows": [
+            [
+              2147483647
+            ],
+            [
+              -2147483648
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "2147483647"
+            ],
+            [
+              "-2147483648"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_bigint",
+      "sql": "SELECT c_bigint AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_bigint AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              "9007199254740993"
+            ],
+            [
+              "-9223372036854775808"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740993"
+            ],
+            [
+              "-9223372036854775808"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_ubigint",
+      "sql": "SELECT c_ubigint AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_ubigint AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "UNSIGNED BIGINT"
+          ],
+          "rows": [
+            [
+              "18446744073709551615"
+            ],
+            [
+              0
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "18446744073709551615"
+            ],
+            [
+              "0"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_decimal",
+      "sql": "SELECT c_decimal AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_decimal AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DECIMAL"
+          ],
+          "rows": [
+            [
+              "12345.67890"
+            ],
+            [
+              "-0.00001"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "12345.67890"
+            ],
+            [
+              "-0.00001"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_float",
+      "sql": "SELECT c_float AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_float AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FLOAT"
+          ],
+          "rows": [
+            [
+              1.1
+            ],
+            [
+              3.40282e+38
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "1.1"
+            ],
+            [
+              "3.40282e+38"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_double",
+      "sql": "SELECT c_double AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_double AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DOUBLE"
+          ],
+          "rows": [
+            [
+              0.1
+            ],
+            [
+              1e+21
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "0.1"
+            ],
+            [
+              "1e+21"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_bit",
+      "sql": "SELECT c_bit AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_bit AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIT"
+          ],
+          "rows": [
+            [
+              "\n"
+            ],
+            [
+              "\u0000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "\n"
+            ],
+            [
+              "\u0000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_char",
+      "sql": "SELECT c_char AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_char AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "CHAR"
+          ],
+          "rows": [
+            [
+              "ab"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "ab"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_varchar",
+      "sql": "SELECT c_varchar AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_varchar AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARCHAR"
+          ],
+          "rows": [
+            [
+              "héllo 🌍"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "héllo 🌍"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_text",
+      "sql": "SELECT c_text AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_text AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              "line1\nline2"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "line1\nline2"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_blob",
+      "sql": "SELECT c_blob AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_blob AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BLOB"
+          ],
+          "rows": [
+            [
+              "blob-utf8"
+            ],
+            [
+              "\\x00ff"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "blob-utf8"
+            ],
+            [
+              "\\x00ff"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_binary",
+      "sql": "SELECT c_binary AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_binary AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BINARY"
+          ],
+          "rows": [
+            [
+              "abcd"
+            ],
+            [
+              "\u0000\u0000\u0000\u0000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "abcd"
+            ],
+            [
+              "\u0000\u0000\u0000\u0000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_varbinary",
+      "sql": "SELECT c_varbinary AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_varbinary AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARBINARY"
+          ],
+          "rows": [
+            [
+              "\\xdeadbeef"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "\\xdeadbeef"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_date",
+      "sql": "SELECT c_date AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_date AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1000-01-01T00:00:00Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1000-01-01T00:00:00Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime",
+      "sql": "SELECT c_datetime AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATETIME"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ],
+            [
+              "9999-12-31T23:59:59.999999Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ],
+            [
+              "9999-12-31T23:59:59.999999Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_timestamp",
+      "sql": "SELECT c_timestamp AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_timestamp AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1970-01-01T00:00:01Z"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1970-01-01T00:00:01Z"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_time",
+      "sql": "SELECT c_time AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_time AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIME"
+          ],
+          "rows": [
+            [
+              "13:45:30.123"
+            ],
+            [
+              "-838:59:59.000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "13:45:30.123"
+            ],
+            [
+              "-838:59:59.000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_year",
+      "sql": "SELECT c_year AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_year AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "YEAR"
+          ],
+          "rows": [
+            [
+              2024
+            ],
+            [
+              1901
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "2024"
+            ],
+            [
+              "1901"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_json",
+      "sql": "SELECT c_json AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_json AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              "{\"b\": 1, \"a\": [1, 2]}"
+            ],
+            [
+              "[]"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "{\"b\": 1, \"a\": [1, 2]}"
+            ],
+            [
+              "[]"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_enum",
+      "sql": "SELECT c_enum AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_enum AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "ENUM"
+          ],
+          "rows": [
+            [
+              "happy"
+            ],
+            [
+              "sad"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "happy"
+            ],
+            [
+              "sad"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_set",
+      "sql": "SELECT c_set AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_set AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "SET"
+          ],
+          "rows": [
+            [
+              "a,c"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "a,c"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_point",
+      "sql": "SELECT c_point AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_point AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "GEOMETRY"
+          ],
+          "rows": [
+            [
+              "\\x000000000101000000000000000000f03f0000000000000040"
+            ],
+            [
+              "\u0000\u0000\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "\\x000000000101000000000000000000f03f0000000000000040"
+            ],
+            [
+              "\u0000\u0000\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_uuid",
+      "sql": "SELECT c_uuid AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_uuid AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "CHAR"
+          ],
+          "rows": [
+            [
+              "123e4567-e89b-12d3-a456-426614174000"
+            ],
+            [
+              "00000000-0000-0000-0000-000000000000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "123e4567-e89b-12d3-a456-426614174000"
+            ],
+            [
+              "00000000-0000-0000-0000-000000000000"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_inet6",
+      "sql": "SELECT c_inet6 AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_inet6 AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "CHAR"
+          ],
+          "rows": [
+            [
+              "::ffff:192.168.0.1"
+            ],
+            [
+              "::1"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "::ffff:192.168.0.1"
+            ],
+            [
+              "::1"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "types_rows",
+      "sql": "SELECT * FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "id",
+            "c_tinyint",
+            "c_bool",
+            "c_smallint",
+            "c_mediumint",
+            "c_int",
+            "c_bigint",
+            "c_ubigint",
+            "c_decimal",
+            "c_float",
+            "c_double",
+            "c_bit",
+            "c_char",
+            "c_varchar",
+            "c_text",
+            "c_blob",
+            "c_binary",
+            "c_varbinary",
+            "c_date",
+            "c_datetime",
+            "c_timestamp",
+            "c_time",
+            "c_year",
+            "c_json",
+            "c_enum",
+            "c_set",
+            "c_point",
+            "c_uuid",
+            "c_inet6"
+          ],
+          "columnTypes": [
+            "INT",
+            "TINYINT",
+            "TINYINT",
+            "SMALLINT",
+            "MEDIUMINT",
+            "INT",
+            "BIGINT",
+            "UNSIGNED BIGINT",
+            "DECIMAL",
+            "FLOAT",
+            "DOUBLE",
+            "BIT",
+            "CHAR",
+            "VARCHAR",
+            "TEXT",
+            "BLOB",
+            "BINARY",
+            "VARBINARY",
+            "DATE",
+            "DATETIME",
+            "TIMESTAMP",
+            "TIME",
+            "YEAR",
+            "TEXT",
+            "ENUM",
+            "SET",
+            "GEOMETRY",
+            "CHAR",
+            "CHAR"
+          ],
+          "rows": [
+            [
+              1,
+              127,
+              1,
+              32767,
+              8388607,
+              2147483647,
+              "9007199254740993",
+              "18446744073709551615",
+              "12345.67890",
+              1.1,
+              0.1,
+              "\n",
+              "ab",
+              "héllo 🌍",
+              "line1\nline2",
+              "blob-utf8",
+              "abcd",
+              "\\xdeadbeef",
+              "2024-02-29T00:00:00Z",
+              "2024-02-29T13:45:30.123456Z",
+              "2024-02-29T13:45:30.123Z",
+              "13:45:30.123",
+              2024,
+              "{\"b\": 1, \"a\": [1, 2]}",
+              "happy",
+              "a,c",
+              "\\x000000000101000000000000000000f03f0000000000000040",
+              "123e4567-e89b-12d3-a456-426614174000",
+              "::ffff:192.168.0.1"
+            ],
+            [
+              2,
+              -128,
+              0,
+              -32768,
+              -8388608,
+              -2147483648,
+              "-9223372036854775808",
+              0,
+              "-0.00001",
+              3.40282e+38,
+              1e+21,
+              "\u0000",
+              "",
+              "",
+              "",
+              "\\x00ff",
+              "\u0000\u0000\u0000\u0000",
+              "",
+              "1000-01-01T00:00:00Z",
+              "9999-12-31T23:59:59.999999Z",
+              "1970-01-01T00:00:01Z",
+              "-838:59:59.000",
+              1901,
+              "[]",
+              "sad",
+              "",
+              "\u0000\u0000\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+              "00000000-0000-0000-0000-000000000000",
+              "::1"
+            ],
+            [
+              3,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              4,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              "0001-01-01T00:00:00Z",
+              "0001-01-01T00:00:00Z",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "127",
+              "1",
+              "32767",
+              "8388607",
+              "2147483647",
+              "9007199254740993",
+              "18446744073709551615",
+              "12345.67890",
+              "1.1",
+              "0.1",
+              "\n",
+              "ab",
+              "héllo 🌍",
+              "line1\nline2",
+              "blob-utf8",
+              "abcd",
+              "\\xdeadbeef",
+              "2024-02-29T00:00:00Z",
+              "2024-02-29T13:45:30.123456Z",
+              "2024-02-29T13:45:30.123Z",
+              "13:45:30.123",
+              "2024",
+              "{\"b\": 1, \"a\": [1, 2]}",
+              "happy",
+              "a,c",
+              "\\x000000000101000000000000000000f03f0000000000000040",
+              "123e4567-e89b-12d3-a456-426614174000",
+              "::ffff:192.168.0.1"
+            ],
+            [
+              "2",
+              "-128",
+              "0",
+              "-32768",
+              "-8388608",
+              "-2147483648",
+              "-9223372036854775808",
+              "0",
+              "-0.00001",
+              "3.40282e+38",
+              "1e+21",
+              "\u0000",
+              "",
+              "",
+              "",
+              "\\x00ff",
+              "\u0000\u0000\u0000\u0000",
+              "",
+              "1000-01-01T00:00:00Z",
+              "9999-12-31T23:59:59.999999Z",
+              "1970-01-01T00:00:01Z",
+              "-838:59:59.000",
+              "1901",
+              "[]",
+              "sad",
+              "",
+              "\u0000\u0000\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+              "00000000-0000-0000-0000-000000000000",
+              "::1"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              "4",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              "0001-01-01T00:00:00Z",
+              "0001-01-01T00:00:00Z",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_int",
+      "sql": "SELECT 1 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_bigint_max",
+      "sql": "SELECT 9223372036854775807 AS v",
+      "results": [
+        {
+          "statement": "SELECT 9223372036854775807 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "display": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_ubigint_max",
+      "sql": "SELECT 18446744073709551615 AS v",
+      "results": [
+        {
+          "statement": "SELECT 18446744073709551615 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "UNSIGNED BIGINT"
+          ],
+          "rows": [
+            [
+              "18446744073709551615"
+            ]
+          ],
+          "display": [
+            [
+              "18446744073709551615"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_decimal",
+      "sql": "SELECT 0.1 + 0.2 AS v",
+      "results": [
+        {
+          "statement": "SELECT 0.1 + 0.2 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DECIMAL"
+          ],
+          "rows": [
+            [
+              "0.3"
+            ]
+          ],
+          "display": [
+            [
+              "0.3"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_double",
+      "sql": "SELECT 1e21 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1e21 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DOUBLE"
+          ],
+          "rows": [
+            [
+              1e+21
+            ]
+          ],
+          "display": [
+            [
+              "1e+21"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_string",
+      "sql": "SELECT 'x' AS v",
+      "results": [
+        {
+          "statement": "SELECT 'x' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARCHAR"
+          ],
+          "rows": [
+            [
+              "x"
+            ]
+          ],
+          "display": [
+            [
+              "x"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_null",
+      "sql": "SELECT NULL AS v",
+      "results": [
+        {
+          "statement": "SELECT NULL AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "NULL"
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_date",
+      "sql": "SELECT CAST('2024-02-29' AS DATE) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29' AS DATE) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_datetime",
+      "sql": "SELECT CAST('2024-02-29 13:45:30.5' AS DATETIME(3)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29 13:45:30.5' AS DATETIME(3)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATETIME"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.5Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.5Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_binary",
+      "sql": "SELECT X'DEADBEEF' AS v",
+      "results": [
+        {
+          "statement": "SELECT X'DEADBEEF' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARBINARY"
+          ],
+          "rows": [
+            [
+              "\\xdeadbeef"
+            ]
+          ],
+          "display": [
+            [
+              "\\xdeadbeef"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "multi_columns",
+      "sql": "SELECT 1 AS a, 'x' AS b, NULL AS c, 2.5 AS d",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a, 'x' AS b, NULL AS c, 2.5 AS d",
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "columnTypes": [
+            "INT",
+            "VARCHAR",
+            "NULL",
+            "DECIMAL"
+          ],
+          "rows": [
+            [
+              1,
+              "x",
+              null,
+              "2.5"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "x",
+              null,
+              "2.5"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "duplicate_names",
+      "sql": "SELECT 1 AS v, 2 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v, 2 AS v",
+          "columns": [
+            "v",
+            "v"
+          ],
+          "columnTypes": [
+            "INT",
+            "INT"
+          ],
+          "rows": [
+            [
+              1,
+              2
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "no_rows",
+      "sql": "SELECT 1 AS v FROM DUAL WHERE 1 = 0",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v FROM DUAL WHERE 1 = 0",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT"
+          ],
+          "rowCount": 0,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "table_rows",
+      "sql": "SELECT * FROM barsql_golden.customers ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM barsql_golden.customers ORDER BY id",
+          "columns": [
+            "id",
+            "email",
+            "name",
+            "mood",
+            "created_at"
+          ],
+          "columnTypes": [
+            "INT",
+            "VARCHAR",
+            "VARCHAR",
+            "ENUM",
+            "DATETIME"
+          ],
+          "rows": [
+            [
+              1,
+              "a@x.io",
+              "Ann",
+              "happy",
+              "2024-01-01T10:00:00Z"
+            ],
+            [
+              2,
+              "b@x.io",
+              "Bob",
+              "sad",
+              "2024-01-02T11:30:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a@x.io",
+              "Ann",
+              "happy",
+              "2024-01-01T10:00:00Z"
+            ],
+            [
+              "2",
+              "b@x.io",
+              "Bob",
+              "sad",
+              "2024-01-02T11:30:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "view_rows",
+      "sql": "SELECT * FROM barsql_golden.customer_totals ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM barsql_golden.customer_totals ORDER BY id",
+          "columns": [
+            "id",
+            "email",
+            "total"
+          ],
+          "columnTypes": [
+            "INT",
+            "VARCHAR",
+            "DECIMAL"
+          ],
+          "rows": [
+            [
+              1,
+              "a@x.io",
+              "15.50"
+            ],
+            [
+              2,
+              "b@x.io",
+              "7.25"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a@x.io",
+              "15.50"
+            ],
+            [
+              "2",
+              "b@x.io",
+              "7.25"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "show_tables",
+      "sql": "SHOW TABLES FROM barsql_golden",
+      "results": [
+        {
+          "statement": "SHOW TABLES FROM barsql_golden",
+          "columns": [
+            "Tables_in_barsql_golden"
+          ],
+          "columnTypes": [
+            "VARCHAR"
+          ],
+          "rows": [
+            [
+              "customer_totals"
+            ],
+            [
+              "customers"
+            ],
+            [
+              "orders"
+            ],
+            [
+              "types"
+            ]
+          ],
+          "display": [
+            [
+              "customer_totals"
+            ],
+            [
+              "customers"
+            ],
+            [
+              "orders"
+            ],
+            [
+              "types"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "set_variable",
+      "sql": "SET @golden = 1",
+      "results": [
+        {
+          "statement": "SET @golden = 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "variable",
+      "sql": "SET @golden = 41; SELECT @golden + 1 AS v",
+      "results": [
+        {
+          "statement": "SET @golden = 41",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        },
+        {
+          "statement": "SELECT @golden + 1 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              42
+            ]
+          ],
+          "display": [
+            [
+              "42"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "do",
+      "sql": "DO 1",
+      "results": [
+        {
+          "statement": "DO 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "insert",
+      "sql": "INSERT INTO barsql_golden.customers (email, name, created_at) VALUES ('c@x.io', 'Cy', '2024-03-01 00:00:00')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name, created_at) VALUES ('c@x.io', 'Cy', '2024-03-01 00:00:00')",
+          "rowCount": 0,
+          "affectedRows": 1,
+          "message": "1 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "update_unchanged",
+      "sql": "UPDATE barsql_golden.orders SET status = status",
+      "results": [
+        {
+          "statement": "UPDATE barsql_golden.orders SET status = status",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "sql": "UPDATE barsql_golden.orders SET total = total + 1 WHERE customer_id = 1",
+      "results": [
+        {
+          "statement": "UPDATE barsql_golden.orders SET total = total + 1 WHERE customer_id = 1",
+          "rowCount": 0,
+          "affectedRows": 2,
+          "message": "2 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "call",
+      "sql": "CALL barsql_golden.reset_status('new')",
+      "results": [
+        {
+          "statement": "CALL barsql_golden.reset_status('new')",
+          "rowCount": 0,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "multi_statement",
+      "sql": "SELECT 1 AS a; SELECT 'b' AS b",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a",
+          "columns": [
+            "a"
+          ],
+          "columnTypes": [
+            "INT"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 'b' AS b",
+          "columns": [
+            "b"
+          ],
+          "columnTypes": [
+            "VARCHAR"
+          ],
+          "rows": [
+            [
+              "b"
+            ]
+          ],
+          "display": [
+            [
+              "b"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "explain_statement",
+      "sql": "EXPLAIN SELECT 1",
+      "results": [
+        {
+          "statement": "EXPLAIN SELECT 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "plan": true
+        }
+      ]
+    },
+    {
+      "name": "hash_comment",
+      "sql": "SELECT 1 AS v # trailing comment",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v # trailing comment",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INT"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    }
+  ],
+  "localTimeZone": "UTC+03:00",
+  "localProbes": [
+    {
+      "name": "c_date",
+      "sql": "SELECT c_date AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_date AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1000-01-01T00:00:00Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1000-01-01T00:00:00Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime",
+      "sql": "SELECT c_datetime AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATETIME"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ],
+            [
+              "9999-12-31T23:59:59.999999Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123456Z"
+            ],
+            [
+              "9999-12-31T23:59:59.999999Z"
+            ],
+            [
+              null
+            ],
+            [
+              "0001-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_timestamp",
+      "sql": "SELECT c_timestamp AS v FROM barsql_golden.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_timestamp AS v FROM barsql_golden.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1970-01-01T00:00:01Z"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1970-01-01T00:00:01Z"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    }
+  ]
+}

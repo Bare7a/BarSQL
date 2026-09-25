@@ -1,0 +1,155 @@
+[
+  {
+    "input": "name",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`name`",
+        "quoted": "`name`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"name\"",
+        "quoted": "\"name\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"name\"",
+        "quoted": "\"name\""
+      }
+    }
+  },
+  {
+    "input": "Mixed",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`Mixed`",
+        "quoted": "`Mixed`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"Mixed\"",
+        "quoted": "\"Mixed\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"Mixed\"",
+        "quoted": "\"Mixed\""
+      }
+    }
+  },
+  {
+    "input": "with space",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`with space`",
+        "quoted": "`with space`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"with space\"",
+        "quoted": "\"with space\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"with space\"",
+        "quoted": "\"with space\""
+      }
+    }
+  },
+  {
+    "input": "a\"b",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`a\"b`",
+        "quoted": "`a\"b`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"a\"\"b\"",
+        "quoted": "\"a\"\"b\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"a\"\"b\"",
+        "quoted": "\"a\"\"b\""
+      }
+    }
+  },
+  {
+    "input": "a`b",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`a``b`",
+        "quoted": "`a``b`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"a`b\"",
+        "quoted": "\"a`b\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"a`b\"",
+        "quoted": "\"a`b\""
+      }
+    }
+  },
+  {
+    "input": "select",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`select`",
+        "quoted": "`select`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"select\"",
+        "quoted": "\"select\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"select\"",
+        "quoted": "\"select\""
+      }
+    }
+  },
+  {
+    "input": "",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.``",
+        "quoted": "``"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"\"",
+        "quoted": "\"\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"\"",
+        "quoted": "\"\""
+      }
+    }
+  },
+  {
+    "input": "ünï",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`ünï`",
+        "quoted": "`ünï`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"ünï\"",
+        "quoted": "\"ünï\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"ünï\"",
+        "quoted": "\"ünï\""
+      }
+    }
+  },
+  {
+    "input": "a.b",
+    "output": {
+      "mysql": {
+        "qualified": "`s`.`a.b`",
+        "quoted": "`a.b`"
+      },
+      "postgres": {
+        "qualified": "\"s\".\"a.b\"",
+        "quoted": "\"a.b\""
+      },
+      "sqlite": {
+        "qualified": "\"s\".\"a.b\"",
+        "quoted": "\"a.b\""
+      }
+    }
+  }
+]

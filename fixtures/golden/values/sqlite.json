@@ -1,0 +1,1770 @@
+{
+  "engine": "sqlite",
+  "serverVersion": "3.53.4",
+  "setup": [
+    "CREATE TABLE customers (\n\t\tid INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\temail TEXT NOT NULL UNIQUE,\n\t\tname TEXT NOT NULL DEFAULT 'anon' CHECK (length(name) > 0),\n\t\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n\t)",
+    "CREATE TABLE orders (\n\t\tid INTEGER PRIMARY KEY,\n\t\tcustomer_id INTEGER NOT NULL REFERENCES customers (id) ON DELETE CASCADE,\n\t\ttotal NUMERIC NOT NULL DEFAULT 0,\n\t\tstatus TEXT NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax NUMERIC GENERATED ALWAYS AS (total * 1.2) STORED\n\t)",
+    "CREATE INDEX orders_customer_idx ON orders (customer_id)",
+    "CREATE UNIQUE INDEX orders_status_partial_idx ON orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE VIEW customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM customers c LEFT JOIN orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER orders_touch AFTER INSERT ON orders BEGIN UPDATE orders SET status = lower(NEW.status) WHERE id = NEW.id; END",
+    "INSERT INTO customers (email, name, created_at) VALUES ('a@x.io', 'Ann', '2024-01-01 10:00:00'), ('b@x.io', 'Bob', '2024-01-02 11:30:00')",
+    "INSERT INTO orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE TABLE types (\n\t\tid INTEGER PRIMARY KEY, c_integer INTEGER, c_bigint BIGINT, c_real REAL, c_double DOUBLE,\n\t\tc_numeric NUMERIC, c_decimal DECIMAL(10,2), c_boolean BOOLEAN, c_text TEXT, c_varchar VARCHAR(20),\n\t\tc_blob BLOB, c_date DATE, c_datetime DATETIME, c_timestamp TIMESTAMP, c_time TIME, c_json JSON, c_untyped\n\t)",
+    "INSERT INTO types VALUES (1, 42, 9007199254740993, 1.1, 0.1, 12.50, 3.14159, 1, 'héllo 🌍', 'abc', X'68656C6C6F', '2024-02-29', '2024-02-29 13:45:30.123', '2024-02-29T13:45:30Z', '13:45:30', '{\"b\": 1, \"a\": [1, 2]}', 'text')",
+    "INSERT INTO types VALUES (2, -9223372036854775808, 9223372036854775807, 1e21, -0.0, '1e3', 'abc', 0, '', '', X'DEADBEEF', 1709214330, 1709214330123, 1709214330, 'not a time', '[]', 3.5)",
+    "INSERT INTO types (id) VALUES (3)",
+    "INSERT INTO types VALUES (4, 1.5, '12', 3, 4, 5, 6, 'true', X'00', 7, 'text-in-blob', 'not a date', '2024-02-29 13:45', '2024-02-29', NULL, NULL, X'00')"
+  ],
+  "timeZone": "UTC",
+  "probes": [
+    {
+      "name": "c_integer",
+      "sql": "SELECT c_integer AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_integer AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "INTEGER"
+          ],
+          "rows": [
+            [
+              42
+            ],
+            [
+              "-9223372036854775808"
+            ],
+            [
+              null
+            ],
+            [
+              1.5
+            ]
+          ],
+          "display": [
+            [
+              "42"
+            ],
+            [
+              "-9223372036854775808"
+            ],
+            [
+              null
+            ],
+            [
+              "1.5"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_bigint",
+      "sql": "SELECT c_bigint AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_bigint AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              "9007199254740993"
+            ],
+            [
+              "9223372036854775807"
+            ],
+            [
+              null
+            ],
+            [
+              12
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740993"
+            ],
+            [
+              "9223372036854775807"
+            ],
+            [
+              null
+            ],
+            [
+              "12"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_real",
+      "sql": "SELECT c_real AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_real AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "REAL"
+          ],
+          "rows": [
+            [
+              1.1
+            ],
+            [
+              1e+21
+            ],
+            [
+              null
+            ],
+            [
+              3
+            ]
+          ],
+          "display": [
+            [
+              "1.1"
+            ],
+            [
+              "1e+21"
+            ],
+            [
+              null
+            ],
+            [
+              "3"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_double",
+      "sql": "SELECT c_double AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_double AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DOUBLE"
+          ],
+          "rows": [
+            [
+              0.1
+            ],
+            [
+              0
+            ],
+            [
+              null
+            ],
+            [
+              4
+            ]
+          ],
+          "display": [
+            [
+              "0.1"
+            ],
+            [
+              "0"
+            ],
+            [
+              null
+            ],
+            [
+              "4"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_numeric",
+      "sql": "SELECT c_numeric AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_numeric AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "NUMERIC"
+          ],
+          "rows": [
+            [
+              12.5
+            ],
+            [
+              1000
+            ],
+            [
+              null
+            ],
+            [
+              5
+            ]
+          ],
+          "display": [
+            [
+              "12.5"
+            ],
+            [
+              "1000"
+            ],
+            [
+              null
+            ],
+            [
+              "5"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_decimal",
+      "sql": "SELECT c_decimal AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_decimal AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DECIMAL(10,2)"
+          ],
+          "rows": [
+            [
+              3.14159
+            ],
+            [
+              "abc"
+            ],
+            [
+              null
+            ],
+            [
+              6
+            ]
+          ],
+          "display": [
+            [
+              "3.14159"
+            ],
+            [
+              "abc"
+            ],
+            [
+              null
+            ],
+            [
+              "6"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_boolean",
+      "sql": "SELECT c_boolean AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_boolean AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BOOLEAN"
+          ],
+          "rows": [
+            [
+              1
+            ],
+            [
+              0
+            ],
+            [
+              null
+            ],
+            [
+              "true"
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ],
+            [
+              "0"
+            ],
+            [
+              null
+            ],
+            [
+              "true"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_text",
+      "sql": "SELECT c_text AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_text AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TEXT"
+          ],
+          "rows": [
+            [
+              "héllo 🌍"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              "\u0000"
+            ]
+          ],
+          "display": [
+            [
+              "héllo 🌍"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              "\u0000"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_varchar",
+      "sql": "SELECT c_varchar AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_varchar AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "VARCHAR(20)"
+          ],
+          "rows": [
+            [
+              "abc"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              "7"
+            ]
+          ],
+          "display": [
+            [
+              "abc"
+            ],
+            [
+              ""
+            ],
+            [
+              null
+            ],
+            [
+              "7"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_blob",
+      "sql": "SELECT c_blob AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_blob AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "BLOB"
+          ],
+          "rows": [
+            [
+              "hello"
+            ],
+            [
+              "\\xdeadbeef"
+            ],
+            [
+              null
+            ],
+            [
+              "text-in-blob"
+            ]
+          ],
+          "display": [
+            [
+              "hello"
+            ],
+            [
+              "\\xdeadbeef"
+            ],
+            [
+              null
+            ],
+            [
+              "text-in-blob"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_date",
+      "sql": "SELECT c_date AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_date AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              1709214330
+            ],
+            [
+              null
+            ],
+            [
+              "not a date"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1709214330"
+            ],
+            [
+              null
+            ],
+            [
+              "not a date"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime",
+      "sql": "SELECT c_datetime AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATETIME"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              1709214330123
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T13:45:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1709214330123"
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T13:45:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_timestamp",
+      "sql": "SELECT c_timestamp AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_timestamp AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30Z"
+            ],
+            [
+              1709214330
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30Z"
+            ],
+            [
+              "1709214330"
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_time",
+      "sql": "SELECT c_time AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_time AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIME"
+          ],
+          "rows": [
+            [
+              "13:45:30"
+            ],
+            [
+              "not a time"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "13:45:30"
+            ],
+            [
+              "not a time"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_json",
+      "sql": "SELECT c_json AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_json AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "JSON"
+          ],
+          "rows": [
+            [
+              "{\"b\": 1, \"a\": [1, 2]}"
+            ],
+            [
+              "[]"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "{\"b\": 1, \"a\": [1, 2]}"
+            ],
+            [
+              "[]"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_untyped",
+      "sql": "SELECT c_untyped AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_untyped AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              "text"
+            ],
+            [
+              3.5
+            ],
+            [
+              null
+            ],
+            [
+              "\u0000"
+            ]
+          ],
+          "display": [
+            [
+              "text"
+            ],
+            [
+              "3.5"
+            ],
+            [
+              null
+            ],
+            [
+              "\u0000"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "types_rows",
+      "sql": "SELECT * FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM types ORDER BY id",
+          "columns": [
+            "id",
+            "c_integer",
+            "c_bigint",
+            "c_real",
+            "c_double",
+            "c_numeric",
+            "c_decimal",
+            "c_boolean",
+            "c_text",
+            "c_varchar",
+            "c_blob",
+            "c_date",
+            "c_datetime",
+            "c_timestamp",
+            "c_time",
+            "c_json",
+            "c_untyped"
+          ],
+          "columnTypes": [
+            "INTEGER",
+            "INTEGER",
+            "BIGINT",
+            "REAL",
+            "DOUBLE",
+            "NUMERIC",
+            "DECIMAL(10,2)",
+            "BOOLEAN",
+            "TEXT",
+            "VARCHAR(20)",
+            "BLOB",
+            "DATE",
+            "DATETIME",
+            "TIMESTAMP",
+            "TIME",
+            "JSON",
+            ""
+          ],
+          "rows": [
+            [
+              1,
+              42,
+              "9007199254740993",
+              1.1,
+              0.1,
+              12.5,
+              3.14159,
+              1,
+              "héllo 🌍",
+              "abc",
+              "hello",
+              "2024-02-29T00:00:00Z",
+              "2024-02-29T13:45:30.123Z",
+              "2024-02-29T13:45:30Z",
+              "13:45:30",
+              "{\"b\": 1, \"a\": [1, 2]}",
+              "text"
+            ],
+            [
+              2,
+              "-9223372036854775808",
+              "9223372036854775807",
+              1e+21,
+              0,
+              1000,
+              "abc",
+              0,
+              "",
+              "",
+              "\\xdeadbeef",
+              1709214330,
+              1709214330123,
+              1709214330,
+              "not a time",
+              "[]",
+              3.5
+            ],
+            [
+              3,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              4,
+              1.5,
+              12,
+              3,
+              4,
+              5,
+              6,
+              "true",
+              "\u0000",
+              "7",
+              "text-in-blob",
+              "not a date",
+              "2024-02-29T13:45:00Z",
+              "2024-02-29T00:00:00Z",
+              null,
+              null,
+              "\u0000"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "42",
+              "9007199254740993",
+              "1.1",
+              "0.1",
+              "12.5",
+              "3.14159",
+              "1",
+              "héllo 🌍",
+              "abc",
+              "hello",
+              "2024-02-29T00:00:00Z",
+              "2024-02-29T13:45:30.123Z",
+              "2024-02-29T13:45:30Z",
+              "13:45:30",
+              "{\"b\": 1, \"a\": [1, 2]}",
+              "text"
+            ],
+            [
+              "2",
+              "-9223372036854775808",
+              "9223372036854775807",
+              "1e+21",
+              "0",
+              "1000",
+              "abc",
+              "0",
+              "",
+              "",
+              "\\xdeadbeef",
+              "1709214330",
+              "1709214330123",
+              "1709214330",
+              "not a time",
+              "[]",
+              "3.5"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              "4",
+              "1.5",
+              "12",
+              "3",
+              "4",
+              "5",
+              "6",
+              "true",
+              "\u0000",
+              "7",
+              "text-in-blob",
+              "not a date",
+              "2024-02-29T13:45:00Z",
+              "2024-02-29T00:00:00Z",
+              null,
+              null,
+              "\u0000"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "typeof",
+      "sql": "SELECT typeof(c_untyped) AS t, c_untyped AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT typeof(c_untyped) AS t, c_untyped AS v FROM types ORDER BY id",
+          "columns": [
+            "t",
+            "v"
+          ],
+          "columnTypes": [
+            "",
+            ""
+          ],
+          "rows": [
+            [
+              "text",
+              "text"
+            ],
+            [
+              "real",
+              3.5
+            ],
+            [
+              "null",
+              null
+            ],
+            [
+              "blob",
+              "\u0000"
+            ]
+          ],
+          "display": [
+            [
+              "text",
+              "text"
+            ],
+            [
+              "real",
+              "3.5"
+            ],
+            [
+              "null",
+              null
+            ],
+            [
+              "blob",
+              "\u0000"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_int",
+      "sql": "SELECT 1 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_real",
+      "sql": "SELECT 1.5 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1.5 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              1.5
+            ]
+          ],
+          "display": [
+            [
+              "1.5"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_text",
+      "sql": "SELECT 'x' AS v",
+      "results": [
+        {
+          "statement": "SELECT 'x' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              "x"
+            ]
+          ],
+          "display": [
+            [
+              "x"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_null",
+      "sql": "SELECT NULL AS v",
+      "results": [
+        {
+          "statement": "SELECT NULL AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_blob",
+      "sql": "SELECT X'00FF' AS v",
+      "results": [
+        {
+          "statement": "SELECT X'00FF' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              "\\x00ff"
+            ]
+          ],
+          "display": [
+            [
+              "\\x00ff"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_bigint_max",
+      "sql": "SELECT 9223372036854775807 AS v",
+      "results": [
+        {
+          "statement": "SELECT 9223372036854775807 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "display": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literal_date_fn",
+      "sql": "SELECT date('2024-02-29') AS v",
+      "results": [
+        {
+          "statement": "SELECT date('2024-02-29') AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              "2024-02-29"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "multi_columns",
+      "sql": "SELECT 1 AS a, 'x' AS b, NULL AS c, 2.5 AS d",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a, 'x' AS b, NULL AS c, 2.5 AS d",
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "columnTypes": [
+            "",
+            "",
+            "",
+            ""
+          ],
+          "rows": [
+            [
+              1,
+              "x",
+              null,
+              2.5
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "x",
+              null,
+              "2.5"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "duplicate_names",
+      "sql": "SELECT 1 AS v, 2 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v, 2 AS v",
+          "columns": [
+            "v",
+            "v"
+          ],
+          "columnTypes": [
+            "",
+            ""
+          ],
+          "rows": [
+            [
+              1,
+              2
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "2"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "no_rows",
+      "sql": "SELECT 1 AS v WHERE 0",
+      "results": [
+        {
+          "statement": "SELECT 1 AS v WHERE 0",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rowCount": 0,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "table_rows",
+      "sql": "SELECT * FROM customers ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM customers ORDER BY id",
+          "columns": [
+            "id",
+            "email",
+            "name",
+            "created_at"
+          ],
+          "columnTypes": [
+            "INTEGER",
+            "TEXT",
+            "TEXT",
+            "TEXT"
+          ],
+          "rows": [
+            [
+              1,
+              "a@x.io",
+              "Ann",
+              "2024-01-01 10:00:00"
+            ],
+            [
+              2,
+              "b@x.io",
+              "Bob",
+              "2024-01-02 11:30:00"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a@x.io",
+              "Ann",
+              "2024-01-01 10:00:00"
+            ],
+            [
+              "2",
+              "b@x.io",
+              "Bob",
+              "2024-01-02 11:30:00"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "view_rows",
+      "sql": "SELECT * FROM customer_totals ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT * FROM customer_totals ORDER BY id",
+          "columns": [
+            "id",
+            "email",
+            "total"
+          ],
+          "columnTypes": [
+            "INTEGER",
+            "TEXT",
+            ""
+          ],
+          "rows": [
+            [
+              1,
+              "a@x.io",
+              15.5
+            ],
+            [
+              2,
+              "b@x.io",
+              7.25
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "a@x.io",
+              "15.5"
+            ],
+            [
+              "2",
+              "b@x.io",
+              "7.25"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "pragma",
+      "sql": "PRAGMA table_info(customers)",
+      "results": [
+        {
+          "statement": "PRAGMA table_info(customers)",
+          "columns": [
+            "cid",
+            "name",
+            "type",
+            "notnull",
+            "dflt_value",
+            "pk"
+          ],
+          "columnTypes": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "rows": [
+            [
+              0,
+              "id",
+              "INTEGER",
+              0,
+              null,
+              1
+            ],
+            [
+              1,
+              "email",
+              "TEXT",
+              1,
+              null,
+              0
+            ],
+            [
+              2,
+              "name",
+              "TEXT",
+              1,
+              "'anon'",
+              0
+            ],
+            [
+              3,
+              "created_at",
+              "TEXT",
+              1,
+              "CURRENT_TIMESTAMP",
+              0
+            ]
+          ],
+          "display": [
+            [
+              "0",
+              "id",
+              "INTEGER",
+              "0",
+              null,
+              "1"
+            ],
+            [
+              "1",
+              "email",
+              "TEXT",
+              "1",
+              null,
+              "0"
+            ],
+            [
+              "2",
+              "name",
+              "TEXT",
+              "1",
+              "'anon'",
+              "0"
+            ],
+            [
+              "3",
+              "created_at",
+              "TEXT",
+              "1",
+              "CURRENT_TIMESTAMP",
+              "0"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "insert",
+      "sql": "INSERT INTO customers (email, name, created_at) VALUES ('c@x.io', 'Cy', '2024-03-01 00:00:00')",
+      "results": [
+        {
+          "statement": "INSERT INTO customers (email, name, created_at) VALUES ('c@x.io', 'Cy', '2024-03-01 00:00:00')",
+          "rowCount": 0,
+          "affectedRows": 1,
+          "message": "1 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "insert_returning",
+      "sql": "INSERT INTO customers (email, name, created_at) VALUES ('d@x.io', 'Di', '2024-03-02 00:00:00') RETURNING id, email",
+      "results": [
+        {
+          "statement": "INSERT INTO customers (email, name, created_at) VALUES ('d@x.io', 'Di', '2024-03-02 00:00:00') RETURNING id, email",
+          "columns": [
+            "id",
+            "email"
+          ],
+          "columnTypes": [
+            "INTEGER",
+            "TEXT"
+          ],
+          "rows": [
+            [
+              4,
+              "d@x.io"
+            ]
+          ],
+          "display": [
+            [
+              "4",
+              "d@x.io"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "sql": "UPDATE orders SET total = total + 1 WHERE customer_id = 1",
+      "results": [
+        {
+          "statement": "UPDATE orders SET total = total + 1 WHERE customer_id = 1",
+          "rowCount": 0,
+          "affectedRows": 2,
+          "message": "2 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "delete_returning",
+      "sql": "DELETE FROM orders WHERE status = 'new' RETURNING id",
+      "results": [
+        {
+          "statement": "DELETE FROM orders WHERE status = 'new' RETURNING id",
+          "columns": [
+            "id"
+          ],
+          "columnTypes": [
+            "INTEGER"
+          ],
+          "rows": [
+            [
+              1
+            ],
+            [
+              3
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ],
+            [
+              "3"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "multi_statement",
+      "sql": "SELECT 1 AS a; SELECT 'b' AS b",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a",
+          "columns": [
+            "a"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 'b' AS b",
+          "columns": [
+            "b"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              "b"
+            ]
+          ],
+          "display": [
+            [
+              "b"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "explain_statement",
+      "sql": "EXPLAIN QUERY PLAN SELECT * FROM customers",
+      "results": [
+        {
+          "statement": "EXPLAIN QUERY PLAN SELECT * FROM customers",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "plan": true
+        }
+      ]
+    },
+    {
+      "name": "trigger_body_split",
+      "sql": "CREATE TRIGGER orders_noop AFTER DELETE ON orders BEGIN SELECT 1; END",
+      "results": [
+        {
+          "statement": "CREATE TRIGGER orders_noop AFTER DELETE ON orders BEGIN SELECT 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "SQL logic error: incomplete input (1)",
+            "code": "1"
+          }
+        }
+      ]
+    }
+  ],
+  "localTimeZone": "UTC+03:00",
+  "localProbes": [
+    {
+      "name": "c_date",
+      "sql": "SELECT c_date AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_date AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATE"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              1709214330
+            ],
+            [
+              null
+            ],
+            [
+              "not a date"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1709214330"
+            ],
+            [
+              null
+            ],
+            [
+              "not a date"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime",
+      "sql": "SELECT c_datetime AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DATETIME"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              1709214330123
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T13:45:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1709214330123"
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T13:45:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_timestamp",
+      "sql": "SELECT c_timestamp AS v FROM types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_timestamp AS v FROM types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "TIMESTAMP"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30Z"
+            ],
+            [
+              1709214330
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30Z"
+            ],
+            [
+              "1709214330"
+            ],
+            [
+              null
+            ],
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "rowCount": 4,
+          "affectedRows": 0
+        }
+      ]
+    }
+  ]
+}

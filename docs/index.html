@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BarSQL - A fast, local-first SQL workbench</title>
+  <meta name="description" content="BarSQL is a fast, local-first SQL workbench for SQLite, PostgreSQL and MySQL / MariaDB. Native, GPU-rendered and written in Rust. No cloud, no accounts, no telemetry." />
+  <link rel="canonical" href="https://barsql.bare7a.eu/" />
+  <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="BarSQL" />
+  <meta property="og:url" content="https://barsql.bare7a.eu/" />
+  <meta property="og:title" content="BarSQL - A fast, local-first SQL workbench" />
+  <meta property="og:description" content="Work with SQLite, PostgreSQL and MySQL / MariaDB in one fast, native desktop app that runs entirely on your machine." />
+  <meta property="og:image" content="https://barsql.bare7a.eu/preview.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="icon" type="image/png" href="icon.png" />
+  <link rel="apple-touch-icon" href="icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    // The saved theme, else the system's, before the first paint.
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem("barsql-theme"); } catch (e) {}
+      if (theme !== "light" && theme !== "dark") {
+        theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "BarSQL",
+      "description": "A fast, local-first SQL workbench for SQLite, PostgreSQL and MySQL / MariaDB.",
+      "url": "https://barsql.bare7a.eu/",
+      "downloadUrl": "https://github.com/Bare7a/BarSQL/releases/latest",
+      "image": "https://barsql.bare7a.eu/preview.jpg",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows, macOS, Linux",
+      "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+    }
+  </script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/> <path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/> <path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-briefcase" viewBox="0 0 24 24"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/> <rect width="20" height="14" x="2" y="6" rx="2"/></symbol>
+  <symbol id="i-flask-conical" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/> <path d="M6.453 15h11.094"/> <path d="M8.5 2h7"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"/></symbol>
+  <symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/> <path d="M11 13h4"/> <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></symbol>
+  <symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/> <path d="M21 3v5h-5"/> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/> <path d="M8 16H3v5"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/> <path d="M3 5V19A9 3 0 0 0 21 19V5"/> <path d="M3 12A9 3 0 0 0 21 12"/></symbol>
+  <symbol id="i-feather" viewBox="0 0 24 24"><path d="M14.086 18.412A2 2 0 0112.67 19H5v-7.672a2 2 0 01.586-1.414L11.75 3.75a6 6 0 118.49 8.49z"/> <path d="M16 8 2 22"/> <path d="M17.488 15H9"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/> <path d="M20 2v4"/> <path d="M22 4h-4"/> <circle cx="4" cy="20" r="2"/></symbol>
+  <symbol id="i-scroll-text" viewBox="0 0 24 24"><path d="M15 12h-5"/> <path d="M15 8h-5"/> <path d="M19 17V5a2 2 0 0 0-2-2H4"/> <path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/> <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/> <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/> <circle cx="18" cy="5" r="3"/></symbol>
+  <symbol id="i-folder-tree" viewBox="0 0 24 24"><path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/> <path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/> <path d="M3 5a2 2 0 0 0 2 2h3"/> <path d="M3 3v13a2 2 0 0 0 2 2h3"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/></symbol>
+  <symbol id="i-hard-drive-download" viewBox="0 0 24 24"><path d="M12 2v8"/> <path d="m16 6-4 4-4-4"/> <rect width="20" height="8" x="2" y="14" rx="2"/> <path d="M6 18h.01"/> <path d="M10 18h.01"/></symbol>
+  <symbol id="i-square-pen" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/> <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></symbol>
+  <symbol id="i-braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/> <path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></symbol>
+  <symbol id="i-file-up" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/> <path d="M14 2v5a1 1 0 0 0 1 1h5"/> <path d="M12 12v6"/> <path d="m15 15-3-3-3 3"/></symbol>
+  <symbol id="i-file-down" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/> <path d="M14 2v5a1 1 0 0 0 1 1h5"/> <path d="M12 18v-6"/> <path d="m9 15 3 3 3-3"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/> <circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/> <path d="M15 8V2"/> <path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/> <path d="M9 8V2"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M10 8h.01"/> <path d="M12 12h.01"/> <path d="M14 8h.01"/> <path d="M16 12h.01"/> <path d="M18 8h.01"/> <path d="M6 8h.01"/> <path d="M7 16h10"/> <path d="M8 12h.01"/> <rect width="20" height="16" x="2" y="4" rx="2"/></symbol>
+  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/> <path d="m4 14 6-6 2-3"/> <path d="M2 5h12"/> <path d="M7 2h1"/> <path d="m22 22-5-10-5 10"/> <path d="M14 18h6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/> <path d="M12 2v2"/> <path d="M12 20v2"/> <path d="m4.93 4.93 1.41 1.41"/> <path d="m17.66 17.66 1.41 1.41"/> <path d="M2 12h2"/> <path d="M20 12h2"/> <path d="m6.34 17.66-1.41 1.41"/> <path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/> <path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/> <path d="m6 6 12 12"/></symbol>
+  <symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/> <path d="M10 14 21 3"/> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+</svg>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <nav class="container nav" aria-label="Main">
+    <a class="brand" href="#top" aria-label="BarSQL home">
+      <img src="icon.svg" alt="" width="30" height="30" />
+      <span><span class="accent">Bar</span>SQL</span>
+    </a>
+    <div class="nav-links">
+      <a class="nav-section" href="#features">Features</a>
+      <a class="nav-section" href="#tour">Tour</a>
+      <a class="nav-section" href="#screenshots">Screenshots</a>
+      <a class="nav-section" href="#download">Download</a>
+      <a class="nav-icon" href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener" aria-label="BarSQL on GitHub" title="BarSQL on GitHub">
+        <svg viewBox="0 0 16 16" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+      <button id="theme-toggle" class="nav-icon theme-toggle" type="button" aria-label="Switch between dark and light" title="Switch between dark and light">
+        <svg class="icon icon-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        <svg class="icon icon-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+      </button>
+    </div>
+  </nav>
+</header>
+
+<main id="main">
+  <span id="top"></span>
+
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badges">
+        <span class="badge">Rust</span>
+        <span class="badge">GPUI</span>
+        <span class="badge">Windows · macOS · Linux</span>
+        <span class="badge badge-accent">GPL-3.0</span>
+      </div>
+      <h1>A fast, <span class="accent">local-first</span> SQL workbench</h1>
+      <p class="hero-sub">
+        No cloud. No accounts. No telemetry. A native, GPU-rendered desktop app for
+        <strong>SQLite</strong>, <strong>PostgreSQL</strong> and <strong>MySQL&nbsp;/&nbsp;MariaDB</strong>.
+      </p>
+      <div class="cta">
+        <a href="#download" class="btn btn-primary" id="hero-download">
+          <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+          <span id="hero-download-label">Download BarSQL</span>
+        </a>
+        <a href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener" class="btn btn-secondary">View on GitHub</a>
+      </div>
+      <p class="hero-note">Free and open source · Portable · Updates itself</p>
+    </div>
+    <div class="container hero-shot">
+      <button type="button" class="shot shot-hero" data-shot="1" aria-label="View the editor screenshot full size">
+        <img
+          src="screenshots/1-1024.webp"
+          srcset="screenshots/1-640.webp 640w, screenshots/1-1024.webp 1024w, screenshots/1-2048.webp 2048w"
+          sizes="(min-width: 1120px) 1024px, calc(100vw - 32px)"
+          width="2048" height="1152" fetchpriority="high" decoding="async"
+          alt="BarSQL's editor with schema-aware suggestions, a saved query's results in the grid and the focused row as JSON" />
+      </button>
+    </div>
+  </section>
+
+  <section class="strip" aria-label="Highlights">
+    <div class="container strip-inner">
+      <span><svg class="icon" aria-hidden="true"><use href="#i-briefcase"/></svg>Portable</span>
+      <span><svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg>Fast startup</span>
+      <span><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Local-first</span>
+      <span><svg class="icon" aria-hidden="true"><use href="#i-square-terminal"/></svg>Developer-focused</span>
+      <span><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Auto-updating</span>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <h2>SQL tools are usually overkill. <span class="accent">Bar</span>SQL isn't.</h2>
+      <p class="section-sub">
+        Most SQL clients are slow and heavy, cloud-connected by default, tied to subscriptions and packed with
+        features you never use. BarSQL does one thing: a fast, local place to work with your databases.
+      </p>
+      <div class="card-grid card-grid-4">
+        <article class="card">
+          <span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-gauge"/></svg></span>
+          <h3>Native and GPU-rendered</h3>
+          <p>Drawn on the GPU with GPUI, the UI framework behind the Zed editor: one Rust codebase from the database drivers to the window.</p>
+        </article>
+        <article class="card">
+          <span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span>
+          <h3>Yours, entirely</h3>
+          <p>Everything runs and stays on your machine. No account, no sign-in, no telemetry: your connections and queries never leave your computer.</p>
+        </article>
+        <article class="card">
+          <span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-briefcase"/></svg></span>
+          <h3>Portable by design</h3>
+          <p>Connections, history, saved queries and settings live in one <code>BarSQL-data</code> folder next to the app. Copy both to a USB stick and carry on elsewhere.</p>
+        </article>
+        <article class="card">
+          <span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-flask-conical"/></svg></span>
+          <h3>Tested for real</h3>
+          <p>Whole-window UI tests drive the app with real keystrokes and clicks, and end-to-end suites run against real PostgreSQL, MySQL and MariaDB servers.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="databases">
+    <div class="container">
+      <h2>One app for your databases</h2>
+      <p class="section-sub">Read and write, or lock a connection to read-only: it's refused in the app and again inside the database session.</p>
+      <div class="card-grid card-grid-3">
+        <article class="card db-card">
+          <div class="db-head"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg></span><h3>PostgreSQL</h3></div>
+          <ul>
+            <li>SSL: <code>disable</code>, <code>require</code>, <code>verify-full</code></li>
+            <li>SSH tunnel through a bastion</li>
+            <li>DDL composed from the catalog</li>
+            <li>Powered by tokio-postgres</li>
+          </ul>
+        </article>
+        <article class="card db-card">
+          <div class="db-head"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg></span><h3>MySQL / MariaDB</h3></div>
+          <ul>
+            <li>TLS transport</li>
+            <li>SSH tunnel through a bastion</li>
+            <li>The server's own <code>SHOW CREATE</code> DDL</li>
+            <li>Powered by mysql_async</li>
+          </ul>
+        </article>
+        <article class="card db-card">
+          <div class="db-head"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-feather"/></svg></span><h3>SQLite</h3></div>
+          <ul>
+            <li>Open a file, or drop it on the window</li>
+            <li>Opens straight from Finder or Explorer</li>
+            <li>Read-only mode for files you only inspect</li>
+            <li>Bundled SQLite via rusqlite</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="tour">
+    <div class="container">
+      <h2>A closer look</h2>
+      <p class="section-sub">The work you do every day, without the detours.</p>
+
+      <div class="spotlight">
+        <div class="spotlight-text">
+          <span class="eyebrow">SQL editor</span>
+          <h3>Write SQL at full speed</h3>
+          <p>Suggestions know your schema: tables, columns, aliases and CTEs, with fuzzy matching and <code>JOIN</code> snippets where a join fits.</p>
+          <ul class="ticks">
+            <li>Run a selection, a statement from the gutter, or the whole script</li>
+            <li>Multi-statement scripts on one connection, with a result tab per output</li>
+            <li>Pinned transactions per tab: <code>BEGIN</code>, then commit or roll back from the toolbar</li>
+            <li>Rows stream in as they arrive, and Stop cancels the running query</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="2" aria-label="View the transactions screenshot full size">
+          <img src="screenshots/2-1024.webp" srcset="screenshots/2-640.webp 640w, screenshots/2-1024.webp 1024w, screenshots/2-2048.webp 2048w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
+            alt="A transaction with two INSERT … RETURNING statements, each with its own result tab" />
+        </button>
+      </div>
+
+      <div class="spotlight spotlight-flip">
+        <div class="spotlight-text">
+          <span class="eyebrow">Plan viewer</span>
+          <h3>See why a query is slow</h3>
+          <p><strong>Explain</strong> shows the planner's estimate; <strong>Explain analyze</strong> runs the statement and reports what really happened, as one tree on every engine.</p>
+          <ul class="ticks">
+            <li>A heat bar on each node's own share of time, cost or rows</li>
+            <li>Row estimates 10x off are flagged: that's where a missing index hides</li>
+            <li>Every detail the engine reported, plus its raw output</li>
+            <li>Analyzing a write always rolls it back, so nothing lands</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="10" aria-label="View the plan viewer screenshot full size">
+          <img src="screenshots/10-1024.webp" srcset="screenshots/10-640.webp 640w, screenshots/10-1024.webp 1024w, screenshots/10-2048.webp 2048w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
+            alt="A measured query plan with heat bars, flagged row estimates and the hottest node's details" />
+        </button>
+      </div>
+
+      <div class="spotlight">
+        <div class="spotlight-text">
+          <span class="eyebrow">Table data</span>
+          <h3>Edit rows, not <code>UPDATE</code> statements</h3>
+          <p>Browse any table, filter it with a <code>WHERE</code> condition that autocompletes, and change it in place.</p>
+          <ul class="ticks">
+            <li>Edits and deletes are staged until you apply them, with undo and redo</li>
+            <li>Paste blocks of cells, set NULL, insert rows</li>
+            <li>Jump through foreign keys to the row a cell points at</li>
+            <li>The focused row as JSON beside the grid, filterable by key</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="3" aria-label="View the table data screenshot full size">
+          <img src="screenshots/3-1024.webp" srcset="screenshots/3-640.webp 640w, screenshots/3-1024.webp 1024w, screenshots/3-2048.webp 2048w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
+            alt="A table with a staged edit, two rows marked for delete and suggestions in the filter" />
+        </button>
+      </div>
+
+      <div class="spotlight spotlight-flip">
+        <div class="spotlight-text">
+          <span class="eyebrow">Schema</span>
+          <h3>Your schema, down to the triggers</h3>
+          <p>Schemas, tables and columns, then indexes, constraints, triggers and functions, fetched only when you open them.</p>
+          <ul class="ticks">
+            <li>Copy any object's DDL, or open it in a tab ready to run</li>
+            <li>Rename, truncate and drop, with the exact SQL shown first</li>
+            <li>Back a table up to a <code>.sql</code> file that restores it exactly</li>
+            <li>Search tables and columns as you type</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="9" aria-label="View the DDL screenshot full size">
+          <img src="screenshots/9-1024.webp" srcset="screenshots/9-640.webp 640w, screenshots/9-1024.webp 1024w, screenshots/9-2048.webp 2048w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
+            alt="A table's DDL in an editor tab beside its indexes and constraints in the schema tree" />
+        </button>
+      </div>
+
+      <div class="spotlight">
+        <div class="spotlight-text">
+          <span class="eyebrow">Import and export</span>
+          <h3>Data in, data out</h3>
+          <p>Load a CSV into a new or existing table, or run a <code>.sql</code> script, and export any result in the format you need.</p>
+          <ul class="ticks">
+            <li>Delimiter detected, columns mapped, types inferred for a new table</li>
+            <li>Bad rows skipped and reported, with live progress and Stop</li>
+            <li>Export as Text, CSV, JSON, Markdown or SQL <code>INSERT</code></li>
+            <li>CSV and SQL exports import back cleanly, NULLs included</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="11" aria-label="View the import screenshot full size">
+          <img src="screenshots/11-1024.webp" srcset="screenshots/11-640.webp 640w, screenshots/11-1024.webp 1024w, screenshots/11-2048.webp 2048w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
+            alt="The import dialog with a CSV's columns mapped onto an existing table" />
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="features">
+    <div class="container">
+      <h2>Everything you need. <span class="accent">Nothing you don't.</span></h2>
+      <div class="card-grid card-grid-3 features">
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><h3>Smart autocomplete</h3><p>Fuzzy and context-aware: <code>schema.table.column</code> dot completion, quoted identifiers, aliases, CTEs and <code>JOIN</code> snippets.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-scroll-text"/></svg></span><h3>Multi-statement scripts</h3><p>Statements run in order on one connection, so temp tables, <code>SET</code> and scripted transactions hold. Every output gets its own tab.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg></span><h3>Pinned transactions</h3><p><code>BEGIN</code>, <code>COMMIT</code> and <code>ROLLBACK</code> as SQL or from the toolbar. Queries run inside the tab's open transaction until it ends.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg></span><h3>Streaming results</h3><p>Rows render as the driver yields them, in a virtualized grid that scrolls smoothly through thousands of rows.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-route"/></svg></span><h3>Query plan viewer</h3><p>Estimated or measured plans as one tree on PostgreSQL, MySQL, MariaDB and SQLite. Type <code>EXPLAIN</code> yourself and it opens there too.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-folder-tree"/></svg></span><h3>Schema explorer</h3><p>Tables, views, columns, indexes, constraints, triggers and functions, with instant search and a row count that needs no tab.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-wrench"/></svg></span><h3>Schema changes</h3><p>Rename, truncate and drop from the tree. Each dialog shows the exact SQL for your engine, with Cascade on PostgreSQL.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive-download"/></svg></span><h3>Table backups</h3><p>Structure and rows to a <code>.sql</code> file. The server writes every value as a literal, so dates, JSON and binary survive the round trip.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-square-pen"/></svg></span><h3>Edit data in the grid</h3><p>Staged edits, deletes and new rows applied on demand, with undo, paste and foreign-key jumps, guarded by primary keys.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-braces"/></svg></span><h3>Cell and JSON viewers</h3><p>A cell editor for large values (JSON, XML, HTML or text, beautified or minified) and a JSON view of the focused row.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-file-up"/></svg></span><h3>CSV and SQL import</h3><p>Column mapping, inferred types, configurable NULL text and header rows, or a <code>.sql</code> script run statement by statement.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-file-down"/></svg></span><h3>One-click export</h3><p>Text, CSV, JSON, Markdown or SQL <code>INSERT</code>, for all or the selected rows and columns, to the clipboard or a file.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-bookmark"/></svg></span><h3>Saved queries and history</h3><p>Save and reuse queries with unsaved-change tracking, plus per-connection history with status and duration.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-key-round"/></svg></span><h3>SSH tunnel</h3><p>Reach a database only its bastion can see, with a key, a password or ssh-agent, and host keys checked against <code>known_hosts</code>.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg></span><h3>Connection manager</h3><p>Folders, tab colors and read-only mode, and a database list fetched from the server so you needn't remember names.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg></span><h3>Keyboard-first</h3><p>Quick Search jumps to tabs, tables, saved queries and connections. VS Code-style line commands, and every shortcut remappable.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg></span><h3>Instant and polished</h3><p>Dark and light themes, English, Deutsch and Български, no animations in the way, and your window restored where you left it.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></span><h3>Updates itself</h3><p>A new release shows up with its notes. One click downloads it, checks its SHA-256 and restarts into it.</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="screenshots">
+    <div class="container">
+      <h2>Screenshots</h2>
+      <p class="section-sub">Click a screenshot to see it full size, then use the arrow keys to browse.</p>
+      <div class="gallery">
+        <figure><button type="button" class="shot" data-shot="1" data-caption="Editor"><img src="screenshots/1-640.webp" srcset="screenshots/1-640.webp 640w, screenshots/1-1024.webp 1024w, screenshots/1-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The editor with schema-aware suggestions" /></button><figcaption>Editor</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="2" data-caption="Transactions &amp; multiple results"><img src="screenshots/2-640.webp" srcset="screenshots/2-640.webp 640w, screenshots/2-1024.webp 1024w, screenshots/2-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A transaction with a result tab per statement" /></button><figcaption>Transactions &amp; multiple results</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="3" data-caption="Table data"><img src="screenshots/3-640.webp" srcset="screenshots/3-640.webp 640w, screenshots/3-1024.webp 1024w, screenshots/3-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A table with staged changes and a filter" /></button><figcaption>Table data</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="4" data-caption="Cell editor"><img src="screenshots/4-640.webp" srcset="screenshots/4-640.webp 640w, screenshots/4-1024.webp 1024w, screenshots/4-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The cell editor showing a JSON value" /></button><figcaption>Cell editor</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="5" data-caption="Grid"><img src="screenshots/5-640.webp" srcset="screenshots/5-640.webp 640w, screenshots/5-1024.webp 1024w, screenshots/5-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A range of cells selected in the grid, with the copy formats" /></button><figcaption>Grid</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="6" data-caption="Export"><img src="screenshots/6-640.webp" srcset="screenshots/6-640.webp 640w, screenshots/6-1024.webp 1024w, screenshots/6-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The export dialog for the selected rows and columns" /></button><figcaption>Export</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="7" data-caption="Connections"><img src="screenshots/7-640.webp" srcset="screenshots/7-640.webp 640w, screenshots/7-1024.webp 1024w, screenshots/7-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A new connection over the connections grouped in folders" /></button><figcaption>Connections</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="8" data-caption="Quick Search"><img src="screenshots/8-640.webp" srcset="screenshots/8-640.webp 640w, screenshots/8-1024.webp 1024w, screenshots/8-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="Quick Search over tabs, tables and connections" /></button><figcaption>Quick Search</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="9" data-caption="DDL viewer"><img src="screenshots/9-640.webp" srcset="screenshots/9-640.webp 640w, screenshots/9-1024.webp 1024w, screenshots/9-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A table's DDL beside the schema tree" /></button><figcaption>DDL viewer</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="10" data-caption="Plan viewer"><img src="screenshots/10-640.webp" srcset="screenshots/10-640.webp 640w, screenshots/10-1024.webp 1024w, screenshots/10-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A measured query plan with heat bars" /></button><figcaption>Plan viewer</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="11" data-caption="CSV &amp; SQL import"><img src="screenshots/11-640.webp" srcset="screenshots/11-640.webp 640w, screenshots/11-1024.webp 1024w, screenshots/11-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A CSV mapped onto an existing table" /></button><figcaption>CSV &amp; SQL import</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="12" data-caption="Appearance"><img src="screenshots/12-640.webp" srcset="screenshots/12-640.webp 640w, screenshots/12-1024.webp 1024w, screenshots/12-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The light theme with the View menu open" /></button><figcaption>Appearance</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="shortcuts">
+    <div class="container">
+      <h2>Keyboard-first</h2>
+      <p class="section-sub">Every shortcut can be remapped in the app's shortcuts editor.</p>
+      <dl class="keys">
+        <div><dt>Quick Search</dt><dd><kbd data-mod>Ctrl</kbd><kbd>P</kbd></dd></div>
+        <div><dt>Run selection</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Enter</kbd></dd></div>
+        <div><dt>Run all statements</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>Enter</kbd></dd></div>
+        <div><dt>Explain the query plan</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>E</kbd></dd></div>
+        <div><dt>Explain analyze</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></dd></div>
+        <div><dt>Save the query, or apply staged edits</dt><dd><kbd data-mod>Ctrl</kbd><kbd>S</kbd></dd></div>
+        <div><dt>New tab / close tab</dt><dd><kbd data-mod>Ctrl</kbd><kbd>T</kbd> <span>/</span> <kbd data-mod>Ctrl</kbd><kbd>W</kbd></dd></div>
+        <div><dt>Reopen a closed tab</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd></dd></div>
+        <div><dt>Toggle sidebar / JSON viewer</dt><dd><kbd data-mod>Ctrl</kbd><kbd>B</kbd> <span>/</span> <kbd data-mod>Ctrl</kbd><kbd>J</kbd></dd></div>
+        <div><dt>Set a cell to NULL</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Backspace</kbd></dd></div>
+        <div><dt>Zoom in / out</dt><dd><kbd data-mod>Ctrl</kbd><kbd>=</kbd> <span>/</span> <kbd data-mod>Ctrl</kbd><kbd>-</kbd></dd></div>
+        <div><dt>Rename a saved query</dt><dd><kbd>F2</kbd></dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="section" id="download">
+    <div class="container">
+      <h2>Download</h2>
+      <p class="section-sub">No account needed: download it and run it.</p>
+      <div class="card-grid card-grid-3">
+        <article class="card dl-card" id="dl-windows">
+          <div class="dl-head">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true"><path d="M3 5.55 10.44 4.5v7.03H3V5.55Zm0 12.9 7.44 1.05v-6.96H3v5.91Zm8.26 1.17L21 21V12.54h-9.74v7.08Zm0-15.24v7.15H21V3l-9.74 1.38Z"/></svg>
+            <h3>Windows</h3>
+            <span class="dl-detected-label">Your system</span>
+          </div>
+          <a class="btn btn-primary" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-windows-amd64.zip">Portable .zip</a>
+          <a class="btn btn-secondary" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-amd64-installer.exe">Installer .exe</a>
+          <div class="dl-other">
+            <span class="dl-other-title">Other options</span>
+            <ul>
+              <li><a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL.exe">Standalone executable <span>.exe</span></a></li>
+            </ul>
+          </div>
+        </article>
+        <article class="card dl-card" id="dl-macos">
+          <div class="dl-head">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true"><path d="M16.36 12.77c.02 2.4 2.1 3.2 2.12 3.21-.02.06-.33 1.14-1.1 2.25-.66.96-1.35 1.92-2.44 1.94-1.07.02-1.41-.63-2.63-.63-1.22 0-1.6.61-2.6.65-1.05.04-1.85-1.04-2.52-2-1.37-1.98-2.42-5.6-1.01-8.04.7-1.21 1.94-1.98 3.3-2 1.03-.02 2 .7 2.63.7.63 0 1.81-.86 3.05-.73.52.02 1.98.21 2.92 1.58-.08.05-1.74 1.02-1.72 3.07ZM14.35 6.9c.55-.67.93-1.6.83-2.53-.8.03-1.77.53-2.34 1.2-.51.59-.96 1.54-.84 2.45.89.07 1.8-.45 2.35-1.12Z"/></svg>
+            <h3>macOS</h3>
+            <span class="dl-detected-label">Your system</span>
+          </div>
+          <a class="btn btn-primary" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-darwin-arm64.zip">Apple Silicon .zip</a>
+          <a class="btn btn-secondary" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-darwin-amd64.zip">Intel .zip</a>
+          <div class="dl-other">
+            <span class="dl-other-title">Other options</span>
+            <ul>
+              <li><a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-macos-universal.dmg">Disk image <span>.dmg</span></a></li>
+            </ul>
+          </div>
+        </article>
+        <article class="card dl-card" id="dl-linux">
+          <div class="dl-head">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true"><path d="M12.5 2c-2.89 0-3.4 2.31-3.4 3.85 0 1.09.11 2.11-.36 3.15-.72 1.28-1.7 2.4-2.28 3.77-.42.98-.65 2.06-.51 3.13-.31.15-.55.44-.72.9-.24.68-.83.86-1.42 1.06-.32.11-.61.26-.75.6-.13.31-.05.68.06 1.06.15.53.12.74-.02 1.26-.07.28.05.54.31.66.61.28 1.55.28 2.24.5.76.24 1.5.62 2.31.62.75 0 1.31-.36 1.6-.9.72-.03 1.53-.23 2.44-.23.86 0 1.77.2 2.6.22.13.31.35.58.65.75.42.24.96.32 1.5.2.99-.21 1.83-1.01 2.67-1.42.56-.27 1.34-.4 1.72-.85.31-.37.24-.92-.13-1.31-.42-.44-.7-.9-.7-1.53 0-.44.09-.87-.03-1.24.28-1.9-.44-3.87-1.55-5.24-.85-1.05-1.94-1.79-2.28-3.13-.34-1.34.11-2.83-.62-4.24C15.34 2.66 14.11 2 12.5 2Z"/></svg>
+            <h3>Linux</h3>
+            <span class="dl-detected-label">Your system</span>
+          </div>
+          <a class="btn btn-primary" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-linux-amd64.tar.gz">Portable .tar.gz</a>
+          <a class="btn btn-secondary" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-x86_64.AppImage">AppImage</a>
+          <div class="dl-other">
+            <span class="dl-other-title">Other options</span>
+            <ul>
+              <li><a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL.deb">Debian / Ubuntu <span>.deb</span></a></li>
+              <li><a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL.rpm">Fedora / RHEL <span>.rpm</span></a></li>
+              <li><a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL.pkg.tar.zst">Arch <span>.pkg.tar.zst</span></a></li>
+              <li><a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL">Standalone binary <span>BarSQL</span></a></li>
+            </ul>
+          </div>
+        </article>
+      </div>
+      <p class="dl-all">
+        Every build updates itself from inside the app. All of them, with their checksums, are on the
+        <a href="https://github.com/Bare7a/BarSQL/releases/latest" target="_blank" rel="noopener">latest release</a>.
+        Prefer to build it? <code>cargo run -p barsql --release</code>, as the
+        <a href="https://github.com/Bare7a/BarSQL#%EF%B8%8F-installation--development" target="_blank" rel="noopener">README</a> explains.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="portable">
+    <div class="container portable">
+      <div>
+        <h2>Portable by design</h2>
+        <p>
+          Everything lives in one <code>BarSQL-data</code> folder next to the app (beside the <code>.app</code> on macOS):
+          connections, the editor session, history, saved queries and settings. Move both to a USB stick, a network
+          drive or another computer and pick up where you left off.
+        </p>
+        <p>
+          When the app sits somewhere read-only, the folder goes to your user data directory instead, and
+          <code>BARSQL_DATA_DIR</code> puts it anywhere you like.
+        </p>
+      </div>
+      <pre class="code-block" aria-label="The data folder"><code>BarSQL(.exe)
+BarSQL-data/
+  connections.json
+  editor_session.json
+  query_history.json
+  saved_queries.json
+  settings.json</code></pre>
+    </div>
+  </section>
+
+  <section class="section" id="stack">
+    <div class="container">
+      <h2>Built with</h2>
+      <p class="section-sub">One Rust codebase: a background Tokio runtime talks to the databases, so the UI thread only draws.</p>
+      <div class="stack">
+        <a href="https://www.rust-lang.org/" target="_blank" rel="noopener"><strong>Rust</strong><span>Language</span></a>
+        <a href="https://www.gpui.rs/" target="_blank" rel="noopener"><strong>GPUI</strong><span>UI framework</span></a>
+        <a href="https://gpui-kit.com/" target="_blank" rel="noopener"><strong>GPUI Kit</strong><span>Components</span></a>
+        <a href="https://tokio.rs/" target="_blank" rel="noopener"><strong>Tokio</strong><span>Async runtime</span></a>
+        <a href="https://github.com/sfackler/rust-postgres" target="_blank" rel="noopener"><strong>tokio-postgres</strong><span>PostgreSQL</span></a>
+        <a href="https://github.com/blackbeam/mysql_async" target="_blank" rel="noopener"><strong>mysql_async</strong><span>MySQL / MariaDB</span></a>
+        <a href="https://github.com/rusqlite/rusqlite" target="_blank" rel="noopener"><strong>rusqlite</strong><span>SQLite</span></a>
+        <a href="https://github.com/Eugeny/russh" target="_blank" rel="noopener"><strong>russh</strong><span>SSH</span></a>
+        <a href="https://github.com/rustls/rustls" target="_blank" rel="noopener"><strong>rustls</strong><span>TLS</span></a>
+        <a href="https://lucide.dev/" target="_blank" rel="noopener"><strong>Lucide</strong><span>Icons</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section cta-final">
+    <div class="container">
+      <img class="cta-icon" src="icon.svg" alt="" width="72" height="72" loading="lazy" />
+      <h2>Ready to try <span class="accent">Bar</span>SQL?</h2>
+      <p class="section-sub">Free, open source and yours to keep, on Windows, macOS and Linux.</p>
+      <div class="cta">
+        <a href="#download" class="btn btn-primary">
+          <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+          Download now
+        </a>
+        <a href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener" class="btn btn-secondary">Star on GitHub</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="24" height="24" loading="lazy" />
+      <span><span class="accent">Bar</span>SQL</span>
+    </div>
+    <nav class="footer-links" aria-label="Project">
+      <a href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Bare7a/BarSQL/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/Bare7a/BarSQL/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/Bare7a/BarSQL/blob/master/LICENSE" target="_blank" rel="noopener">GPL-3.0 License</a>
+    </nav>
+  </div>
+</footer>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" hidden>
+  <button class="lightbox-button lightbox-close" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+  <button class="lightbox-button lightbox-prev" type="button" aria-label="Previous screenshot"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+  <figure>
+    <img src="data:," alt="" width="2048" height="1152" />
+    <figcaption><span class="lightbox-caption"></span> <span class="lightbox-count"></span></figcaption>
+  </figure>
+  <button class="lightbox-button lightbox-next" type="button" aria-label="Next screenshot"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+</div>
+
+</body>
+</html>

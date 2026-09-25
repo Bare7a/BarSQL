@@ -1,0 +1,1463 @@
+{
+  "engine": "mariadb",
+  "driver": "mysql",
+  "serverVersion": "11.8",
+  "plans": [
+    {
+      "statement": "SELECT * FROM barsql_golden.customers",
+      "analyze": false,
+      "explainSql": "EXPLAIN FORMAT=JSON SELECT * FROM barsql_golden.customers",
+      "raw": {
+        "columns": [
+          "EXPLAIN"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.0111808,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"rows\": 2,\n          \"cost\": 0.0111808,\n          \"filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT * FROM barsql_golden.customers",
+        "explainSql": "EXPLAIN FORMAT=JSON SELECT * FROM barsql_golden.customers",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.0223616,
+            "costSelf": 0.0111808,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.0111808,
+                "costSelf": 0,
+                "children": [
+                  {
+                    "label": "Table (ALL)",
+                    "relation": "customers",
+                    "costTotal": 0.0111808,
+                    "costSelf": 0.0111808,
+                    "rowsPlanned": 2,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.0223616,
+        "durationMs": 0,
+        "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.0111808,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"rows\": 2,\n          \"cost\": 0.0111808,\n          \"filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT * FROM barsql_golden.customers",
+      "analyze": true,
+      "explainSql": "ANALYZE FORMAT=JSON SELECT * FROM barsql_golden.customers",
+      "raw": {
+        "columns": [
+          "ANALYZE"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.007399542\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.0111808,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.009322587,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 2,\n          \"r_rows\": 2,\n          \"cost\": 0.0111808,\n          \"r_table_time_ms\": 0.00518386,\n          \"r_other_time_ms\": 0.00196485,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 1\n          },\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT * FROM barsql_golden.customers",
+        "explainSql": "ANALYZE FORMAT=JSON SELECT * FROM barsql_golden.customers",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.0223616,
+            "costSelf": 0.0111808,
+            "loops": 1,
+            "timeMs": 0.009322587,
+            "selfTimeMs": 0.0021738769999999994,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.0111808,
+                "costSelf": 0,
+                "timeMs": 0.007148710000000001,
+                "selfTimeMs": 0,
+                "children": [
+                  {
+                    "label": "Table (ALL)",
+                    "relation": "customers",
+                    "costTotal": 0.0111808,
+                    "costSelf": 0.0111808,
+                    "rowsPlanned": 2,
+                    "rowsActual": 2,
+                    "loops": 1,
+                    "timeMs": 0.007148710000000001,
+                    "selfTimeMs": 0.007148710000000001,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      },
+                      {
+                        "key": "R filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "R total filtered",
+                        "value": "100"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "label": "R engine stats",
+                        "fields": [
+                          {
+                            "key": "Pages accessed",
+                            "value": "1"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Query optimization",
+            "timeMs": 0.007399542,
+            "selfTimeMs": 0.007399542
+          }
+        ],
+        "totalCost": 0.0223616,
+        "executionMs": 0.009322587,
+        "durationMs": 0,
+        "raw": "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.007399542\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.0111808,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.009322587,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 2,\n          \"r_rows\": 2,\n          \"cost\": 0.0111808,\n          \"r_table_time_ms\": 0.00518386,\n          \"r_other_time_ms\": 0.00196485,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 1\n          },\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+      "analyze": false,
+      "explainSql": "EXPLAIN FORMAT=JSON SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+      "raw": {
+        "columns": [
+          "EXPLAIN"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.01221801,\n    \"filesort\": {\n      \"sort_key\": \"sum(barsql_golden.o.total) desc\",\n      \"temporary_table\": {\n        \"nested_loop\": [\n          {\n            \"table\": {\n              \"table_name\": \"c\",\n              \"access_type\": \"index\",\n              \"possible_keys\": [\"PRIMARY\"],\n              \"key\": \"customers_email_uq\",\n              \"key_length\": \"1022\",\n              \"used_key_parts\": [\"email\"],\n              \"loops\": 1,\n              \"rows\": 2,\n              \"cost\": 0.00693929,\n              \"filtered\": 100,\n              \"using_index\": true\n            }\n          },\n          {\n            \"table\": {\n              \"table_name\": \"o\",\n              \"access_type\": \"ref\",\n              \"possible_keys\": [\"orders_customer_idx\"],\n              \"key\": \"orders_customer_idx\",\n              \"key_length\": \"4\",\n              \"used_key_parts\": [\"customer_id\"],\n              \"ref\": [\"barsql_golden.c.id\"],\n              \"loops\": 2,\n              \"rows\": 1,\n              \"cost\": 0.00527872,\n              \"filtered\": 100\n            }\n          }\n        ]\n      }\n    }\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+        "explainSql": "EXPLAIN FORMAT=JSON SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.02443602,
+            "costSelf": 0.01221801,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Filesort",
+                "costTotal": 0.01221801,
+                "costSelf": 0,
+                "fields": [
+                  {
+                    "key": "Sort key",
+                    "value": "sum(barsql_golden.o.total) desc"
+                  }
+                ],
+                "children": [
+                  {
+                    "label": "Temporary table",
+                    "costTotal": 0.01221801,
+                    "costSelf": 0,
+                    "children": [
+                      {
+                        "label": "Nested loop",
+                        "costTotal": 0.01221801,
+                        "costSelf": 0,
+                        "children": [
+                          {
+                            "label": "Table (index)",
+                            "relation": "c",
+                            "index": "customers_email_uq",
+                            "costTotal": 0.00693929,
+                            "costSelf": 0.00693929,
+                            "rowsPlanned": 2,
+                            "fields": [
+                              {
+                                "key": "Filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "Key length",
+                                "value": "1022"
+                              },
+                              {
+                                "key": "Loops",
+                                "value": "1"
+                              },
+                              {
+                                "key": "Possible keys",
+                                "value": "PRIMARY"
+                              },
+                              {
+                                "key": "Used key parts",
+                                "value": "email"
+                              },
+                              {
+                                "key": "Using index",
+                                "value": "true"
+                              }
+                            ]
+                          },
+                          {
+                            "label": "Table (ref)",
+                            "relation": "o",
+                            "index": "orders_customer_idx",
+                            "costTotal": 0.00527872,
+                            "costSelf": 0.00527872,
+                            "rowsPlanned": 1,
+                            "fields": [
+                              {
+                                "key": "Filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "Key length",
+                                "value": "4"
+                              },
+                              {
+                                "key": "Loops",
+                                "value": "2"
+                              },
+                              {
+                                "key": "Possible keys",
+                                "value": "orders_customer_idx"
+                              },
+                              {
+                                "key": "Ref",
+                                "value": "barsql_golden.c.id"
+                              },
+                              {
+                                "key": "Used key parts",
+                                "value": "customer_id"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.02443602,
+        "durationMs": 0,
+        "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.01221801,\n    \"filesort\": {\n      \"sort_key\": \"sum(barsql_golden.o.total) desc\",\n      \"temporary_table\": {\n        \"nested_loop\": [\n          {\n            \"table\": {\n              \"table_name\": \"c\",\n              \"access_type\": \"index\",\n              \"possible_keys\": [\"PRIMARY\"],\n              \"key\": \"customers_email_uq\",\n              \"key_length\": \"1022\",\n              \"used_key_parts\": [\"email\"],\n              \"loops\": 1,\n              \"rows\": 2,\n              \"cost\": 0.00693929,\n              \"filtered\": 100,\n              \"using_index\": true\n            }\n          },\n          {\n            \"table\": {\n              \"table_name\": \"o\",\n              \"access_type\": \"ref\",\n              \"possible_keys\": [\"orders_customer_idx\"],\n              \"key\": \"orders_customer_idx\",\n              \"key_length\": \"4\",\n              \"used_key_parts\": [\"customer_id\"],\n              \"ref\": [\"barsql_golden.c.id\"],\n              \"loops\": 2,\n              \"rows\": 1,\n              \"cost\": 0.00527872,\n              \"filtered\": 100\n            }\n          }\n        ]\n      }\n    }\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+      "analyze": true,
+      "explainSql": "ANALYZE FORMAT=JSON SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+      "raw": {
+        "columns": [
+          "ANALYZE"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.022282238\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.01221801,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.037959235,\n    \"filesort\": {\n      \"sort_key\": \"sum(barsql_golden.o.total) desc\",\n      \"r_loops\": 1,\n      \"r_total_time_ms\": 0.002968178,\n      \"r_used_priority_queue\": false,\n      \"r_output_rows\": 2,\n      \"r_buffer_size\": \"496\",\n      \"r_sort_mode\": \"sort_key,rowid\",\n      \"temporary_table\": {\n        \"nested_loop\": [\n          {\n            \"table\": {\n              \"table_name\": \"c\",\n              \"access_type\": \"index\",\n              \"possible_keys\": [\"PRIMARY\"],\n              \"key\": \"customers_email_uq\",\n              \"key_length\": \"1022\",\n              \"used_key_parts\": [\"email\"],\n              \"loops\": 1,\n              \"r_loops\": 1,\n              \"rows\": 2,\n              \"r_rows\": 2,\n              \"cost\": 0.00693929,\n              \"r_table_time_ms\": 0.002633735,\n              \"r_other_time_ms\": 0.002968178,\n              \"r_engine_stats\": {\n                \"pages_accessed\": 1\n              },\n              \"filtered\": 100,\n              \"r_total_filtered\": 100,\n              \"r_filtered\": 100,\n              \"using_index\": true\n            }\n          },\n          {\n            \"table\": {\n              \"table_name\": \"o\",\n              \"access_type\": \"ref\",\n              \"possible_keys\": [\"orders_customer_idx\"],\n              \"key\": \"orders_customer_idx\",\n              \"key_length\": \"4\",\n              \"used_key_parts\": [\"customer_id\"],\n              \"ref\": [\"barsql_golden.c.id\"],\n              \"loops\": 2,\n              \"r_loops\": 2,\n              \"rows\": 1,\n              \"r_rows\": 1.5,\n              \"cost\": 0.00527872,\n              \"r_table_time_ms\": 0.004598586,\n              \"r_other_time_ms\": 0.020233777,\n              \"r_engine_stats\": {\n                \"pages_accessed\": 5\n              },\n              \"filtered\": 100,\n              \"r_total_filtered\": 100,\n              \"r_filtered\": 100\n            }\n          }\n        ]\n      }\n    }\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+        "explainSql": "ANALYZE FORMAT=JSON SELECT c.email, SUM(o.total) FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.email ORDER BY 2 DESC",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.02443602,
+            "costSelf": 0.01221801,
+            "loops": 1,
+            "timeMs": 0.037959235,
+            "selfTimeMs": 0.034991057,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Filesort",
+                "costTotal": 0.01221801,
+                "costSelf": 0,
+                "loops": 1,
+                "timeMs": 0.002968178,
+                "selfTimeMs": 0,
+                "fields": [
+                  {
+                    "key": "R buffer size",
+                    "value": "496"
+                  },
+                  {
+                    "key": "R output rows",
+                    "value": "2"
+                  },
+                  {
+                    "key": "R sort mode",
+                    "value": "sort_key,rowid"
+                  },
+                  {
+                    "key": "R used priority queue",
+                    "value": "false"
+                  },
+                  {
+                    "key": "Sort key",
+                    "value": "sum(barsql_golden.o.total) desc"
+                  }
+                ],
+                "children": [
+                  {
+                    "label": "Temporary table",
+                    "costTotal": 0.01221801,
+                    "costSelf": 0,
+                    "timeMs": 0.030434276000000003,
+                    "selfTimeMs": 0,
+                    "children": [
+                      {
+                        "label": "Nested loop",
+                        "costTotal": 0.01221801,
+                        "costSelf": 0,
+                        "timeMs": 0.030434276000000003,
+                        "selfTimeMs": 0,
+                        "children": [
+                          {
+                            "label": "Table (index)",
+                            "relation": "c",
+                            "index": "customers_email_uq",
+                            "costTotal": 0.00693929,
+                            "costSelf": 0.00693929,
+                            "rowsPlanned": 2,
+                            "rowsActual": 2,
+                            "loops": 1,
+                            "timeMs": 0.005601913,
+                            "selfTimeMs": 0.005601913,
+                            "fields": [
+                              {
+                                "key": "Filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "Key length",
+                                "value": "1022"
+                              },
+                              {
+                                "key": "Loops",
+                                "value": "1"
+                              },
+                              {
+                                "key": "Possible keys",
+                                "value": "PRIMARY"
+                              },
+                              {
+                                "key": "R filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "R total filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "Used key parts",
+                                "value": "email"
+                              },
+                              {
+                                "key": "Using index",
+                                "value": "true"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "label": "R engine stats",
+                                "fields": [
+                                  {
+                                    "key": "Pages accessed",
+                                    "value": "1"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "label": "Table (ref)",
+                            "relation": "o",
+                            "index": "orders_customer_idx",
+                            "costTotal": 0.00527872,
+                            "costSelf": 0.00527872,
+                            "rowsPlanned": 1,
+                            "rowsActual": 3,
+                            "loops": 2,
+                            "timeMs": 0.024832363000000003,
+                            "selfTimeMs": 0.024832363000000003,
+                            "fields": [
+                              {
+                                "key": "Filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "Key length",
+                                "value": "4"
+                              },
+                              {
+                                "key": "Loops",
+                                "value": "2"
+                              },
+                              {
+                                "key": "Possible keys",
+                                "value": "orders_customer_idx"
+                              },
+                              {
+                                "key": "R filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "R total filtered",
+                                "value": "100"
+                              },
+                              {
+                                "key": "Ref",
+                                "value": "barsql_golden.c.id"
+                              },
+                              {
+                                "key": "Used key parts",
+                                "value": "customer_id"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "label": "R engine stats",
+                                "fields": [
+                                  {
+                                    "key": "Pages accessed",
+                                    "value": "5"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Query optimization",
+            "timeMs": 0.022282238,
+            "selfTimeMs": 0.022282238
+          }
+        ],
+        "totalCost": 0.02443602,
+        "executionMs": 0.037959235,
+        "durationMs": 0,
+        "raw": "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.022282238\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.01221801,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.037959235,\n    \"filesort\": {\n      \"sort_key\": \"sum(barsql_golden.o.total) desc\",\n      \"r_loops\": 1,\n      \"r_total_time_ms\": 0.002968178,\n      \"r_used_priority_queue\": false,\n      \"r_output_rows\": 2,\n      \"r_buffer_size\": \"496\",\n      \"r_sort_mode\": \"sort_key,rowid\",\n      \"temporary_table\": {\n        \"nested_loop\": [\n          {\n            \"table\": {\n              \"table_name\": \"c\",\n              \"access_type\": \"index\",\n              \"possible_keys\": [\"PRIMARY\"],\n              \"key\": \"customers_email_uq\",\n              \"key_length\": \"1022\",\n              \"used_key_parts\": [\"email\"],\n              \"loops\": 1,\n              \"r_loops\": 1,\n              \"rows\": 2,\n              \"r_rows\": 2,\n              \"cost\": 0.00693929,\n              \"r_table_time_ms\": 0.002633735,\n              \"r_other_time_ms\": 0.002968178,\n              \"r_engine_stats\": {\n                \"pages_accessed\": 1\n              },\n              \"filtered\": 100,\n              \"r_total_filtered\": 100,\n              \"r_filtered\": 100,\n              \"using_index\": true\n            }\n          },\n          {\n            \"table\": {\n              \"table_name\": \"o\",\n              \"access_type\": \"ref\",\n              \"possible_keys\": [\"orders_customer_idx\"],\n              \"key\": \"orders_customer_idx\",\n              \"key_length\": \"4\",\n              \"used_key_parts\": [\"customer_id\"],\n              \"ref\": [\"barsql_golden.c.id\"],\n              \"loops\": 2,\n              \"r_loops\": 2,\n              \"rows\": 1,\n              \"r_rows\": 1.5,\n              \"cost\": 0.00527872,\n              \"r_table_time_ms\": 0.004598586,\n              \"r_other_time_ms\": 0.020233777,\n              \"r_engine_stats\": {\n                \"pages_accessed\": 5\n              },\n              \"filtered\": 100,\n              \"r_total_filtered\": 100,\n              \"r_filtered\": 100\n            }\n          }\n        ]\n      }\n    }\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN FORMAT=JSON SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+      "raw": {
+        "columns": [
+          "EXPLAIN"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.004452,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"ref\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"ref\": [\"const\"],\n          \"loops\": 1,\n          \"rows\": 2,\n          \"cost\": 0.004452,\n          \"filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+        "explainSql": "EXPLAIN FORMAT=JSON SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.008904,
+            "costSelf": 0.004452,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.004452,
+                "costSelf": 0,
+                "children": [
+                  {
+                    "label": "Table (ref)",
+                    "relation": "orders",
+                    "index": "orders_customer_idx",
+                    "costTotal": 0.004452,
+                    "costSelf": 0.004452,
+                    "rowsPlanned": 2,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Key length",
+                        "value": "4"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      },
+                      {
+                        "key": "Possible keys",
+                        "value": "orders_customer_idx"
+                      },
+                      {
+                        "key": "Ref",
+                        "value": "const"
+                      },
+                      {
+                        "key": "Used key parts",
+                        "value": "customer_id"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.008904,
+        "durationMs": 0,
+        "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.004452,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"ref\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"ref\": [\"const\"],\n          \"loops\": 1,\n          \"rows\": 2,\n          \"cost\": 0.004452,\n          \"filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+      "analyze": true,
+      "explainSql": "ANALYZE FORMAT=JSON SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+      "raw": {
+        "columns": [
+          "ANALYZE"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.016596714\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.004452,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.005476498,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"ref\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"ref\": [\"const\"],\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 2,\n          \"r_rows\": 2,\n          \"cost\": 0.004452,\n          \"r_table_time_ms\": 0.003177205,\n          \"r_other_time_ms\": 0.001295965,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 4\n          },\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+        "explainSql": "ANALYZE FORMAT=JSON SELECT * FROM barsql_golden.orders WHERE customer_id = 1",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.008904,
+            "costSelf": 0.004452,
+            "loops": 1,
+            "timeMs": 0.005476498,
+            "selfTimeMs": 0.0010033279999999995,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.004452,
+                "costSelf": 0,
+                "timeMs": 0.00447317,
+                "selfTimeMs": 0,
+                "children": [
+                  {
+                    "label": "Table (ref)",
+                    "relation": "orders",
+                    "index": "orders_customer_idx",
+                    "costTotal": 0.004452,
+                    "costSelf": 0.004452,
+                    "rowsPlanned": 2,
+                    "rowsActual": 2,
+                    "loops": 1,
+                    "timeMs": 0.00447317,
+                    "selfTimeMs": 0.00447317,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Key length",
+                        "value": "4"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      },
+                      {
+                        "key": "Possible keys",
+                        "value": "orders_customer_idx"
+                      },
+                      {
+                        "key": "R filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "R total filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Ref",
+                        "value": "const"
+                      },
+                      {
+                        "key": "Used key parts",
+                        "value": "customer_id"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "label": "R engine stats",
+                        "fields": [
+                          {
+                            "key": "Pages accessed",
+                            "value": "4"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Query optimization",
+            "timeMs": 0.016596714,
+            "selfTimeMs": 0.016596714
+          }
+        ],
+        "totalCost": 0.008904,
+        "executionMs": 0.005476498,
+        "durationMs": 0,
+        "raw": "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.016596714\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.004452,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.005476498,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"ref\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"ref\": [\"const\"],\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 2,\n          \"r_rows\": 2,\n          \"cost\": 0.004452,\n          \"r_table_time_ms\": 0.003177205,\n          \"r_other_time_ms\": 0.001295965,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 4\n          },\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN FORMAT=JSON WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+      "raw": {
+        "columns": [
+          "EXPLAIN"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.010134054,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"<derived2>\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"rows\": 3,\n          \"cost\": 0.010134054,\n          \"filtered\": 100,\n          \"attached_condition\": \"t.n > 1\",\n          \"materialized\": {\n            \"query_block\": {\n              \"select_id\": 2,\n              \"cost\": 0.008984649,\n              \"having_condition\": \"n > 1\",\n              \"nested_loop\": [\n                {\n                  \"table\": {\n                    \"table_name\": \"orders\",\n                    \"access_type\": \"index\",\n                    \"key\": \"orders_customer_idx\",\n                    \"key_length\": \"4\",\n                    \"used_key_parts\": [\"customer_id\"],\n                    \"loops\": 1,\n                    \"rows\": 3,\n                    \"cost\": 0.007085975,\n                    \"filtered\": 100,\n                    \"using_index\": true\n                  }\n                }\n              ]\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+        "explainSql": "EXPLAIN FORMAT=JSON WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.036338732,
+            "costSelf": 0.010134054,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.026204678000000002,
+                "costSelf": 0,
+                "children": [
+                  {
+                    "label": "Table (ALL)",
+                    "detail": "t.n > 1",
+                    "relation": "<derived2>",
+                    "costTotal": 0.026204678000000002,
+                    "costSelf": 0.010134054,
+                    "rowsPlanned": 3,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "label": "Materialized",
+                        "costTotal": 0.016070624000000002,
+                        "costSelf": 0,
+                        "children": [
+                          {
+                            "label": "Query block #2",
+                            "costTotal": 0.016070624000000002,
+                            "costSelf": 0.008984649,
+                            "fields": [
+                              {
+                                "key": "Having condition",
+                                "value": "n > 1"
+                              },
+                              {
+                                "key": "Select id",
+                                "value": "2"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "label": "Nested loop",
+                                "costTotal": 0.007085975,
+                                "costSelf": 0,
+                                "children": [
+                                  {
+                                    "label": "Table (index)",
+                                    "relation": "orders",
+                                    "index": "orders_customer_idx",
+                                    "costTotal": 0.007085975,
+                                    "costSelf": 0.007085975,
+                                    "rowsPlanned": 3,
+                                    "fields": [
+                                      {
+                                        "key": "Filtered",
+                                        "value": "100"
+                                      },
+                                      {
+                                        "key": "Key length",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "key": "Loops",
+                                        "value": "1"
+                                      },
+                                      {
+                                        "key": "Used key parts",
+                                        "value": "customer_id"
+                                      },
+                                      {
+                                        "key": "Using index",
+                                        "value": "true"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.036338732,
+        "durationMs": 0,
+        "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.010134054,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"<derived2>\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"rows\": 3,\n          \"cost\": 0.010134054,\n          \"filtered\": 100,\n          \"attached_condition\": \"t.n > 1\",\n          \"materialized\": {\n            \"query_block\": {\n              \"select_id\": 2,\n              \"cost\": 0.008984649,\n              \"having_condition\": \"n > 1\",\n              \"nested_loop\": [\n                {\n                  \"table\": {\n                    \"table_name\": \"orders\",\n                    \"access_type\": \"index\",\n                    \"key\": \"orders_customer_idx\",\n                    \"key_length\": \"4\",\n                    \"used_key_parts\": [\"customer_id\"],\n                    \"loops\": 1,\n                    \"rows\": 3,\n                    \"cost\": 0.007085975,\n                    \"filtered\": 100,\n                    \"using_index\": true\n                  }\n                }\n              ]\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+      "analyze": true,
+      "explainSql": "ANALYZE FORMAT=JSON WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+      "raw": {
+        "columns": [
+          "ANALYZE"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.022115017\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.010134054,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.009698835,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"<derived2>\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 3,\n          \"r_rows\": 1,\n          \"cost\": 0.010134054,\n          \"r_table_time_ms\": 3.344426e-4,\n          \"r_other_time_ms\": 0.001170549,\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"attached_condition\": \"t.n > 1\",\n          \"r_filtered\": 100,\n          \"materialized\": {\n            \"query_block\": {\n              \"select_id\": 2,\n              \"cost\": 0.008984649,\n              \"r_loops\": 1,\n              \"r_total_time_ms\": 0.006312604,\n              \"having_condition\": \"n > 1\",\n              \"nested_loop\": [\n                {\n                  \"table\": {\n                    \"table_name\": \"orders\",\n                    \"access_type\": \"index\",\n                    \"key\": \"orders_customer_idx\",\n                    \"key_length\": \"4\",\n                    \"used_key_parts\": [\"customer_id\"],\n                    \"loops\": 1,\n                    \"r_loops\": 1,\n                    \"rows\": 3,\n                    \"r_rows\": 3,\n                    \"cost\": 0.007085975,\n                    \"r_table_time_ms\": 0.002341098,\n                    \"r_other_time_ms\": 0.002675541,\n                    \"r_engine_stats\": {\n                      \"pages_accessed\": 1\n                    },\n                    \"filtered\": 100,\n                    \"r_total_filtered\": 100,\n                    \"r_filtered\": 100,\n                    \"using_index\": true\n                  }\n                }\n              ]\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+        "explainSql": "ANALYZE FORMAT=JSON WITH t AS (SELECT customer_id, COUNT(*) AS n FROM barsql_golden.orders GROUP BY customer_id) SELECT * FROM t WHERE n > 1",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.036338732,
+            "costSelf": 0.010134054,
+            "loops": 1,
+            "timeMs": 0.009698835,
+            "selfTimeMs": 0.0018812393999999982,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.026204678000000002,
+                "costSelf": 0,
+                "timeMs": 0.007817595600000001,
+                "selfTimeMs": 0,
+                "children": [
+                  {
+                    "label": "Table (ALL)",
+                    "detail": "t.n > 1",
+                    "relation": "<derived2>",
+                    "costTotal": 0.026204678000000002,
+                    "costSelf": 0.010134054,
+                    "rowsPlanned": 3,
+                    "rowsActual": 1,
+                    "loops": 1,
+                    "timeMs": 0.007817595600000001,
+                    "selfTimeMs": 0.0015049916,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      },
+                      {
+                        "key": "R filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "R total filtered",
+                        "value": "100"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "label": "Materialized",
+                        "costTotal": 0.016070624000000002,
+                        "costSelf": 0,
+                        "timeMs": 0.006312604,
+                        "selfTimeMs": 0,
+                        "children": [
+                          {
+                            "label": "Query block #2",
+                            "costTotal": 0.016070624000000002,
+                            "costSelf": 0.008984649,
+                            "loops": 1,
+                            "timeMs": 0.006312604,
+                            "selfTimeMs": 0.0012959650000000005,
+                            "fields": [
+                              {
+                                "key": "Having condition",
+                                "value": "n > 1"
+                              },
+                              {
+                                "key": "Select id",
+                                "value": "2"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "label": "Nested loop",
+                                "costTotal": 0.007085975,
+                                "costSelf": 0,
+                                "timeMs": 0.005016639,
+                                "selfTimeMs": 0,
+                                "children": [
+                                  {
+                                    "label": "Table (index)",
+                                    "relation": "orders",
+                                    "index": "orders_customer_idx",
+                                    "costTotal": 0.007085975,
+                                    "costSelf": 0.007085975,
+                                    "rowsPlanned": 3,
+                                    "rowsActual": 3,
+                                    "loops": 1,
+                                    "timeMs": 0.005016639,
+                                    "selfTimeMs": 0.005016639,
+                                    "fields": [
+                                      {
+                                        "key": "Filtered",
+                                        "value": "100"
+                                      },
+                                      {
+                                        "key": "Key length",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "key": "Loops",
+                                        "value": "1"
+                                      },
+                                      {
+                                        "key": "R filtered",
+                                        "value": "100"
+                                      },
+                                      {
+                                        "key": "R total filtered",
+                                        "value": "100"
+                                      },
+                                      {
+                                        "key": "Used key parts",
+                                        "value": "customer_id"
+                                      },
+                                      {
+                                        "key": "Using index",
+                                        "value": "true"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "label": "R engine stats",
+                                        "fields": [
+                                          {
+                                            "key": "Pages accessed",
+                                            "value": "1"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Query optimization",
+            "timeMs": 0.022115017,
+            "selfTimeMs": 0.022115017
+          }
+        ],
+        "totalCost": 0.036338732,
+        "executionMs": 0.009698835,
+        "durationMs": 0,
+        "raw": "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.022115017\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.010134054,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.009698835,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"<derived2>\",\n          \"access_type\": \"ALL\",\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 3,\n          \"r_rows\": 1,\n          \"cost\": 0.010134054,\n          \"r_table_time_ms\": 3.344426e-4,\n          \"r_other_time_ms\": 0.001170549,\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"attached_condition\": \"t.n > 1\",\n          \"r_filtered\": 100,\n          \"materialized\": {\n            \"query_block\": {\n              \"select_id\": 2,\n              \"cost\": 0.008984649,\n              \"r_loops\": 1,\n              \"r_total_time_ms\": 0.006312604,\n              \"having_condition\": \"n > 1\",\n              \"nested_loop\": [\n                {\n                  \"table\": {\n                    \"table_name\": \"orders\",\n                    \"access_type\": \"index\",\n                    \"key\": \"orders_customer_idx\",\n                    \"key_length\": \"4\",\n                    \"used_key_parts\": [\"customer_id\"],\n                    \"loops\": 1,\n                    \"r_loops\": 1,\n                    \"rows\": 3,\n                    \"r_rows\": 3,\n                    \"cost\": 0.007085975,\n                    \"r_table_time_ms\": 0.002341098,\n                    \"r_other_time_ms\": 0.002675541,\n                    \"r_engine_stats\": {\n                      \"pages_accessed\": 1\n                    },\n                    \"filtered\": 100,\n                    \"r_total_filtered\": 100,\n                    \"r_filtered\": 100,\n                    \"using_index\": true\n                  }\n                }\n              ]\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+      "analyze": false,
+      "explainSql": "EXPLAIN FORMAT=JSON SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+      "raw": {
+        "columns": [
+          "EXPLAIN"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.005393495,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"index\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"loops\": 1,\n          \"rows\": 3,\n          \"cost\": 0.001890975,\n          \"filtered\": 100,\n          \"using_index\": true,\n          \"loose_scan\": true\n        }\n      },\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"eq_ref\",\n          \"possible_keys\": [\"PRIMARY\"],\n          \"key\": \"PRIMARY\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"id\"],\n          \"ref\": [\"barsql_golden.orders.customer_id\"],\n          \"loops\": 3,\n          \"rows\": 1,\n          \"cost\": 0.00350252,\n          \"filtered\": 33.33333206\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+        "explainSql": "EXPLAIN FORMAT=JSON SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.01078699,
+            "costSelf": 0.005393495,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.005393495,
+                "costSelf": 0,
+                "children": [
+                  {
+                    "label": "Table (index)",
+                    "relation": "orders",
+                    "index": "orders_customer_idx",
+                    "costTotal": 0.001890975,
+                    "costSelf": 0.001890975,
+                    "rowsPlanned": 3,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Key length",
+                        "value": "4"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      },
+                      {
+                        "key": "Loose scan",
+                        "value": "true"
+                      },
+                      {
+                        "key": "Possible keys",
+                        "value": "orders_customer_idx"
+                      },
+                      {
+                        "key": "Used key parts",
+                        "value": "customer_id"
+                      },
+                      {
+                        "key": "Using index",
+                        "value": "true"
+                      }
+                    ]
+                  },
+                  {
+                    "label": "Table (eq_ref)",
+                    "relation": "customers",
+                    "index": "PRIMARY",
+                    "costTotal": 0.00350252,
+                    "costSelf": 0.00350252,
+                    "rowsPlanned": 1,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "33.33333206"
+                      },
+                      {
+                        "key": "Key length",
+                        "value": "4"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "3"
+                      },
+                      {
+                        "key": "Possible keys",
+                        "value": "PRIMARY"
+                      },
+                      {
+                        "key": "Ref",
+                        "value": "barsql_golden.orders.customer_id"
+                      },
+                      {
+                        "key": "Used key parts",
+                        "value": "id"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.01078699,
+        "durationMs": 0,
+        "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.005393495,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"index\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"loops\": 1,\n          \"rows\": 3,\n          \"cost\": 0.001890975,\n          \"filtered\": 100,\n          \"using_index\": true,\n          \"loose_scan\": true\n        }\n      },\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"eq_ref\",\n          \"possible_keys\": [\"PRIMARY\"],\n          \"key\": \"PRIMARY\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"id\"],\n          \"ref\": [\"barsql_golden.orders.customer_id\"],\n          \"loops\": 3,\n          \"rows\": 1,\n          \"cost\": 0.00350252,\n          \"filtered\": 33.33333206\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+      "analyze": true,
+      "explainSql": "ANALYZE FORMAT=JSON SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+      "raw": {
+        "columns": [
+          "ANALYZE"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.016011439\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.005393495,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.007399542,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"index\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 3,\n          \"r_rows\": 2,\n          \"cost\": 0.001890975,\n          \"r_table_time_ms\": 0.001797629,\n          \"r_other_time_ms\": 0.002382903,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 1\n          },\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100,\n          \"using_index\": true,\n          \"loose_scan\": true\n        }\n      },\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"eq_ref\",\n          \"possible_keys\": [\"PRIMARY\"],\n          \"key\": \"PRIMARY\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"id\"],\n          \"ref\": [\"barsql_golden.orders.customer_id\"],\n          \"loops\": 3,\n          \"r_loops\": 2,\n          \"rows\": 1,\n          \"r_rows\": 1,\n          \"cost\": 0.00350252,\n          \"r_table_time_ms\": 0.001797629,\n          \"r_other_time_ms\": 5.016639e-4,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 2\n          },\n          \"filtered\": 33.33333206,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+        "explainSql": "ANALYZE FORMAT=JSON SELECT * FROM barsql_golden.customers WHERE id IN (SELECT customer_id FROM barsql_golden.orders)",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "costTotal": 0.01078699,
+            "costSelf": 0.005393495,
+            "loops": 1,
+            "timeMs": 0.007399542,
+            "selfTimeMs": 0.0009197171,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Nested loop",
+                "costTotal": 0.005393495,
+                "costSelf": 0,
+                "timeMs": 0.0064798249,
+                "selfTimeMs": 0,
+                "children": [
+                  {
+                    "label": "Table (index)",
+                    "relation": "orders",
+                    "index": "orders_customer_idx",
+                    "costTotal": 0.001890975,
+                    "costSelf": 0.001890975,
+                    "rowsPlanned": 3,
+                    "rowsActual": 2,
+                    "loops": 1,
+                    "timeMs": 0.004180532,
+                    "selfTimeMs": 0.004180532,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Key length",
+                        "value": "4"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "1"
+                      },
+                      {
+                        "key": "Loose scan",
+                        "value": "true"
+                      },
+                      {
+                        "key": "Possible keys",
+                        "value": "orders_customer_idx"
+                      },
+                      {
+                        "key": "R filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "R total filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Used key parts",
+                        "value": "customer_id"
+                      },
+                      {
+                        "key": "Using index",
+                        "value": "true"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "label": "R engine stats",
+                        "fields": [
+                          {
+                            "key": "Pages accessed",
+                            "value": "1"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "label": "Table (eq_ref)",
+                    "relation": "customers",
+                    "index": "PRIMARY",
+                    "costTotal": 0.00350252,
+                    "costSelf": 0.00350252,
+                    "rowsPlanned": 1,
+                    "rowsActual": 2,
+                    "loops": 2,
+                    "timeMs": 0.0022992929,
+                    "selfTimeMs": 0.0022992929,
+                    "fields": [
+                      {
+                        "key": "Filtered",
+                        "value": "33.33333206"
+                      },
+                      {
+                        "key": "Key length",
+                        "value": "4"
+                      },
+                      {
+                        "key": "Loops",
+                        "value": "3"
+                      },
+                      {
+                        "key": "Possible keys",
+                        "value": "PRIMARY"
+                      },
+                      {
+                        "key": "R filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "R total filtered",
+                        "value": "100"
+                      },
+                      {
+                        "key": "Ref",
+                        "value": "barsql_golden.orders.customer_id"
+                      },
+                      {
+                        "key": "Used key parts",
+                        "value": "id"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "label": "R engine stats",
+                        "fields": [
+                          {
+                            "key": "Pages accessed",
+                            "value": "2"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Query optimization",
+            "timeMs": 0.016011439,
+            "selfTimeMs": 0.016011439
+          }
+        ],
+        "totalCost": 0.01078699,
+        "executionMs": 0.007399542,
+        "durationMs": 0,
+        "raw": "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.016011439\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost\": 0.005393495,\n    \"r_loops\": 1,\n    \"r_total_time_ms\": 0.007399542,\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"index\",\n          \"possible_keys\": [\"orders_customer_idx\"],\n          \"key\": \"orders_customer_idx\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"customer_id\"],\n          \"loops\": 1,\n          \"r_loops\": 1,\n          \"rows\": 3,\n          \"r_rows\": 2,\n          \"cost\": 0.001890975,\n          \"r_table_time_ms\": 0.001797629,\n          \"r_other_time_ms\": 0.002382903,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 1\n          },\n          \"filtered\": 100,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100,\n          \"using_index\": true,\n          \"loose_scan\": true\n        }\n      },\n      {\n        \"table\": {\n          \"table_name\": \"customers\",\n          \"access_type\": \"eq_ref\",\n          \"possible_keys\": [\"PRIMARY\"],\n          \"key\": \"PRIMARY\",\n          \"key_length\": \"4\",\n          \"used_key_parts\": [\"id\"],\n          \"ref\": [\"barsql_golden.orders.customer_id\"],\n          \"loops\": 3,\n          \"r_loops\": 2,\n          \"rows\": 1,\n          \"r_rows\": 1,\n          \"cost\": 0.00350252,\n          \"r_table_time_ms\": 0.001797629,\n          \"r_other_time_ms\": 5.016639e-4,\n          \"r_engine_stats\": {\n            \"pages_accessed\": 2\n          },\n          \"filtered\": 33.33333206,\n          \"r_total_filtered\": 100,\n          \"r_filtered\": 100\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "statement": "UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN FORMAT=JSON UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+      "raw": {
+        "columns": [
+          "EXPLAIN"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"table\": {\n      \"update\": 1,\n      \"table_name\": \"orders\",\n      \"access_type\": \"range\",\n      \"possible_keys\": [\"PRIMARY\"],\n      \"key\": \"PRIMARY\",\n      \"key_length\": \"8\",\n      \"used_key_parts\": [\"id\"],\n      \"rows\": 1,\n      \"attached_condition\": \"barsql_golden.orders.`id` = 1\"\n    }\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+        "explainSql": "EXPLAIN FORMAT=JSON UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Table (range)",
+                "detail": "barsql_golden.orders.`id` = 1",
+                "relation": "orders",
+                "index": "PRIMARY",
+                "rowsPlanned": 1,
+                "fields": [
+                  {
+                    "key": "Key length",
+                    "value": "8"
+                  },
+                  {
+                    "key": "Possible keys",
+                    "value": "PRIMARY"
+                  },
+                  {
+                    "key": "Update",
+                    "value": "1"
+                  },
+                  {
+                    "key": "Used key parts",
+                    "value": "id"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "durationMs": 0,
+        "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"table\": {\n      \"update\": 1,\n      \"table_name\": \"orders\",\n      \"access_type\": \"range\",\n      \"possible_keys\": [\"PRIMARY\"],\n      \"key\": \"PRIMARY\",\n      \"key_length\": \"8\",\n      \"used_key_parts\": [\"id\"],\n      \"rows\": 1,\n      \"attached_condition\": \"barsql_golden.orders.`id` = 1\"\n    }\n  }\n}"
+      }
+    },
+    {
+      "statement": "UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+      "analyze": true,
+      "explainSql": "ANALYZE FORMAT=JSON UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+      "raw": {
+        "columns": [
+          "ANALYZE"
+        ],
+        "rows": [
+          [
+            "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.010200499\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"r_total_time_ms\": 0.034238561,\n    \"table\": {\n      \"update\": 1,\n      \"table_name\": \"orders\",\n      \"access_type\": \"range\",\n      \"possible_keys\": [\"PRIMARY\"],\n      \"key\": \"PRIMARY\",\n      \"key_length\": \"8\",\n      \"used_key_parts\": [\"id\"],\n      \"rows\": 1,\n      \"r_rows\": 1,\n      \"r_total_filtered\": 100,\n      \"r_table_time_ms\": 0.028093178,\n      \"r_other_time_ms\": 0.003720674,\n      \"r_engine_stats\": {\n        \"pages_accessed\": 6,\n        \"pages_updated\": 5\n      },\n      \"attached_condition\": \"barsql_golden.orders.`id` = 1\",\n      \"r_filtered\": 100\n    }\n  }\n}"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "mysql",
+        "statement": "UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+        "explainSql": "ANALYZE FORMAT=JSON UPDATE barsql_golden.orders SET total = total + 1 WHERE id = 1",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Query block #1",
+            "timeMs": 0.034238561,
+            "selfTimeMs": 0.002424708999999997,
+            "fields": [
+              {
+                "key": "Select id",
+                "value": "1"
+              }
+            ],
+            "children": [
+              {
+                "label": "Table (range)",
+                "detail": "barsql_golden.orders.`id` = 1",
+                "relation": "orders",
+                "index": "PRIMARY",
+                "rowsPlanned": 1,
+                "rowsActual": 1,
+                "timeMs": 0.031813852000000004,
+                "selfTimeMs": 0.031813852000000004,
+                "fields": [
+                  {
+                    "key": "Key length",
+                    "value": "8"
+                  },
+                  {
+                    "key": "Possible keys",
+                    "value": "PRIMARY"
+                  },
+                  {
+                    "key": "R filtered",
+                    "value": "100"
+                  },
+                  {
+                    "key": "R total filtered",
+                    "value": "100"
+                  },
+                  {
+                    "key": "Update",
+                    "value": "1"
+                  },
+                  {
+                    "key": "Used key parts",
+                    "value": "id"
+                  }
+                ],
+                "children": [
+                  {
+                    "label": "R engine stats",
+                    "fields": [
+                      {
+                        "key": "Pages accessed",
+                        "value": "6"
+                      },
+                      {
+                        "key": "Pages updated",
+                        "value": "5"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "label": "Query optimization",
+            "timeMs": 0.010200499,
+            "selfTimeMs": 0.010200499
+          }
+        ],
+        "executionMs": 0.034238561,
+        "durationMs": 0,
+        "raw": "{\n  \"query_optimization\": {\n    \"r_total_time_ms\": 0.010200499\n  },\n  \"query_block\": {\n    \"select_id\": 1,\n    \"r_total_time_ms\": 0.034238561,\n    \"table\": {\n      \"update\": 1,\n      \"table_name\": \"orders\",\n      \"access_type\": \"range\",\n      \"possible_keys\": [\"PRIMARY\"],\n      \"key\": \"PRIMARY\",\n      \"key_length\": \"8\",\n      \"used_key_parts\": [\"id\"],\n      \"rows\": 1,\n      \"r_rows\": 1,\n      \"r_total_filtered\": 100,\n      \"r_table_time_ms\": 0.028093178,\n      \"r_other_time_ms\": 0.003720674,\n      \"r_engine_stats\": {\n        \"pages_accessed\": 6,\n        \"pages_updated\": 5\n      },\n      \"attached_condition\": \"barsql_golden.orders.`id` = 1\",\n      \"r_filtered\": 100\n    }\n  }\n}"
+      }
+    }
+  ]
+}
