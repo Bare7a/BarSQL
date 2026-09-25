@@ -123,9 +123,10 @@ pub(crate) fn appimage_file(exe: &Path) -> Option<PathBuf> {
 }
 
 // Apps started from an AppImage inherit APPIMAGE, so the executable must also sit in its mount.
+// has_root (not is_absolute) so Unix APPIMAGE paths still count when these unit tests run on Windows.
 pub(crate) fn appimage(exe: &Path, file: Option<OsString>, mount: Option<OsString>) -> Option<PathBuf> {
     let (file, mount) = (PathBuf::from(file?), mount?);
-    (file.is_absolute() && !mount.is_empty() && exe.starts_with(mount)).then_some(file)
+    (file.has_root() && !mount.is_empty() && exe.starts_with(mount)).then_some(file)
 }
 
 fn owning_package(exe: &Path) -> Option<Kind> {
