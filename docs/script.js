@@ -54,7 +54,7 @@
   }
 })();
 
-// Lightbox with the 2048px screenshots. Arrow keys, swipes and the buttons move between them.
+// Lightbox with the full-size WebP screenshots. Arrow keys, swipes and the buttons move between them.
 (function () {
   var box = document.getElementById("lightbox");
   var img = box.querySelector("img");
@@ -74,7 +74,7 @@
   var touchX = null;
 
   function source(item) {
-    return "screenshots/" + item.id + "-2048.webp";
+    return "screenshots/" + item.id + ".webp";
   }
 
   function show(at) {

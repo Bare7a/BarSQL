@@ -514,8 +514,8 @@ macOS and Windows run before a release and when you start the workflow by hand (
 display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the
 connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in
 `crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run.
-It finishes with `cargo xtask docs-images`, which makes the landing page's copies in `docs/screenshots`: 640, 1024 and
-2048 pixels wide as lossless WebP, so the page loads only the size a screen needs.
+It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size
+lossless WebP plus a 640px thumbnail for the landing page.
 
 For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png`
 at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE`
