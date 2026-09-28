@@ -47,7 +47,12 @@ staging="$out/dmg"
 mkdir -p "$staging"
 ditto "$app" "$staging/BarSQL.app"
 ln -s /Applications "$staging/Applications"
-hdiutil create -quiet -volname "BarSQL" -srcfolder "$staging" -ov -format UDZO "$dist/BarSQL-macos-universal.dmg"
+# hdiutil fails now and then on CI runners, so it gets a few tries. Its errors still reach the log.
+for attempt in 1 2 3; do
+  hdiutil create -volname "BarSQL" -srcfolder "$staging" -ov -format UDZO "$dist/BarSQL-macos-universal.dmg" >/dev/null && break
+  [ "$attempt" = 3 ] && { df -h "$dist" >&2; exit 1; }
+  sleep 10
+done
 rm -rf "$staging"
 
 echo "BarSQL $version: $(lipo -archs "$app/Contents/MacOS/BarSQL")"
