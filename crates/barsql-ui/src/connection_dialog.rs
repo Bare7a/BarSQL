@@ -776,13 +776,9 @@ mod tests {
     struct Blank;
 
     impl gpui_kit::Render for Blank {
-        fn render(
-            &mut self,
-            window: &mut gpui_kit::Window,
-            cx: &mut gpui_kit::Context<Self>,
-        ) -> impl gpui_kit::IntoElement {
-            use gpui_kit::{ParentElement as _, Styled as _};
-            gpui_kit::div().size_full().children(Root::render_dialog_layer(window, cx))
+        fn render(&mut self, _: &mut gpui_kit::Window, _: &mut gpui_kit::Context<Self>) -> impl gpui_kit::IntoElement {
+            use gpui_kit::Styled as _;
+            gpui_kit::div().size_full()
         }
     }
 

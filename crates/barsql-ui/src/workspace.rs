@@ -212,6 +212,15 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
         let mut after: Option<crate::snapshot::AfterRun> = None;
         let window = cx.open_window(window_options, |window, cx| {
             window.set_rem_size(px(theme::zoom(cx)));
+            // On macOS the close button quits like Cmd+Q, with the window still open. Closing the window first
+            // drops GPUI's AccessKit adapter, which resets the class of the content view while the Touch Bar
+            // observes it through KVO, and AppKit aborts on the Touch Bar's next update.
+            if cfg!(target_os = "macos") {
+                window.on_window_should_close(cx, |_, cx| {
+                    cx.quit();
+                    false
+                });
+            }
             let view = cx.new(|cx| Workspace::new(window, cx));
             if track {
                 view.update(cx, |workspace, cx| workspace.track_window(saved.clone(), window, cx));
@@ -1446,9 +1455,6 @@ impl Render for Workspace {
                 ),
             )
             .child(status_bar::render(self.status(cx), cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
             .children(toast::render(window, cx))
             .child(self.drop_overlay(cx))
             .child(self.context_menu.clone())

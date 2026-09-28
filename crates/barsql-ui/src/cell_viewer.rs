@@ -110,12 +110,11 @@ impl CellViewer {
                 .dropdown_menu(move |mut menu: PopupMenu, _, cx| {
                     for kind in SELECTABLE {
                         let this = this.clone();
+                        let label = t(cx, kind.label_key()).to_uppercase();
                         menu =
-                            menu.item(PopupMenuItem::new(t(cx, kind.label_key())).checked(kind == current).on_click(
-                                move |_, _, cx| {
-                                    this.update(cx, |viewer, cx| viewer.set_kind(kind, cx)).ok();
-                                },
-                            ));
+                            menu.item(PopupMenuItem::new(label).checked(kind == current).on_click(move |_, _, cx| {
+                                this.update(cx, |viewer, cx| viewer.set_kind(kind, cx)).ok();
+                            }));
                     }
                     menu
                 })

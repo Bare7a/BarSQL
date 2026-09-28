@@ -268,8 +268,6 @@ pub struct Grid {
     editing: Option<Editing>,
     load_armed: bool,
     scrolled_to: Pixels,
-    // Pasting the last copy straight back reuses these exact values, NULLs included.
-    last_copy: Option<(String, Vec<Vec<Option<String>>>)>,
 }
 
 impl EventEmitter<GridEvent> for Grid {}
@@ -309,7 +307,6 @@ impl Grid {
             editing: None,
             load_armed: true,
             scrolled_to: px(0.),
-            last_copy: None,
         }
     }
 
@@ -510,22 +507,21 @@ impl Grid {
         let staged = self.staged();
         if single_cell && let Some((row, column)) = copy::single_cell(&self.selection, &self.view()) {
             let text = copy::cell_text(&self.set, staged.as_ref(), row, column);
-            let value = copy::shown(&self.set, staged.as_ref(), row, column).display().map(str::to_string);
-            self.last_copy = self.overlay.is_some().then(|| (text.clone(), vec![vec![value]]));
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            let target = CopyTarget { columns: vec![column], rows: vec![row] };
+            cx.write_to_clipboard(copy::clipboard_item(text, None, &self.set, staged.as_ref(), &target));
             toast::success(t(cx, "toast.copiedCell"), cx);
             return;
         }
         let (set, target, table) = (self.set.clone(), self.copy_target(), self.table.clone());
-        let values = self.overlay.is_some().then(|| copy::values(&set, staged.as_ref(), &target));
         let format = copy_format(cx);
-        let text =
-            cx.background_spawn(async move { copy::export(&set, staged.as_ref(), format, table.as_deref(), &target) });
+        let item = cx.background_spawn(async move {
+            let text = copy::export(&set, staged.as_ref(), format, table.as_deref(), &target);
+            copy::clipboard_item(text, Some(format), &set, staged.as_ref(), &target)
+        });
         cx.spawn_in(window, async move |this, cx| {
-            let text = text.await;
-            this.update(cx, |grid, cx| {
-                grid.last_copy = values.map(|values| (text.clone(), values));
-                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            let item = item.await;
+            this.update(cx, |_, cx| {
+                cx.write_to_clipboard(item);
                 toast::success(t(cx, "toast.copiedClipboard"), cx);
             })
             .ok();

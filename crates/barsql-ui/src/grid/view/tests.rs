@@ -4,13 +4,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use barsql_db::{ChunkBuilder, ColumnMeta};
+use barsql_io::ExportFormat;
 use gpui_kit::component::Root;
 use gpui_kit::{
     AppContext as _, Bounds, Entity, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollWheelEvent,
     TestAppContext, TouchPhase, VisualTestContext, point, px,
 };
 
-use super::{Grid, GridEvent, MAX_CELL_CHARS, Metrics, Width, display_text};
+use super::{Grid, GridEvent, MAX_CELL_CHARS, Metrics, TableOverlay, Width, display_text};
 use crate::grid::range::CellRange;
 use crate::test_support::Env;
 
@@ -28,8 +29,6 @@ fn modifier() -> &'static str {
 // `rows` rows of (id, name, note) where every third note is NULL.
 fn open(cx: &mut TestAppContext, rows: usize) -> (Env, Entity<Grid>, &mut VisualTestContext) {
     let env = Env::new(cx);
-    let columns: Arc<[ColumnMeta]> =
-        ["id", "name", "note"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into();
     let mut builder = ChunkBuilder::new(3, rows);
     for row in 0..rows {
         builder.push_number(|s| s.push_str(&(rows - row).to_string()));
@@ -41,6 +40,14 @@ fn open(cx: &mut TestAppContext, rows: usize) -> (Env, Entity<Grid>, &mut Visual
         }
         builder.end_row();
     }
+    let (grid, cx) = mount(builder, cx);
+    (env, grid, cx)
+}
+
+// A focused grid of (id, name, note) in its own window.
+fn mount(builder: ChunkBuilder, cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
+    let columns: Arc<[ColumnMeta]> =
+        ["id", "name", "note"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into();
     let grid = cx.new(|cx| Grid::new(columns, cx));
     let view = grid.clone();
     let window = cx.add_window(move |window, cx| Root::new(view, window, cx));
@@ -51,7 +58,7 @@ fn open(cx: &mut TestAppContext, rows: usize) -> (Env, Entity<Grid>, &mut Visual
         window.focus(&focus, cx);
     });
     cx.run_until_parked();
-    (env, grid, cx)
+    (grid, cx)
 }
 
 fn geometry(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> (Bounds<Pixels>, Metrics, Vec<Pixels>) {
@@ -198,6 +205,54 @@ fn copy_takes_a_lone_cell_raw_and_a_selection_in_the_copy_format(cx: &mut TestAp
     cx.run_until_parked();
     let text = cx.read_from_clipboard().and_then(|item| item.text());
     assert_eq!(text.as_deref(), Some("id,name,note\n3,name 0,note 0\n2,name 1,note 1\n1,name 2,"));
+}
+
+// Copied from a grid that can't be edited, like query results, and pasted into a table view.
+#[gpui_kit::test]
+fn a_text_copy_pastes_exact_values_into_an_editable_grid(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let mut builder = ChunkBuilder::new(3, 2);
+    for (id, name, note) in [("1", "tab\there", Some("has \"quote\"")), ("2", "line1\nline2", None)] {
+        builder.push_number(|s| s.push_str(id));
+        builder.push_text(|s| s.push_str(name));
+        match note {
+            Some(note) => builder.push_text(|s| s.push_str(note)),
+            None => builder.push_null(),
+        }
+        builder.end_row();
+    }
+    let (grid, cx) = mount(builder, cx);
+    cx.update(|_, cx| super::set_copy_format(ExportFormat::Text, cx));
+    cx.simulate_keystrokes(&format!("{}-a", modifier()));
+    cx.simulate_keystrokes(&format!("{}-c", modifier()));
+    cx.run_until_parked();
+    let text = cx.read_from_clipboard().and_then(|item| item.text());
+    assert_eq!(text.as_deref(), Some("1\ttab\there\thas \"quote\"\n2\tline1\nline2\t"), "tabs between columns");
+
+    let pasted = Rc::new(RefCell::new(Vec::new()));
+    let sink = pasted.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&grid, move |_, event: &GridEvent, _| {
+            if let GridEvent::PasteCells(cells) = event {
+                sink.borrow_mut().extend(cells.iter().cloned());
+            }
+        })
+        .detach()
+    });
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { editable: true, ..Default::default() }, cx));
+    cx.simulate_keystrokes(&format!("{}-v", modifier()));
+    let value = |s: &str| Some(s.to_string());
+    assert_eq!(
+        *pasted.borrow(),
+        [
+            (0, 0, value("1")),
+            (0, 1, value("tab\there")),
+            (0, 2, value("has \"quote\"")),
+            (1, 0, value("2")),
+            (1, 1, value("line1\nline2")),
+            (1, 2, None),
+        ]
+    );
 }
 
 #[gpui_kit::test]

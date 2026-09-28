@@ -4,8 +4,14 @@ use std::sync::Arc;
 use barsql_db::{Cell, ResultSet};
 use barsql_io::export::EXPORT_CHUNK_ROWS;
 use barsql_io::{ExportChunk, ExportFormat, Exporter, export_to_string};
+use gpui_kit::{ClipboardEntry, ClipboardItem};
+use serde::{Deserialize, Serialize};
 
 use super::selection::{Selection, View};
+
+// Copies up to this many cells also carry their values, so a paste into any grid puts back exactly what was
+// copied, NULLs, tabs and line breaks included. The text alone can't tell those apart.
+const EXACT_PASTE_CELLS: usize = 100_000;
 
 // Result-set column and row indices, both in display order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +109,69 @@ pub fn values(set: &ResultSet, staged: Option<&Staged>, target: &CopyTarget) -> 
         .collect()
 }
 
+#[derive(Serialize, Deserialize)]
+struct CopiedCells {
+    barsql_cells: Vec<Vec<Option<String>>>,
+    // The copy format's id. None for a lone cell's raw value.
+    #[serde(default)]
+    format: Option<String>,
+}
+
+// Other apps get the text. The values ride along as clipboard metadata, which the platform drops once anything
+// else replaces the text.
+pub fn clipboard_item(
+    text: String,
+    format: Option<ExportFormat>,
+    set: &ResultSet,
+    staged: Option<&Staged>,
+    target: &CopyTarget,
+) -> ClipboardItem {
+    if target.rows.len() * target.columns.len() > EXACT_PASTE_CELLS {
+        return ClipboardItem::new_string(text);
+    }
+    let copied =
+        CopiedCells { barsql_cells: values(set, staged, target), format: format.map(|format| format.id().into()) };
+    ClipboardItem::new_string_with_json_metadata(text, copied)
+}
+
+fn copied(item: &ClipboardItem) -> Option<CopiedCells> {
+    match item.entries() {
+        [ClipboardEntry::String(text)] => text.metadata_json(),
+        _ => None,
+    }
+}
+
+// The values of a grid copy, or None for text from anywhere else.
+pub fn copied_cells(item: &ClipboardItem) -> Option<Vec<Vec<Option<String>>>> {
+    copied(item).map(|copied| copied.barsql_cells)
+}
+
+// A Text copy of several columns, laid out to line up in the SQL editor, which draws tabs too narrowly to show
+// them. Every column but the last is padded to its widest value plus two spaces. Line breaks and tabs inside a
+// value become spaces, so each row stays on one line.
+pub fn aligned_text(item: &ClipboardItem) -> Option<String> {
+    let copied = copied(item).filter(|copied| copied.format.as_deref() == Some(ExportFormat::Text.id()))?;
+    let flat = |value: &Option<String>| {
+        value.as_deref().unwrap_or_default().replace("\r\n", " ").replace(['\r', '\n', '\t'], " ")
+    };
+    let rows: Vec<Vec<String>> = copied.barsql_cells.iter().map(|row| row.iter().map(flat).collect()).collect();
+    let columns = rows.iter().map(Vec::len).max().filter(|&columns| columns > 1)?;
+    let widths: Vec<usize> = (0..columns)
+        .map(|c| rows.iter().filter_map(|row| row.get(c)).map(|value| value.chars().count()).max().unwrap_or(0))
+        .collect();
+    let line = |row: &Vec<String>| {
+        let mut line = String::new();
+        for (c, value) in row.iter().enumerate() {
+            line.push_str(value);
+            if c + 1 < row.len() {
+                line.push_str(&" ".repeat(widths[c] - value.chars().count() + 2));
+            }
+        }
+        line.trim_end().to_string()
+    };
+    Some(rows.iter().map(line).collect::<Vec<_>>().join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -190,5 +259,44 @@ mod tests {
         selection.focus(0, 0);
         selection.rows.insert(0);
         assert_eq!(single_cell(&selection, &view), None);
+    }
+
+    #[test]
+    fn grid_copies_carry_their_exact_values() {
+        let order = RowOrder::identity(3);
+        let columns = [0, 1, 2];
+        let view = View { order: &order, columns: &columns };
+        let target = resolve(&Selection::default(), &view);
+        let text = export(&set(), None, ExportFormat::Text, None, &target);
+        let item = clipboard_item(text.clone(), Some(ExportFormat::Text), &set(), None, &target);
+        assert_eq!(item.text(), Some(text.clone()), "other apps get the text");
+        assert_eq!(copied_cells(&item), Some(values(&set(), None, &target)));
+        assert_eq!(copied_cells(&ClipboardItem::new_string(text.clone())), None);
+        assert_eq!(copied_cells(&ClipboardItem::new_string_with_json_metadata(text, [1, 2])), None, "another app's");
+        let huge = CopyTarget { columns: vec![0], rows: vec![0; EXACT_PASTE_CELLS + 1] };
+        assert_eq!(copied_cells(&clipboard_item(String::new(), None, &set(), None, &huge)), None, "too big to carry");
+    }
+
+    #[test]
+    fn text_copies_line_up_for_the_editor() {
+        let order = RowOrder::identity(3);
+        let columns = [1, 2, 0];
+        let view = View { order: &order, columns: &columns };
+        let target = resolve(&Selection::default(), &view);
+        let item = |format| clipboard_item(String::new(), format, &set(), None, &target);
+        assert_eq!(
+            aligned_text(&item(Some(ExportFormat::Text))).as_deref(),
+            Some("ann  a,b  1\nbob       2\ncy   x    3")
+        );
+        assert_eq!(aligned_text(&item(Some(ExportFormat::Csv))), None, "other formats paste as copied");
+        assert_eq!(aligned_text(&item(None)), None, "a lone cell pastes raw");
+        let one = resolve(&Selection::default(), &View { order: &order, columns: &[1] });
+        assert_eq!(aligned_text(&clipboard_item(String::new(), Some(ExportFormat::Text), &set(), None, &one)), None);
+        assert_eq!(aligned_text(&ClipboardItem::new_string("a\tb".into())), None);
+
+        let staged: Staged =
+            Arc::new(HashMap::from([((0, 1), Some("two\nlines".into())), ((1, 2), Some("t\tab".into()))]));
+        let item = clipboard_item(String::new(), Some(ExportFormat::Text), &set(), Some(&staged), &target);
+        assert_eq!(aligned_text(&item).as_deref(), Some("two lines  a,b   1\nbob        t ab  2\ncy         x     3"));
     }
 }
