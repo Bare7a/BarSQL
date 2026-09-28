@@ -47,9 +47,10 @@ staging="$out/dmg"
 mkdir -p "$staging"
 ditto "$app" "$staging/BarSQL.app"
 ln -s /Applications "$staging/Applications"
-# hdiutil fails now and then on CI runners, so it gets a few tries. Its errors still reach the log.
+size_mb=$(($(du -sAm "$staging" | cut -f1) * 2))
 for attempt in 1 2 3; do
-  hdiutil create -volname "BarSQL" -srcfolder "$staging" -ov -format UDZO "$dist/BarSQL-macos-universal.dmg" >/dev/null && break
+  hdiutil create -size "${size_mb}m" -volname "BarSQL" -srcfolder "$staging" -ov -format UDZO \
+    "$dist/BarSQL-macos-universal.dmg" >/dev/null && break
   [ "$attempt" = 3 ] && { df -h "$dist" >&2; exit 1; }
   sleep 10
 done
