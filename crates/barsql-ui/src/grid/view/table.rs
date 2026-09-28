@@ -11,7 +11,7 @@ use super::super::copy::{self, Staged};
 use super::super::sort::RowOrder;
 use super::{Editing, Grid, GridEvent, SortState, TableOverlay, Target, Width};
 use crate::i18n::{t, t_with};
-use crate::table_edits::{parse_clipboard_grid, paste_cells};
+use crate::table_edits::{paste_cells, text_cells};
 
 // Rows this close to the bottom ask for the next page.
 const LOAD_MORE_ROWS: f32 = 4.;
@@ -161,7 +161,7 @@ impl Grid {
         }
     }
 
-    // Pastes at the range's top-left or the focused cell. Our own last copy pastes back exactly, and other
+    // Pastes at the range's top-left or the focused cell. A copy from any grid pastes back exactly, and other
     // text is split into tab- or comma-separated fields.
     pub(super) fn paste(&mut self, cx: &mut Context<Self>) {
         if !self.editable() {
@@ -173,10 +173,10 @@ impl Grid {
             None => self.focused_data_cell().map(|(display, ..)| (display, self.selection.focus_col as usize)),
         };
         let Some((row, col)) = anchor else { return };
-        let text = cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default();
-        let grid: Vec<Vec<Option<String>>> = match &self.last_copy {
-            Some((copied, cells)) if *copied == text => cells.clone(),
-            _ => parse_clipboard_grid(&text).into_iter().map(|row| row.into_iter().map(Some).collect()).collect(),
+        let item = cx.read_from_clipboard();
+        let grid = match item.as_ref().and_then(copy::copied_cells) {
+            Some(cells) => cells,
+            None => text_cells(&item.and_then(|item| item.text()).unwrap_or_default()),
         };
         let cells: Vec<_> = paste_cells(&grid, row, col, self.order.len(), &self.columns)
             .into_iter()

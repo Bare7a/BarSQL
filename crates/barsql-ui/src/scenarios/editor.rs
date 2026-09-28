@@ -1,3 +1,4 @@
+use barsql_io::ExportFormat;
 use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
 
 use super::driver::open;
@@ -90,6 +91,24 @@ fn vs_code_line_commands_edit_the_current_line(cx: &mut TestAppContext) {
     caret(&mut app, 0);
     app.keys("mod-v");
     assert_eq!(app.sql(), "Xone\none\ntwo\nthree", "other text pastes at the caret");
+}
+
+// The editor draws tabs too narrowly to show them, so Text copies from the results line up in columns there.
+#[gpui_kit::test]
+fn a_text_copy_of_results_pastes_into_the_editor_in_columns(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS id, 'Ann' AS name, NULL AS note UNION ALL SELECT 22, 'Bartholomew', 'x';");
+    app.cx.update(|_, cx| crate::grid::set_copy_format(ExportFormat::Text, cx));
+    let grid = app.grid().expect("a grid");
+    let at = app.grid_point(&grid, |grid| grid.cell_point(0, 0));
+    app.click_at(at, Modifiers::none());
+    app.keys("mod-a mod-c");
+    let copied = app.cx.read_from_clipboard().and_then(|item| item.text());
+    assert_eq!(copied.as_deref(), Some("1\tAnn\t\n22\tBartholomew\tx"), "other apps get tabs");
+    app.set_sql("");
+    app.keys("mod-v");
+    assert_eq!(app.sql(), "1   Ann\n22  Bartholomew  x");
 }
 
 // On Linux GPUI Kit's own keys duplicate the line, so VS Code's Ctrl+Shift+Down is used there.

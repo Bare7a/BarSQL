@@ -26,7 +26,7 @@ use crate::context_menu::{self, Entry};
 use crate::dialogs::{self, Prompt};
 use crate::editor_commands;
 use crate::form::ToolButton;
-use crate::grid::RowRef;
+use crate::grid::{RowRef, copy};
 use crate::i18n::{I18n, t, t_with};
 use crate::results::{ResultStatus, ResultsEvent, ResultsPanel};
 use crate::saved_queries;
@@ -891,7 +891,15 @@ impl Render for QueryTab {
                             .bordered(false)
                             .pl(rems(GLYPH_MARGIN_REM))
                             .text_size(font_size)
-                            .context_menu(editor_menu(self.editor.read(cx).focus_handle(cx))),
+                            .context_menu(editor_menu(self.editor.read(cx).focus_handle(cx)))
+                            .on_paste({
+                                let editor = self.editor.clone();
+                                move |item, window, cx| {
+                                    let Some(text) = copy::aligned_text(item) else { return false };
+                                    editor.update(cx, |editor, cx| editor.replace(text, window, cx));
+                                    true
+                                }
+                            }),
                     )
                     .child(self.run_glyphs(cx))
                     .child(self.completion.clone()),

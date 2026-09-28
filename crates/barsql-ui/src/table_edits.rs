@@ -217,7 +217,7 @@ impl Staging {
 }
 
 // Tab-separated if there's any tab, as from spreadsheets or our Text copy, else comma-separated.
-// Quotes follow RFC 4180 and a trailing newline adds no row.
+// Quotes follow RFC 4180, so only a leading one opens a quoted field. A trailing newline adds no row.
 pub fn parse_clipboard_grid(text: &str) -> Vec<Vec<String>> {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     if normalized.is_empty() {
@@ -239,7 +239,7 @@ pub fn parse_clipboard_grid(text: &str) -> Vec<Vec<String>> {
             continue;
         }
         match c {
-            '"' => quoted = true,
+            '"' if field.is_empty() => quoted = true,
             '\n' => {
                 row.push(std::mem::take(&mut field));
                 grid.push(std::mem::take(&mut row));
@@ -256,8 +256,14 @@ pub fn parse_clipboard_grid(text: &str) -> Vec<Vec<String>> {
     grid
 }
 
+// Text can't say NULL, so an empty field pastes as one.
+pub fn text_cells(text: &str) -> Vec<Vec<Option<String>>> {
+    let field = |field: String| (!field.is_empty()).then_some(field);
+    parse_clipboard_grid(text).into_iter().map(|row| row.into_iter().map(field).collect()).collect()
+}
+
 // `anchor_row` is a display row and `anchor_col` a column position. Cells past the loaded rows or visible
-// columns are dropped, and an empty field pastes as NULL.
+// columns are dropped.
 pub fn paste_cells(
     grid: &[Vec<Option<String>>],
     anchor_row: usize,
@@ -273,7 +279,7 @@ pub fn paste_cells(
         }
         for (dc, field) in fields.iter().enumerate() {
             let Some(&column) = columns.get(anchor_col + dc) else { continue };
-            cells.push((row, column, field.clone().filter(|value| !value.is_empty())));
+            cells.push((row, column, field.clone()));
         }
     }
     cells
@@ -440,6 +446,9 @@ mod tests {
         assert_eq!(grid("a\tb\r\nc\td\re\tf"), rows(&[&["a", "b"], &["c", "d"], &["e", "f"]]));
         assert_eq!(grid("a\tb\n1\t2\n"), rows(&[&["a", "b"], &["1", "2"]]));
         assert_eq!(grid("a\t\tc"), rows(&[&["a", "", "c"]]));
+        assert_eq!(grid("has \"quote\"\t{\"b\":1}"), rows(&[&["has \"quote\"", "{\"b\":1}"]]), "quotes inside a field");
+        assert_eq!(grid("\"a\tb\"\tc"), rows(&[&["a\tb", "c"]]));
+        assert_eq!(text_cells("a\t\tc"), [[Some("a".into()), None, Some("c".into())]], "an empty field is NULL");
     }
 
     #[test]
@@ -455,7 +464,7 @@ mod tests {
             ((1, 1, field("1")), (1, 3, field("3")), (3, 3, field("9")))
         );
         assert_eq!(paste_cells(&[vec![field("x")]], 5, 2, 100, &columns), [(5, 2, field("x"))]);
-        assert_eq!(paste_cells(&[vec![field("")]], 0, 0, 100, &columns), [(0, 0, None)]);
+        assert_eq!(paste_cells(&[vec![field(""), None]], 0, 0, 100, &columns), [(0, 0, field("")), (0, 1, None)]);
         let column_of_three = [vec![field("1")], vec![field("2")], vec![field("3")]];
         assert_eq!(paste_cells(&column_of_three, 1, 0, 2, &columns), [(1, 0, field("1"))]);
         assert_eq!(paste_cells(&[vec![field("1"), field("2"), field("3")]], 0, 4, 100, &columns), [(0, 4, field("1"))]);

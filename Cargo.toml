@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
@@ -23,7 +23,7 @@ bytes = "1"
 dirs = "7"
 flate2 = "1"
 futures-util = "0.3"
-gpui-kit = { version = "=0.6.6", features = ["tree-sitter-sql", "tree-sitter-html"] }
+gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "tree-sitter-html"] }
 hex = "0.4"
 interprocess = "2"
 jiff = "0.2"
@@ -39,7 +39,7 @@ rustls-native-certs = "0.8"
 ryu-js = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
-sha2 = "0.10"
+sha2 = "0.11"
 sqlformat = "0.5"
 tar = "0.4"
 tempfile = "3"

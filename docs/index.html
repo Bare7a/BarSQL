@@ -140,8 +140,8 @@
     <div class="container hero-shot">
       <button type="button" class="shot shot-hero" data-shot="1" aria-label="View the editor screenshot full size">
         <img
-          src="screenshots/1-1024.webp"
-          srcset="screenshots/1-640.webp 640w, screenshots/1-1024.webp 1024w, screenshots/1-2048.webp 2048w"
+          src="screenshots/1-640.webp"
+          srcset="screenshots/1-640.webp 640w, screenshots/1.webp 2048w"
           sizes="(min-width: 1120px) 1024px, calc(100vw - 32px)"
           width="2048" height="1152" fetchpriority="high" decoding="async"
           alt="BarSQL's editor with schema-aware suggestions, a saved query's results in the grid and the focused row as JSON" />
@@ -245,7 +245,7 @@
           </ul>
         </div>
         <button type="button" class="shot" data-shot="2" aria-label="View the transactions screenshot full size">
-          <img src="screenshots/2-1024.webp" srcset="screenshots/2-640.webp 640w, screenshots/2-1024.webp 1024w, screenshots/2-2048.webp 2048w"
+          <img src="screenshots/2-640.webp" srcset="screenshots/2-640.webp 640w, screenshots/2.webp 2048w"
             sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
             alt="A transaction with two INSERT … RETURNING statements, each with its own result tab" />
         </button>
@@ -264,7 +264,7 @@
           </ul>
         </div>
         <button type="button" class="shot" data-shot="10" aria-label="View the plan viewer screenshot full size">
-          <img src="screenshots/10-1024.webp" srcset="screenshots/10-640.webp 640w, screenshots/10-1024.webp 1024w, screenshots/10-2048.webp 2048w"
+          <img src="screenshots/10-640.webp" srcset="screenshots/10-640.webp 640w, screenshots/10.webp 2048w"
             sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
             alt="A measured query plan with heat bars, flagged row estimates and the hottest node's details" />
         </button>
@@ -283,7 +283,7 @@
           </ul>
         </div>
         <button type="button" class="shot" data-shot="3" aria-label="View the table data screenshot full size">
-          <img src="screenshots/3-1024.webp" srcset="screenshots/3-640.webp 640w, screenshots/3-1024.webp 1024w, screenshots/3-2048.webp 2048w"
+          <img src="screenshots/3-640.webp" srcset="screenshots/3-640.webp 640w, screenshots/3.webp 2048w"
             sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
             alt="A table with a staged edit, two rows marked for delete and suggestions in the filter" />
         </button>
@@ -302,7 +302,7 @@
           </ul>
         </div>
         <button type="button" class="shot" data-shot="9" aria-label="View the DDL screenshot full size">
-          <img src="screenshots/9-1024.webp" srcset="screenshots/9-640.webp 640w, screenshots/9-1024.webp 1024w, screenshots/9-2048.webp 2048w"
+          <img src="screenshots/9-640.webp" srcset="screenshots/9-640.webp 640w, screenshots/9.webp 2048w"
             sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
             alt="A table's DDL in an editor tab beside its indexes and constraints in the schema tree" />
         </button>
@@ -321,7 +321,7 @@
           </ul>
         </div>
         <button type="button" class="shot" data-shot="11" aria-label="View the import screenshot full size">
-          <img src="screenshots/11-1024.webp" srcset="screenshots/11-640.webp 640w, screenshots/11-1024.webp 1024w, screenshots/11-2048.webp 2048w"
+          <img src="screenshots/11-640.webp" srcset="screenshots/11-640.webp 640w, screenshots/11.webp 2048w"
             sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async"
             alt="The import dialog with a CSV's columns mapped onto an existing table" />
         </button>
@@ -360,18 +360,18 @@
       <h2>Screenshots</h2>
       <p class="section-sub">Click a screenshot to see it full size, then use the arrow keys to browse.</p>
       <div class="gallery">
-        <figure><button type="button" class="shot" data-shot="1" data-caption="Editor"><img src="screenshots/1-640.webp" srcset="screenshots/1-640.webp 640w, screenshots/1-1024.webp 1024w, screenshots/1-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The editor with schema-aware suggestions" /></button><figcaption>Editor</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="2" data-caption="Transactions &amp; multiple results"><img src="screenshots/2-640.webp" srcset="screenshots/2-640.webp 640w, screenshots/2-1024.webp 1024w, screenshots/2-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A transaction with a result tab per statement" /></button><figcaption>Transactions &amp; multiple results</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="3" data-caption="Table data"><img src="screenshots/3-640.webp" srcset="screenshots/3-640.webp 640w, screenshots/3-1024.webp 1024w, screenshots/3-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A table with staged changes and a filter" /></button><figcaption>Table data</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="4" data-caption="Cell editor"><img src="screenshots/4-640.webp" srcset="screenshots/4-640.webp 640w, screenshots/4-1024.webp 1024w, screenshots/4-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The cell editor showing a JSON value" /></button><figcaption>Cell editor</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="5" data-caption="Grid"><img src="screenshots/5-640.webp" srcset="screenshots/5-640.webp 640w, screenshots/5-1024.webp 1024w, screenshots/5-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A range of cells selected in the grid, with the copy formats" /></button><figcaption>Grid</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="6" data-caption="Export"><img src="screenshots/6-640.webp" srcset="screenshots/6-640.webp 640w, screenshots/6-1024.webp 1024w, screenshots/6-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The export dialog for the selected rows and columns" /></button><figcaption>Export</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="7" data-caption="Connections"><img src="screenshots/7-640.webp" srcset="screenshots/7-640.webp 640w, screenshots/7-1024.webp 1024w, screenshots/7-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A new connection over the connections grouped in folders" /></button><figcaption>Connections</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="8" data-caption="Quick Search"><img src="screenshots/8-640.webp" srcset="screenshots/8-640.webp 640w, screenshots/8-1024.webp 1024w, screenshots/8-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="Quick Search over tabs, tables and connections" /></button><figcaption>Quick Search</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="9" data-caption="DDL viewer"><img src="screenshots/9-640.webp" srcset="screenshots/9-640.webp 640w, screenshots/9-1024.webp 1024w, screenshots/9-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A table's DDL beside the schema tree" /></button><figcaption>DDL viewer</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="10" data-caption="Plan viewer"><img src="screenshots/10-640.webp" srcset="screenshots/10-640.webp 640w, screenshots/10-1024.webp 1024w, screenshots/10-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A measured query plan with heat bars" /></button><figcaption>Plan viewer</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="11" data-caption="CSV &amp; SQL import"><img src="screenshots/11-640.webp" srcset="screenshots/11-640.webp 640w, screenshots/11-1024.webp 1024w, screenshots/11-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="A CSV mapped onto an existing table" /></button><figcaption>CSV &amp; SQL import</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="12" data-caption="Appearance"><img src="screenshots/12-640.webp" srcset="screenshots/12-640.webp 640w, screenshots/12-1024.webp 1024w, screenshots/12-2048.webp 2048w" sizes="(min-width: 1120px) 346px, (min-width: 640px) 45vw, calc(100vw - 32px)" width="2048" height="1152" loading="lazy" decoding="async" alt="The light theme with the View menu open" /></button><figcaption>Appearance</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="1" data-caption="Editor"><img src="screenshots/1-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="The editor with schema-aware suggestions" /></button><figcaption>Editor</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="2" data-caption="Transactions &amp; multiple results"><img src="screenshots/2-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A transaction with a result tab per statement" /></button><figcaption>Transactions &amp; multiple results</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="3" data-caption="Table data"><img src="screenshots/3-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A table with staged changes and a filter" /></button><figcaption>Table data</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="4" data-caption="Cell editor"><img src="screenshots/4-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="The cell editor showing a JSON value" /></button><figcaption>Cell editor</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="5" data-caption="Grid"><img src="screenshots/5-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A range of cells selected in the grid, with the copy formats" /></button><figcaption>Grid</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="6" data-caption="Export"><img src="screenshots/6-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="The export dialog for the selected rows and columns" /></button><figcaption>Export</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="7" data-caption="Connections"><img src="screenshots/7-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A new connection over the connections grouped in folders" /></button><figcaption>Connections</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="8" data-caption="Quick Search"><img src="screenshots/8-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="Quick Search over tabs, tables and connections" /></button><figcaption>Quick Search</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="9" data-caption="DDL viewer"><img src="screenshots/9-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A table's DDL beside the schema tree" /></button><figcaption>DDL viewer</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="10" data-caption="Plan viewer"><img src="screenshots/10-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A measured query plan with heat bars" /></button><figcaption>Plan viewer</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="11" data-caption="CSV &amp; SQL import"><img src="screenshots/11-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="A CSV mapped onto an existing table" /></button><figcaption>CSV &amp; SQL import</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="12" data-caption="Appearance"><img src="screenshots/12-640.webp" width="2048" height="1152" loading="lazy" decoding="async" alt="The light theme with the View menu open" /></button><figcaption>Appearance</figcaption></figure>
       </div>
     </div>
   </section>
