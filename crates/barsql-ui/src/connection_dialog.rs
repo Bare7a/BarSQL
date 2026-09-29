@@ -12,7 +12,7 @@ use gpui_kit::*;
 
 use crate::connections_panel::parse_color;
 use crate::file_dialogs;
-use crate::form;
+use crate::form::{self, SelectMenu};
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::state;
@@ -408,6 +408,7 @@ impl ConnectionForm {
         current: SharedString,
         options: Vec<(SharedString, SharedString)>,
         pick: fn(&mut Self, SharedString, &mut Window, &mut Context<Self>),
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let this = cx.entity().downgrade();
@@ -415,7 +416,7 @@ impl ConnectionForm {
             options.iter().find(|(value, _)| *value == current).map_or(current.clone(), |(_, label)| label.clone());
         form::select(id, label, cx)
             .debug_selector(move || id.into())
-            .dropdown_menu(move |mut menu, _, _| {
+            .select_menu(window, cx, move |mut menu, _, _| {
                 for (value, label) in &options {
                     let (this, value) = (this.clone(), value.clone());
                     menu = menu.item(PopupMenuItem::new(label.clone()).checked(value == current).on_click(
@@ -524,6 +525,7 @@ impl Render for ConnectionForm {
             self.driver.to_string().into(),
             drivers,
             |form, value, window, cx| form.set_driver(DriverType::parse(&value), window, cx),
+            window,
             cx,
         );
         let swatches = h_flex().flex_wrap().gap(rems(0.462)).children(COLORS.iter().map(|color| {
@@ -582,6 +584,7 @@ impl Render for ConnectionForm {
                     form.ssl_mode = value.to_string();
                     cx.notify();
                 },
+                window,
                 cx,
             );
             let database_hint = if mysql { "connection.databaseHintMysql" } else { "connection.databaseHint" };
@@ -650,7 +653,7 @@ impl Render for ConnectionForm {
 }
 
 impl ConnectionForm {
-    fn ssh_section(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn ssh_section(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let f = &self.fields;
         let enabled = self.toggle(
             "conn-ssh",
@@ -677,6 +680,7 @@ impl ConnectionForm {
                 form.ssh_auth = value.to_string();
                 cx.notify();
             },
+            window,
             cx,
         );
         section = section

@@ -165,18 +165,20 @@ impl SchemaTree {
     }
 
     pub fn set_connection(&mut self, connection: Option<ConnectionConfig>, cx: &mut Context<Self>) {
-        if self.connection.as_ref().map(|c| &c.id) == connection.as_ref().map(|c| &c.id) {
-            self.connection = connection;
-            return;
-        }
+        let same = self.connection.as_ref().map(|c| &c.id) == connection.as_ref().map(|c| &c.id);
         self.connection = connection;
-        self.error = None;
-        self.connecting = false;
-        // A connection that is up loads its schema on first view.
+        if !same {
+            self.error = None;
+            self.connecting = false;
+        }
+        // A connection that is up loads its schema on first view, also when it came up after the tree showed it,
+        // as when the connection switcher connects it.
         if let Some(conn) = self.connection.clone().filter(|c| state::bar(cx).is_connected(&c.id)) {
             self.load(&conn, false, cx);
         }
-        self.schema_changed(cx);
+        if !same {
+            self.schema_changed(cx);
+        }
     }
 
     fn load(&mut self, conn: &ConnectionConfig, force: bool, cx: &mut Context<Self>) {

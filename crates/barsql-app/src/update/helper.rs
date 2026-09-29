@@ -1,10 +1,11 @@
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use super::install::STAGING_PREFIX;
 use super::{Install, Kind, admin, appimage_file};
 
 // Restart & Apply relaunches this binary with these set. It waits for the app to exit, puts the new build
@@ -22,6 +23,14 @@ const ENV_LOG: &str = "BARSQL_UPDATER_LOG";
 const SWAP_FLAG: &str = "--barsql-update-swap";
 const PARENT_TIMEOUT: Duration = Duration::from_secs(30);
 const SWAP_ATTEMPTS: usize = 20;
+// In the data folder, started afresh by each update.
+const UPDATE_LOG: &str = "update.log";
+// The helper writes this into the staging folder when it starts.
+const CLAIM: &str = ".helper";
+// How long after anything last touched it a staging folder whose app is gone counts as abandoned.
+const STALE_AFTER: Duration = Duration::from_secs(60 * 60);
+#[cfg(windows)]
+const ASIDE_ATTEMPTS: usize = 20;
 
 // On macOS the whole .app bundle, elsewhere the binary itself.
 pub fn bundle_target(exe: &Path) -> PathBuf {
@@ -42,7 +51,7 @@ pub fn spawn_helper(install: &Install, staged: &Path, version: &str, prompt: &st
     let exe = fs::canonicalize(&exe).unwrap_or(exe);
     // The app's AppImage mount can go away with the app, so the helper starts from the AppImage file.
     let program = if install.kind == Kind::AppImage { install.target.clone() } else { exe };
-    let log = std::env::temp_dir().join(format!("barsql-update-{}.log", std::process::id()));
+    let log = barsql_core::paths::data_dir().join(UPDATE_LOG);
     let mut command = Command::new(program);
     command
         .env(ENV_MODE, "1")
@@ -142,8 +151,17 @@ impl Host for Native {
 struct Log(Option<fs::File>);
 
 impl Log {
-    fn open(path: Option<&Path>) -> Self {
-        Self(path.and_then(|path| OpenOptions::new().create(true).append(true).open(path).ok()))
+    // The helper empties the log, then appends, so the admin half's lines in between survive.
+    fn create(path: Option<&Path>) -> Self {
+        Self(path.and_then(|path| {
+            File::create(path).ok()?;
+            OpenOptions::new().append(true).open(path).ok()
+        }))
+    }
+
+    // The admin half adds to the helper's log and never creates one, which as root would be root's.
+    fn append(path: &Path) -> Self {
+        Self(OpenOptions::new().append(true).open(path).ok())
     }
 
     fn line(&mut self, text: impl AsRef<str>) {
@@ -158,7 +176,8 @@ impl Log {
 // the backup is back, 14 the restore failed too, 15/16 the same after a failed launch, 17 the app didn't
 // exit, 18 the admin step was refused or failed. After 11, 12, 13 and 18 the old build launches again.
 pub(crate) fn run_helper(job: &Job, host: &impl Host) -> i32 {
-    let mut log = Log::open(job.log.as_deref());
+    claim_staging(&job.new);
+    let mut log = Log::create(job.log.as_deref());
     log.line(format!("helper start: target={} new={} pid={}", job.target.display(), job.new.display(), job.parent));
     if fs::symlink_metadata(&job.target).is_err() {
         log.line("target missing");
@@ -250,13 +269,14 @@ fn put_in_place(job: &Job, backup: &Path, host: &impl Host, log: &mut Log) -> (i
 
 // Runs with admin rights. The helper can't clean up a protected folder, so the backup goes once the swap works.
 pub(crate) fn admin_swap(target: &Path, new: &Path, version: &str, log: &Path) -> i32 {
-    let mut log = Log::open(Some(log));
+    let mut log = Log::append(log);
     log.line("admin swap start");
     let backup = backup_path(target);
     let code = swap(target, new, &backup, true, &mut log);
     if code == 0 {
         let _ = remove_any(&backup);
         register_version(target, version, &mut log);
+        delete_asides_at_reboot(target, &mut log);
     }
     code
 }
@@ -317,12 +337,22 @@ fn backup_path(target: &Path) -> PathBuf {
     path.into()
 }
 
+// The folder download_and_stage made for the new build.
+fn staging_of(new: &Path) -> Option<&Path> {
+    new.parent().filter(|dir| dir.file_name().is_some_and(|name| name.to_string_lossy().starts_with(STAGING_PREFIX)))
+}
+
 fn remove_staging(new: &Path) {
-    let staging = new
-        .parent()
-        .filter(|dir| dir.file_name().is_some_and(|name| name.to_string_lossy().starts_with("barsql-update-")));
-    if let Some(staging) = staging {
+    if let Some(staging) = staging_of(new) {
         let _ = fs::remove_dir_all(staging);
+    }
+}
+
+// The app is gone while the helper works, so the claim is what keeps a BarSQL started meanwhile from
+// sweeping the new build away.
+fn claim_staging(new: &Path) {
+    if let Some(staging) = staging_of(new) {
+        let _ = fs::write(staging.join(CLAIM), std::process::id().to_string());
     }
 }
 
@@ -419,7 +449,7 @@ fn replace_target(target: &Path, new: &Path, copy: bool) -> io::Result<()> {
 fn replace_target(target: &Path, new: &Path, copy: bool) -> io::Result<()> {
     let put = || if copy { copy_any(new, target) } else { rename_or_copy(new, target) };
     if remove_any(target).is_ok() {
-        sweep_asides(target);
+        let _ = sweep_asides(target);
         return put();
     }
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
@@ -429,21 +459,100 @@ fn replace_target(target: &Path, new: &Path, copy: bool) -> io::Result<()> {
         let _ = fs::rename(&aside, target);
         return Err(error);
     }
-    let _ = fs::remove_file(&aside);
-    sweep_asides(target);
+    let _ = sweep_asides(target);
     Ok(())
 }
 
+// Returns the asides that are still there.
 #[cfg(windows)]
-fn sweep_asides(target: &Path) {
-    let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else { return };
+fn sweep_asides(target: &Path) -> Vec<PathBuf> {
+    asides(target).into_iter().filter(|aside| fs::remove_file(aside).is_err()).collect()
+}
+
+#[cfg(windows)]
+fn asides(target: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else { return Vec::new() };
     let prefix = format!("{}.old.", name.to_string_lossy());
+    let entries = fs::read_dir(dir).into_iter().flatten().flatten();
+    entries.filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix)).map(|entry| entry.path()).collect()
+}
+
+// Clears what earlier updates left behind, off the main thread. main() calls this once the app is the one
+// running.
+pub fn sweep_update_leftovers() {
+    std::thread::spawn(|| {
+        sweep_staging(&std::env::temp_dir(), SystemTime::now(), alive);
+        #[cfg(windows)]
+        sweep_own_asides();
+    });
+}
+
+// The helper runs from the target, so its aside stays locked until it exits. A protected folder needs admin
+// rights to delete from, so there the admin half has already handed the aside to Windows for the next boot.
+#[cfg(windows)]
+fn sweep_own_asides() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    if writable(&exe).is_err() {
+        return;
+    }
+    for _ in 0..ASIDE_ATTEMPTS {
+        if sweep_asides(&exe).is_empty() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+// Removes the staging folders of apps that quit or crashed without applying their download, and the logs
+// older versions left beside them, once their app is gone and nothing has touched them for STALE_AFTER.
+pub(crate) fn sweep_staging(dir: &Path, now: SystemTime, alive: impl Fn(u32) -> bool) {
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-        if entry.file_name().to_string_lossy().starts_with(&prefix) {
-            let _ = fs::remove_file(entry.path());
+        let Some(owner) = leftover_owner(&entry.file_name().to_string_lossy()) else { continue };
+        let path = entry.path();
+        let stale =
+            last_touched(&path).is_some_and(|touched| now.duration_since(touched).is_ok_and(|age| age >= STALE_AFTER));
+        if stale && !alive(owner) {
+            let _ = remove_any(&path);
         }
     }
 }
+
+// The app's pid, from barsql-update-<pid>-<nanos> for a staging folder or barsql-update-<pid>.log for an old log.
+fn leftover_owner(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(STAGING_PREFIX)?;
+    let (pid, tail) = rest.split_at(rest.find(|c: char| !c.is_ascii_digit())?);
+    let nanos = tail.strip_prefix('-').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    if nanos || tail == ".log" { pid.parse().ok() } else { None }
+}
+
+// The newest change to the entry or anything directly in it, such as the helper's claim. None when any of
+// that can't be read, which keeps the entry.
+fn last_touched(path: &Path) -> Option<SystemTime> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    let mut newest = meta.modified().ok()?;
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).ok()? {
+            newest = newest.max(entry.ok()?.metadata().ok()?.modified().ok()?);
+        }
+    }
+    Some(newest)
+}
+
+#[cfg(windows)]
+fn delete_asides_at_reboot(target: &Path, log: &mut Log) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
+    for aside in sweep_asides(target) {
+        let wide: Vec<u16> = aside.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: a NUL-terminated UTF-16 path that outlives the call. A null new name means delete.
+        if unsafe { MoveFileExW(wide.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) } == 0 {
+            log.line(format!("{} not queued for deletion: {}", aside.display(), io::Error::last_os_error()));
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn delete_asides_at_reboot(_: &Path, _: &mut Log) {}
 
 // Recursive, keeping symlinks and permissions.
 pub(crate) fn copy_any(from: &Path, to: &Path) -> io::Result<()> {

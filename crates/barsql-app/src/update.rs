@@ -336,7 +336,7 @@ mod admin;
 mod helper;
 mod install;
 
-pub use helper::{bundle_target, helper_mode, spawn_helper};
+pub use helper::{bundle_target, helper_mode, spawn_helper, sweep_update_leftovers};
 pub use install::{InstallError, InstallEvent, Stage, Staged, download_and_stage, extract_single};
 
 #[cfg(test)]

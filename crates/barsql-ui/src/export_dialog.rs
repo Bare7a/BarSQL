@@ -4,13 +4,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use barsql_io::{EXPORT_FORMATS, ExportFormat, WriteOutcome, write_chunks};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Disableable, WindowExt, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::file_dialogs::pick_export_path;
-use crate::form;
+use crate::form::{self, SelectMenu};
 use crate::grid::copy::{self, CopyTarget};
 use crate::grid::format_label;
 use crate::grid::{ExportSource, copy_format, set_copy_format};
@@ -222,7 +222,7 @@ impl ExportDialog {
 }
 
 impl Render for ExportDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let format = copy_format(cx);
         let target = self.target();
         let (total, selected_rows) = (self.source.order.len(), self.source.selected_rows.len());
@@ -231,7 +231,7 @@ impl Render for ExportDialog {
         let this = cx.entity().downgrade();
         let format_menu = form::select("export-format", format_label(format, cx), cx)
             .debug_selector(|| "export-format".into())
-            .dropdown_menu(move |mut menu: PopupMenu, _, cx| {
+            .select_menu(window, cx, move |mut menu: PopupMenu, _, cx| {
                 for option in EXPORT_FORMATS {
                     let this = this.clone();
                     menu = menu.item(PopupMenuItem::new(format_label(option, cx)).checked(option == format).on_click(

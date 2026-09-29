@@ -118,6 +118,8 @@ impl TableTab {
             foreign: HashMap::new(),
             _subscriptions: subscriptions,
         };
+        // Like a query tab, so the sidebar tree fills when the app starts on a table view.
+        schema::ensure_loaded(&this.connection.id, this.connection.driver.clone(), cx);
         this.load_foreign_keys(cx);
         this.fetch(0, true, window, cx);
         this
@@ -339,6 +341,10 @@ impl TableTab {
             cx.notify();
         });
         self.sync_overlay(cx);
+        // A tab opened while the server was down gets its schema once a fetch gets through.
+        if self.error.is_none() {
+            schema::ensure_loaded(&self.connection.id, self.connection.driver.clone(), cx);
+        }
     }
 
     // Maps the PK-keyed staging onto result rows for the grid.

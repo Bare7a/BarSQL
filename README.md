@@ -154,8 +154,7 @@ BarSQL focuses on one thing:
 - Organize into **folders** with drag-and-drop reorder
 - Per-connection **tab colors**
 - **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session
-- **Pick the database from a list** - the button beside the database field asks the server for its databases
-  with the credentials you've entered, so you don't have to remember the name
+- **Pick the database from a list** - the button beside the database field asks the server for its databases with the credentials you've entered, so you don't have to remember the name
 - PostgreSQL SSL (`disable` / `require` / `verify-full`) and MySQL TLS
 - **SSH tunnel** to reach databases behind a bastion (see below)
 - SQLite file picker, or drop a database file on the window
@@ -168,8 +167,7 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 - Host keys verified against `~/.ssh/known_hosts` by default, with an override for a custom file
 - Unknown bastion? The error tells you the exact `ssh-keyscan` line to run - or tick **Skip host key check**
 - Keepalives hold the tunnel open under a long, idle session
-- The database host stays what the bastion resolves (usually `localhost`), and `verify-full` still checks
-  the real certificate
+- The database host stays what the bastion resolves (usually `localhost`), and `verify-full` still checks the real certificate
 
 ---
 
@@ -180,8 +178,7 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 - **Smart autocomplete** - fuzzy matching, context-aware (`SELECT` / `FROM` / `JOIN` / `WHERE` / `UPDATE` / `DELETE` / `INSERT`), `schema.table.column` dot completion, quoted identifiers, aliases and CTEs
 - Built-in **`JOIN` snippets** where a join fits
 - Driver-correct identifier quoting (PostgreSQL, MySQL, SQLite)
-- **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, select the
-  next occurrence, toggle comments
+- **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, select the next occurrence, toggle comments
 - **Run selection** (`Ctrl+Enter`) / **run all** (`Ctrl+Shift+Enter`) / **stop** long-running queries
 - **Streaming results** - rows render as the driver yields them
 - **Multi-statement scripts** - run several `;`-separated statements at once; they execute in order on one connection, so temp tables, `SET` and scripted `BEGIN` / `COMMIT` hold
@@ -195,35 +192,19 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 
 ### 🧭 Query Plan Viewer
 
-**Explain** (`Ctrl+Shift+E`) plans the statement under the cursor and shows the engine's plan as one
-tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates.
-**Explain analyze** (`Ctrl+Shift+A`, or the toolbar button) _executes_ the statement instead and
-reports what really happened: measured rows, real timings, loop counts.
+**Explain** (`Ctrl+Shift+E`) plans the statement under the cursor and shows the engine's plan as one tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates. **Explain analyze** (`Ctrl+Shift+A`, or the toolbar button) _executes_ the statement instead and reports what really happened: measured rows, real timings, loop counts.
 
-Typing `EXPLAIN` yourself works the same way - **Run** recognises it and opens the plan viewer instead
-of dumping the engine's raw rows into the grid. Statements whose output already carries structure (any
-`FORMAT JSON`, MySQL's `EXPLAIN ANALYZE`, `EXPLAIN QUERY PLAN`) run exactly as typed; the rest are
-asked again in JSON. Name a format on purpose (`EXPLAIN (FORMAT TEXT)`, `FORMAT=TRADITIONAL`) or use
-SQLite's bytecode `EXPLAIN` and you get the raw rows, as asked.
+Typing `EXPLAIN` yourself works the same way - **Run** recognises it and opens the plan viewer instead of dumping the engine's raw rows into the grid. Statements whose output already carries structure (any `FORMAT JSON`, MySQL's `EXPLAIN ANALYZE`, `EXPLAIN QUERY PLAN`) run exactly as typed; the rest are asked again in JSON. Name a format on purpose (`EXPLAIN (FORMAT TEXT)`, `FORMAT=TRADITIONAL`) or use SQLite's bytecode `EXPLAIN` and you get the raw rows, as asked.
 
-Plans are outputs like any other, so a script can mix them freely - `SELECT …; EXPLAIN SELECT …;`
-gives you `Result 1 · Plan 1` as switchable tabs, each keeping its own state.
+Plans are outputs like any other, so a script can mix them freely - `SELECT …; EXPLAIN SELECT …;` gives you `Result 1 · Plan 1` as switchable tabs, each keeping its own state.
 
-- **Heat map** over the tree - each node's bar is its own share of the run's time, cost or rows, so
-  the expensive step is the one you see first; switch the metric to re-rank
-- **Own vs. total** for time and cost, side by side - a node isn't flagged just because its children
-  are slow. Loop counts are folded in, so a node inside a nested loop compares fairly to its siblings
-- **Bad row estimates flagged** - when the measured count is 10x off the planner's guess, the node is
-  marked with the factor: usually where a missing index or stale statistics hides
+- **Heat map** over the tree - each node's bar is its own share of the run's time, cost or rows, so the expensive step is the one you see first; switch the metric to re-rank
+- **Own vs. total** for time and cost, side by side - a node isn't flagged just because its children are slow. Loop counts are folded in, so a node inside a nested loop compares fairly to its siblings
+- **Bad row estimates flagged** - when the measured count is 10x off the planner's guess, the node is marked with the factor: usually where a missing index or stale statistics hides
 - **Relations and indexes** called out per node, plus the filter or join condition behind it
-- **Node details** - every field the engine reported (sort method, buffer hits, rows removed by
-  filter, …), and the untouched engine output on a raw tab
-- Per engine: PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, MySQL `EXPLAIN FORMAT=JSON` and
-  `EXPLAIN ANALYZE`, MariaDB `ANALYZE FORMAT=JSON`, SQLite `EXPLAIN QUERY PLAN` (plan shape only -
-  SQLite reports no cost or timings)
-- **Analyzing a write never leaves data behind** - `EXPLAIN ANALYZE` executes the statement, so a
-  write runs inside a transaction that is always rolled back (and says so). On a tab with an open
-  transaction it runs there, exactly where a plain **Run** would have
+- **Node details** - every field the engine reported (sort method, buffer hits, rows removed by filter, …), and the untouched engine output on a raw tab
+- Per engine: PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, MySQL `EXPLAIN FORMAT=JSON` and `EXPLAIN ANALYZE`, MariaDB `ANALYZE FORMAT=JSON`, SQLite `EXPLAIN QUERY PLAN` (plan shape only - SQLite reports no cost or timings)
+- **Analyzing a write never leaves data behind** - `EXPLAIN ANALYZE` executes the statement, so a write runs inside a transaction that is always rolled back (and says so). On a tab with an open transaction it runs there, exactly where a plain **Run** would have
 
 ---
 
@@ -237,24 +218,16 @@ gives you `Result 1 · Plan 1` as switchable tabs, each keeping its own state.
 - **Count rows** answers straight away, without opening a tab
 - Refresh the whole schema, or one schema from its right-click menu
 
-Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed
-groups and are fetched only when you open one, so expanding a table stays cheap.
+Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.
 
-Each group row carries what you actually want at a glance: an index's columns and whether it's
-unique, a foreign key's target (`(org_id) → orgs(id)`), a check's expression, a trigger's timing
-and events.
+Each group row carries what you actually want at a glance: an index's columns and whether it's unique, a foreign key's target (`(org_id) → orgs(id)`), a check's expression, a trigger's timing and events.
 
 ### 📋 Copy DDL
 
-Right-click any object - table, view, index, constraint, trigger, function - for **Copy DDL** and
-**Open DDL in new tab**. The second opens an ordinary SQL tab, so the statement arrives with
-syntax highlighting, search and editing, ready to run or tweak.
+Right-click any object - table, view, index, constraint, trigger, function - for **Copy DDL** and **Open DDL in new tab**. The second opens an ordinary SQL tab, so the statement arrives with syntax highlighting, search and editing, ready to run or tweak.
 
-- **SQLite** and **MySQL / MariaDB** hand back the engine's own text (`sqlite_master`,
-  `SHOW CREATE …`), so what you copy is what the server stored
-- **PostgreSQL** has no `SHOW CREATE TABLE`, so the statement is composed from the catalog:
-  columns with their types, defaults, identity and generated expressions, collations, every table
-  constraint, the indexes no constraint already implies, and `COMMENT ON` for anything documented
+- **SQLite** and **MySQL / MariaDB** hand back the engine's own text (`sqlite_master`, `SHOW CREATE …`), so what you copy is what the server stored
+- **PostgreSQL** has no `SHOW CREATE TABLE`, so the statement is composed from the catalog: columns with their types, defaults, identity and generated expressions, collations, every table constraint, the indexes no constraint already implies, and `COMMENT ON` for anything documented
 - A table's DDL includes its standalone indexes, so pasting it elsewhere rebuilds the table whole
 
 ### 🛠️ Changing the Schema
@@ -265,35 +238,23 @@ The same menus change things, too:
 - **Columns** - Rename, Drop
 - **Indexes, constraints, triggers, functions and procedures** - Drop
 
-Every change opens a dialog that shows the **exact SQL** it will run, written for your engine
-(`RENAME TABLE` on MySQL, `ALTER VIEW … RENAME` on PostgreSQL, `DELETE FROM` for a SQLite truncate, and
-so on). PostgreSQL adds **Cascade** and, for a truncate, **Restart identity**. If the server refuses -
-say, because a view depends on the table - the dialog stays open with its message, so you can tick
-Cascade and try again.
+Every change opens a dialog that shows the **exact SQL** it will run, written for your engine (`RENAME TABLE` on MySQL, `ALTER VIEW … RENAME` on PostgreSQL, `DELETE FROM` for a SQLite truncate, and so on). PostgreSQL adds **Cascade** and, for a truncate, **Restart identity**. If the server refuses - say, because a view depends on the table - the dialog stays open with its message, so you can tick Cascade and try again.
 
-- A change runs on a connection of its own, lands in the query history, and can be cancelled while it waits
-  on a lock
-- The tree, autocomplete and open tabs follow it: a renamed table's tab switches to the new name, a
-  dropped table's tab closes
+- A change runs on a connection of its own, lands in the query history, and can be cancelled while it waits on a lock
+- The tree, autocomplete and open tabs follow it: a renamed table's tab switches to the new name, a dropped table's tab closes
 - Read-only connections show the menu items but can't run them
 - What an engine can't do isn't offered - SQLite can't rename a view or drop a constraint, for example
 
 ### 💾 Table Backups
 
-**Back up to file…** writes a table to a `.sql` file - its structure, its rows, or both - that recreates it
-when you run the file or load it with **Import → SQL script**.
+**Back up to file…** writes a table to a `.sql` file - its structure, its rows, or both - that recreates it when you run the file or load it with **Import → SQL script**.
 
-- **Values come back exactly** - the server writes every value as an SQL literal itself (PostgreSQL
-  `quote_nullable`, MySQL `QUOTE` and hex for binary, SQLite `quote`), so dates, JSON, arrays, binary
-  data and floating-point values survive the round trip
-- **Rows restore in any order** - PostgreSQL adds foreign keys after the data, MySQL and SQLite pause
-  foreign-key checks, so a table that references itself restores cleanly
-- **Sequences follow** - restored PostgreSQL identity and serial columns carry on after the highest id;
-  MySQL `TIMESTAMP`s are written in UTC, so they restore correctly in any time zone
+- **Values come back exactly** - the server writes every value as an SQL literal itself (PostgreSQL `quote_nullable`, MySQL `QUOTE` and hex for binary, SQLite `quote`), so dates, JSON, arrays, binary data and floating-point values survive the round trip
+- **Rows restore in any order** - PostgreSQL adds foreign keys after the data, MySQL and SQLite pause foreign-key checks, so a table that references itself restores cleanly
+- **Sequences follow** - restored PostgreSQL identity and serial columns carry on after the highest id; MySQL `TIMESTAMP`s are written in UTC, so they restore correctly in any time zone
 - Generated columns are left for the database to compute
 - Rows are grouped into multi-row `INSERT`s, with live progress and a **Stop** button
-- The file only replaces an older one once the backup has finished, so a failed or stopped backup leaves
-  the older file untouched
+- The file only replaces an older one once the backup has finished, so a failed or stopped backup leaves the older file untouched
 
 ---
 
@@ -335,33 +296,22 @@ View and modify table data directly in the grid - no hand-written `UPDATE` / `DE
 
 ## 📥 Import
 
-Load a **CSV** (or any delimited file) or run a **`.sql` script**, from the ⬆ button in the Schema
-Explorer or a schema's or table's right-click menu.
+Load a **CSV** (or any delimited file) or run a **`.sql` script**, from the ⬆ button in the Schema Explorer or a schema's or table's right-click menu.
 
 ### CSV
 
-- **Delimiter auto-detected** (`,` `;` tab `|`) - the one that splits every line the same way wins,
-  so commas inside quoted values don't fool it; override it if you'd rather
-- **Column mapping** - each source column shows its first value and the target column it loads
-  into; blank the target to skip that column entirely
-- **Import into an existing table**, optionally emptying it first, **or create a new one** with
-  types inferred from the data (integer, decimal, boolean, date, timestamp, text) - each one
-  editable before you commit to it, and named in your engine's own dialect
-- Headers optional, `NULL` text configurable (`\N`, `NULL`, whatever your exporter writes),
-  leading lines skippable for files with a preamble, whitespace trimmable
-- **Empty fields keep their meaning**: a bare one is `NULL`, a quoted `""` is an empty string -
-  the same convention Postgres `COPY … FORMAT csv` uses, and what lets a BarSQL CSV export load
-  straight back in. In a numeric or date column, where `""` is never valid, both mean `NULL`
+- **Delimiter auto-detected** (`,` `;` tab `|`) - the one that splits every line the same way wins, so commas inside quoted values don't fool it; override it if you'd rather
+- **Column mapping** - each source column shows its first value and the target column it loads into; blank the target to skip that column entirely
+- **Import into an existing table**, optionally emptying it first, **or create a new one** with types inferred from the data (integer, decimal, boolean, date, timestamp, text) - each one editable before you commit to it, and named in your engine's own dialect
+- Headers optional, `NULL` text configurable (`\N`, `NULL`, whatever your exporter writes), leading lines skippable for files with a preamble, whitespace trimmable
+- **Empty fields keep their meaning**: a bare one is `NULL`, a quoted `""` is an empty string - the same convention Postgres `COPY … FORMAT csv` uses, and what lets a BarSQL CSV export load straight back in. In a numeric or date column, where `""` is never valid, both mean `NULL`
 - UTF-8 BOMs stripped, ragged rows tolerated
-- **Bad rows are skipped and reported**, not fatal - or tick **stop at the first error** if you'd
-  rather nothing partial lands
+- **Bad rows are skipped and reported**, not fatal - or tick **stop at the first error** if you'd rather nothing partial lands
 - Rows load in batches with live progress, and **Stop** ends a long run
 
 ### SQL scripts
 
-A `.sql` file runs statement by statement on one connection, so `SET`, temp tables and scripted
-transactions behave. You get a progress bar and a count - not thousands of result tabs. It's also how a
-table backup comes back.
+A `.sql` file runs statement by statement on one connection, so `SET`, temp tables and scripted transactions behave. You get a progress bar and a count - not thousands of result tabs. It's also how a table backup comes back.
 
 > Batches are committed as they go, so a stopped or failed import keeps the rows it had already
 > loaded and tells you how many that was. Read-only connections refuse imports outright.
@@ -374,8 +324,7 @@ table backup comes back.
 - Export all or **selected** rows and columns
 - Copy to clipboard or **save to file**
 - Remembers your last export format
-- **CSV and SQL exports import back cleanly** - `NULL` stays apart from an empty string, and cells
-  that spreadsheets would treat as formulas are guarded on the way out and unguarded on the way in
+- **CSV and SQL exports import back cleanly** - `NULL` stays apart from an empty string, and cells that spreadsheets would treat as formulas are guarded on the way out and unguarded on the way in
 
 ---
 
@@ -394,8 +343,7 @@ table backup comes back.
 - **English**, **Deutsch** and **Български**
 - **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs
 - Custom shortcuts editor + keyboard tips
-- Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on
-  Windows and Linux
+- Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
 - Everything opens instantly - no animations
 - **Window state persistence** - size, position and maximized state restored between sessions
 
@@ -448,15 +396,13 @@ If the app lives in a read-only location (e.g. `/Applications` or a system path)
 - **Linux** → `~/.config/BarSQL-data`
 - **Windows** → `%AppData%\BarSQL-data`
 
-Override the location with `BARSQL_DATA_DIR`. A debug build (`cargo run`) keeps its data in `./BarSQL-data`, in
-the folder you run it from.
+Override the location with `BARSQL_DATA_DIR`. A debug build (`cargo run`) keeps its data in `./BarSQL-data`, in the folder you run it from.
 
 ---
 
 # 🖥️ Built with GPUI
 
-BarSQL's interface is drawn with **[GPUI](https://www.gpui.rs/)**, the UI framework the Zed editor is
-built on, and the components of **[GPUI Kit](https://gpui-kit.com/)**.
+BarSQL's interface is drawn with **[GPUI](https://www.gpui.rs/)**, the UI framework the Zed editor is built on, and the components of **[GPUI Kit](https://gpui-kit.com/)**.
 
 - One Rust codebase from the database drivers to the window
 - The whole window is rendered on the GPU
@@ -469,8 +415,7 @@ built on, and the components of **[GPUI Kit](https://gpui-kit.com/)**.
 ## Requirements
 
 - [Rust](https://rustup.rs/) - rustup installs the toolchain pinned in `rust-toolchain.toml` on first use
-- **Linux** also needs GPUI's libraries:
-  `clang libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`
+- **Linux** also needs GPUI's libraries: `clang libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`
 - Docker or Podman, only for the PostgreSQL / MySQL / MariaDB test databases
 
 ## Run
@@ -497,30 +442,18 @@ cargo xtask screenshots  # the README screenshots, against the PostgreSQL above
 cargo xtask docs-images  # the landing page's images, from those screenshots
 ```
 
-`cargo xtask` is this repository's task runner (the `xtask/` crate); run it alone to list its commands.
-`COMPOSE="podman compose"` makes it use Podman.
+`cargo xtask` is this repository's task runner (the `xtask/` crate); run it alone to list its commands. `COMPOSE="podman compose"` makes it use Podman.
 
-- The UI tests in `crates/barsql-ui` run on GPUI's `TestAppContext` against a SQLite database, with real keystrokes,
-  clicks, file drops and window resizes. `src/scenarios` drives the whole window.
-- `--features e2e` adds the per-engine scenarios and the fixtures in `fixtures/golden`, which pin down value display,
-  DDL, EXPLAIN plans and errors for each engine.
+- The UI tests in `crates/barsql-ui` run on GPUI's `TestAppContext` against a SQLite database, with real keystrokes, clicks, file drops and window resizes. `src/scenarios` drives the whole window.
+- `--features e2e` adds the per-engine scenarios and the fixtures in `fixtures/golden`, which pin down value display, DDL, EXPLAIN plans and errors for each engine.
 
-CI (`.github/workflows/test.yml`) runs the Linux checks and the E2E suites on every pull request and push to master.
-macOS and Windows run before a release and when you start the workflow by hand (Actions → Tests → Run workflow).
+CI (`.github/workflows/test.yml`) runs the Linux checks and the E2E suites on every pull request and push to master. macOS and Windows run before a release and when you start the workflow by hand (Actions → Tests → Run workflow).
 
 ## Screenshots
 
-`cargo xtask screenshots` takes the pictures above again, at 2048 × 1152 points (4096 × 2304 pixels on a Retina
-display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the
-connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in
-`crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run.
-It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size
-lossless WebP plus a 640px thumbnail for the landing page.
+`cargo xtask screenshots` takes the pictures above again, at 2048 × 1152 points (4096 × 2304 pixels on a Retina display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in `crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run. It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size lossless WebP plus a 640px thumbnail for the landing page.
 
-For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png`
-at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE`
-sets the window's size in points (`2048x1152`), `BARSQL_SNAPSHOT_RUN=1` runs the active tab first, and
-`BARSQL_SNAPSHOT_PANEL` chooses what the screenshot shows:
+For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png` at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE` sets the window's size in points (`2048x1152`), `BARSQL_SNAPSHOT_RUN=1` runs the active tab first, and `BARSQL_SNAPSHOT_PANEL` chooses what the screenshot shows:
 
 - the sidebar panels: `saved`, `recent`, `connections`
 - the grid: `cell`, `export`, `json`
@@ -532,24 +465,13 @@ sets the window's size in points (`2048x1152`), `BARSQL_SNAPSHOT_RUN=1` runs the
 
 # 🔄 How Updates Work
 
-Release builds check [Bare7a/BarSQL](https://github.com/Bare7a/BarSQL)'s releases at launch and offer a newer one
-with a toast. About → Check for Updates does the same at any time. The code lives in
-`crates/barsql-app/src/update*` and `crates/barsql-ui/src/update_dialog.rs`.
+Release builds check [Bare7a/BarSQL](https://github.com/Bare7a/BarSQL)'s releases at launch and offer a newer one with a toast. About → Check for Updates does the same at any time. The code lives in `crates/barsql-app/src/update*` and `crates/barsql-ui/src/update_dialog.rs`.
 
-1. **Check.** The latest release, if it is newer than this build. The asset depends on how this copy was installed:
-   the `.zip` or `.tar.gz` named for this platform and architecture, or the `.AppImage`, `.deb`, `.rpm` or
-   `.pkg.tar.zst` when the app came as one. Its digest comes from `SHA256SUMS`.
-2. **Install Update.** The download goes to a fresh `barsql-update-*` folder in the temp directory, with progress. Its
-   SHA-256 is checked, then the archive's single top-level entry is unpacked, guarded against zip-slip, links and
-   oversized entries. An AppImage or a package stays as it is. An asset that `SHA256SUMS` does not list is refused. Closing the dialog leaves the download
-   running, and Check for Updates reopens it where it got to.
-3. **Restart & Apply.** The app relaunches itself as a helper with the `BARSQL_UPDATER_*` variables set, then quits.
-   The helper waits for it to exit, swaps `BarSQL.app`, the binary or the AppImage while keeping a backup until the
-   new version has launched, restores the backup on failure, and logs to `barsql-update-<pid>.log` in the temp
-   directory.
-   - When the folder isn't writable, like Program Files or `/usr/local/bin`, the swap runs as
-     `BarSQL --barsql-update-swap` behind the system's admin prompt (UAC, the macOS password dialog or pkexec). On
-     Windows it also updates the installer's version under Installed apps.
+1. **Check.** The latest release, if it is newer than this build. The asset depends on how this copy was installed: the `.zip` or `.tar.gz` named for this platform and architecture, or the `.AppImage`, `.deb`, `.rpm` or `.pkg.tar.zst` when the app came as one. Its digest comes from `SHA256SUMS`.
+2. **Install Update.** The download goes to a fresh `barsql-update-*` folder in the temp directory, with progress. Its SHA-256 is checked, then the archive's single top-level entry is unpacked, guarded against zip-slip, links and oversized entries. An AppImage or a package stays as it is. An asset that `SHA256SUMS` does not list is refused. Closing the dialog leaves the download running, and Check for Updates reopens it where it got to. A folder left by an app that quit or crashed without applying its download is removed at a later launch, once that app is gone and nothing has touched the folder for an hour.
+3. **Restart & Apply.** The app relaunches itself as a helper with the `BARSQL_UPDATER_*` variables set, then quits. The helper first marks the download's folder as in use, so a BarSQL started meanwhile leaves it alone. It waits for the app to exit, swaps `BarSQL.app`, the binary or the AppImage while keeping a backup until the new version has launched, restores the backup on failure, and logs to `update.log` in the data folder, starting it afresh each time.
+   - When the folder isn't writable, like Program Files or `/usr/local/bin`, the swap runs as `BarSQL --barsql-update-swap` behind the system's admin prompt (UAC, the macOS password dialog or pkexec). On Windows it also updates the installer's version under Installed apps.
+   - Windows can't delete the running `BarSQL.exe`, so the swap moves it aside as `BarSQL.exe.old.<n>`. The new version deletes that once the helper has exited, or, in a folder that needs admin rights, Windows deletes it at the next restart.
    - The Linux packages are installed with `dpkg -i`, `rpm -U` or `pacman -U` through pkexec instead.
    - If the prompt is cancelled or anything fails, the old version starts again.
 
@@ -557,22 +479,13 @@ with a toast. About → Check for Updates does the same at any time. The code li
 
 # 🚢 Releasing
 
-1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`,
-   `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current
-   version.
-2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch
-   (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
-3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then
-   builds on Ubuntu 22.04, Windows and macOS while the full test suite runs on all three. Once both pass, it publishes
-   every asset plus `SHA256SUMS`.
+1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`, `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current version.
+2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
+3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds on Ubuntu 22.04, Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`.
 
-Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the
-run's page for 7 days.
+Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
 
-`cargo xtask package` builds this OS's packages locally, into `target/package/dist` (on Linux, after
-`cargo install cargo-deb cargo-generate-rpm`).
-`BARSQL_RELEASE_DIR=<that folder> cargo test -p barsql-app a_packaged_release_stages_its_app` runs the updater over
-them.
+`cargo xtask package` builds this OS's packages locally, into `target/package/dist` (on Linux, after `cargo install cargo-deb cargo-generate-rpm`). `BARSQL_RELEASE_DIR=<that folder> cargo test -p barsql-app a_packaged_release_stages_its_app` runs the updater over them.
 
 ## Packages
 
@@ -583,20 +496,11 @@ them.
 | `scripts/package-linux.sh`                                                | `BarSQL-linux-amd64.tar.gz` (`BarSQL`)                                                 | `BarSQL`, `BarSQL.deb`, `BarSQL.rpm`, `BarSQL-x86_64.AppImage` |
 | `packaging/linux/PKGBUILD` (release workflow, in an Arch Linux container) |                                                                                        | `BarSQL.pkg.tar.zst`                                           |
 
-- Only the portable updater assets name both a platform and an architecture, so portable copies never pick another
-  download. The AppImage and the packages update from their own asset, and the installer and the dmg from the
-  `.zip`.
-- Release builds turn on the `production` feature, which enables the update check at launch. The release profile
-  uses thin LTO and strips symbols.
-- **macOS:** a `lipo` universal `.app` for macOS 12 and later with an ad-hoc signature; the dmg adds an
-  `Applications` link. `BARSQL_NATIVE_ONLY=1` builds this Mac's architecture alone.
-- **Windows:** `crates/barsql/build.rs` embeds the icon and the version block. `packaging/windows/installer.nsi`
-  installs the app with the `SQLite Database` file class for `.db`, `.sqlite`, `.sqlite3`, `.s3db` and `.sl3`.
-- **Linux:** [`cargo-deb`](https://crates.io/crates/cargo-deb) and [`cargo-generate-rpm`](https://crates.io/crates/cargo-generate-rpm)
-  build the deb and rpm from `crates/barsql/Cargo.toml`, and `makepkg` builds the Arch package from
-  `packaging/linux/PKGBUILD`. Each installs `/usr/bin/BarSQL` and a desktop entry that opens SQLite files; the deb
-  and rpm work out their library dependencies from the binary. The window's app id is `BarSQL`, so Wayland docks
-  match it to `BarSQL.desktop`.
+- Only the portable updater assets name both a platform and an architecture, so portable copies never pick another download. The AppImage and the packages update from their own asset, and the installer and the dmg from the `.zip`.
+- Release builds turn on the `production` feature, which enables the update check at launch. The release profile uses thin LTO and strips symbols.
+- **macOS:** a `lipo` universal `.app` for macOS 12 and later with an ad-hoc signature; the dmg adds an `Applications` link. `BARSQL_NATIVE_ONLY=1` builds this Mac's architecture alone.
+- **Windows:** `crates/barsql/build.rs` embeds the icon and the version block. `packaging/windows/installer.nsi` installs the app with the `SQLite Database` file class for `.db`, `.sqlite`, `.sqlite3`, `.s3db` and `.sl3`.
+- **Linux:** [`cargo-deb`](https://crates.io/crates/cargo-deb) and [`cargo-generate-rpm`](https://crates.io/crates/cargo-generate-rpm) build the deb and rpm from `crates/barsql/Cargo.toml`, and `makepkg` builds the Arch package from `packaging/linux/PKGBUILD`. Each installs `/usr/bin/BarSQL` and a desktop entry that opens SQLite files; the deb and rpm work out their library dependencies from the binary. The window's app id is `BarSQL`, so Wayland docks match it to `BarSQL.desktop`.
 - The icon's source is `packaging/icon.svg`.
 
 ---
