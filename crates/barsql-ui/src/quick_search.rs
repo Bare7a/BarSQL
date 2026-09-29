@@ -5,6 +5,7 @@ use barsql_core::{ConnectionConfig, SavedQuery, TableInfo};
 use barsql_io::is_space;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{Enter, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Icon, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -356,13 +357,13 @@ impl Render for QuickSearchDialog {
         } else {
             let rows: Vec<_> =
                 self.items.iter().enumerate().map(|(ix, item)| self.row(ix, item, ix == active, cx)).collect();
-            v_flex()
+            let list = v_flex()
                 .id("quick-search-list")
                 .max_h(max_height)
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
-                .children(rows)
-                .into_any_element()
+                .children(rows);
+            div().relative().child(list).vertical_scrollbar(&self.scroll).into_any_element()
         };
         v_flex()
             .key_context("QuickSearch")

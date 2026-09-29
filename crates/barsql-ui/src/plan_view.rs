@@ -4,6 +4,7 @@ use barsql_sql::QueryPlan;
 use barsql_sql::plan::PlanNode;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::scroll::{ScrollableElement as _, ScrollbarAxis};
 use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -44,6 +45,8 @@ pub struct PlanView {
     raw: bool,
     focus: FocusHandle,
     scroll: ScrollHandle,
+    details_scroll: ScrollHandle,
+    raw_scroll: ScrollHandle,
 }
 
 impl PlanView {
@@ -57,6 +60,8 @@ impl PlanView {
             raw: false,
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
+            details_scroll: ScrollHandle::new(),
+            raw_scroll: ScrollHandle::new(),
         }
     }
 
@@ -402,13 +407,12 @@ impl PlanView {
         };
         let fields: Vec<(SharedString, String)> =
             node.fields.iter().map(|field| (field.key.clone().into(), field.value.clone())).collect();
-        v_flex()
+        let details = v_flex()
             .id("plan-details")
             .debug_selector(|| "plan-details".into())
-            .flex_none()
-            .w(rems(21.))
-            .h_full()
+            .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.details_scroll)
             .p(rems(0.769))
             .gap(rems(0.615))
             .border_l_1()
@@ -452,7 +456,14 @@ impl PlanView {
             .when(!stats.is_empty(), |el| el.child(grid(stats, false)))
             .when(!fields.is_empty(), |el| {
                 el.child(div().pt(rems(0.769)).border_t_1().border_color(theme.border).child(grid(fields, true)))
-            })
+            });
+        div()
+            .relative()
+            .flex_none()
+            .w(rems(21.))
+            .h_full()
+            .child(details)
+            .vertical_scrollbar(&self.details_scroll)
             .into_any_element()
     }
 }
@@ -514,17 +525,23 @@ impl Render for PlanView {
             })
             .collect();
         let body: AnyElement = if self.raw {
-            div()
+            let raw = div()
                 .id("plan-raw")
                 .debug_selector(|| "plan-raw-text".into())
-                .flex_1()
-                .min_h_0()
+                .size_full()
                 .overflow_scroll()
+                .track_scroll(&self.raw_scroll)
                 .p(rems(0.769))
                 .text_size(TEXT_XS)
                 .font_family(theme.mono_font_family.clone())
                 .whitespace_nowrap()
-                .child(self.plan.raw.clone())
+                .child(self.plan.raw.clone());
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .child(raw)
+                .scrollbar(&self.raw_scroll, ScrollbarAxis::Both)
                 .into_any_element()
         } else {
             let plan = self.plan.clone();
@@ -551,28 +568,33 @@ impl Render for PlanView {
                 .when(shown(Metric::Time), |el| el.child(head("results.planColTime", Some(METRIC_REM))))
                 .when(shown(Metric::Cost), |el| el.child(head("results.planColCost", Some(METRIC_REM))));
             let items: Vec<AnyElement> = rows.iter().map(|row| self.row(row, cx)).collect();
+            let tree = v_flex()
+                .id("plan-tree")
+                .key_context(CONTEXT)
+                .track_focus(&self.focus)
+                .size_full()
+                .overflow_scroll()
+                .track_scroll(&self.scroll)
+                .on_action(cx.listener(|view, _: &SelectPrevious, _, cx| view.step(Step::Previous, cx)))
+                .on_action(cx.listener(|view, _: &SelectNext, _, cx| view.step(Step::Next, cx)))
+                .on_action(cx.listener(|view, _: &Collapse, _, cx| view.step(Step::Collapse, cx)))
+                .on_action(cx.listener(|view, _: &Expand, _, cx| view.step(Step::Expand, cx)))
+                .on_action(cx.listener(|view, _: &SelectFirst, _, cx| view.step(Step::First, cx)))
+                .on_action(cx.listener(|view, _: &SelectLast, _, cx| view.step(Step::Last, cx)))
+                .child(header)
+                .children(items);
             h_flex()
                 .flex_1()
                 .min_h_0()
                 .items_start()
                 .child(
-                    v_flex()
-                        .id("plan-tree")
-                        .key_context(CONTEXT)
-                        .track_focus(&self.focus)
+                    div()
+                        .relative()
                         .flex_1()
                         .h_full()
                         .min_w_0()
-                        .overflow_scroll()
-                        .track_scroll(&self.scroll)
-                        .on_action(cx.listener(|view, _: &SelectPrevious, _, cx| view.step(Step::Previous, cx)))
-                        .on_action(cx.listener(|view, _: &SelectNext, _, cx| view.step(Step::Next, cx)))
-                        .on_action(cx.listener(|view, _: &Collapse, _, cx| view.step(Step::Collapse, cx)))
-                        .on_action(cx.listener(|view, _: &Expand, _, cx| view.step(Step::Expand, cx)))
-                        .on_action(cx.listener(|view, _: &SelectFirst, _, cx| view.step(Step::First, cx)))
-                        .on_action(cx.listener(|view, _: &SelectLast, _, cx| view.step(Step::Last, cx)))
-                        .child(header)
-                        .children(items),
+                        .child(tree)
+                        .scrollbar(&self.scroll, ScrollbarAxis::Both),
                 )
                 .children(selected.map(|node| self.details(&node, cx)))
                 .into_any_element()

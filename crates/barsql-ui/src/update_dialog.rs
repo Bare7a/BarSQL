@@ -9,6 +9,7 @@ use barsql_app::update::{self, InstallEvent, Release, Stage, Staged};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::progress::Progress;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{ActiveTheme, Icon, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -108,6 +109,7 @@ pub struct UpdateDialog {
     task: Task<()>,
     stop: Arc<AtomicBool>,
     apply: Apply,
+    notes_scroll: ScrollHandle,
 }
 
 impl Drop for UpdateDialog {
@@ -126,6 +128,7 @@ impl UpdateDialog {
             apply: Rc::new(|release, staged, prompt| {
                 update::spawn_helper(update::install(), staged, &release.version, prompt)
             }),
+            notes_scroll: ScrollHandle::new(),
         };
         match state {
             Some(state) => this.state = state,
@@ -359,19 +362,18 @@ impl Render for UpdateDialog {
             UpdateState::Installing(_) => Some(spinner(t(cx, "update.unpacking"))),
             UpdateState::Downloading(_, transfer) => Some(self.transfer(*transfer, cx)),
             UpdateState::Available(release) | UpdateState::Ready(release, _) if !release.notes.trim().is_empty() => {
-                Some(
-                    div()
-                        .id("update-notes")
-                        .max_h(rems(18.))
-                        .overflow_y_scroll()
-                        .p(rems(0.769))
-                        .rounded(RADIUS)
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.background)
-                        .child(TextView::markdown("update-notes-text", release.notes.clone()))
-                        .into_any_element(),
-                )
+                let notes = div()
+                    .id("update-notes")
+                    .max_h(rems(18.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.notes_scroll)
+                    .p(rems(0.769))
+                    .rounded(RADIUS)
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.background)
+                    .child(TextView::markdown("update-notes-text", release.notes.clone()));
+                Some(div().relative().child(notes).vertical_scrollbar(&self.notes_scroll).into_any_element())
             }
             UpdateState::Failed { stage, message, .. } => {
                 let stage = t(cx, &format!("update.stage.{}", stage.key()));

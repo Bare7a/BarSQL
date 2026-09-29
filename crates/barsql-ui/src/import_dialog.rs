@@ -9,6 +9,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -84,6 +85,7 @@ pub struct ImportDialog {
     preview_task: Option<Task<()>>,
     on_imported: Rc<dyn Fn(&mut App)>,
     scroll: ScrollHandle,
+    errors_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -140,6 +142,7 @@ impl ImportDialog {
             preview_task: None,
             on_imported,
             scroll: ScrollHandle::new(),
+            errors_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -443,7 +446,7 @@ impl ImportDialog {
                                 },
                             ));
                         }
-                        menu
+                        menu.scrollable(true)
                     });
                 v_flex()
                     .gap(rems(0.923))
@@ -676,17 +679,17 @@ impl ImportDialog {
                 )
             })
             .when(!result.errors.is_empty(), |el| {
-                el.child(
-                    v_flex()
-                        .id("import-errors")
-                        .max_h(px(120.))
-                        .overflow_y_scroll()
-                        .pl(rems(1.231))
-                        .font_family(theme.mono_font_family.clone())
-                        .text_size(TEXT_2XS)
-                        .text_color(theme.muted_foreground)
-                        .children(result.errors.iter().map(|error| div().child(format!("• {error}")))),
-                )
+                let errors = v_flex()
+                    .id("import-errors")
+                    .max_h(px(120.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.errors_scroll)
+                    .pl(rems(1.231))
+                    .font_family(theme.mono_font_family.clone())
+                    .text_size(TEXT_2XS)
+                    .text_color(theme.muted_foreground)
+                    .children(result.errors.iter().map(|error| div().child(format!("• {error}"))));
+                el.child(div().relative().child(errors).vertical_scrollbar(&self.errors_scroll))
             })
     }
 }

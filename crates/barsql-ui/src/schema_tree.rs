@@ -9,6 +9,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -1321,6 +1322,7 @@ impl Render for SchemaTree {
             div()
                 .key_context(CONTEXT)
                 .track_focus(&self.focus)
+                .relative()
                 .size_full()
                 .on_action(cx.listener(|this, _: &CursorUp, _, cx| this.move_cursor(-1, cx)))
                 .on_action(cx.listener(|this, _: &CursorDown, _, cx| this.move_cursor(1, cx)))
@@ -1329,11 +1331,13 @@ impl Render for SchemaTree {
                 .on_action(cx.listener(|this, _: &ActivateRow, _, cx| this.activate_cursor(cx)))
                 .child(
                     uniform_list("schema-tree", self.rows.len(), cx.processor(Self::render_rows))
+                        .debug_selector(|| "schema-tree".into())
                         .track_scroll(&self.scroll)
                         .size_full()
                         .px(rems(0.615))
                         .pb(rems(0.615)),
                 )
+                .vertical_scrollbar(&self.scroll)
                 .into_any_element()
         };
         v_flex()

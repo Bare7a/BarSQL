@@ -5,6 +5,7 @@ use barsql_core::{ConnectionConfig, DriverType};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -410,18 +411,8 @@ impl ConnectionsPanel {
                         .child(connection_subtitle(connection)),
                 ),
             )
-            // Absolute so the hover actions take no room until shown.
             .child(
-                h_flex()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .right(rems(0.615))
-                    .gap(rems(0.231))
-                    .pl(rems(0.462))
-                    .bg(theme.sidebar_accent)
-                    .invisible()
-                    .group_hover(group, |s| s.visible())
+                list_nav::hover_actions(group, rems(0.615), cx)
                     .child(
                         Button::new(SharedString::from(format!("connect-{}", connection.id)))
                             .small()
@@ -599,8 +590,9 @@ impl Render for ConnectionsPanel {
                 loose.iter().map(|c| self.render_connection(c, self.nav.ringed(&c.id, window), cx)).collect();
             let folders = self.folders.clone();
             rows.extend(folders.iter().map(|f| self.render_folder(f, window, cx)));
-            v_flex()
+            let list = v_flex()
                 .id("connection-list")
+                .debug_selector(|| "connection-list".into())
                 .key_context(list_nav::CONTEXT)
                 .track_focus(&self.nav.focus)
                 .track_scroll(&self.nav.scroll)
@@ -620,10 +612,11 @@ impl Render for ConnectionsPanel {
                         this.delete(connection, window, cx);
                     }
                 }))
-                .children(rows)
-                .into_any_element()
+                .children(rows);
+            v_flex().relative().min_h_0().child(list).vertical_scrollbar(&self.nav.scroll).into_any_element()
         };
-        v_flex().w_full().child(toolbar).child(body)
+        // Shrinks to fit the switcher menu, so the list scrolls and the toolbar stays.
+        v_flex().w_full().min_h_0().child(toolbar).child(body)
     }
 }
 

@@ -306,3 +306,11 @@ fn copy_ddl_on_an_index_copies_the_create_index(cx: &mut TestAppContext) {
     let ddl = clipboard(&mut app);
     assert!(ddl.contains("CREATE INDEX") && ddl.contains("e2e_ddl_idx_name_idx"), "{ddl}");
 }
+
+#[gpui_kit::test]
+fn a_long_tree_scrolls_by_its_bar(cx: &mut TestAppContext) {
+    let seed: Vec<String> = (0..60).map(|n| format!("CREATE TABLE e2e_long_{n:02} (id INTEGER)")).collect();
+    let mut app = prepared(cx, &seed.join(";"));
+    assert!(has(&mut app, "t:main.e2e_long_59"));
+    app.scrolls_by_its_bar("schema-tree", "tree:s:main");
+}

@@ -3,6 +3,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -15,7 +16,7 @@ use crate::list_nav::{self, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavO
 use crate::relative_time::one_line_preview;
 use crate::saved_queries::{self, SORT_KEY, SavedQueries, SavedSort};
 use crate::state::{self, set_setting, setting};
-use crate::tokens::{ICON_2XS, TEXT_2XS, TEXT_SM, TEXT_XS};
+use crate::tokens::{ICON_2XS, RADIUS, TEXT_2XS, TEXT_SM, TEXT_XS};
 
 pub enum SavedEvent {
     Open(SavedQuery),
@@ -274,14 +275,17 @@ impl SavedPanel {
             .id(SharedString::from(format!("saved-{ix}-{}", query.id)))
             .debug_selector(move || format!("saved-row-{ix}"))
             .group("saved-row")
+            .relative()
             .w_full()
             .px_2()
             .py_1()
+            .rounded(RADIUS)
             .gap_2()
             .cursor_pointer()
             .hover(|s| s.bg(theme.sidebar_accent))
             .child(
                 v_flex()
+                    .debug_selector(move || format!("saved-text-{ix}"))
                     .flex_1()
                     .min_w_0()
                     .child(
@@ -314,14 +318,10 @@ impl SavedPanel {
                     ),
             )
             .child(
-                h_flex()
-                    .flex_none()
-                    .invisible()
-                    .group_hover("saved-row", |s| s.visible())
+                list_nav::hover_actions("saved-row", rems(0.5), cx)
                     .child(
                         Button::new(SharedString::from(format!("saved-pin-{ix}")))
-                            .ghost()
-                            .xsmall()
+                            .small()
                             .debug_selector(move || format!("saved-pin-{ix}"))
                             .icon(Icon::new(if pinned { Lucide::PinOff } else { Lucide::Pin }))
                             .tooltip(t(cx, if pinned { "sidebar.unpin" } else { "sidebar.pin" }))
@@ -332,8 +332,7 @@ impl SavedPanel {
                     )
                     .child(
                         Button::new(SharedString::from(format!("saved-rename-{ix}")))
-                            .ghost()
-                            .xsmall()
+                            .small()
                             .debug_selector(move || format!("saved-rename-{ix}"))
                             .icon(Icon::new(Lucide::SquarePen))
                             .tooltip(t(cx, "tooltip.renameSavedQueryBtn"))
@@ -344,8 +343,9 @@ impl SavedPanel {
                     )
                     .child(
                         Button::new(SharedString::from(format!("saved-delete-{ix}")))
-                            .ghost()
-                            .xsmall()
+                            .small()
+                            .danger()
+                            .outline()
                             .debug_selector(move || format!("saved-delete-{ix}"))
                             .icon(Icon::new(Lucide::Trash))
                             .tooltip(t(cx, "tooltip.deleteSavedQuery"))
@@ -395,12 +395,15 @@ impl Render for SavedPanel {
                 .enumerate()
                 .map(|(ix, q)| self.render_row(ix, q, self.nav.ringed(&q.id, window), cx))
                 .collect();
-            v_flex()
+            let list = v_flex()
                 .id("saved-list")
+                .debug_selector(|| "saved-list".into())
                 .key_context(list_nav::CONTEXT)
                 .track_focus(&self.nav.focus)
                 .track_scroll(&self.nav.scroll)
                 .size_full()
+                .px(rems(0.615))
+                .pb(rems(0.615))
                 .overflow_y_scroll()
                 .on_action(cx.listener(|this, _: &NavUp, _, cx| this.step(-1, cx)))
                 .on_action(cx.listener(|this, _: &NavDown, _, cx| this.step(1, cx)))
@@ -416,8 +419,8 @@ impl Render for SavedPanel {
                         this.delete(query, window, cx);
                     }
                 }))
-                .children(rows)
-                .into_any_element()
+                .children(rows);
+            div().relative().size_full().child(list).vertical_scrollbar(&self.nav.scroll).into_any_element()
         };
         v_flex().size_full().child(filter_bar).child(div().flex_1().min_h_0().child(body))
     }

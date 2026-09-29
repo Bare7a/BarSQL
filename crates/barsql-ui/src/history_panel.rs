@@ -5,6 +5,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -18,7 +19,7 @@ use crate::relative_time::{format_relative_time, one_line_preview, time_bucket};
 use crate::saved_queries;
 use crate::state;
 use crate::toast;
-use crate::tokens::{TEXT_2XS, TEXT_XS};
+use crate::tokens::{RADIUS, TEXT_2XS, TEXT_XS};
 
 const HISTORY_LIMIT: usize = 200;
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -297,9 +298,11 @@ impl HistoryPanel {
             .id(SharedString::from(format!("history-{ix}-{}", entry.id)))
             .debug_selector(move || format!("history-row-{ix}"))
             .group("history-row")
+            .relative()
             .w_full()
             .px_2()
             .py_1()
+            .rounded(RADIUS)
             .gap_2()
             .items_start()
             .cursor_pointer()
@@ -311,11 +314,14 @@ impl HistoryPanel {
             }))
             .child(
                 v_flex()
+                    .debug_selector(move || format!("history-text-{ix}"))
                     .flex_1()
                     .min_w_0()
+                    // Without the ellipsis, the clamp leaves the rest on the last line, clipped mid-glyph.
                     .child(
                         div()
                             .line_clamp(2)
+                            .text_ellipsis()
                             .text_size(TEXT_XS)
                             .line_height(relative(1.45))
                             .font_family(theme.mono_font_family.clone())
@@ -325,14 +331,10 @@ impl HistoryPanel {
                     .children(error.map(|e| div().truncate().text_size(TEXT_2XS).text_color(theme.danger).child(e))),
             )
             .child(
-                h_flex()
-                    .flex_none()
-                    .invisible()
-                    .group_hover("history-row", |s| s.visible())
+                list_nav::hover_actions("history-row", rems(0.5), cx)
                     .child(
                         Button::new(SharedString::from(format!("history-save-{ix}")))
-                            .ghost()
-                            .xsmall()
+                            .small()
                             .icon(Icon::new(Lucide::BookmarkPlus))
                             .tooltip(t(cx, "sidebar.saveAsQuery"))
                             .on_click(move |_, window, cx| {
@@ -342,8 +344,9 @@ impl HistoryPanel {
                     )
                     .child(
                         Button::new(SharedString::from(format!("history-delete-{ix}")))
-                            .ghost()
-                            .xsmall()
+                            .small()
+                            .danger()
+                            .outline()
                             .debug_selector(move || format!("history-delete-{ix}"))
                             .icon(Icon::new(Lucide::Trash))
                             .tooltip(t(cx, "tooltip.deleteHistory"))
@@ -394,12 +397,15 @@ impl Render for HistoryPanel {
                 }
                 rows.push(self.render_entry(ix, entry, now_ms, self.nav.ringed(&entry.id, window), cx));
             }
-            v_flex()
+            let list = v_flex()
                 .id("history-list")
+                .debug_selector(|| "history-list".into())
                 .key_context(list_nav::CONTEXT)
                 .track_focus(&self.nav.focus)
                 .track_scroll(&self.nav.scroll)
                 .size_full()
+                .px(rems(0.615))
+                .pb(rems(0.615))
                 .overflow_y_scroll()
                 .on_action(cx.listener(|this, _: &NavUp, _, cx| this.step(-1, cx)))
                 .on_action(cx.listener(|this, _: &NavDown, _, cx| this.step(1, cx)))
@@ -415,8 +421,8 @@ impl Render for HistoryPanel {
                         this.delete(&entry.id, cx);
                     }
                 }))
-                .children(rows)
-                .into_any_element()
+                .children(rows);
+            div().relative().size_full().child(list).vertical_scrollbar(&self.nav.scroll).into_any_element()
         };
         v_flex().size_full().child(filter_bar).child(div().flex_1().min_h_0().child(body))
     }

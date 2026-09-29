@@ -1,5 +1,5 @@
 use crate::tokens::RADIUS;
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::{ActiveTheme, h_flex};
 use gpui_kit::*;
 
 // Keyboard navigation for the sidebar lists. Delete triggers the row's delete button.
@@ -73,6 +73,21 @@ impl ListNav {
 // Added as the last child so the row's hover actions don't cover it.
 pub fn ring<E: ParentElement + Styled>(el: E, cx: &App) -> E {
     el.relative().child(div().absolute().inset_0().rounded(RADIUS).border_2().border_color(cx.theme().primary))
+}
+
+// Small buttons over the end of a relative row, shown while `group` is hovered. Absolute, so the row's text has
+// its whole width until then. `inset` is the row's right padding.
+pub fn hover_actions(group: impl Into<SharedString>, inset: Rems, cx: &App) -> Div {
+    h_flex()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right(inset)
+        .gap(rems(0.231))
+        .pl(rems(0.462))
+        .bg(cx.theme().sidebar_accent)
+        .invisible()
+        .group_hover(group, |s| s.visible())
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use barsql_core::{QueryError, ResultSummary};
 use barsql_sql::QueryPlan;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -20,14 +21,15 @@ use crate::tokens::{ICON_SM, ICON_XS, TEXT_MD, TEXT_SM, TEXT_XS};
 pub struct ShownError {
     pub message: SharedString,
     pub info: Option<QueryError>,
+    scroll: ScrollHandle,
 }
 
 impl ShownError {
     pub fn new(error: QueryError, cx: &App) -> Self {
         if error.cancelled {
-            return Self { message: t(cx, "dialog.queryCancelled"), info: None };
+            return Self { message: t(cx, "dialog.queryCancelled"), info: None, scroll: ScrollHandle::new() };
         }
-        Self { message: error.message.clone().into(), info: Some(error) }
+        Self { message: error.message.clone().into(), info: Some(error), scroll: ScrollHandle::new() }
     }
 
     // Centred in the pane. `action` sits next to the copy button.
@@ -63,6 +65,14 @@ impl ShownError {
                         toast::success(t(cx, "toast.copiedClipboard"), cx);
                     }),
             );
+        let message = div()
+            .id("error-message")
+            .max_h(rems(16.))
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .font_family(theme.mono_font_family.clone())
+            .text_color(theme.foreground)
+            .child(self.message.clone());
         let card = form::alert(danger)
             .w_full()
             .max_w(rems(40.))
@@ -70,15 +80,7 @@ impl ShownError {
             .flex_col()
             .gap(rems(0.462))
             .child(header)
-            .child(
-                div()
-                    .id("error-message")
-                    .max_h(rems(16.))
-                    .overflow_y_scroll()
-                    .font_family(theme.mono_font_family.clone())
-                    .text_color(theme.foreground)
-                    .child(self.message.clone()),
-            )
+            .child(div().relative().child(message).vertical_scrollbar(&self.scroll))
             .when_some(info.filter(|i| !i.detail.is_empty()), |el, info| {
                 el.child(meta("errors.detailLabel", &info.detail, theme.foreground))
             })
@@ -172,6 +174,7 @@ pub enum ResultStatus {
 pub struct ResultsPanel {
     sets: Vec<ResultSetView>,
     active: usize,
+    tab_scroll: ScrollHandle,
 }
 
 impl ResultsPanel {
@@ -390,14 +393,21 @@ impl ResultsPanel {
                     .on_click(cx.listener(move |this, _, _, cx| this.select_result(ix, cx)))
             })
             .collect();
-        h_flex()
-            .id("result-tabs")
+        div()
+            .relative()
             .flex_none()
             .w_full()
-            .border_b_1()
-            .border_color(theme.border)
-            .overflow_x_scroll()
-            .children(tabs)
+            .child(
+                h_flex()
+                    .id("result-tabs")
+                    .w_full()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .overflow_x_scroll()
+                    .track_scroll(&self.tab_scroll)
+                    .children(tabs),
+            )
+            .horizontal_scrollbar(&self.tab_scroll)
     }
 
     fn header(&self, left: SharedString, right: Option<SharedString>, cx: &App) -> impl IntoElement {
