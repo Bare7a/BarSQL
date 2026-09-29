@@ -11,6 +11,8 @@ use super::Release;
 const MAX_ENTRIES: usize = 50_000;
 const MAX_TOTAL_SIZE: u64 = 2 << 30;
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+// Each download gets its own barsql-update-<pid>-<nanos> folder in the temp directory.
+pub(crate) const STAGING_PREFIX: &str = "barsql-update-";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -59,7 +61,7 @@ pub enum InstallEvent {
 
 fn staging_dir() -> io::Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let dir = std::env::temp_dir().join(format!("barsql-update-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("{STAGING_PREFIX}{}-{nanos}", std::process::id()));
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }

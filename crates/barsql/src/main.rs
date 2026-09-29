@@ -22,6 +22,7 @@ fn main() -> anyhow::Result<()> {
             Instance::Later => return Ok(()),
         },
     };
+    barsql_app::update::sweep_update_leftovers();
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().context("tokio runtime")?;
     let bar = BarApp::open(&data_dir, runtime.handle().clone()).context("open data folder")?;
     if let Some(path) = find_sqlite_arg(&args) {

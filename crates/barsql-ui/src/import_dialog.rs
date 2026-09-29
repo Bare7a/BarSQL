@@ -8,13 +8,13 @@ use barsql_core::ConnectionConfig;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::file_dialogs::pick_import_file;
-use crate::form;
+use crate::form::{self, SelectMenu};
 use crate::i18n::{count, t, t_with};
 use crate::modal::{self, Modal};
 use crate::query_tab::new_tab_id;
@@ -429,7 +429,7 @@ impl ImportDialog {
                 let table = form::select("import-existing-table", current.clone(), cx)
                     .debug_selector(|| "import-existing-table".into())
                     .disabled(running)
-                    .dropdown_menu(move |mut menu: PopupMenu, _, _| {
+                    .select_menu(window, cx, move |mut menu: PopupMenu, _, _| {
                         for table in tables.clone() {
                             let this = this.clone();
                             let checked = table == current;
@@ -468,7 +468,7 @@ impl ImportDialog {
         let delimiter = form::select("import-delimiter", t(cx, delimiter_label), cx)
             .debug_selector(|| "import-delimiter".into())
             .disabled(running)
-            .dropdown_menu(move |mut menu: PopupMenu, _, cx| {
+            .select_menu(window, cx, move |mut menu: PopupMenu, _, cx| {
                 for (value, key) in DELIMITERS {
                     let this = this.clone();
                     menu = menu.item(PopupMenuItem::new(t(cx, key)).checked(value == current).on_click(
@@ -559,7 +559,7 @@ impl ImportDialog {
                     let this = cx.entity().downgrade();
                     let picker = form::select(("import-type", ix), t(cx, &format!("import.type.{kind}")), cx)
                         .disabled(running)
-                        .dropdown_menu(move |mut menu: PopupMenu, _, cx| {
+                        .select_menu(window, cx, move |mut menu: PopupMenu, _, cx| {
                             for option in COLUMN_TYPES {
                                 let this = this.clone();
                                 menu = menu.item(

@@ -264,6 +264,8 @@ pub struct Grid {
     hover: Option<Target>,
     published: (Option<usize>, Vec<usize>),
     pub(super) picker_open: bool,
+    // Kept across renders so the column picker's list doesn't jump back to the top.
+    pub(super) picker_scroll: ScrollHandle,
     overlay: Option<TableOverlay>,
     editing: Option<Editing>,
     load_armed: bool,
@@ -303,6 +305,7 @@ impl Grid {
             hover: None,
             published: (None, Vec::new()),
             picker_open: false,
+            picker_scroll: ScrollHandle::new(),
             overlay: None,
             editing: None,
             load_armed: true,

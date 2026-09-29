@@ -256,12 +256,12 @@ mod install {
     use std::io::{self, Write};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::AtomicBool;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use sha2::{Digest, Sha256};
     use zip::write::SimpleFileOptions;
 
-    use super::super::helper::{Host, Job, run_helper};
+    use super::super::helper::{Host, Job, admin_swap, run_helper, sweep_staging};
     use super::super::install::{InstallEvent, Stage, download_and_stage, extract_single};
     use super::super::{Asset, Kind, Release, arch, bundle_target, check, platform};
     use super::Server;
@@ -492,12 +492,67 @@ mod install {
         assert_eq!(run_helper(&job(&dir.path().join("gone.app"), &new), &Fake::default()), 10);
     }
 
+    #[test]
+    fn the_helper_claims_its_staging_folder_and_starts_a_fresh_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = app(dir.path(), "BarSQL.app", "old");
+        let staging = dir.path().join("barsql-update-3-4");
+        let new = app(&staging, "BarSQL.app", "new");
+        let log = dir.path().join("update.log");
+        fs::write(&log, "the last update\n").unwrap();
+        let running = Fake { running: true, ..Fake::default() };
+        assert_eq!(run_helper(&Job { parent: 42, log: Some(log.clone()), ..job(&target, &new) }, &running), 17);
+        assert!(staging.join(".helper").exists(), "claimed before waiting for the app");
+        let text = fs::read_to_string(&log).unwrap();
+        assert!(text.contains("helper start") && !text.contains("the last update"), "{text}");
+
+        let gone = dir.path().join("gone.app");
+        assert_eq!(admin_swap(&gone, &new, "", &log), 12);
+        let text = fs::read_to_string(&log).unwrap();
+        assert!(text.contains("helper start") && text.contains("admin swap start"), "the admin half appends: {text}");
+        let missing = dir.path().join("no.log");
+        assert_eq!(admin_swap(&gone, &new, "", &missing), 12);
+        assert!(!missing.exists(), "the admin half never creates a log");
+    }
+
+    #[test]
+    fn abandoned_staging_folders_and_old_logs_are_swept() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = |name: &str| {
+            let path = dir.path().join(name);
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("BarSQL"), "build").unwrap();
+            path
+        };
+        let abandoned = folder("barsql-update-5-100");
+        let running = folder("barsql-update-7-100");
+        let claimed = folder("barsql-update-8-100");
+        let old_log = dir.path().join("barsql-update-5.log");
+        fs::write(&old_log, "log").unwrap();
+        let others: Vec<PathBuf> =
+            ["barsql-update-5", "barsql-update-x-1", "barsql-update-5-1a", "barsql-updater-5-1", "notes-5-1"]
+                .into_iter()
+                .map(folder)
+                .collect();
+        let alive = |pid| pid == 7;
+        let hours = |hours: f64| SystemTime::now() + Duration::from_secs_f64(hours * 3600.);
+        fs::File::create(claimed.join(".helper")).unwrap().set_modified(hours(1.5)).unwrap();
+
+        sweep_staging(dir.path(), hours(0.5), alive);
+        assert!(abandoned.exists() && old_log.exists(), "nothing is an hour old yet");
+
+        sweep_staging(dir.path(), hours(2.), alive);
+        assert!(!abandoned.exists() && !old_log.exists(), "their app is gone and nothing touched them for an hour");
+        assert!(running.exists(), "its app is still running");
+        assert!(claimed.exists(), "a helper touched it half an hour ago");
+        assert!(others.iter().all(|path| path.exists()), "not named like ours");
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_protected_folder_is_swapped_by_the_admin_half() {
         use std::os::unix::fs::PermissionsExt;
 
-        use super::super::helper::admin_swap;
         // SAFETY: geteuid has no preconditions.
         if unsafe { libc::geteuid() } == 0 {
             return;

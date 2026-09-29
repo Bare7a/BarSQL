@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
@@ -51,7 +51,7 @@ tree-sitter-json = "=0.24.8"
 unicode-normalization = "0.1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 uuid = { version = "1", features = ["v4"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 # No debug info for dependencies. Keeps target/ much smaller and links faster.

@@ -1,17 +1,18 @@
 use barsql_io::{EXPORT_FORMATS, ExportFormat};
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::Button;
-use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, h_flex, v_flex};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::view::Grid;
 use super::{copy_format, set_copy_format};
 use crate::form::ToolButton;
 use crate::i18n::t;
-use crate::tokens::{ICON_XS, TEXT_SM};
+use crate::tokens::{ICON_2XS, ICON_XS, RADIUS_SM, TEXT_SM, TINT_BORDER};
 
 pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
     let key = match format {
@@ -109,6 +110,9 @@ pub fn toolbar(grid: &Entity<Grid>, meta: SharedString, cx: &mut App) -> impl In
         )
 }
 
+// 24px column picker rows.
+const ROW_HEIGHT: f32 = 1.846;
+
 fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
     let state = grid.read(cx);
     let total = state.set().columns.len();
@@ -133,41 +137,107 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
             })
             .ok();
         })
-        .content(move |_, _, cx| {
+        .content(move |_, window, cx| {
             let state = grid.read(cx);
             let names: Vec<(usize, String, bool)> = state
                 .column_names()
                 .enumerate()
                 .map(|(ix, name)| (ix, name.to_string(), !state.is_hidden(ix)))
                 .collect();
+            let (hidden, total, scroll) = (state.hidden_count(), names.len(), state.picker_scroll.clone());
+            // About 13 rows, or half the window when that is shorter.
+            let list_height = (window.viewport_size().height * 0.5).min(window.rem_size() * 24.615);
+            let overflows = window.rem_size() * ROW_HEIGHT * total as f32 > list_height;
             let (show, hide) = (grid.clone(), grid.clone());
+            let rows: Vec<Stateful<Div>> =
+                names.into_iter().map(|(ix, name, visible)| column_row(&grid, ix, name, visible, cx)).collect();
             v_flex()
-                .gap_2()
-                .max_h(px(320.))
-                .min_w(px(200.))
+                .min_w(rems(15.385))
+                .max_w(rems(24.615))
+                .text_size(TEXT_SM)
                 .child(
                     h_flex()
-                        .gap_2()
+                        .gap(rems(0.308))
+                        .pb(rems(0.462))
+                        .mb(rems(0.308))
+                        .border_b_1()
+                        .border_color(cx.theme().border)
                         .child(
                             Button::new("columns-show-all")
-                                .tool_label(t(cx, "common.showAll"))
+                                .ghost()
+                                .disabled(hidden == 0)
+                                .tool(Icon::new(Lucide::Eye), ICON_XS, t(cx, "common.showAll"))
                                 .on_click(move |_, _, cx| show.update(cx, |grid, cx| grid.show_all_columns(cx))),
                         )
                         .child(
                             Button::new("columns-hide-all")
-                                .tool_label(t(cx, "common.hideAll"))
+                                .ghost()
+                                .disabled(hidden == total)
+                                .tool(Icon::new(Lucide::EyeOff), ICON_XS, t(cx, "common.hideAll"))
                                 .on_click(move |_, _, cx| hide.update(cx, |grid, cx| grid.hide_all_columns(cx))),
                         ),
                 )
-                .child(v_flex().id("column-picker-list").gap_1().overflow_y_scroll().children(names.into_iter().map(
-                    |(ix, name, checked)| {
-                        let grid = grid.clone();
-                        Checkbox::new(("column-picker-item", ix))
-                            .debug_selector(move || format!("column-picker-item-{ix}"))
-                            .label(name)
-                            .checked(checked)
-                            .on_click(move |_, _, cx| grid.update(cx, |grid, cx| grid.toggle_column(ix, cx)))
-                    },
-                )))
+                .child(
+                    div()
+                        .relative()
+                        .child(
+                            div()
+                                .id("column-picker-list")
+                                .max_h(list_height)
+                                .overflow_y_scroll()
+                                .track_scroll(&scroll)
+                                .child(v_flex().when(overflows, |list| list.pr(Scrollbar::width())).children(rows)),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .bottom_0()
+                                .w(Scrollbar::width())
+                                .child(Scrollbar::vertical(&scroll).mode(ScrollbarMode::Always).viewport_from_layout()),
+                        ),
+                )
         })
+}
+
+// A whole row toggles its column. Hidden columns keep an empty box and a dimmed name.
+fn column_row(grid: &Entity<Grid>, ix: usize, name: String, visible: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let (hover, primary, check, muted) =
+        (theme.accent, theme.primary, theme.primary_foreground, theme.muted_foreground);
+    let text = if visible { theme.foreground } else { muted };
+    let group = SharedString::from(format!("column-picker-row-{ix}"));
+    let grid = grid.clone();
+    h_flex()
+        .id(("column-picker-item", ix))
+        .debug_selector(move || format!("column-picker-item-{ix}"))
+        .group(group.clone())
+        .h(rems(ROW_HEIGHT))
+        .px(rems(0.462))
+        .gap(rems(0.615))
+        .rounded(RADIUS_SM)
+        .cursor_pointer()
+        .hover(|style| style.bg(hover))
+        .on_click(move |_, _, cx| grid.update(cx, |grid, cx| grid.toggle_column(ix, cx)))
+        .child(
+            div()
+                .flex_none()
+                .size(rems(1.077))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(RADIUS_SM)
+                .border_1()
+                .map(|el| match visible {
+                    true => el
+                        .bg(primary)
+                        .border_color(primary)
+                        .child(Icon::new(IconName::Check).size(ICON_2XS).text_color(check)),
+                    false => el
+                        .border_color(muted.opacity(TINT_BORDER))
+                        .group_hover(group, |style| style.border_color(muted)),
+                }),
+        )
+        .child(div().flex_1().min_w_0().truncate().text_color(text).child(name))
 }

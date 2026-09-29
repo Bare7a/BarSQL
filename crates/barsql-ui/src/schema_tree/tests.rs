@@ -75,6 +75,20 @@ fn connecting_loads_and_expands_the_schema_then_tables_open_lazily(cx: &mut Test
     settle(cx, has(&tree, &format!("o:{key}:things_name")));
 }
 
+// The connection switcher connects on its own, then the sidebar hands the tree the connection it already shows.
+#[gpui_kit::test]
+fn a_connection_made_elsewhere_loads_when_the_sidebar_shows_it_again(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    // Seeding left the connection open.
+    env.runtime.block_on(env.bar.disconnect(&env.connection.id));
+    let (tree, cx) = open(&env, cx);
+    assert!(ids(&tree, cx).is_empty(), "nothing before connecting");
+    env.runtime.block_on(env.bar.connect(&env.connection.id)).unwrap();
+    let connection = env.connection.clone();
+    tree.update(cx, |tree, cx| tree.set_connection(Some(connection), cx));
+    settle(cx, has(&tree, "s:main"));
+}
+
 #[gpui_kit::test]
 fn searching_filters_tables_by_column_and_counts_them(cx: &mut TestAppContext) {
     let env = Env::new(cx);

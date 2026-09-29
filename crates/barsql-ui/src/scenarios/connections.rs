@@ -25,6 +25,17 @@ fn selected(app: &mut Driver) -> Option<String> {
 }
 
 #[gpui_kit::test]
+fn the_switcher_button_closes_what_it_opened(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    open_switcher(&mut app);
+    assert!(app.shown("connection-switcher-menu"));
+    open_switcher(&mut app);
+    assert!(!app.shown("connection-switcher-menu"), "a second click closes it");
+    open_switcher(&mut app);
+    assert!(app.shown("connection-switcher-menu"), "and a third opens it again");
+}
+
+#[gpui_kit::test]
 fn a_new_connection_is_tested_saved_connected_and_disconnected(cx: &mut TestAppContext) {
     let mut app = open(cx);
     let dir = tempfile::tempdir().unwrap();

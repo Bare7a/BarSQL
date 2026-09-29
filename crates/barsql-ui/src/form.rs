@@ -1,5 +1,10 @@
+use std::cell::Cell;
+use std::rc::Rc;
+use std::sync::Arc;
+
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenu};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -26,6 +31,7 @@ fn field(state: &Entity<InputState>, text: Rems, padding: Rems, window: &Window,
         .focus_bordered(false)
         .bg(theme.background)
         .text_size(text)
+        .py_0()
         .context_menu(crate::context_menu::input(state));
     let input = match focused {
         true => input.border_2().border_color(theme.ring).px(padding.to_pixels(window.rem_size()) - px(1.)),
@@ -135,6 +141,44 @@ pub fn select(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App
     )
 }
 
+// A select's menu is as wide as the select, or wider for a longer item. GPUI Kit builds the menu while rendering
+// the frame it opens in, before this frame's layout, so the width is the one measured a frame earlier and kept
+// in state keyed by the select.
+pub trait SelectMenu {
+    fn select_menu(
+        self,
+        window: &mut Window,
+        cx: &mut App,
+        items: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> Div;
+}
+
+impl SelectMenu for Button {
+    fn select_menu(
+        mut self,
+        window: &mut Window,
+        cx: &mut App,
+        items: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> Div {
+        let id = self.interactivity().element_id.clone().unwrap_or_else(|| "select".into());
+        let key = ElementId::NamedChild(Arc::new(id), "menu-width".into());
+        let width = window.use_keyed_state(key, cx, |_, _| Rc::new(Cell::new(Pixels::ZERO))).read(cx).clone();
+        let measured = width.clone();
+        // GPUI Kit's own minimum, which a smaller min_w would replace.
+        let floor = window.rem_size() * 8.;
+        div()
+            .relative()
+            .child(self.dropdown_menu(move |menu, window, cx| items(menu, window, cx).min_w(width.get().max(floor))))
+            .child(
+                canvas(move |bounds, _, _| measured.set(bounds.size.width), |_, _, _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
+    }
+}
+
 pub fn select_small(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
     let theme = cx.theme();
     Button::new(id)
@@ -239,4 +283,43 @@ pub fn empty_state(icon: Option<Icon>, text: impl Into<SharedString>, cx: &App) 
         .text_color(cx.theme().muted_foreground)
         .when_some(icon, |el, icon| el.child(icon.size(ICON_XL)))
         .child(text.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::component::menu::PopupMenuItem;
+    use gpui_kit::{
+        Context, InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Render, Styled as _,
+        TestAppContext, Window, div, px,
+    };
+
+    use super::SelectMenu;
+    use crate::test_support::Env;
+
+    struct WideSelect;
+
+    impl Render for WideSelect {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.)).child(super::select("wide", "Pick", cx).debug_selector(|| "wide".into()).select_menu(
+                window,
+                cx,
+                |menu, _, _| {
+                    menu.item(PopupMenuItem::element(|_, _| div().debug_selector(|| "item".into()).w_full().h(px(8.))))
+                },
+            ))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_select_menu_is_as_wide_as_the_select(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (_, cx) = cx.add_window_view(|_, _| WideSelect);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let select = cx.debug_bounds("wide").expect("the select is drawn");
+        cx.simulate_click(select.center(), Modifiers::none());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let item = cx.debug_bounds("item").expect("the menu is open");
+        // The item sits inside the menu's padding, so it's a little narrower than the menu.
+        assert!(item.size.width > select.size.width * 0.9, "item {item:?} in a menu under the select {select:?}");
+    }
 }

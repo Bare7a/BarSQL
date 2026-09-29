@@ -80,6 +80,24 @@ fn table_views_restore_and_orphaned_tabs_stay_in_the_session(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn a_session_that_opens_on_a_table_view_fills_the_sidebar_tree(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let id = env.connection.id.clone();
+    // Seeding left the connection open, and the app starts with none.
+    env.runtime.block_on(env.bar.disconnect(&id));
+    let table_view = EditorTab {
+        table_view: Some(TableViewRef { schema: "main".into(), table: "things".into(), ..Default::default() }),
+        ..tab("view", &id, "")
+    };
+    env.bar.save_editor_session(EditorSession { tabs: vec![table_view], active_tab: "view".into() }).unwrap();
+    let (workspace, cx) = open(cx);
+    let tree = cx.update(|_, cx| workspace.read(cx).sidebar().read(cx).panels().0);
+    crate::test_support::settle(cx, |cx| {
+        cx.update(|_, cx| tree.read(cx).listed().iter().any(|(row, _, _)| row == "s:main"))
+    });
+}
+
+#[gpui_kit::test]
 fn edits_are_saved_after_a_pause_and_closing_saves_at_once(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let id = env.connection.id.clone();
