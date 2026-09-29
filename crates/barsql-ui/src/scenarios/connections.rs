@@ -1,5 +1,6 @@
 // Drag-and-drop reordering is tested in connections_drag_into_order_and_folders.
-use gpui_kit::TestAppContext;
+use barsql_core::{ConnectionConfig, DriverType};
+use gpui_kit::{TestAppContext, px, size};
 
 use super::driver::{Driver, open, selector};
 use crate::file_dialogs::Stub;
@@ -92,4 +93,30 @@ fn a_connection_is_deleted_after_confirming(cx: &mut TestAppContext) {
     app.settle(|cx| cx.update(|_, cx| sidebar.read(cx).connections().is_empty()));
     assert!(names(&app).is_empty());
     assert_eq!(selected(&mut app), None, "the switcher offers a new connection");
+}
+
+#[gpui_kit::test]
+fn a_long_switcher_keeps_its_toolbar_and_scrolls_the_list(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    for n in 0..40 {
+        let config = ConnectionConfig {
+            name: format!("Conn {n:02}"),
+            driver: DriverType::Sqlite,
+            file_path: format!("/tmp/barsql-conn-{n}.db"),
+            ..Default::default()
+        };
+        app.env.runtime.block_on(app.env.bar.save_connection(config)).unwrap();
+    }
+    app.reopen();
+    app.cx.simulate_resize(size(px(1200.), px(560.)));
+    open_switcher(&mut app);
+    let viewport = app.cx.update(|window, _| window.viewport_size());
+    let menu = app.bounds("connection-switcher-menu").expect("the switcher is open");
+    assert!(menu.size.height <= viewport.height * 0.6 + px(0.5), "{menu:?} fits under the cap for {viewport:?}");
+    let toolbar = app.bounds("new-connection").expect("the toolbar is drawn");
+    let list = app.bounds("connection-list").expect("the list is drawn");
+    assert!(menu.contains(&toolbar.origin) && list.bottom() <= menu.bottom(), "the list shrinks to the menu");
+    let first = app.env.bar.list_connections()[0].id.clone();
+    app.scrolls_by_its_bar("connection-list", selector(format!("connection-row-{first}")));
+    assert_eq!(app.bounds("new-connection"), Some(toolbar), "the toolbar stays put");
 }

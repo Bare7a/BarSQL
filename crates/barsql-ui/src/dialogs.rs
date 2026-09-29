@@ -130,14 +130,12 @@ pub fn confirm(
     on_confirm: impl Fn(&mut Window, &mut App) + 'static,
 ) {
     let on_confirm = Rc::new(on_confirm);
+    let scroll = ScrollHandle::new();
     window.open_dialog(cx, move |dialog, window, cx| {
         let (on_ok, on_click) = (on_confirm.clone(), on_confirm.clone());
+        let detail = confirm.detail.clone().map(|detail| modal::detail("confirm-detail", detail, &scroll, cx));
         let content = v_flex()
-            .child(
-                modal::body()
-                    .child(modal::description(confirm.description.clone(), cx))
-                    .children(confirm.detail.clone().map(|detail| modal::detail("confirm-detail", detail, cx))),
-            )
+            .child(modal::body().child(modal::description(confirm.description.clone(), cx)).children(detail))
             .child(
                 modal::footer(cx)
                     .child(

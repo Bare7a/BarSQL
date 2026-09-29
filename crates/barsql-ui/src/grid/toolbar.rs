@@ -3,7 +3,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -122,6 +122,7 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
     let this = grid.downgrade();
     let grid = grid.clone();
     Popover::new("column-picker")
+        .p_0()
         .trigger(
             Button::new("column-picker-button")
                 .debug_selector(|| "column-picker-button".into())
@@ -147,31 +148,35 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
             let (hidden, total, scroll) = (state.hidden_count(), names.len(), state.picker_scroll.clone());
             // About 13 rows, or half the window when that is shorter.
             let list_height = (window.viewport_size().height * 0.5).min(window.rem_size() * 24.615);
-            let overflows = window.rem_size() * ROW_HEIGHT * total as f32 > list_height;
             let (show, hide) = (grid.clone(), grid.clone());
+            let border = cx.theme().border;
             let rows: Vec<Stateful<Div>> =
                 names.into_iter().map(|(ix, name, visible)| column_row(&grid, ix, name, visible, cx)).collect();
             v_flex()
                 .min_w(rems(15.385))
                 .max_w(rems(24.615))
                 .text_size(TEXT_SM)
+                // Two equal halves with a rule between them.
                 .child(
                     h_flex()
-                        .gap(rems(0.308))
-                        .pb(rems(0.462))
-                        .mb(rems(0.308))
+                        .p(rems(0.308))
                         .border_b_1()
-                        .border_color(cx.theme().border)
+                        .border_color(border)
                         .child(
                             Button::new("columns-show-all")
+                                .debug_selector(|| "columns-show-all".into())
                                 .ghost()
+                                .flex_1()
                                 .disabled(hidden == 0)
                                 .tool(Icon::new(Lucide::Eye), ICON_XS, t(cx, "common.showAll"))
                                 .on_click(move |_, _, cx| show.update(cx, |grid, cx| grid.show_all_columns(cx))),
                         )
+                        .child(div().flex_none().w(px(1.)).h(rems(1.231)).mx(rems(0.308)).bg(border))
                         .child(
                             Button::new("columns-hide-all")
+                                .debug_selector(|| "columns-hide-all".into())
                                 .ghost()
+                                .flex_1()
                                 .disabled(hidden == total)
                                 .tool(Icon::new(Lucide::EyeOff), ICON_XS, t(cx, "common.hideAll"))
                                 .on_click(move |_, _, cx| hide.update(cx, |grid, cx| grid.hide_all_columns(cx))),
@@ -181,22 +186,15 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
                     div()
                         .relative()
                         .child(
-                            div()
+                            v_flex()
                                 .id("column-picker-list")
                                 .max_h(list_height)
                                 .overflow_y_scroll()
                                 .track_scroll(&scroll)
-                                .child(v_flex().when(overflows, |list| list.pr(Scrollbar::width())).children(rows)),
+                                .p(rems(0.308))
+                                .children(rows),
                         )
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .right_0()
-                                .bottom_0()
-                                .w(Scrollbar::width())
-                                .child(Scrollbar::vertical(&scroll).mode(ScrollbarMode::Always).viewport_from_layout()),
-                        ),
+                        .vertical_scrollbar(&scroll),
                 )
         })
 }

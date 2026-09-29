@@ -4,6 +4,7 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{InputBaseState, InputModeKind};
 use gpui_kit::component::input::{CompletionProvider, InputEvent};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme, Icon, Rope, RopeExt, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -437,7 +438,9 @@ impl<M: InputModeKind> Render for Completion<M> {
                     .border_color(border)
                     .font_family(mono)
                     .text_size(font_size)
-                    .child(list),
+                    .relative()
+                    .child(list)
+                    .vertical_scrollbar(&self.scroll),
             ),
         )
         .with_priority(1)

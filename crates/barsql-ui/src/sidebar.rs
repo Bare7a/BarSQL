@@ -194,12 +194,12 @@ impl Sidebar {
     }
 
     // A click outside closes it, but not one on a popup the panel opened. A row's context menu acts on
-    // mouse-up, after this handler.
+    // mouse-up, after this handler. The panel shrinks to the height cap, and its list scrolls.
     fn switcher_menu(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let bounds = self.switcher_bounds.clone();
         deferred(
-            div()
+            v_flex()
                 .id("connection-switcher-menu")
                 .debug_selector(|| "connection-switcher-menu".into())
                 .track_focus(&self.menu_focus)
@@ -208,7 +208,7 @@ impl Sidebar {
                 .left_0()
                 .right_0()
                 .max_h(window.viewport_size().height * 0.6)
-                .overflow_y_scroll()
+                .overflow_hidden()
                 .occlude()
                 .p(rems(0.615))
                 .bg(theme.secondary)

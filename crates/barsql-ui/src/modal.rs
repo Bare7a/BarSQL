@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::scroll::{ScrollableElement as _, Scrollbar};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -224,12 +224,13 @@ pub fn description(text: impl Into<SharedString>, cx: &App) -> Div {
     div().text_size(TEXT_BASE).text_color(cx.theme().muted_foreground).child(text.into())
 }
 
-pub fn detail(id: impl Into<ElementId>, text: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
+pub fn detail(id: impl Into<ElementId>, text: impl Into<SharedString>, scroll: &ScrollHandle, cx: &App) -> Div {
     let theme = cx.theme();
-    div()
+    let detail = div()
         .id(id)
         .max_h(rems(12.308))
         .overflow_y_scroll()
+        .track_scroll(scroll)
         .py(rems(0.769))
         .px(rems(0.923))
         .rounded(RADIUS)
@@ -239,5 +240,6 @@ pub fn detail(id: impl Into<ElementId>, text: impl Into<SharedString>, cx: &App)
         .font_family(theme.mono_font_family.clone())
         .text_size(TEXT_XS)
         .text_color(theme.muted_foreground)
-        .child(text.into())
+        .child(text.into());
+    div().relative().child(detail).vertical_scrollbar(scroll)
 }

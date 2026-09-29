@@ -2,7 +2,7 @@ use barsql_core::{ConnectionConfig, Value};
 use gpui_kit::component::Root;
 use gpui_kit::{
     Action, AppContext as _, Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
-    TestAppContext, VisualTestContext,
+    ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px,
 };
 
 use crate::grid::Grid;
@@ -315,6 +315,29 @@ impl Driver<'_> {
     pub fn click_at(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
         self.cx.simulate_click(at, modifiers);
         self.cx.run_until_parked();
+    }
+
+    // A mouse wheel or trackpad over `at`. Negative `dy` scrolls down.
+    pub fn wheel(&mut self, at: Point<Pixels>, dy: Pixels) {
+        self.draw();
+        self.cx.simulate_event(ScrollWheelEvent {
+            position: at,
+            delta: ScrollDelta::Pixels(point(px(0.), dy)),
+            ..Default::default()
+        });
+        self.cx.run_until_parked();
+    }
+
+    // Like the editor's, the list's bar shows once the list scrolls, and a click low on its track then jumps down.
+    pub fn scrolls_by_its_bar(&mut self, list: &'static str, first_row: &'static str) {
+        let frame = self.bounds(list).unwrap_or_else(|| panic!("{list} is not drawn"));
+        let row = self.bounds(first_row).unwrap_or_else(|| panic!("{first_row} is not drawn"));
+        self.wheel(frame.center(), px(-40.));
+        self.draw();
+        self.click_at(point(frame.right() - px(8.), frame.bottom() - px(12.)), Modifiers::none());
+        // A virtual list stops drawing rows it scrolled past.
+        let jumped = self.bounds(first_row).is_none_or(|moved| moved.top() < row.top() - px(200.));
+        assert!(jumped, "a click on the bar's track scrolls {list}");
     }
 
     pub fn double_click_at(&mut self, position: Point<Pixels>) {

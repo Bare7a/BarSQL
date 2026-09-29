@@ -1,8 +1,10 @@
-use gpui_kit::{Entity, TestAppContext};
+use barsql_core::SavedQuery;
+use gpui_kit::{Entity, TestAppContext, px};
 
 use super::driver::{Driver, open};
 use crate::history_panel::HistoryPanel;
 use crate::saved_panel::SavedPanel;
+use crate::saved_queries;
 
 // Newest first. SELECTs only, since Env's seed is in the history too.
 fn history(app: &mut Driver) -> Vec<String> {
@@ -172,4 +174,53 @@ fn saved_queries_filter_and_sort_by_name(cx: &mut TestAppContext) {
     app.pause();
     app.menu_pick("saved-options", 2);
     assert_eq!(names(saved(&mut app)), ["Apple query", "Zebra query"]);
+}
+
+#[gpui_kit::test]
+fn long_saved_and_recent_lists_scroll_by_their_bars(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    for n in 0..60 {
+        let sql = format!("SELECT {n} AS n");
+        let query = SavedQuery {
+            name: format!("Saved {n:02}"),
+            connection_id: app.connection.id.clone(),
+            sql,
+            ..Default::default()
+        };
+        app.env.bar.save_saved_query(query).unwrap();
+    }
+    app.cx.update(|_, cx| saved_queries::refresh(cx));
+    app.click("sidebar.saved");
+    app.scrolls_by_its_bar("saved-list", "saved-row-0");
+
+    app.seed(&(0..60).map(|n| format!("SELECT {n} AS n")).collect::<Vec<_>>().join(";"));
+    let sidebar = app.sidebar();
+    sidebar.update(app.cx, |sidebar, cx| sidebar.refresh_history(cx));
+    show_recent(&mut app);
+    app.scrolls_by_its_bar("history-list", "history-row-0");
+}
+
+// The actions float over the row's end, so the text keeps the whole row. Rows pad both sides alike.
+#[gpui_kit::test]
+fn saved_and_recent_text_spans_the_row_under_its_hover_actions(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    save_as(&mut app, "SELECT 6 AS spans;", "Spanning query");
+    app.click("sidebar.saved");
+    let (row, text) = (app.bounds("saved-row-0").unwrap(), app.bounds("saved-text-0").unwrap());
+    let inset = text.left() - row.left();
+    assert!((row.right() - text.right() - inset).abs() < px(0.5), "saved text {text:?} fills its row {row:?}");
+    app.hover("saved-row-0");
+    let delete = app.bounds("saved-delete-0").expect("hovering shows the actions");
+    assert!(delete.left() < text.right() && delete.right() <= row.right(), "over the text's end, in the row");
+
+    show_recent(&mut app);
+    let (row, text) = (app.bounds("history-row-0").unwrap(), app.bounds("history-text-0").unwrap());
+    assert!((row.right() - text.right() - inset).abs() < px(0.5), "history text {text:?} fills its row {row:?}");
+    app.hover("history-row-0");
+    let delete = app.bounds("history-delete-0").expect("hovering shows the actions");
+    assert!(delete.left() < text.right() && delete.right() <= row.right());
+    app.click("history-delete-0");
+    assert!(history(&mut app).iter().all(|sql| sql != "SELECT 6 AS spans"), "the button still deletes");
 }

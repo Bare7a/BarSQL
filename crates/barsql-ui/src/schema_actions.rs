@@ -155,6 +155,7 @@ struct ChangeDialog {
     error: Option<SharedString>,
     job: String,
     on_done: OnDone,
+    sql_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -290,7 +291,8 @@ impl Render for ChangeDialog {
             ));
         }
         if let Some(sql) = self.preview(cx) {
-            body = body.child(form::group(t(cx, "schemaChange.sql"), modal::detail("change-sql", sql, cx), cx));
+            let detail = modal::detail("change-sql", sql, &self.sql_scroll, cx);
+            body = body.child(form::group(t(cx, "schemaChange.sql"), detail, cx));
         }
         let error = self.error.clone().map(|error| form::error(error, cx).debug_selector(|| "change-error".into()));
         let body = body.children(error);
@@ -347,6 +349,7 @@ pub fn open_change(
             error: None,
             job: job_id("schema-change"),
             on_done: Rc::new(on_done),
+            sql_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     });

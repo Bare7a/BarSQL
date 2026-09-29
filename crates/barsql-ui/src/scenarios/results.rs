@@ -1,4 +1,4 @@
-use gpui_kit::{Entity, Modifiers, TestAppContext};
+use gpui_kit::{Entity, Modifiers, TestAppContext, px};
 
 use super::driver::{Driver, open, selector};
 use crate::actions::ToggleJsonPanel;
@@ -101,6 +101,23 @@ fn each_result_set_keeps_its_own_sort_and_hidden_columns(cx: &mut TestAppContext
     app.click("result-tab-1");
     assert_eq!(layout(&mut app), (vec!["num".into()], Some(("num".into(), true))));
     assert_eq!(app.cell(0, 0).as_deref(), Some("3"));
+}
+
+#[gpui_kit::test]
+fn the_column_picker_splits_show_all_and_hide_all_evenly(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.seed(SETS);
+    app.connect();
+    app.run("SELECT id, name FROM e2e_sets;");
+    app.click("column-picker-button");
+    let show = app.bounds("columns-show-all").expect("Show all is drawn");
+    let hide = app.bounds("columns-hide-all").expect("Hide all is drawn");
+    assert!((show.size.width - hide.size.width).abs() < px(1.), "{show:?} and {hide:?} take half each");
+    assert!(show.right() < hide.left(), "side by side, with the rule between them");
+    app.click("columns-hide-all");
+    assert!(layout(&mut app).0.is_empty());
+    app.click("columns-show-all");
+    assert_eq!(layout(&mut app).0, ["id", "name"]);
 }
 
 #[gpui_kit::test]
