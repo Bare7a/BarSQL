@@ -1,5 +1,6 @@
 use barsql_core::{ConnectionConfig, Value};
-use gpui_kit::component::Root;
+use gpui_kit::component::scroll::ScrollbarMode;
+use gpui_kit::component::{Root, Theme};
 use gpui_kit::{
     Action, AppContext as _, Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
     ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px,
@@ -338,6 +339,32 @@ impl Driver<'_> {
         // A virtual list stops drawing rows it scrolled past.
         let jumped = self.bounds(first_row).is_none_or(|moved| moved.top() < row.top() - px(200.));
         assert!(jumped, "a click on the bar's track scrolls {list}");
+    }
+
+    // Like a Mac with a trackpad, where GPUI Kit hides a bar until its area scrolls.
+    pub fn overlay_scrollbars(&mut self) {
+        self.cx.update(|_, cx| Theme::set_scrollbar_mode(ScrollbarMode::Scrolling, cx));
+        self.draw();
+    }
+
+    pub fn hover_at(&mut self, at: Point<Pixels>) {
+        self.cx.simulate_mouse_move(at, None, Modifiers::none());
+        self.draw();
+    }
+
+    // After overlay_scrollbars, the list's bar shows only while the pointer is over the list. With the pointer away,
+    // a click low on its track goes to the list. With it over the list, the click jumps down.
+    pub fn shows_its_bar_on_hover(&mut self, list: &'static str, first_row: &'static str) {
+        let frame = self.bounds(list).unwrap_or_else(|| panic!("{list} is not drawn"));
+        let row = self.bounds(first_row).unwrap_or_else(|| panic!("{first_row} is not drawn"));
+        let track = point(frame.right() - px(8.), frame.bottom() - px(12.));
+        self.hover_at(point(frame.right() + px(40.), frame.center().y));
+        self.click_at(track, Modifiers::none());
+        assert_eq!(self.bounds(first_row), Some(row), "away from {list}, its bar is hidden");
+        self.hover_at(frame.center());
+        self.click_at(track, Modifiers::none());
+        let jumped = self.bounds(first_row).is_none_or(|moved| moved.top() < row.top() - px(200.));
+        assert!(jumped, "hovering {list} shows its bar");
     }
 
     pub fn double_click_at(&mut self, position: Point<Pixels>) {

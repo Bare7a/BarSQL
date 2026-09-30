@@ -18,6 +18,7 @@ use gpui_kit::*;
 use crate::form;
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::spinner::Spinner;
 use crate::toast::{self, ToastAction, ToastKind};
 use crate::tokens::{ICON_MD, ICON_SM, RADIUS};
@@ -373,7 +374,14 @@ impl Render for UpdateDialog {
                     .border_color(theme.border)
                     .bg(theme.background)
                     .child(TextView::markdown("update-notes-text", release.notes.clone()));
-                Some(div().relative().child(notes).vertical_scrollbar(&self.notes_scroll).into_any_element())
+                Some(
+                    div()
+                        .relative()
+                        .child(notes)
+                        .vertical_scrollbar(&self.notes_scroll)
+                        .scrollbars_on_hover()
+                        .into_any_element(),
+                )
             }
             UpdateState::Failed { stage, message, .. } => {
                 let stage = t(cx, &format!("update.stage.{}", stage.key()));

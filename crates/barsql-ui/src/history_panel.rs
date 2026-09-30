@@ -17,6 +17,7 @@ use crate::i18n::{I18n, t, t_with};
 use crate::list_nav::{self, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
 use crate::relative_time::{format_relative_time, one_line_preview, time_bucket};
 use crate::saved_queries;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::state;
 use crate::toast;
 use crate::tokens::{RADIUS, TEXT_2XS, TEXT_XS};
@@ -278,9 +279,10 @@ impl HistoryPanel {
         ix: usize,
         entry: &HistoryEntry,
         now_ms: i64,
-        ring: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ring = self.nav.ringed(&entry.id, window);
         let theme = cx.theme().clone();
         let lang = cx.global::<I18n>().lang();
         let mut meta = format!("{} · {}ms", format_relative_time(&entry.executed_at, lang, now_ms), entry.duration_ms);
@@ -332,6 +334,8 @@ impl HistoryPanel {
             )
             .child(
                 list_nav::hover_actions("history-row", rems(0.5), cx)
+                    // The list's inset plus the row's.
+                    .pr(self.nav.bar_clearance(rems(0.615 + 0.5), window))
                     .child(
                         Button::new(SharedString::from(format!("history-save-{ix}")))
                             .small()
@@ -395,7 +399,7 @@ impl Render for HistoryPanel {
                     last = Some(bucket);
                     rows.push(form::caption(t(cx, bucket.label_key()), cx).px_2().pt_2().pb_1().into_any_element());
                 }
-                rows.push(self.render_entry(ix, entry, now_ms, self.nav.ringed(&entry.id, window), cx));
+                rows.push(self.render_entry(ix, entry, now_ms, window, cx));
             }
             let list = v_flex()
                 .id("history-list")
@@ -422,7 +426,13 @@ impl Render for HistoryPanel {
                     }
                 }))
                 .children(rows);
-            div().relative().size_full().child(list).vertical_scrollbar(&self.nav.scroll).into_any_element()
+            div()
+                .relative()
+                .size_full()
+                .child(list)
+                .vertical_scrollbar(&self.nav.scroll)
+                .scrollbars_on_hover()
+                .into_any_element()
         };
         v_flex().size_full().child(filter_bar).child(div().flex_1().min_h_0().child(body))
     }

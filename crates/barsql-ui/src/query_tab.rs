@@ -31,6 +31,7 @@ use crate::i18n::{I18n, t, t_with};
 use crate::results::{ResultStatus, ResultsEvent, ResultsPanel};
 use crate::saved_queries;
 use crate::schema::{self, Schemas};
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::sql_language::{self, SqlLanguage, lsp_range};
 use crate::tokens::{ICON_SM, TEXT_XS};
 use crate::{state, theme};
@@ -899,7 +900,8 @@ impl Render for QueryTab {
                                     editor.update(cx, |editor, cx| editor.replace(text, window, cx));
                                     true
                                 }
-                            }),
+                            })
+                            .scrollbars_on_hover(),
                     )
                     .child(self.run_glyphs(cx))
                     .child(self.completion.clone()),

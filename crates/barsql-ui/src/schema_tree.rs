@@ -22,6 +22,7 @@ use crate::schema_actions::{self, Applied, Change};
 use crate::schema_objects::{
     Badge, Group, ObjectRow, constraint_rows, group_key, index_rows, routine_rows, routines_key, trigger_rows,
 };
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::spinner::Spinner;
 use crate::state::{self, set_setting_json, setting_json};
 use crate::toast;
@@ -1338,6 +1339,7 @@ impl Render for SchemaTree {
                         .pb(rems(0.615)),
                 )
                 .vertical_scrollbar(&self.scroll)
+                .scrollbars_on_hover()
                 .into_any_element()
         };
         v_flex()

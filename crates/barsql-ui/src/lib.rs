@@ -36,6 +36,7 @@ mod schema_actions;
 mod schema_objects;
 mod schema_tree;
 mod screenshots;
+mod scrollbars;
 mod shortcuts;
 mod shortcuts_dialog;
 mod sidebar;

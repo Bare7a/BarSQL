@@ -1,4 +1,5 @@
 use crate::tokens::RADIUS;
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::{ActiveTheme, h_flex};
 use gpui_kit::*;
 
@@ -67,6 +68,15 @@ impl ListNav {
 
     pub fn ringed(&self, id: &str, window: &Window) -> bool {
         self.keyed && self.focus.is_focused(window) && self.cursor.as_deref() == Some(id)
+    }
+
+    // A shown bar takes clicks on its track. While the list can scroll, row buttons that end `edge` from its right
+    // side move left by this much, clear of the track.
+    pub fn bar_clearance(&self, edge: Rems, window: &Window) -> Pixels {
+        if self.scroll.max_offset().y <= px(0.) {
+            return px(0.);
+        }
+        (Scrollbar::width() - edge.to_pixels(window.rem_size())).max(px(0.))
     }
 }
 

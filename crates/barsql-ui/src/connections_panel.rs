@@ -16,6 +16,7 @@ use crate::i18n::{t, t_with};
 use crate::list_nav::{self, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
 use crate::saved_queries::failed;
 use crate::schema;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::state::{self, set_setting_json, setting_json};
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM, TEXT_XS};
 
@@ -369,8 +370,9 @@ impl ConnectionsPanel {
         }
     }
 
-    fn render_connection(&self, connection: &ConnectionConfig, ring: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_connection(&self, connection: &ConnectionConfig, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
+        let ring = self.nav.ringed(&connection.id, window);
         let connected = state::bar(cx).is_connected(&connection.id);
         let selected = self.selected.as_deref() == Some(connection.id.as_str());
         let color = parse_color(&connection.color).unwrap_or(theme.primary);
@@ -413,6 +415,7 @@ impl ConnectionsPanel {
             )
             .child(
                 list_nav::hover_actions(group, rems(0.615), cx)
+                    .pr(self.nav.bar_clearance(rems(0.615), window))
                     .child(
                         Button::new(SharedString::from(format!("connect-{}", connection.id)))
                             .small()
@@ -547,8 +550,7 @@ impl ConnectionsPanel {
                     .child(t(cx, "sidebar.folderEmpty"))
                     .into_any_element()
             } else {
-                let rows: Vec<AnyElement> =
-                    members.iter().map(|c| self.render_connection(c, self.nav.ringed(&c.id, window), cx)).collect();
+                let rows: Vec<AnyElement> = members.iter().map(|c| self.render_connection(c, window, cx)).collect();
                 v_flex().pl(rems(0.615)).children(rows).into_any_element()
             }
         });
@@ -586,8 +588,7 @@ impl Render for ConnectionsPanel {
             form::empty_state(Some(Icon::new(Lucide::Database)), t(cx, "sidebar.noConnectionsYet"), cx)
                 .into_any_element()
         } else {
-            let mut rows: Vec<AnyElement> =
-                loose.iter().map(|c| self.render_connection(c, self.nav.ringed(&c.id, window), cx)).collect();
+            let mut rows: Vec<AnyElement> = loose.iter().map(|c| self.render_connection(c, window, cx)).collect();
             let folders = self.folders.clone();
             rows.extend(folders.iter().map(|f| self.render_folder(f, window, cx)));
             let list = v_flex()
@@ -613,7 +614,13 @@ impl Render for ConnectionsPanel {
                     }
                 }))
                 .children(rows);
-            v_flex().relative().min_h_0().child(list).vertical_scrollbar(&self.nav.scroll).into_any_element()
+            v_flex()
+                .relative()
+                .min_h_0()
+                .child(list)
+                .vertical_scrollbar(&self.nav.scroll)
+                .scrollbars_on_hover()
+                .into_any_element()
         };
         // Shrinks to fit the switcher menu, so the list scrolls and the toolbar stays.
         v_flex().w_full().min_h_0().child(toolbar).child(body)

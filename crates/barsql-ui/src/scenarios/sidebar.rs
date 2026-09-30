@@ -176,9 +176,8 @@ fn saved_queries_filter_and_sort_by_name(cx: &mut TestAppContext) {
     assert_eq!(names(saved(&mut app)), ["Apple query", "Zebra query"]);
 }
 
-#[gpui_kit::test]
-fn long_saved_and_recent_lists_scroll_by_their_bars(cx: &mut TestAppContext) {
-    let mut app = open(cx);
+// Fills Saved and Recent with 60 queries each, and checks each list and its first row.
+fn check_long_lists<'a>(app: &mut Driver<'a>, check: impl Fn(&mut Driver<'a>, &'static str, &'static str)) {
     app.connect();
     for n in 0..60 {
         let sql = format!("SELECT {n} AS n");
@@ -192,13 +191,25 @@ fn long_saved_and_recent_lists_scroll_by_their_bars(cx: &mut TestAppContext) {
     }
     app.cx.update(|_, cx| saved_queries::refresh(cx));
     app.click("sidebar.saved");
-    app.scrolls_by_its_bar("saved-list", "saved-row-0");
+    check(app, "saved-list", "saved-row-0");
 
     app.seed(&(0..60).map(|n| format!("SELECT {n} AS n")).collect::<Vec<_>>().join(";"));
     let sidebar = app.sidebar();
     sidebar.update(app.cx, |sidebar, cx| sidebar.refresh_history(cx));
-    show_recent(&mut app);
-    app.scrolls_by_its_bar("history-list", "history-row-0");
+    show_recent(app);
+    check(app, "history-list", "history-row-0");
+}
+
+#[gpui_kit::test]
+fn long_saved_and_recent_lists_scroll_by_their_bars(cx: &mut TestAppContext) {
+    check_long_lists(&mut open(cx), Driver::scrolls_by_its_bar);
+}
+
+#[gpui_kit::test]
+fn long_saved_and_recent_lists_show_their_bars_on_hover(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.overlay_scrollbars();
+    check_long_lists(&mut app, Driver::shows_its_bar_on_hover);
 }
 
 // The actions float over the row's end, so the text keeps the whole row. Rows pad both sides alike.

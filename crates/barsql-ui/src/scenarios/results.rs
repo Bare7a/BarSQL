@@ -1,4 +1,4 @@
-use gpui_kit::{Entity, Modifiers, TestAppContext, px};
+use gpui_kit::{Entity, Modifiers, TestAppContext, point, px};
 
 use super::driver::{Driver, open, selector};
 use crate::actions::ToggleJsonPanel;
@@ -187,4 +187,24 @@ fn json_text_in_a_cell_nests_as_an_object(cx: &mut TestAppContext) {
     let panel = app.cx.update(|_, cx| app.workspace.read(cx).json_panel()).expect("the JSON viewer is open");
     let shown = app.cx.update(|_, cx| panel.read(cx).text().unwrap_or_default().to_string());
     assert!(shown.contains("\"x\": 42"), "{shown}");
+}
+
+#[gpui_kit::test]
+fn a_long_result_shows_the_grid_bar_on_hover(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT * FROM things;");
+    app.overlay_scrollbars();
+    let grid = grid(&mut app);
+    let frame = app.bounds("grid").expect("the grid is drawn");
+    let track = point(frame.right() - px(8.), frame.center().y);
+    let first = |app: &mut Driver| app.grid_point(&grid, |grid| grid.cell_point(0, 0));
+    let before = first(&mut app);
+    let editor = app.bounds("query-editor").expect("the editor is drawn");
+    app.hover_at(editor.center());
+    app.click_at(track, Modifiers::none());
+    assert_eq!(first(&mut app), before, "away from the grid, its bar is hidden");
+    app.hover_at(frame.center());
+    app.click_at(track, Modifiers::none());
+    assert!(first(&mut app).y < before.y - px(200.), "hovering the grid shows its bar");
 }

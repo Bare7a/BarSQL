@@ -12,6 +12,7 @@ use super::view::Grid;
 use super::{copy_format, set_copy_format};
 use crate::form::ToolButton;
 use crate::i18n::t;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::tokens::{ICON_2XS, ICON_XS, RADIUS_SM, TEXT_SM, TINT_BORDER};
 
 pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
@@ -194,7 +195,8 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
                                 .p(rems(0.308))
                                 .children(rows),
                         )
-                        .vertical_scrollbar(&scroll),
+                        .vertical_scrollbar(&scroll)
+                        .scrollbars_on_hover(),
                 )
         })
 }

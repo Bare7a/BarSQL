@@ -20,6 +20,7 @@ use super::scroll::GridScroll;
 use super::selection::{Arrow, GUTTER, Selection, View};
 use super::sort::{RowOrder, SortState, sort_order};
 use crate::i18n::t;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::state::{set_setting, setting};
 use crate::toast;
 
@@ -913,6 +914,7 @@ impl Render for Grid {
         });
         div()
             .id("grid")
+            .debug_selector(|| "grid".into())
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .size_full()
@@ -975,6 +977,7 @@ impl Render for Grid {
             )
             .children(editor)
             .context_menu(move |menu, _, cx| Grid::menu(&weak, menu, cx))
+            .scrollbars_on_hover()
     }
 }
 

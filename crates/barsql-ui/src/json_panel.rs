@@ -10,6 +10,7 @@ use crate::actions::{ToggleJsonPanel, shortcut_label};
 use crate::form;
 use crate::grid::RowRef;
 use crate::i18n::{I18n, t, t_with};
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::theme;
 use crate::tokens::ICON_SM;
 
@@ -140,7 +141,8 @@ impl Render for JsonPanel {
                             .context_menu(crate::context_menu::editor(&self.editor))
                             .size_full()
                             .bordered(false)
-                            .text_size(px(theme::editor_font_size(cx))),
+                            .text_size(px(theme::editor_font_size(cx)))
+                            .scrollbars_on_hover(),
                     ),
                 )
                 .into_any_element(),
