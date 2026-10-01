@@ -15,6 +15,7 @@ use crate::plan_tree::{
     Metric, PlanRow, available_metrics, collect_parent_keys, default_metric, flatten, format_cost, format_factor,
     format_ms, format_rows, is_estimate_off,
 };
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::toast;
 use crate::tokens::{ICON_2XS, ICON_SM, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_SM, TEXT_XS, TINT, TINT_BORDER};
 
@@ -464,6 +465,7 @@ impl PlanView {
             .h_full()
             .child(details)
             .vertical_scrollbar(&self.details_scroll)
+            .scrollbars_on_hover()
             .into_any_element()
     }
 }
@@ -542,6 +544,7 @@ impl Render for PlanView {
                 .min_h_0()
                 .child(raw)
                 .scrollbar(&self.raw_scroll, ScrollbarAxis::Both)
+                .scrollbars_on_hover()
                 .into_any_element()
         } else {
             let plan = self.plan.clone();
@@ -594,7 +597,8 @@ impl Render for PlanView {
                         .h_full()
                         .min_w_0()
                         .child(tree)
-                        .scrollbar(&self.scroll, ScrollbarAxis::Both),
+                        .scrollbar(&self.scroll, ScrollbarAxis::Both)
+                        .scrollbars_on_hover(),
                 )
                 .children(selected.map(|node| self.details(&node, cx)))
                 .into_any_element()

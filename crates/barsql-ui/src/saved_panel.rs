@@ -15,6 +15,7 @@ use crate::i18n::{I18n, t, t_with};
 use crate::list_nav::{self, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
 use crate::relative_time::one_line_preview;
 use crate::saved_queries::{self, SORT_KEY, SavedQueries, SavedSort};
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::state::{self, set_setting, setting};
 use crate::tokens::{ICON_2XS, RADIUS, TEXT_2XS, TEXT_SM, TEXT_XS};
 
@@ -262,7 +263,8 @@ impl SavedPanel {
         self.visible(cx).into_iter().find(|query| query.id == id).cloned()
     }
 
-    fn render_row(&self, ix: usize, query: &SavedQuery, ring: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(&self, ix: usize, query: &SavedQuery, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let ring = self.nav.ringed(&query.id, window);
         let theme = cx.theme().clone();
         let pinned = saved_queries::pinned(cx).contains(&query.id);
         let connection = (self.scope == Scope::All)
@@ -319,6 +321,8 @@ impl SavedPanel {
             )
             .child(
                 list_nav::hover_actions("saved-row", rems(0.5), cx)
+                    // The list's inset plus the row's.
+                    .pr(self.nav.bar_clearance(rems(0.615 + 0.5), window))
                     .child(
                         Button::new(SharedString::from(format!("saved-pin-{ix}")))
                             .small()
@@ -390,11 +394,8 @@ impl Render for SavedPanel {
             };
             form::empty_state(None, t(cx, key), cx).into_any_element()
         } else {
-            let rows: Vec<AnyElement> = visible
-                .iter()
-                .enumerate()
-                .map(|(ix, q)| self.render_row(ix, q, self.nav.ringed(&q.id, window), cx))
-                .collect();
+            let rows: Vec<AnyElement> =
+                visible.iter().enumerate().map(|(ix, q)| self.render_row(ix, q, window, cx)).collect();
             let list = v_flex()
                 .id("saved-list")
                 .debug_selector(|| "saved-list".into())
@@ -420,7 +421,13 @@ impl Render for SavedPanel {
                     }
                 }))
                 .children(rows);
-            div().relative().size_full().child(list).vertical_scrollbar(&self.nav.scroll).into_any_element()
+            div()
+                .relative()
+                .size_full()
+                .child(list)
+                .vertical_scrollbar(&self.nav.scroll)
+                .scrollbars_on_hover()
+                .into_any_element()
         };
         v_flex().size_full().child(filter_bar).child(div().flex_1().min_h_0().child(body))
     }

@@ -1,7 +1,7 @@
 use barsql_io::ExportFormat;
 use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
 
-use super::driver::open;
+use super::driver::{Driver, open};
 use crate::results::ResultStatus;
 
 #[gpui_kit::test]
@@ -287,4 +287,28 @@ fn the_suggestion_list_takes_the_arrow_keys_and_enter(cx: &mut TestAppContext) {
     suggest(&mut app, "SELECT * FROM ac_", "ac_parent");
     app.click("query-editor");
     assert!(suggestions(&mut app).is_empty(), "a click in the editor closed the list");
+}
+
+// After overlay_scrollbars, the bar shows while the pointer is over the editor, and typing there keeps it.
+#[gpui_kit::test]
+fn the_editor_shows_its_bar_while_hovered(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql(&(0..200).map(|n| format!("SELECT {n};")).collect::<Vec<_>>().join("\n"));
+    app.overlay_scrollbars();
+    let frame = app.bounds("query-editor").expect("the editor is drawn");
+    let track = point(frame.right() - px(8.), frame.center().y);
+    let tab = app.tab();
+    let top = |app: &mut Driver| app.cx.update(|_, cx| tab.read(cx).editor().read(cx).scroll_offset().y);
+    let before = top(&mut app);
+    app.hover_at(point(frame.left() - px(40.), frame.center().y));
+    app.click_at(track, Modifiers::none());
+    assert_eq!(top(&mut app), before, "away from the editor, its bar is hidden");
+    app.hover_at(frame.center());
+    app.keys("home");
+    // A hover change seen while drawing shows on the frame after.
+    app.draw();
+    app.draw();
+    app.click_at(track, Modifiers::none());
+    assert!((top(&mut app) - before).abs() > px(200.), "hovering the editor shows its bar");
 }

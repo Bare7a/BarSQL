@@ -13,6 +13,7 @@ use lsp_types::{
     CompletionTriggerKind,
 };
 
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::sql_language::word_start;
 use crate::theme;
 
@@ -440,7 +441,8 @@ impl<M: InputModeKind> Render for Completion<M> {
                     .text_size(font_size)
                     .relative()
                     .child(list)
-                    .vertical_scrollbar(&self.scroll),
+                    .vertical_scrollbar(&self.scroll)
+                    .scrollbars_on_hover(),
             ),
         )
         .with_priority(1)

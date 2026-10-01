@@ -19,6 +19,7 @@ use crate::form::{self, SelectMenu};
 use crate::i18n::{count, t, t_with};
 use crate::modal::{self, Modal};
 use crate::query_tab::new_tab_id;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::spinner::Spinner;
 use crate::tokens::{DIMMED, ICON_XS, RADIUS, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS};
 use crate::{schema, state};
@@ -689,7 +690,7 @@ impl ImportDialog {
                     .text_size(TEXT_2XS)
                     .text_color(theme.muted_foreground)
                     .children(result.errors.iter().map(|error| div().child(format!("• {error}"))));
-                el.child(div().relative().child(errors).vertical_scrollbar(&self.errors_scroll))
+                el.child(div().relative().child(errors).vertical_scrollbar(&self.errors_scroll).scrollbars_on_hover())
             })
     }
 }

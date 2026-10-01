@@ -314,3 +314,11 @@ fn a_long_tree_scrolls_by_its_bar(cx: &mut TestAppContext) {
     assert!(has(&mut app, "t:main.e2e_long_59"));
     app.scrolls_by_its_bar("schema-tree", "tree:s:main");
 }
+
+#[gpui_kit::test]
+fn a_long_tree_shows_its_bar_on_hover(cx: &mut TestAppContext) {
+    let seed: Vec<String> = (0..60).map(|n| format!("CREATE TABLE e2e_long_{n:02} (id INTEGER)")).collect();
+    let mut app = prepared(cx, &seed.join(";"));
+    app.overlay_scrollbars();
+    app.shows_its_bar_on_hover("schema-tree", "tree:s:main");
+}

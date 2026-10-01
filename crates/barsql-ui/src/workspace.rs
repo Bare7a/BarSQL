@@ -1156,6 +1156,7 @@ impl Workspace {
                     .children(tabs)
                     .child(add),
             )
+            // Not on hover: its track would take clicks on the tabs' lower half.
             .child(
                 div()
                     .absolute()

@@ -12,6 +12,7 @@ use crate::cell_content::{self, Kind, Mode, SELECTABLE};
 use crate::form;
 use crate::i18n::t;
 use crate::modal::{self, Modal};
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::theme;
 use crate::toast;
 
@@ -210,7 +211,8 @@ impl Render for CellViewer {
                             .context_menu(crate::context_menu::editor(&self.editor))
                             .size_full()
                             .bordered(false)
-                            .text_size(font_size),
+                            .text_size(font_size)
+                            .scrollbars_on_hover(),
                     ),
             )
             .when_some(self.error.clone(), |el, error| {

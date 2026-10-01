@@ -13,6 +13,7 @@ use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef};
 use crate::i18n::{I18n, format_number, t, t_with};
 use crate::plan_view::PlanView;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::toast;
 use crate::tokens::{ICON_SM, ICON_XS, TEXT_MD, TEXT_SM, TEXT_XS};
 
@@ -80,7 +81,7 @@ impl ShownError {
             .flex_col()
             .gap(rems(0.462))
             .child(header)
-            .child(div().relative().child(message).vertical_scrollbar(&self.scroll))
+            .child(div().relative().child(message).vertical_scrollbar(&self.scroll).scrollbars_on_hover())
             .when_some(info.filter(|i| !i.detail.is_empty()), |el, info| {
                 el.child(meta("errors.detailLabel", &info.detail, theme.foreground))
             })
@@ -407,6 +408,7 @@ impl ResultsPanel {
                     .track_scroll(&self.tab_scroll)
                     .children(tabs),
             )
+            // Not on hover: its track would take clicks on the tabs' lower half.
             .horizontal_scrollbar(&self.tab_scroll)
     }
 

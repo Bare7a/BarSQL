@@ -9,6 +9,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::i18n::t;
+use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::tokens::{ICON_MD, RADIUS, RADIUS_LG, TEXT_BASE, TEXT_MD, TEXT_XS};
 
 #[derive(Clone, Copy)]
@@ -185,7 +186,7 @@ pub fn body() -> Div {
 
 // Header and footer stay put. A plain scroll container, because GPUI Kit's scrollable wrapper adds no height
 // to a column that sizes to its content.
-pub fn scroll_body(handle: &ScrollHandle, body: Div) -> Div {
+pub fn scroll_body(handle: &ScrollHandle, body: Div) -> impl IntoElement {
     div()
         .relative()
         .flex()
@@ -202,6 +203,7 @@ pub fn scroll_body(handle: &ScrollHandle, body: Div) -> Div {
                 .w(Scrollbar::width())
                 .child(Scrollbar::vertical(handle).viewport_from_layout()),
         )
+        .scrollbars_on_hover()
 }
 
 // Shrinks to the frame so the body can scroll.
@@ -224,7 +226,12 @@ pub fn description(text: impl Into<SharedString>, cx: &App) -> Div {
     div().text_size(TEXT_BASE).text_color(cx.theme().muted_foreground).child(text.into())
 }
 
-pub fn detail(id: impl Into<ElementId>, text: impl Into<SharedString>, scroll: &ScrollHandle, cx: &App) -> Div {
+pub fn detail(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    scroll: &ScrollHandle,
+    cx: &App,
+) -> impl IntoElement {
     let theme = cx.theme();
     let detail = div()
         .id(id)
@@ -241,5 +248,5 @@ pub fn detail(id: impl Into<ElementId>, text: impl Into<SharedString>, scroll: &
         .text_size(TEXT_XS)
         .text_color(theme.muted_foreground)
         .child(text.into());
-    div().relative().child(detail).vertical_scrollbar(scroll)
+    div().relative().child(detail).vertical_scrollbar(scroll).scrollbars_on_hover()
 }

@@ -6,12 +6,13 @@ use std::sync::Arc;
 use barsql_db::{ChunkBuilder, ColumnMeta};
 use barsql_io::ExportFormat;
 use gpui_kit::component::Root;
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::{
     AppContext as _, Bounds, Entity, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollWheelEvent,
     TestAppContext, TouchPhase, VisualTestContext, point, px,
 };
 
-use super::{Grid, GridEvent, MAX_CELL_CHARS, Metrics, TableOverlay, Width, display_text};
+use super::{Grid, GridEvent, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
 use crate::grid::range::CellRange;
 use crate::test_support::Env;
 
@@ -293,6 +294,27 @@ fn the_wheel_scrolls_down_and_shift_turns_it_sideways(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.simulate_event(wheel(-80., shift()));
     assert_eq!(read(&grid, cx, |g| g.scroll.position()), point(px(80.), px(0.)));
+}
+
+// Scrolled to the end, the last row and column stop just short of the bars' lanes, which hold no cells.
+#[gpui_kit::test]
+fn the_bars_never_cover_the_last_row_or_column(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 500);
+    let (bounds, ..) = geometry(&grid, cx);
+    grid.update(cx, |grid, cx| {
+        // Wider than the grid right of the gutter, so it scrolls sideways too.
+        grid.widths = vec![Width::Px(bounds.size.width / 3.); 3];
+        grid.user_sized = (0..3).collect();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("end right right");
+    let lane = Scrollbar::width();
+    let corner = bounds.bottom_right() - point(lane, lane);
+    let hit = |at: Point<Pixels>, cx: &mut VisualTestContext| read(&grid, cx, |g| g.hit(at));
+    assert_eq!(hit(corner - point(px(1.), px(1.)), cx), Some(Target::Cell { row: 499, col: 2 }));
+    assert_eq!(hit(point(corner.x - px(1.), corner.y), cx), None, "the bottom lane");
+    assert_eq!(hit(point(corner.x, corner.y - px(1.)), cx), None, "the right lane");
 }
 
 #[gpui_kit::test]

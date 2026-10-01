@@ -1,6 +1,7 @@
 // Drag-and-drop reordering is tested in connections_drag_into_order_and_folders.
 use barsql_core::{ConnectionConfig, DriverType};
-use gpui_kit::{TestAppContext, px, size};
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::{Pixels, TestAppContext, px, size};
 
 use super::driver::{Driver, open, selector};
 use crate::file_dialogs::Stub;
@@ -14,6 +15,30 @@ fn row_button(app: &mut Driver, kind: &str, id: &str) {
     open_switcher(app);
     app.hover(selector(format!("connection-row-{id}")));
     app.click(selector(format!("{kind}-{id}")));
+}
+
+// Adds 40 connections, in a window short enough for the switcher's list to scroll.
+fn many_connections(app: &mut Driver) {
+    for n in 0..40 {
+        let config = ConnectionConfig {
+            name: format!("Conn {n:02}"),
+            driver: DriverType::Sqlite,
+            file_path: format!("/tmp/barsql-conn-{n}.db"),
+            ..Default::default()
+        };
+        app.env.runtime.block_on(app.env.bar.save_connection(config)).unwrap();
+    }
+    app.reopen();
+    app.cx.simulate_resize(size(px(1200.), px(560.)));
+}
+
+// How far the first row's Delete ends from the list's right side, with the switcher open.
+fn delete_inset(app: &mut Driver) -> Pixels {
+    let first = app.env.bar.list_connections()[0].id.clone();
+    app.hover(selector(format!("connection-row-{first}")));
+    let list = app.bounds("connection-list").expect("the list is drawn");
+    let delete = app.bounds(selector(format!("delete-{first}"))).expect("hovering shows the buttons");
+    list.right() - delete.right()
 }
 
 fn names(app: &Driver) -> Vec<String> {
@@ -98,17 +123,7 @@ fn a_connection_is_deleted_after_confirming(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_long_switcher_keeps_its_toolbar_and_scrolls_the_list(cx: &mut TestAppContext) {
     let mut app = open(cx);
-    for n in 0..40 {
-        let config = ConnectionConfig {
-            name: format!("Conn {n:02}"),
-            driver: DriverType::Sqlite,
-            file_path: format!("/tmp/barsql-conn-{n}.db"),
-            ..Default::default()
-        };
-        app.env.runtime.block_on(app.env.bar.save_connection(config)).unwrap();
-    }
-    app.reopen();
-    app.cx.simulate_resize(size(px(1200.), px(560.)));
+    many_connections(&mut app);
     open_switcher(&mut app);
     let viewport = app.cx.update(|window, _| window.viewport_size());
     let menu = app.bounds("connection-switcher-menu").expect("the switcher is open");
@@ -119,4 +134,16 @@ fn a_long_switcher_keeps_its_toolbar_and_scrolls_the_list(cx: &mut TestAppContex
     let first = app.env.bar.list_connections()[0].id.clone();
     app.scrolls_by_its_bar("connection-list", selector(format!("connection-row-{first}")));
     assert_eq!(app.bounds("new-connection"), Some(toolbar), "the toolbar stays put");
+}
+
+// A shown bar takes clicks on its track, so once the list can scroll the row buttons move clear of it.
+#[gpui_kit::test]
+fn row_buttons_keep_clear_of_the_switcher_bar(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    open_switcher(&mut app);
+    assert!(delete_inset(&mut app) < Scrollbar::width(), "a short list keeps them at its edge");
+    open_switcher(&mut app);
+    many_connections(&mut app);
+    open_switcher(&mut app);
+    assert!(delete_inset(&mut app) >= Scrollbar::width() - px(0.5), "a long list moves them off its bar");
 }
