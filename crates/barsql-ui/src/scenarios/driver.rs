@@ -329,7 +329,8 @@ impl Driver<'_> {
         self.cx.run_until_parked();
     }
 
-    // Like the editor's, the list's bar shows once the list scrolls, and a click low on its track then jumps down.
+    // The wheel leaves the pointer over the list, which shows its bar, and a click low on its track then jumps down.
+    // That a scroll alone shows a bar, with the pointer away, is tested in scrollbars.rs.
     pub fn scrolls_by_its_bar(&mut self, list: &'static str, first_row: &'static str) {
         let frame = self.bounds(list).unwrap_or_else(|| panic!("{list} is not drawn"));
         let row = self.bounds(first_row).unwrap_or_else(|| panic!("{first_row} is not drawn"));

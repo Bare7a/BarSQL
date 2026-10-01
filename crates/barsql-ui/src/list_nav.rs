@@ -1,7 +1,16 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use crate::tokens::RADIUS;
-use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle};
 use gpui_kit::component::{ActiveTheme, h_flex};
 use gpui_kit::*;
+
+// The sidebar lists' padding. Saved, Recent and the Schema tree pad the list by it, and connection rows pad
+// themselves by it.
+pub const LIST_INSET: Rems = rems(0.615);
+// The padding of a Saved or Recent row inside its list.
+pub const ROW_INSET: Rems = rems(0.5);
 
 // Keyboard navigation for the sidebar lists. Delete triggers the row's delete button.
 pub const CONTEXT: &str = "ListNav";
@@ -25,13 +34,20 @@ pub fn init(cx: &mut App) {
 pub struct ListNav {
     pub focus: FocusHandle,
     pub scroll: ScrollHandle,
+    pub clearance: BarClearance,
     cursor: Option<String>,
     keyed: bool,
 }
 
 impl ListNav {
     pub fn new(cx: &mut App) -> Self {
-        Self { focus: cx.focus_handle(), scroll: ScrollHandle::new(), cursor: None, keyed: false }
+        Self {
+            focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
+            clearance: BarClearance::default(),
+            cursor: None,
+            keyed: false,
+        }
     }
 
     pub fn focus_list(&mut self, window: &mut Window, cx: &mut App) {
@@ -70,14 +86,59 @@ impl ListNav {
         self.keyed && self.focus.is_focused(window) && self.cursor.as_deref() == Some(id)
     }
 
-    // A shown bar takes clicks on its track. While the list can scroll, row buttons that end `edge` from its right
-    // side move left by this much, clear of the track.
-    pub fn bar_clearance(&self, edge: Rems, window: &Window) -> Pixels {
-        if self.scroll.max_offset().y <= px(0.) {
+    // `hover_actions` for a row padded `row_inset` inside a list padded `list_inset`, kept clear of the list's bar.
+    pub fn hover_actions(
+        &self,
+        group: impl Into<SharedString>,
+        row_inset: Rems,
+        list_inset: Rems,
+        window: &Window,
+        cx: &App,
+    ) -> Div {
+        let clearance = self.clearance.get(&self.scroll, rems(row_inset.0 + list_inset.0), window);
+        hover_actions(group, row_inset, cx).pr(clearance)
+    }
+}
+
+// A shown bar takes clicks on its track, so buttons at the end of a list's rows move clear of it while the list can
+// scroll. Rows are built before the frame's layout, from the frame before's, so `watch` draws them again on the frame
+// the list starts or stops scrolling.
+#[derive(Clone, Default)]
+pub struct BarClearance(Rc<Cell<bool>>);
+
+impl BarClearance {
+    // How far to move buttons that end `edge` from the list's right side.
+    pub fn get(&self, handle: &impl ScrollbarHandle, edge: Rems, window: &Window) -> Pixels {
+        let scrolls = scrolls(handle);
+        self.0.set(scrolls);
+        if !scrolls {
             return px(0.);
         }
         (Scrollbar::width() - edge.to_pixels(window.rem_size())).max(px(0.))
     }
+
+    // Goes after the list, so it runs once the list is laid out.
+    pub fn watch(&self, handle: impl ScrollbarHandle) -> impl IntoElement {
+        let used = self.0.clone();
+        canvas(
+            move |_, window, cx| {
+                let scrolls = scrolls(&handle);
+                if used.replace(scrolls) != scrolls {
+                    let view = window.current_view();
+                    window.defer(cx, move |_, cx| cx.notify(view));
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+}
+
+fn scrolls(handle: &impl ScrollbarHandle) -> bool {
+    handle.content_size().height > handle.viewport_bounds().size.height
 }
 
 // Added as the last child so the row's hover actions don't cover it.
@@ -87,7 +148,7 @@ pub fn ring<E: ParentElement + Styled>(el: E, cx: &App) -> E {
 
 // Small buttons over the end of a relative row, shown while `group` is hovered. Absolute, so the row's text has
 // its whole width until then. `inset` is the row's right padding.
-pub fn hover_actions(group: impl Into<SharedString>, inset: Rems, cx: &App) -> Div {
+fn hover_actions(group: impl Into<SharedString>, inset: Rems, cx: &App) -> Div {
     h_flex()
         .absolute()
         .top_0()

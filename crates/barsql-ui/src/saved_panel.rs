@@ -3,7 +3,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -12,10 +12,10 @@ use crate::dialogs::{self, Confirm, Prompt};
 use crate::form;
 use crate::history_panel::Scope;
 use crate::i18n::{I18n, t, t_with};
-use crate::list_nav::{self, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
+use crate::list_nav::{self, LIST_INSET, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp, ROW_INSET};
 use crate::relative_time::one_line_preview;
 use crate::saved_queries::{self, SORT_KEY, SavedQueries, SavedSort};
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::state::{self, set_setting, setting};
 use crate::tokens::{ICON_2XS, RADIUS, TEXT_2XS, TEXT_SM, TEXT_XS};
 
@@ -279,7 +279,7 @@ impl SavedPanel {
             .group("saved-row")
             .relative()
             .w_full()
-            .px_2()
+            .px(ROW_INSET)
             .py_1()
             .rounded(RADIUS)
             .gap_2()
@@ -320,9 +320,8 @@ impl SavedPanel {
                     ),
             )
             .child(
-                list_nav::hover_actions("saved-row", rems(0.5), cx)
-                    // The list's inset plus the row's.
-                    .pr(self.nav.bar_clearance(rems(0.615 + 0.5), window))
+                self.nav
+                    .hover_actions("saved-row", ROW_INSET, LIST_INSET, window, cx)
                     .child(
                         Button::new(SharedString::from(format!("saved-pin-{ix}")))
                             .small()
@@ -403,8 +402,8 @@ impl Render for SavedPanel {
                 .track_focus(&self.nav.focus)
                 .track_scroll(&self.nav.scroll)
                 .size_full()
-                .px(rems(0.615))
-                .pb(rems(0.615))
+                .px(LIST_INSET)
+                .pb(LIST_INSET)
                 .overflow_y_scroll()
                 .on_action(cx.listener(|this, _: &NavUp, _, cx| this.step(-1, cx)))
                 .on_action(cx.listener(|this, _: &NavDown, _, cx| this.step(1, cx)))
@@ -425,8 +424,8 @@ impl Render for SavedPanel {
                 .relative()
                 .size_full()
                 .child(list)
-                .vertical_scrollbar(&self.nav.scroll)
-                .scrollbars_on_hover()
+                .child(self.nav.clearance.watch(self.nav.scroll.clone()))
+                .hover_scrollbar(&self.nav.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };
         v_flex().size_full().child(filter_bar).child(div().flex_1().min_h_0().child(body))

@@ -3,7 +3,7 @@ use barsql_core::{QueryError, ResultSummary};
 use barsql_sql::QueryPlan;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -13,7 +13,7 @@ use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef};
 use crate::i18n::{I18n, format_number, t, t_with};
 use crate::plan_view::PlanView;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::{HoverScrollbar as _, system_bar};
 use crate::toast;
 use crate::tokens::{ICON_SM, ICON_XS, TEXT_MD, TEXT_SM, TEXT_XS};
 
@@ -34,6 +34,7 @@ impl ShownError {
     }
 
     // Centred in the pane. `action` sits next to the copy button.
+    #[track_caller]
     pub fn card(&self, action: Option<Button>, cx: &App) -> Div {
         let theme = cx.theme();
         let danger = theme.danger;
@@ -81,7 +82,7 @@ impl ShownError {
             .flex_col()
             .gap(rems(0.462))
             .child(header)
-            .child(div().relative().child(message).vertical_scrollbar(&self.scroll).scrollbars_on_hover())
+            .child(div().relative().child(message).hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical))
             .when_some(info.filter(|i| !i.detail.is_empty()), |el, info| {
                 el.child(meta("errors.detailLabel", &info.detail, theme.foreground))
             })
@@ -408,8 +409,9 @@ impl ResultsPanel {
                     .track_scroll(&self.tab_scroll)
                     .children(tabs),
             )
-            // Not on hover: its track would take clicks on the tabs' lower half.
-            .horizontal_scrollbar(&self.tab_scroll)
+            // Not on hover: its track would take clicks on the tabs' lower half. The mode is set here, so it stays the
+            // system's even inside an area that shows its bars on hover.
+            .child(div().absolute().inset_0().child(system_bar(Scrollbar::horizontal(&self.tab_scroll), cx)))
     }
 
     fn header(&self, left: SharedString, right: Option<SharedString>, cx: &App) -> impl IntoElement {

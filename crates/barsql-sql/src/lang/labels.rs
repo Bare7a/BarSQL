@@ -10,7 +10,6 @@ pub struct SqlLabels {
     pub view: String,
     pub schema: String,
     pub column: String,
-    pub type_name: String,
     pub cte: String,
     pub subquery: String,
     pub cte_column: String,
@@ -20,14 +19,10 @@ pub struct SqlLabels {
     pub schema_table: String,
     pub unknown_table: String,
     pub column_of: String,
-    pub schema_name: String,
-    pub name_kind: String,
     pub alias_for: String,
-    pub columns_list: String,
-    pub more_columns: String,
 }
 
-const KEYS: [&str; 22] = [
+const KEYS: [&str; 17] = [
     "pk",
     "fk",
     "notNull",
@@ -35,7 +30,6 @@ const KEYS: [&str; 22] = [
     "view",
     "schema",
     "column",
-    "type",
     "cte",
     "subquery",
     "cteColumn",
@@ -45,14 +39,10 @@ const KEYS: [&str; 22] = [
     "schemaTable",
     "unknownTable",
     "columnOf",
-    "schemaName",
-    "nameKind",
     "aliasFor",
-    "columnsList",
-    "moreColumns",
 ];
 
-const ENGLISH: [&str; 22] = [
+const ENGLISH: [&str; 17] = [
     "PK",
     "FK",
     "not null",
@@ -60,7 +50,6 @@ const ENGLISH: [&str; 22] = [
     "view",
     "schema",
     "column",
-    "type",
     "CTE",
     "subquery",
     "CTE column",
@@ -70,11 +59,7 @@ const ENGLISH: [&str; 22] = [
     "{{schema}} · {{type}}",
     "Unknown table \"{{table}}\"",
     "column of {{target}}",
-    "schema {{name}}",
-    "{{name}} · {{kind}}",
     "alias for {{table}}",
-    "columns: {{cols}}",
-    "… {{count}} more columns",
 ];
 
 impl Default for SqlLabels {
@@ -99,21 +84,16 @@ impl SqlLabels {
             view: value(4),
             schema: value(5),
             column: value(6),
-            type_name: value(7),
-            cte: value(8),
-            subquery: value(9),
-            cte_column: value(10),
-            subquery_column: value(11),
-            foreign_key: value(12),
-            alias_arrow: value(13),
-            schema_table: value(14),
-            unknown_table: value(15),
-            column_of: value(16),
-            schema_name: value(17),
-            name_kind: value(18),
-            alias_for: value(19),
-            columns_list: value(20),
-            more_columns: value(21),
+            cte: value(7),
+            subquery: value(8),
+            cte_column: value(9),
+            subquery_column: value(10),
+            foreign_key: value(11),
+            alias_arrow: value(12),
+            schema_table: value(13),
+            unknown_table: value(14),
+            column_of: value(15),
+            alias_for: value(16),
         }
     }
 }

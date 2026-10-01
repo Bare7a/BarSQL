@@ -119,7 +119,7 @@ impl Fixture {
         let range = current_statement_range(&parse_statements(text, Some(&PG)), offset, text.len());
         let stmt = &text[range.clone()];
         let parsed = parse_query(stmt, &self.catalog);
-        analyze_hover(stmt, offset - range.start, &parsed, &self.catalog, &self.labels).is_some()
+        analyze_hover(stmt, offset - range.start, &parsed, &self.catalog).is_some()
     }
 }
 

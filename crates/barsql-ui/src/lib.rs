@@ -15,6 +15,7 @@ mod form;
 mod fuzzy;
 mod grid;
 mod history_panel;
+mod hover_card;
 pub mod i18n;
 mod import_dialog;
 mod insert_row;

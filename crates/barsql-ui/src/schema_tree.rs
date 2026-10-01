@@ -9,25 +9,27 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::form;
 use crate::i18n::{I18n, count, t, t_count, t_with};
-use crate::list_nav;
+use crate::list_nav::{self, BarClearance, LIST_INSET};
 use crate::schema::{self, Schemas};
 use crate::schema_actions::{self, Applied, Change};
 use crate::schema_objects::{
     Badge, Group, ObjectRow, constraint_rows, group_key, index_rows, routine_rows, routines_key, trigger_rows,
 };
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
 use crate::state::{self, set_setting_json, setting_json};
 use crate::toast;
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS, TINT};
 
+// How far a table's Browse button sits from the end of its row.
+const BROWSE_INSET: Rems = rems(0.308);
 const SCHEMA_EXPANDED_KEY: &str = "barsql-schema-expanded";
 const TABLES_EXPANDED_KEY: &str = "barsql-schema-tables-expanded";
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(200);
@@ -114,6 +116,7 @@ pub struct SchemaTree {
     connecting: bool,
     rows: Vec<TreeRow>,
     scroll: UniformListScrollHandle,
+    clearance: BarClearance,
     focus: FocusHandle,
     // Kept by row id so it survives rows opening and closing around it. The ring shows only after a key moves it.
     cursor: Option<SharedString>,
@@ -158,6 +161,7 @@ impl SchemaTree {
             connecting: false,
             rows: Vec::new(),
             scroll: UniformListScrollHandle::new(),
+            clearance: BarClearance::default(),
             focus: cx.focus_handle(),
             cursor: None,
             keyed: false,
@@ -997,16 +1001,18 @@ impl SchemaTree {
     fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let rows = self.rows.get(range).map(<[TreeRow]>::to_vec).unwrap_or_default();
         let focused = self.focus.is_focused(window);
+        let clearance = self.clearance.get(&self.scroll, rems(LIST_INSET.0 + BROWSE_INSET.0), window);
         rows.into_iter()
             .map(|row| {
                 let ring = focused && self.keyed && self.cursor.as_ref() == Some(&row.id);
-                self.render_row(row, ring, cx)
+                self.render_row(row, ring, clearance, cx)
             })
             .collect()
     }
 
     // A nested row sits inside its parent's indent, so its hover background starts at the indent.
-    fn render_row(&self, row: TreeRow, ring: bool, cx: &mut Context<Self>) -> AnyElement {
+    // `clearance` moves a table's Browse button clear of the tree's bar.
+    fn render_row(&self, row: TreeRow, ring: bool, clearance: Pixels, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let muted = theme.muted_foreground;
         let chevron = |open: bool, size: Rems| {
@@ -1062,7 +1068,7 @@ impl SchemaTree {
                 let menu = self.table_menu(schema.clone(), table.clone(), cx);
                 let name = table.name.clone();
                 let group = SharedString::from(format!("schema-table-{}-{}", schema, table.name));
-                let browse = self.browse_action(&schema, &table.name, group.clone(), ring, cx);
+                let browse = self.browse_action(&schema, &table.name, group.clone(), ring, clearance, cx);
                 clickable(base)
                     .group(group)
                     .child(chevron(expanded, ICON_SM))
@@ -1155,6 +1161,7 @@ impl SchemaTree {
         table: &str,
         group: SharedString,
         ring: bool,
+        clearance: Pixels,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let theme = cx.theme();
@@ -1166,7 +1173,8 @@ impl SchemaTree {
         let selector = id.to_string();
         h_flex()
             .absolute()
-            .right(rems(0.308))
+            .right(BROWSE_INSET)
+            .pr(clearance)
             .top_0()
             .bottom_0()
             .invisible()
@@ -1335,11 +1343,11 @@ impl Render for SchemaTree {
                         .debug_selector(|| "schema-tree".into())
                         .track_scroll(&self.scroll)
                         .size_full()
-                        .px(rems(0.615))
-                        .pb(rems(0.615)),
+                        .px(LIST_INSET)
+                        .pb(LIST_INSET),
                 )
-                .vertical_scrollbar(&self.scroll)
-                .scrollbars_on_hover()
+                .child(self.clearance.watch(self.scroll.clone()))
+                .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };
         v_flex()

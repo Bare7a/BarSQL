@@ -27,6 +27,7 @@ use crate::dialogs::{self, Prompt};
 use crate::editor_commands;
 use crate::form::ToolButton;
 use crate::grid::{RowRef, copy};
+use crate::hover_card::HoverCard;
 use crate::i18n::{I18n, t, t_with};
 use crate::results::{ResultStatus, ResultsEvent, ResultsPanel};
 use crate::saved_queries;
@@ -114,6 +115,7 @@ pub struct QueryTab {
     saved_sql_baseline: String,
     editor: Entity<EditorState>,
     completion: Entity<Completion<EditorMode>>,
+    hover: Entity<HoverCard>,
     results: Entity<ResultsPanel>,
     running: Option<Running>,
     txn: TxnState,
@@ -134,12 +136,10 @@ impl QueryTab {
     pub fn new(tab: EditorTab, connection: ConnectionConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sql = tab.sql;
         let language = Rc::new(SqlLanguage::new(connection.id.clone(), connection.driver.clone()));
-        let editor = cx.new(|cx| {
-            let mut state =
-                EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql);
-            state.lsp_mut().hover_provider = Some(language.clone());
-            state
-        });
+        let editor = cx
+            .new(|cx| EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql));
+        let hover = cx.new(|cx| HoverCard::new(editor.clone(), language.clone(), cx));
+        editor.update(cx, |state, _| state.lsp_mut().hover_provider = Some(HoverCard::provider(&hover)));
         let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language), window, cx));
         let results = cx.new(|_| ResultsPanel::default());
         let subscriptions = vec![
@@ -170,6 +170,7 @@ impl QueryTab {
             saved_sql_baseline: tab.saved_sql_baseline,
             editor,
             completion,
+            hover,
             results,
             running: None,
             txn: TxnState::Idle,
@@ -904,7 +905,8 @@ impl Render for QueryTab {
                             .scrollbars_on_hover(),
                     )
                     .child(self.run_glyphs(cx))
-                    .child(self.completion.clone()),
+                    .child(self.completion.clone())
+                    .child(self.hover.clone()),
             )
             .child(
                 div()
@@ -945,6 +947,10 @@ fn word_range(text: &str, offset: usize) -> Range<usize> {
 impl QueryTab {
     pub(crate) fn completion(&self) -> Entity<Completion<EditorMode>> {
         self.completion.clone()
+    }
+
+    pub(crate) fn hover(&self) -> Entity<HoverCard> {
+        self.hover.clone()
     }
 }
 

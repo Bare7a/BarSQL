@@ -27,5 +27,14 @@
       "verify": "верификацията",
       "install": "инсталирането"
     }
+  },
+  "editor": {
+    "sql": {
+      "columnsCount_one": "{{count}} колона",
+      "columnsCount_other": "{{count}} колони",
+      "tablesCount_one": "{{count}} таблица",
+      "tablesCount_other": "{{count}} таблици",
+      "defaultValue": "по подразбиране {{value}}"
+    }
   }
 }

@@ -9,7 +9,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -19,7 +19,7 @@ use crate::form::{self, SelectMenu};
 use crate::i18n::{count, t, t_with};
 use crate::modal::{self, Modal};
 use crate::query_tab::new_tab_id;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
 use crate::tokens::{DIMMED, ICON_XS, RADIUS, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS};
 use crate::{schema, state};
@@ -690,7 +690,7 @@ impl ImportDialog {
                     .text_size(TEXT_2XS)
                     .text_color(theme.muted_foreground)
                     .children(result.errors.iter().map(|error| div().child(format!("• {error}"))));
-                el.child(div().relative().child(errors).vertical_scrollbar(&self.errors_scroll).scrollbars_on_hover())
+                el.child(div().relative().child(errors).hover_scrollbar(&self.errors_scroll, ScrollbarAxis::Vertical))
             })
     }
 }

@@ -1,11 +1,11 @@
-use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
-use barsql_sql::lang::{
-    Catalog, ColumnLookup, HoverQuery, SqlLabels, TableBinding, analyze_hover, column_hover_lines, parse_query,
-    table_columns_markdown,
-};
+use barsql_core::{DriverType, SchemaInfo, TableInfo};
+use barsql_sql::lang::{Catalog, ColumnLookup, HoverQuery, HoverSubject, TableBinding, analyze_hover, parse_query};
+
+fn table(name: &str, kind: &str) -> TableInfo {
+    TableInfo { schema: "public".into(), name: name.into(), kind: kind.into() }
+}
 
 fn catalog() -> Catalog {
-    let table = |name: &str, kind: &str| TableInfo { schema: "public".into(), name: name.into(), kind: kind.into() };
     Catalog::new(
         DriverType::Postgres,
         vec![SchemaInfo { name: "public".into() }],
@@ -16,31 +16,27 @@ fn catalog() -> Catalog {
 fn hover_at(sql: &str, needle: &str, occurrence: usize) -> Option<HoverQuery> {
     let offset = sql.match_indices(needle).nth(occurrence - 1).expect("needle").0;
     let catalog = catalog();
-    analyze_hover(sql, offset, &parse_query(sql, &catalog), &catalog, &SqlLabels::default())
+    analyze_hover(sql, offset, &parse_query(sql, &catalog), &catalog)
 }
 
-fn lines(sql: &str, needle: &str, occurrence: usize) -> Option<Vec<String>> {
-    hover_at(sql, needle, occurrence).and_then(|q| q.lines)
+fn subject(sql: &str, needle: &str, occurrence: usize) -> Option<HoverSubject> {
+    hover_at(sql, needle, occurrence).map(|q| q.subject)
 }
 
 fn binding(table: &str) -> TableBinding {
     TableBinding { schema: "public".into(), table: table.into() }
 }
 
-fn column(name: &str, data_type: &str, nullable: bool, primary: bool) -> ColumnInfo {
-    ColumnInfo {
-        name: name.into(),
-        data_type: data_type.into(),
-        is_nullable: nullable,
-        is_primary: primary,
-        ..Default::default()
-    }
-}
-
 #[test]
-fn describes_a_table_with_its_type_and_schema() {
-    assert_eq!(lines("SELECT * FROM users WHERE id = 1", "users", 1).unwrap(), ["**users** · table", "schema public"]);
-    assert_eq!(lines("SELECT * FROM orders", "orders", 1).unwrap(), ["**orders** · view", "schema public"]);
+fn describes_a_table_or_view_from_the_catalog() {
+    assert_eq!(
+        subject("SELECT * FROM users WHERE id = 1", "users", 1),
+        Some(HoverSubject::Table { table: table("users", "table"), alias: None })
+    );
+    assert_eq!(
+        subject("SELECT * FROM orders", "orders", 1),
+        Some(HoverSubject::Table { table: table("orders", "view"), alias: None })
+    );
 }
 
 #[test]
@@ -51,19 +47,31 @@ fn spans_exactly_the_hovered_token() {
 }
 
 #[test]
-fn describes_an_alias_as_pointing_at_its_table() {
-    assert_eq!(lines("SELECT * FROM users u WHERE u.id = 1", "u ", 1).unwrap()[0], "**u** · alias for users");
+fn describes_an_alias_as_its_table() {
+    assert_eq!(
+        subject("SELECT * FROM users u WHERE u.id = 1", "u ", 1),
+        Some(HoverSubject::Table { table: table("users", "table"), alias: Some("u".into()) })
+    );
+    assert_eq!(
+        subject("SELECT * FROM archive x", "x", 1),
+        Some(HoverSubject::Alias { name: "x".into(), table: "archive".into() }),
+        "an alias for a table the catalog doesn't know"
+    );
 }
 
 #[test]
 fn requests_a_column_lookup_for_a_qualified_column() {
-    let q = hover_at("SELECT * FROM users u WHERE u.email = 1", "email", 1).unwrap();
-    assert_eq!(q.column_lookup, Some(ColumnLookup { bindings: vec![binding("users")], name: "email".into() }));
+    assert_eq!(
+        subject("SELECT * FROM users u WHERE u.email = 1", "email", 1),
+        Some(HoverSubject::Column(ColumnLookup { bindings: vec![binding("users")], name: "email".into() }))
+    );
 }
 
 #[test]
 fn requests_a_lookup_across_in_scope_tables_for_a_bare_column() {
-    let lookup = hover_at("SELECT email FROM users JOIN orders o ON 1=1", "email", 1).unwrap().column_lookup.unwrap();
+    let Some(HoverSubject::Column(lookup)) = subject("SELECT email FROM users JOIN orders o ON 1=1", "email", 1) else {
+        panic!("a column lookup");
+    };
     assert_eq!(lookup.name, "email");
     let mut tables: Vec<String> = lookup.bindings.into_iter().map(|b| b.table).collect();
     tables.sort();
@@ -73,9 +81,33 @@ fn requests_a_lookup_across_in_scope_tables_for_a_bare_column() {
 #[test]
 fn answers_ctes_and_their_columns_without_a_lookup() {
     let sql = "WITH recent AS (SELECT id, email AS mail FROM users) SELECT * FROM recent WHERE recent.mail = 1";
-    assert_eq!(lines(sql, "recent", 2).unwrap(), ["**recent** · CTE", "columns: id, mail"]);
+    assert_eq!(
+        subject(sql, "recent", 2),
+        Some(HoverSubject::Derived { name: "recent".into(), cte: true, columns: vec!["id".into(), "mail".into()] })
+    );
     // `email` contains `mail`, so the qualified recent.mail is the third occurrence.
-    assert_eq!(lines(sql, "mail", 3).unwrap(), ["**mail**", "column of CTE recent"]);
+    assert_eq!(
+        subject(sql, "mail", 3),
+        Some(HoverSubject::DerivedColumn { name: "mail".into(), source: "recent".into(), cte: true })
+    );
+    let missing = "WITH recent AS (SELECT id FROM users) SELECT recent.nope FROM recent";
+    assert_eq!(subject(missing, "nope", 1), None, "a name the CTE doesn't output");
+}
+
+#[test]
+fn lists_every_column_of_a_cte() {
+    let cols: Vec<String> = (0..12).map(|i| format!("c{i}")).collect();
+    let sql = format!("WITH wide AS (SELECT {} FROM users) SELECT * FROM wide", cols.join(", "));
+    assert_eq!(subject(&sql, "wide", 2), Some(HoverSubject::Derived { name: "wide".into(), cte: true, columns: cols }));
+}
+
+#[test]
+fn describes_a_subquery_column_with_its_source() {
+    let sql = "SELECT s.n FROM (SELECT 1 AS n) S";
+    assert_eq!(
+        subject(sql, "n", 1),
+        Some(HoverSubject::DerivedColumn { name: "n".into(), source: "s".into(), cte: false })
+    );
 }
 
 #[test]
@@ -87,33 +119,8 @@ fn ignores_keywords_strings_and_comments() {
 
 #[test]
 fn describes_a_schema_name() {
-    assert_eq!(lines("SELECT * FROM public.users", "public", 1).unwrap(), ["**public** · schema"]);
-}
-
-#[test]
-fn formats_column_hover_lines() {
-    let lines = column_hover_lines(&column("email", "text", false, false), &binding("users"), &SqlLabels::default());
-    assert_eq!(lines, ["**email** · text · not null", "column of public.users"]);
-}
-
-#[test]
-fn table_and_alias_hovers_append_the_column_list() {
-    assert_eq!(hover_at("SELECT * FROM users", "users", 1).unwrap().table_columns, Some(binding("users")));
     assert_eq!(
-        hover_at("SELECT * FROM users u WHERE u.id = 1", "u ", 1).unwrap().table_columns,
-        Some(binding("users"))
+        subject("SELECT * FROM public.users", "public", 1),
+        Some(HoverSubject::Schema { name: "public".into() })
     );
-}
-
-#[test]
-fn renders_the_column_list_as_a_capped_markdown_table() {
-    let labels = SqlLabels::default();
-    let cols = [column("id", "int", false, true), column("email", "text", false, false)];
-    assert_eq!(
-        table_columns_markdown(&cols, 30, &labels),
-        ["| column | type |\n| --- | --- |\n| id | int · PK |\n| email | text · not null |"]
-    );
-    assert!(table_columns_markdown(&[], 30, &labels).is_empty());
-    let many: Vec<ColumnInfo> = (0..35).map(|i| column(&format!("c{i}"), "int", true, false)).collect();
-    assert_eq!(table_columns_markdown(&many, 30, &labels)[1], "… 5 more columns");
 }
