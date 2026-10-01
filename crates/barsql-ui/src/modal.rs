@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::scroll::{ScrollableElement as _, Scrollbar};
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::i18n::t;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_MD, RADIUS, RADIUS_LG, TEXT_BASE, TEXT_MD, TEXT_XS};
 
 #[derive(Clone, Copy)]
@@ -186,6 +186,7 @@ pub fn body() -> Div {
 
 // Header and footer stay put. A plain scroll container, because GPUI Kit's scrollable wrapper adds no height
 // to a column that sizes to its content.
+#[track_caller]
 pub fn scroll_body(handle: &ScrollHandle, body: Div) -> impl IntoElement {
     div()
         .relative()
@@ -194,16 +195,7 @@ pub fn scroll_body(handle: &ScrollHandle, body: Div) -> impl IntoElement {
         .flex_auto()
         .min_h_0()
         .child(div().id("modal-scroll").flex_auto().min_h_0().overflow_y_scroll().track_scroll(handle).child(body))
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .right_0()
-                .bottom_0()
-                .w(Scrollbar::width())
-                .child(Scrollbar::vertical(handle).viewport_from_layout()),
-        )
-        .scrollbars_on_hover()
+        .hover_scrollbar(handle, ScrollbarAxis::Vertical)
 }
 
 // Shrinks to the frame so the body can scroll.
@@ -232,9 +224,9 @@ pub fn detail(
     scroll: &ScrollHandle,
     cx: &App,
 ) -> impl IntoElement {
-    let theme = cx.theme();
+    let (theme, id) = (cx.theme(), id.into());
     let detail = div()
-        .id(id)
+        .id(id.clone())
         .max_h(rems(12.308))
         .overflow_y_scroll()
         .track_scroll(scroll)
@@ -248,5 +240,5 @@ pub fn detail(
         .text_size(TEXT_XS)
         .text_color(theme.muted_foreground)
         .child(text.into());
-    div().relative().child(detail).vertical_scrollbar(scroll).scrollbars_on_hover()
+    div().relative().child(detail).hover_scrollbar(scroll, ScrollbarAxis::Vertical).id(id)
 }

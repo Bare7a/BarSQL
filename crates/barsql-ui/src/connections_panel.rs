@@ -5,7 +5,7 @@ use barsql_core::{ConnectionConfig, DriverType};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -13,10 +13,10 @@ use gpui_kit::*;
 use crate::dialogs::{self, Confirm, Prompt};
 use crate::form;
 use crate::i18n::{t, t_with};
-use crate::list_nav::{self, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
+use crate::list_nav::{self, LIST_INSET, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
 use crate::saved_queries::failed;
 use crate::schema;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::state::{self, set_setting_json, setting_json};
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM, TEXT_XS};
 
@@ -386,7 +386,7 @@ impl ConnectionsPanel {
             .relative()
             .w_full()
             .py(rems(0.538))
-            .px(rems(0.615))
+            .px(LIST_INSET)
             .gap(rems(0.462))
             .rounded(RADIUS)
             .text_size(TEXT_BASE)
@@ -414,8 +414,8 @@ impl ConnectionsPanel {
                 ),
             )
             .child(
-                list_nav::hover_actions(group, rems(0.615), cx)
-                    .pr(self.nav.bar_clearance(rems(0.615), window))
+                self.nav
+                    .hover_actions(group, LIST_INSET, rems(0.), window, cx)
                     .child(
                         Button::new(SharedString::from(format!("connect-{}", connection.id)))
                             .small()
@@ -618,8 +618,8 @@ impl Render for ConnectionsPanel {
                 .relative()
                 .min_h_0()
                 .child(list)
-                .vertical_scrollbar(&self.nav.scroll)
-                .scrollbars_on_hover()
+                .child(self.nav.clearance.watch(self.nav.scroll.clone()))
+                .hover_scrollbar(&self.nav.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };
         // Shrinks to fit the switcher menu, so the list scrolls and the toolbar stays.

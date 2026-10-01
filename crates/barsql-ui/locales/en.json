@@ -27,5 +27,14 @@
       "verify": "verify",
       "install": "install"
     }
+  },
+  "editor": {
+    "sql": {
+      "columnsCount_one": "{{count}} column",
+      "columnsCount_other": "{{count}} columns",
+      "tablesCount_one": "{{count}} table",
+      "tablesCount_other": "{{count}} tables",
+      "defaultValue": "default {{value}}"
+    }
   }
 }

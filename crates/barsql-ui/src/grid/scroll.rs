@@ -4,6 +4,9 @@ use std::rc::Rc;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle};
 use gpui_kit::{Axis, Bounds, Pixels, Point, Size, point, px, size};
 
+// Width of each bar's lane. The bars' tracks are pinned to it, so a theme can't make a bar wider than its lane.
+pub const LANE: Pixels = Scrollbar::width();
+
 // Scroll state of the cells right of the gutter and below the header. Shared with the scrollbars.
 #[derive(Clone, Default)]
 pub struct GridScroll(Rc<RefCell<State>>);
@@ -43,8 +46,23 @@ impl GridScroll {
         self.0.borrow().viewport
     }
 
+    // The whole grid, with its gutter and header.
+    pub fn grid(&self) -> Bounds<Pixels> {
+        self.0.borrow().grid
+    }
+
     pub fn lanes(&self) -> Size<Pixels> {
         self.0.borrow().lanes
+    }
+
+    // The strips beside and below the cells, with the corner where they meet. Empty where the axis doesn't scroll.
+    pub fn lane_bounds(&self) -> [Bounds<Pixels>; 2] {
+        let state = self.0.borrow();
+        let (grid, cells) = (state.grid, state.viewport);
+        [
+            Bounds::from_corners(point(cells.right(), grid.top()), grid.bottom_right()),
+            Bounds::from_corners(point(grid.left(), cells.bottom()), grid.bottom_right()),
+        ]
     }
 
     pub fn max(&self) -> Point<Pixels> {
@@ -55,7 +73,7 @@ impl GridScroll {
     // a lane for its bar along the grid's far edge, so the bar never covers cells. Returns the cells' viewport, which
     // stops at the lanes.
     pub fn set_layout(&self, grid: Bounds<Pixels>, origin: Point<Pixels>, content: Size<Pixels>) -> Bounds<Pixels> {
-        let lane = |scrolls: bool| if scrolls { Scrollbar::width() } else { px(0.) };
+        let lane = |scrolls: bool| if scrolls { LANE } else { px(0.) };
         let room = size(grid.right() - origin.x, grid.bottom() - origin.y);
         // A lane takes room from the other axis, which can then scroll too.
         let down = content.height > room.height;

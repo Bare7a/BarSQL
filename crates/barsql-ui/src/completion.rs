@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{InputBaseState, InputModeKind};
 use gpui_kit::component::input::{CompletionProvider, InputEvent};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, Rope, RopeExt, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -13,7 +13,7 @@ use lsp_types::{
     CompletionTriggerKind,
 };
 
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::sql_language::word_start;
 use crate::theme;
 
@@ -340,6 +340,12 @@ fn palette(cx: &App) -> Palette {
     }
 }
 
+// The list's background and border, which the editor's hover card shares.
+pub(crate) fn surface(cx: &App) -> (Hsla, Hsla) {
+    let palette = palette(cx);
+    (palette.background, palette.border)
+}
+
 fn kind_icon(kind: Option<CompletionItemKind>, dark: bool) -> (Lucide, Hsla) {
     let (icon, dark_color, light_color) = match kind {
         Some(CompletionItemKind::CLASS) => (Lucide::Workflow, 0xee9d28, 0xd67e00),
@@ -441,8 +447,7 @@ impl<M: InputModeKind> Render for Completion<M> {
                     .text_size(font_size)
                     .relative()
                     .child(list)
-                    .vertical_scrollbar(&self.scroll)
-                    .scrollbars_on_hover(),
+                    .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical),
             ),
         )
         .with_priority(1)

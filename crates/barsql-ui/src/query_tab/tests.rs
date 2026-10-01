@@ -1,4 +1,6 @@
 use barsql_app::EditorTab;
+use gpui_kit::component::Theme;
+use gpui_kit::component::scroll::ScrollbarMode;
 use gpui_kit::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px};
 
 use super::{QueryTab, TxnState, char_offset, new_tab_id, results_share, word_range};
@@ -257,4 +259,114 @@ fn result_tabs_count_rows_affected_rows_or_nothing(cx: &mut TestAppContext) {
     settle(cx, idle(&tab));
     let counts = cx.update(|_, cx| tab.read(cx).results.read(cx).tab_counts(cx));
     assert_eq!(counts, [Some(2), Some(3), None]);
+}
+
+fn hover_lines(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> Vec<String> {
+    cx.update(|_, cx| tab.read(cx).hover.read(cx).lines())
+}
+
+// Rests the pointer on the first character of the first `text` long enough for GPUI Kit to ask for a hover, then
+// waits for the card.
+fn rest_on(tab: &Entity<QueryTab>, text: &str, cx: &mut VisualTestContext) -> gpui_kit::Point<gpui_kit::Pixels> {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let at = cx.update(|_, cx| {
+        let editor = tab.read(cx).editor.read(cx);
+        let start = editor.value().find(text).expect("the text is in the editor");
+        let bounds = editor.range_to_bounds(&(start..start + 1)).expect("the text is laid out");
+        point(bounds.left() + px(2.), bounds.center().y)
+    });
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.executor().advance_clock(std::time::Duration::from_millis(200));
+    let name = text.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or_default();
+    settle(cx, |cx| hover_lines(tab, cx).first().is_some_and(|line| line.starts_with(&format!("{name} "))));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    at
+}
+
+fn wide_table(env: &Env) {
+    let middle: Vec<String> = (1..=38).map(|i| format!("c{i} TEXT NOT NULL DEFAULT 'x'")).collect();
+    let sql = format!(
+        "CREATE TABLE hover_wide (id INTEGER PRIMARY KEY, {}, parent_id INTEGER REFERENCES hover_wide (id))",
+        middle.join(", ")
+    );
+    env.runtime.block_on(env.bar.execute_query(&env.connection.id, &sql)).unwrap();
+}
+
+fn wait_for_table(env: &Env, table: &str, cx: &mut VisualTestContext) {
+    let connection_id = env.connection.id.clone();
+    settle(cx, |cx| {
+        cx.update(|_, cx| schema::catalog(cx, &connection_id).is_some_and(|c| c.tables.iter().any(|t| t.name == table)))
+    });
+}
+
+// GPUI Kit's popover stopped at 30 columns in a 500px box with no bar. The card lists every column on one line each.
+#[gpui_kit::test]
+fn hovering_a_table_lists_every_column_and_scrolls(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    wide_table(&env);
+    let (tab, cx) = open(&env, cx, "SELECT * FROM hover_wide;");
+    wait_for_table(&env, "hover_wide", cx);
+    rest_on(&tab, "hover_wide", cx);
+    let lines = hover_lines(&tab, cx);
+    assert_eq!(lines[0], "hover_wide table · main");
+    assert_eq!(lines.len(), 41, "the header and all 40 columns");
+    assert_eq!(lines[1], "id INTEGER PK");
+    assert_eq!(lines[2], "c1 TEXT not null · default 'x'");
+    assert_eq!(lines[40], "parent_id INTEGER FK → hover_wide.id");
+
+    let card = cx.debug_bounds("hover-card").expect("the card is drawn");
+    let row = cx.debug_bounds("hover-row-0").expect("the first row is drawn");
+    assert_eq!(row.size.height, gpui_kit::px(20.), "one line per column at the editor's 13px");
+    assert!(cx.debug_bounds("hover-row-39").is_none(), "the last column is below the fold");
+    cx.simulate_mouse_move(card.center(), None, Modifiers::none());
+    cx.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: card.center(),
+        delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-2000.))),
+        ..Default::default()
+    });
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.debug_bounds("hover-row-39").is_some(), "the list scrolls to the last column");
+    assert_eq!(hover_lines(&tab, cx).len(), 41, "moving onto the card and scrolling keeps it open");
+
+    // GPUI Kit asks about the `;` the pointer crossed only once it's on the card, which must not close it.
+    let semicolon = cx.update(|_, cx| {
+        let editor = tab.read(cx).editor.read(cx);
+        let at = editor.value().find(';').unwrap();
+        editor.range_to_bounds(&(at..at + 1)).unwrap().center()
+    });
+    cx.simulate_mouse_move(semicolon, None, Modifiers::none());
+    cx.simulate_mouse_move(card.center(), None, Modifiers::none());
+    cx.executor().advance_clock(std::time::Duration::from_millis(200));
+    cx.run_until_parked();
+    assert_eq!(hover_lines(&tab, cx).len(), 41, "a late request from the text doesn't replace the card");
+
+    cx.simulate_mouse_move(card.bottom_right() + point(px(40.), px(40.)), None, Modifiers::none());
+    assert!(hover_lines(&tab, cx).is_empty(), "leaving the name and the card closes it");
+
+    // Even where bars only show while scrolling, a fresh card shows its bar, so a click low on the track jumps down.
+    cx.update(|_, cx| Theme::set_scrollbar_mode(ScrollbarMode::Scrolling, cx));
+    rest_on(&tab, "hover_wide", cx);
+    let card = cx.debug_bounds("hover-card").expect("the card is drawn again");
+    assert!(cx.debug_bounds("hover-row-39").is_none(), "a new card starts at the top");
+    cx.simulate_click(point(card.right() - px(6.), card.bottom() - px(12.)), Modifiers::none());
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.debug_bounds("hover-row-39").is_some(), "the bar was there to click");
+}
+
+#[gpui_kit::test]
+fn hovering_a_column_or_alias_describes_it_and_typing_closes_the_card(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    wide_table(&env);
+    let (tab, cx) = open(&env, cx, "SELECT w.parent_id FROM hover_wide w;");
+    wait_for_table(&env, "hover_wide", cx);
+    rest_on(&tab, "parent_id", cx);
+    assert_eq!(hover_lines(&tab, cx), ["parent_id column of main.hover_wide", "INTEGER FK → hover_wide.id"]);
+
+    let at = rest_on(&tab, "w;", cx);
+    let lines = hover_lines(&tab, cx);
+    assert_eq!(lines[0], "w alias for hover_wide · table · main");
+    assert_eq!(lines.len(), 41);
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_input("x");
+    assert!(hover_lines(&tab, cx).is_empty(), "an edit closes the card");
 }

@@ -19,7 +19,7 @@ pub use catalog::{Catalog, ColumnMap, OrderedMap, TableBinding};
 pub use completion::{bindings_needing_columns, build_completion_items, completion_replace_range};
 pub use context::{CursorSlot, SqlCursor, StatementShape, analyze_cursor};
 pub use diagnostics::{SqlDiagnostic, collect_schema_diagnostics};
-pub use hover::{ColumnLookup, HoverQuery, analyze_hover, column_hover_lines, table_columns_markdown};
+pub use hover::{ColumnLookup, HoverQuery, HoverSubject, analyze_hover};
 pub use labels::SqlLabels;
 pub use query::{ParsedQuery, QueryTableRef, parse_query, resolve_dot_completion, resolve_qualifier_to_table};
 pub use statements::{

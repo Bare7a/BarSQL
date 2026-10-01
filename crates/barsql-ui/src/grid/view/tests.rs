@@ -6,13 +6,13 @@ use std::sync::Arc;
 use barsql_db::{ChunkBuilder, ColumnMeta};
 use barsql_io::ExportFormat;
 use gpui_kit::component::Root;
-use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::{
-    AppContext as _, Bounds, Entity, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    TestAppContext, TouchPhase, VisualTestContext, point, px,
+    AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
+    MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
+    Styled as _, TestAppContext, TouchPhase, VisualTestContext, Window, div, point, px,
 };
 
-use super::{Grid, GridEvent, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
+use super::{Grid, GridEvent, LANE, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
 use crate::grid::range::CellRange;
 use crate::test_support::Env;
 
@@ -27,9 +27,14 @@ fn modifier() -> &'static str {
     if cfg!(target_os = "macos") { "cmd" } else { "ctrl" }
 }
 
-// `rows` rows of (id, name, note) where every third note is NULL.
 fn open(cx: &mut TestAppContext, rows: usize) -> (Env, Entity<Grid>, &mut VisualTestContext) {
     let env = Env::new(cx);
+    let (grid, cx) = mount(sample(rows), cx);
+    (env, grid, cx)
+}
+
+// `rows` rows of (id, name, note) where every third note is NULL.
+fn sample(rows: usize) -> ChunkBuilder {
     let mut builder = ChunkBuilder::new(3, rows);
     for row in 0..rows {
         builder.push_number(|s| s.push_str(&(rows - row).to_string()));
@@ -41,15 +46,16 @@ fn open(cx: &mut TestAppContext, rows: usize) -> (Env, Entity<Grid>, &mut Visual
         }
         builder.end_row();
     }
-    let (grid, cx) = mount(builder, cx);
-    (env, grid, cx)
+    builder
+}
+
+fn columns() -> Arc<[ColumnMeta]> {
+    ["id", "name", "note"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into()
 }
 
 // A focused grid of (id, name, note) in its own window.
 fn mount(builder: ChunkBuilder, cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
-    let columns: Arc<[ColumnMeta]> =
-        ["id", "name", "note"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into();
-    let grid = cx.new(|cx| Grid::new(columns, cx));
+    let grid = cx.new(|cx| Grid::new(columns(), cx));
     let view = grid.clone();
     let window = cx.add_window(move |window, cx| Root::new(view, window, cx));
     let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
@@ -65,7 +71,7 @@ fn mount(builder: ChunkBuilder, cx: &mut TestAppContext) -> (Entity<Grid>, &mut 
 fn geometry(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> (Bounds<Pixels>, Metrics, Vec<Pixels>) {
     cx.update(|_, cx| {
         let grid = grid.read(cx);
-        (*grid.bounds.borrow(), grid.metrics, grid.col_x.clone())
+        (grid.scroll.grid(), grid.metrics, grid.col_x.clone())
     })
 }
 
@@ -296,25 +302,122 @@ fn the_wheel_scrolls_down_and_shift_turns_it_sideways(cx: &mut TestAppContext) {
     assert_eq!(read(&grid, cx, |g| g.scroll.position()), point(px(80.), px(0.)));
 }
 
-// Scrolled to the end, the last row and column stop just short of the bars' lanes, which hold no cells.
-#[gpui_kit::test]
-fn the_bars_never_cover_the_last_row_or_column(cx: &mut TestAppContext) {
-    let (_env, grid, cx) = open(cx, 500);
-    let (bounds, ..) = geometry(&grid, cx);
+// 500 rows of three columns, each a third of the grid wide, so the grid scrolls both ways and has both lanes.
+fn scrolling_both_ways(cx: &mut TestAppContext) -> (Env, Entity<Grid>, &mut VisualTestContext) {
+    let (env, grid, cx) = open(cx, 500);
+    widen(&grid, cx);
+    (env, grid, cx)
+}
+
+fn widen(grid: &Entity<Grid>, cx: &mut VisualTestContext) {
+    let (bounds, ..) = geometry(grid, cx);
     grid.update(cx, |grid, cx| {
-        // Wider than the grid right of the gutter, so it scrolls sideways too.
         grid.widths = vec![Width::Px(bounds.size.width / 3.); 3];
         grid.user_sized = (0..3).collect();
         cx.notify();
     });
     cx.run_until_parked();
-    cx.simulate_keystrokes("end right right");
-    let lane = Scrollbar::width();
-    let corner = bounds.bottom_right() - point(lane, lane);
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+// Points in the right lane, beside the cells, and in the bottom lane, below them.
+fn lanes(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> [Point<Pixels>; 2] {
+    let body = read(grid, cx, |g| g.scroll.viewport());
+    [point(body.right() + LANE / 2., body.center().y), point(body.center().x, body.bottom() + LANE / 2.)]
+}
+
+fn press(cx: &mut VisualTestContext, at: Point<Pixels>, button: MouseButton) {
+    let modifiers = Modifiers::default();
+    cx.simulate_event(MouseDownEvent { button, position: at, modifiers, click_count: 1, first_mouse: false });
+    cx.simulate_event(MouseUpEvent { button, position: at, modifiers, click_count: 1 });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+fn focused(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| grid.read(cx).focus_handle.is_focused(window))
+}
+
+// The lanes hold no cells, though at the start rows and columns go on under them. Scrolled to the end, the last row
+// and column stop just short of them.
+#[gpui_kit::test]
+fn the_bars_never_cover_the_last_row_or_column(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = scrolling_both_ways(cx);
     let hit = |at: Point<Pixels>, cx: &mut VisualTestContext| read(&grid, cx, |g| g.hit(at));
+    let body = read(&grid, cx, |g| g.scroll.viewport());
+    assert!(matches!(hit(point(body.left() + px(1.), body.bottom() - px(1.)), cx), Some(Target::Cell { .. })));
+    assert_eq!(hit(point(body.left() + px(1.), body.bottom() + px(1.)), cx), None, "the bottom lane, over a row");
+    assert!(matches!(hit(point(body.right() - px(1.), body.top() + px(1.)), cx), Some(Target::Cell { .. })));
+    assert_eq!(hit(point(body.right() + px(1.), body.top() + px(1.)), cx), None, "the right lane, over a column");
+
+    cx.simulate_keystrokes("end right right");
+    let (bounds, ..) = geometry(&grid, cx);
+    let corner = bounds.bottom_right() - point(LANE, LANE);
     assert_eq!(hit(corner - point(px(1.), px(1.)), cx), Some(Target::Cell { row: 499, col: 2 }));
-    assert_eq!(hit(point(corner.x - px(1.), corner.y), cx), None, "the bottom lane");
-    assert_eq!(hit(point(corner.x, corner.y - px(1.)), cx), None, "the right lane");
+}
+
+// GPUI Kit's bar takes every button, so a right-click would scroll and the menu would act on the focused cell.
+#[gpui_kit::test]
+fn a_right_click_in_a_lane_neither_scrolls_nor_opens_the_menu(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = scrolling_both_ways(cx);
+    for at in lanes(&grid, cx) {
+        press(cx, at, MouseButton::Right);
+        assert_eq!(read(&grid, cx, |g| g.scroll.position()), point(px(0.), px(0.)), "no jump at {at:?}");
+        assert!(focused(&grid, cx), "no menu at {at:?}");
+    }
+    let cell = cell(&grid, 0, 0, cx);
+    press(cx, cell, MouseButton::Right);
+    assert!(!focused(&grid, cx), "a cell's menu still opens, and takes the focus");
+}
+
+// The grid with something opaque over its right lane, like a dialog or popover.
+struct Covered {
+    grid: Entity<Grid>,
+}
+
+impl Render for Covered {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let cover = div().id("cover").absolute().top_0().right_0().w(px(60.)).h(px(400.)).occlude();
+        div().relative().size_full().child(self.grid.clone()).child(cover)
+    }
+}
+
+#[gpui_kit::test]
+fn a_click_on_something_over_a_lane_doesnt_scroll_the_grid(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let grid = cx.new(|cx| Grid::new(columns(), cx));
+    grid.update(cx, |grid, cx| grid.push(Arc::new(sample(500).finish()), cx));
+    let host = grid.clone();
+    let window = cx.add_window(move |window, cx| {
+        let covered = cx.new(|_| Covered { grid: host });
+        Root::new(covered, window, cx)
+    });
+    let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    cx.run_until_parked();
+    widen(&grid, cx);
+    let [right, _] = lanes(&grid, cx);
+    let under_cover = point(right.x, read(&grid, cx, |g| g.scroll.viewport()).top() + px(100.));
+    press(cx, under_cover, MouseButton::Left);
+    assert_eq!(read(&grid, cx, |g| g.scroll.position()), point(px(0.), px(0.)));
+    press(cx, point(right.x, right.y + px(150.)), MouseButton::Left);
+    assert!(read(&grid, cx, |g| g.scroll.position()).y > px(0.), "the uncovered part of the bar still scrolls");
+}
+
+// The bars' tracks are pinned to the lanes, so a theme with wider tracks can't put them over cells.
+#[gpui_kit::test]
+fn a_wider_theme_track_stays_in_its_lane(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = scrolling_both_ways(cx);
+    cx.update(|window, cx| {
+        let scrollbar = gpui_kit::base::Theme::global(cx).scrollbar.clone();
+        let styles = scrollbar.styles().clone().track(|track| track.width(px(30.)));
+        gpui_kit::base::Theme::global_mut(cx).scrollbar = scrollbar.with_styles(styles);
+        window.refresh();
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let body = read(&grid, cx, |g| g.scroll.viewport());
+    press(cx, point(body.right() - px(8.), body.center().y), MouseButton::Left);
+    assert_eq!(read(&grid, cx, |g| g.scroll.position()), point(px(0.), px(0.)), "a click on the cells beside the lane");
 }
 
 #[gpui_kit::test]

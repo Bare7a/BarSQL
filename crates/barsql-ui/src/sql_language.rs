@@ -5,20 +5,21 @@ use anyhow::Result;
 use barsql_core::DriverType;
 use barsql_sql::lang::quoting::{column_cache_key, format_sql_identifier};
 use barsql_sql::lang::suggestions::{match_score, rank};
-use barsql_sql::lang::{self, Catalog, ColumnMap, CompletionContext, ItemKind, SqlDiagnostic, SqlLabels, TokenKind};
-use gpui_kit::component::input::{CompletionProvider, HoverProvider};
+use barsql_sql::lang::{
+    self, Catalog, ColumnMap, CompletionContext, HoverSubject, ItemKind, SqlDiagnostic, SqlLabels, TokenKind,
+};
+use gpui_kit::component::input::CompletionProvider;
 use gpui_kit::component::{Rope, RopeExt};
 use gpui_kit::{App, Task, Window};
 use lsp_types::{
-    CompletionContext as TriggerContext, CompletionItemKind, CompletionResponse, CompletionTextEdit, Hover,
-    HoverContents, MarkedString, Range as LspRange, TextEdit,
+    CompletionContext as TriggerContext, CompletionItemKind, CompletionResponse, CompletionTextEdit, Range as LspRange,
+    TextEdit,
 };
 
 use crate::i18n::I18n;
-use crate::schema;
+use crate::schema::{self, ColumnsLoad};
 
 const WORD_SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
-const HOVER_TABLE_COLUMNS: usize = 30;
 
 #[derive(Clone)]
 pub struct SqlLanguage {
@@ -31,9 +32,28 @@ impl SqlLanguage {
         Self { connection_id, driver }
     }
 
+    pub fn connection_id(&self) -> &str {
+        &self.connection_id
+    }
+
     fn catalog(&self, cx: &App) -> Arc<Catalog> {
         schema::catalog(cx, &self.connection_id)
             .unwrap_or_else(|| Arc::new(Catalog::new(self.driver.clone(), Vec::new(), Vec::new())))
+    }
+
+    pub fn columns(&self, schema: &str, table: &str, cx: &mut App) -> ColumnsLoad {
+        schema::columns(&self.connection_id, schema, table, cx)
+    }
+
+    // The span of the name at `offset`, and what it refers to.
+    pub fn hover_subject(&self, text: &str, offset: usize, cx: &App) -> Option<(Range<usize>, HoverSubject)> {
+        let offset = offset.min(text.len());
+        let statements = lang::parse_statements(text, Some(&self.driver));
+        let range = lang::current_statement_range(&statements, offset, text.len());
+        let catalog = self.catalog(cx);
+        let stmt = &text[range.clone()];
+        let query = lang::analyze_hover(stmt, offset - range.start, &lang::parse_query(stmt, &catalog), &catalog)?;
+        Some((range.start + query.start..range.start + query.end, query.subject))
     }
 }
 
@@ -147,49 +167,6 @@ impl CompletionProvider for FilterCompletion {
             (Some(c), None) => c.is_alphanumeric() || matches!(c, '_' | '.' | ' ' | '=' | '<' | '>' | '!'),
             _ => false,
         }
-    }
-}
-
-impl HoverProvider for SqlLanguage {
-    fn hover(&self, text: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<Result<Option<Hover>>> {
-        let sql = text.to_string();
-        let offset = offset.min(sql.len());
-        let statements = lang::parse_statements(&sql, Some(&self.driver));
-        let range = lang::current_statement_range(&statements, offset, sql.len());
-        let catalog = self.catalog(cx);
-        let stmt = &sql[range.clone()];
-        let parsed = lang::parse_query(stmt, &catalog);
-        let labels = cx.global::<I18n>().sql_labels();
-        let Some(query) = lang::analyze_hover(stmt, offset - range.start, &parsed, &catalog, &labels) else {
-            return Task::ready(Ok(None));
-        };
-        let span = lsp_range(text, range.start + query.start..range.start + query.end);
-        let hover = move |lines: Vec<String>| Hover {
-            contents: HoverContents::Array(lines.into_iter().map(MarkedString::String).collect()),
-            range: Some(span),
-        };
-        if let Some(mut lines) = query.lines {
-            let Some(table) = query.table_columns else { return Task::ready(Ok(Some(hover(lines)))) };
-            let load = schema::columns(&self.connection_id, &table.schema, &table.table, cx);
-            return cx.spawn(async move |_| {
-                let columns = load.await.unwrap_or_default();
-                lines.extend(lang::table_columns_markdown(&columns, HOVER_TABLE_COLUMNS, &labels));
-                Ok(Some(hover(lines)))
-            });
-        }
-        let Some(lookup) = query.column_lookup else { return Task::ready(Ok(None)) };
-        let connection_id = self.connection_id.clone();
-        // One table at a time, stopping at the first that has the column.
-        cx.spawn(async move |cx| {
-            for binding in &lookup.bindings {
-                let load = cx.update(|cx| schema::columns(&connection_id, &binding.schema, &binding.table, cx));
-                let columns = load.await.unwrap_or_default();
-                if let Some(column) = columns.iter().find(|c| c.name.to_lowercase() == lookup.name) {
-                    return Ok(Some(hover(lang::column_hover_lines(column, binding, &labels))));
-                }
-            }
-            Ok(None)
-        })
     }
 }
 

@@ -3,7 +3,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -12,7 +12,7 @@ use super::view::Grid;
 use super::{copy_format, set_copy_format};
 use crate::form::ToolButton;
 use crate::i18n::t;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_2XS, ICON_XS, RADIUS_SM, TEXT_SM, TINT_BORDER};
 
 pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
@@ -195,8 +195,7 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
                                 .p(rems(0.308))
                                 .children(rows),
                         )
-                        .vertical_scrollbar(&scroll)
-                        .scrollbars_on_hover(),
+                        .hover_scrollbar(&scroll, ScrollbarAxis::Vertical),
                 )
         })
 }

@@ -1,7 +1,5 @@
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use barsql_db::{ColumnMeta, ResultChunk, ResultSet};
@@ -16,7 +14,7 @@ use gpui_kit::*;
 use super::copy::{self, CopyTarget, Staged};
 use super::layout::{SAMPLE_ROWS, auto_width_ch, row_height};
 use super::range::{self, CellCoord};
-use super::scroll::GridScroll;
+use super::scroll::{GridScroll, LANE};
 use super::selection::{Arrow, GUTTER, Selection, View};
 use super::sort::{RowOrder, SortState, sort_order};
 use crate::i18n::t;
@@ -246,7 +244,6 @@ pub struct Grid {
     table: Option<String>,
     focus_handle: FocusHandle,
     scroll: GridScroll,
-    bounds: Rc<RefCell<Bounds<Pixels>>>,
     metrics: Metrics,
     sort: SortState,
     order: RowOrder,
@@ -288,7 +285,6 @@ impl Grid {
             table: None,
             focus_handle: cx.focus_handle(),
             scroll: GridScroll::default(),
-            bounds: Rc::default(),
             metrics: Metrics::default(),
             sort: SortState::default(),
             order: RowOrder::identity(0),
@@ -620,8 +616,7 @@ impl Grid {
     }
 
     fn hit(&self, position: Point<Pixels>) -> Option<Target> {
-        let bounds = *self.bounds.borrow();
-        let body = self.scroll.viewport();
+        let (bounds, body) = (self.scroll.grid(), self.scroll.viewport());
         // The bars' lanes hold nothing.
         if !bounds.contains(&position) || position.x >= body.right() || position.y >= body.bottom() {
             return None;
@@ -675,7 +670,7 @@ impl Grid {
 
     // Foreign-key button at the cell's right edge, in window coordinates.
     fn jump_box(&self, row: usize, col: usize) -> Bounds<Pixels> {
-        let bounds = *self.bounds.borrow();
+        let bounds = self.scroll.grid();
         let m = &self.metrics;
         let scroll = self.scroll.position();
         let right = bounds.left() + m.gutter_width + self.col_x[col + 1] - scroll.x - px(1.) - m.jump_inset;
@@ -911,7 +906,7 @@ impl Render for Grid {
                         .font_family(theme.mono_font_family.clone()),
                 )
         });
-        div()
+        let grid = div()
             .id("grid")
             .debug_selector(|| "grid".into())
             .key_context(CONTEXT)
@@ -957,11 +952,39 @@ impl Render for Grid {
                 .size_full(),
             )
             // Each bar has a lane of its own, clear of the cells, so it can show at all times.
-            .child(Scrollbar::vertical(&self.scroll.bar(Axis::Vertical)).mode(ScrollbarMode::Always))
-            .child(Scrollbar::horizontal(&self.scroll.bar(Axis::Horizontal)).mode(ScrollbarMode::Always))
+            .child(lane_bar(Scrollbar::vertical(&self.scroll.bar(Axis::Vertical))))
+            .child(lane_bar(Scrollbar::horizontal(&self.scroll.bar(Axis::Horizontal))))
             .children(editor)
-            .context_menu(move |menu, _, cx| Grid::menu(&weak, menu, cx))
+            .context_menu(move |menu, _, cx| Grid::menu(&weak, menu, cx));
+        div().relative().size_full().child(grid).child(lane_guard(self.scroll.clone()))
     }
+}
+
+fn lane_bar(bar: Scrollbar) -> Scrollbar {
+    bar.mode(ScrollbarMode::Always).styles(|styles| styles.track(|track| track.width(LANE)))
+}
+
+// GPUI Kit's bars take a press of any button on their track, and through anything drawn over them. Painted after the
+// grid and its menu, this goes first and keeps a lane's press only when it's the primary button reaching the grid:
+// a right-click there would open the menu for a focused cell the jump scrolls away, and a click on a dialog or
+// popover over a lane would scroll the grid under it.
+fn lane_guard(scroll: GridScroll) -> impl IntoElement {
+    canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |_, hitbox, window, _| {
+            let lanes = scroll.lane_bounds();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                let in_lane = lanes.iter().any(|lane| lane.contains(&event.position));
+                if phase.bubble() && in_lane && (event.button != MouseButton::Left || !hitbox.is_hovered(window)) {
+                    cx.stop_propagation();
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 struct Colors {
@@ -1096,7 +1119,6 @@ impl Shaper {
 fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) -> Frame {
     let grid = entity.read(cx);
     let m = grid.metrics;
-    *grid.bounds.borrow_mut() = bounds;
     let origin = bounds.origin + point(m.gutter_width, m.header_height);
     let total_width = grid.col_x.last().copied().unwrap_or_default();
     let rows = grid.order.len();
@@ -1464,7 +1486,7 @@ impl Grid {
     }
 
     pub(crate) fn cell_point(&self, row: usize, col: usize) -> Point<Pixels> {
-        let (bounds, m, scroll) = (*self.bounds.borrow(), &self.metrics, self.scroll.position());
+        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         point(
             bounds.left() + m.gutter_width + (self.col_x[col] + self.col_x[col + 1]) / 2. - scroll.x,
             bounds.top() + m.header_height + m.row_height * (row as f32 + 0.5) - scroll.y,
@@ -1498,7 +1520,7 @@ impl Grid {
     }
 
     pub(crate) fn gutter_point(&self, row: usize) -> Point<Pixels> {
-        let (bounds, m, scroll) = (*self.bounds.borrow(), &self.metrics, self.scroll.position());
+        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         point(
             bounds.left() + m.gutter_width / 2.,
             bounds.top() + m.header_height + m.row_height * (row as f32 + 0.5) - scroll.y,
@@ -1506,7 +1528,7 @@ impl Grid {
     }
 
     pub(crate) fn chevron_point(&self, col: usize) -> Point<Pixels> {
-        let (bounds, m, scroll) = (*self.bounds.borrow(), &self.metrics, self.scroll.position());
+        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         point(
             bounds.left() + m.gutter_width + self.col_x[col + 1] - m.cell_pad_x - m.chevron / 2. - scroll.x,
             bounds.top() + m.header_height / 2.,

@@ -9,7 +9,7 @@ use barsql_app::update::{self, InstallEvent, Release, Stage, Staged};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{ActiveTheme, Icon, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -18,7 +18,7 @@ use gpui_kit::*;
 use crate::form;
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
 use crate::toast::{self, ToastAction, ToastKind};
 use crate::tokens::{ICON_MD, ICON_SM, RADIUS};
@@ -378,8 +378,7 @@ impl Render for UpdateDialog {
                     div()
                         .relative()
                         .child(notes)
-                        .vertical_scrollbar(&self.notes_scroll)
-                        .scrollbars_on_hover()
+                        .hover_scrollbar(&self.notes_scroll, ScrollbarAxis::Vertical)
                         .into_any_element(),
                 )
             }

@@ -1,5 +1,6 @@
 use barsql_core::Value;
-use gpui_kit::{Entity, TestAppContext};
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::{Entity, Modifiers, TestAppContext, point, px};
 
 use super::driver::{Driver, open, selector};
 use crate::schema_tree::SchemaTree;
@@ -313,6 +314,21 @@ fn a_long_tree_scrolls_by_its_bar(cx: &mut TestAppContext) {
     let mut app = prepared(cx, &seed.join(";"));
     assert!(has(&mut app, "t:main.e2e_long_59"));
     app.scrolls_by_its_bar("schema-tree", "tree:s:main");
+}
+
+// The tree shows its bar while it's hovered, so a table's Browse button keeps clear of the bar's track.
+#[gpui_kit::test]
+fn a_long_trees_browse_buttons_keep_clear_of_its_bar(cx: &mut TestAppContext) {
+    let seed: Vec<String> = (0..60).map(|n| format!("CREATE TABLE e2e_long_{n:02} (id INTEGER)")).collect();
+    let mut app = prepared(cx, &seed.join(";"));
+    app.overlay_scrollbars();
+    app.hover("tree:t:main.e2e_long_00");
+    let tree = app.bounds("schema-tree").expect("the tree is drawn");
+    let browse = app.bounds("browse-main-e2e_long_00").expect("hovering shows Browse");
+    assert!(tree.right() - browse.right() >= Scrollbar::width() - px(0.5), "{browse:?} is under the bar of {tree:?}");
+    let tabs = app.titles().len();
+    app.click_at(point(browse.right() - px(2.), browse.center().y), Modifiers::none());
+    assert_eq!(app.titles().len(), tabs + 1, "a click at Browse's edge opens the table");
 }
 
 #[gpui_kit::test]

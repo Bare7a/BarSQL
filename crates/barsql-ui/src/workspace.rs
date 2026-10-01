@@ -20,6 +20,7 @@ use crate::json_panel::JsonPanel;
 use crate::query_tab::{QueryTab, QueryTabEvent, new_tab_id};
 use crate::quick_search::{self, QuickSearchDialog, TabEntry, Target};
 use crate::schema_tree::TableChange;
+use crate::scrollbars;
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::state::{self, set_setting, set_setting_bool, set_setting_json, setting_bool};
 use crate::status_bar::{self, StatusBarState};
@@ -291,6 +292,15 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
                         }
                         if let Some(completion) = table {
                             completion.update(cx, |completion, cx| completion.preview(&text, window, cx));
+                        }
+                    }));
+                }
+                Some(hover) if hover.starts_with("hover=") => {
+                    let (view, name) = (view.clone(), hover["hover=".len()..].to_string());
+                    after = Some(Box::new(move |_, cx| {
+                        if let Some(tab) = view.read(cx).active_query().cloned() {
+                            let card = tab.read(cx).hover();
+                            card.update(cx, |card, cx| card.preview(&name, cx));
                         }
                     }));
                 }
@@ -1164,7 +1174,7 @@ impl Workspace {
                     .right_0()
                     .bottom_0()
                     .h(Scrollbar::width())
-                    .child(Scrollbar::horizontal(&self.tab_scroll).viewport_from_layout()),
+                    .child(scrollbars::system_bar(Scrollbar::horizontal(&self.tab_scroll), cx)),
             )
     }
 

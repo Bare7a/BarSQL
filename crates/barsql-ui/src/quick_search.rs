@@ -5,7 +5,7 @@ use barsql_core::{ConnectionConfig, SavedQuery, TableInfo};
 use barsql_io::is_space;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{Enter, InputEvent, InputState, MoveDown, MoveUp};
-use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -13,7 +13,7 @@ use gpui_kit::*;
 use crate::connections_panel::parse_color;
 use crate::fuzzy::rank_candidate;
 use crate::i18n::t;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_SM, RADIUS_LG, TEXT_BASE, TEXT_XS};
 use crate::{form, saved_queries, schema};
 
@@ -364,7 +364,7 @@ impl Render for QuickSearchDialog {
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
                 .children(rows);
-            div().relative().child(list).vertical_scrollbar(&self.scroll).scrollbars_on_hover().into_any_element()
+            div().relative().child(list).hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical).into_any_element()
         };
         v_flex()
             .key_context("QuickSearch")

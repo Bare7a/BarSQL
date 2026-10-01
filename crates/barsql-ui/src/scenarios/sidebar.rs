@@ -1,7 +1,8 @@
 use barsql_core::SavedQuery;
-use gpui_kit::{Entity, TestAppContext, px};
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::{Entity, Pixels, TestAppContext, px};
 
-use super::driver::{Driver, open};
+use super::driver::{Driver, open, selector};
 use crate::history_panel::HistoryPanel;
 use crate::saved_panel::SavedPanel;
 use crate::saved_queries;
@@ -210,6 +211,46 @@ fn long_saved_and_recent_lists_show_their_bars_on_hover(cx: &mut TestAppContext)
     let mut app = open(cx);
     app.overlay_scrollbars();
     check_long_lists(&mut app, Driver::shows_its_bar_on_hover);
+}
+
+// How far the first row's Delete ends from the list's right side, from the frame already drawn.
+fn delete_inset(app: &mut Driver, list: &'static str, first_row: &'static str) -> Pixels {
+    let delete = selector(first_row.replace("-row-", "-delete-"));
+    app.cx.run_until_parked();
+    let list = app.cx.debug_bounds(list).expect("the list is drawn");
+    let delete = app.cx.debug_bounds(delete).expect("the row's actions are shown");
+    list.right() - delete.right()
+}
+
+// The lists show their bars while they're hovered, so a row's buttons keep clear of the bar's track.
+#[gpui_kit::test]
+fn long_saved_and_recent_lists_keep_their_buttons_clear_of_the_bar(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.overlay_scrollbars();
+    check_long_lists(&mut app, |app, list, first_row| {
+        app.hover(first_row);
+        assert!(delete_inset(app, list, first_row) >= Scrollbar::width() - px(0.5), "{first_row} in {list}");
+    });
+}
+
+// Rows are built from the frame before, so on the frame a list starts scrolling it draws them again.
+#[gpui_kit::test]
+fn recent_moves_the_buttons_clear_on_the_frame_it_starts_scrolling(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.seed("SELECT 1 AS n");
+    let sidebar = app.sidebar();
+    sidebar.update(app.cx, |sidebar, cx| sidebar.refresh_history(cx));
+    show_recent(&mut app);
+    app.hover("history-row-0");
+    assert!(
+        delete_inset(&mut app, "history-list", "history-row-0") < Scrollbar::width(),
+        "a short list's are at its edge"
+    );
+    app.seed(&(0..60).map(|n| format!("SELECT {n} AS n")).collect::<Vec<_>>().join(";"));
+    sidebar.update(app.cx, |sidebar, cx| sidebar.refresh_history(cx));
+    let inset = delete_inset(&mut app, "history-list", "history-row-0");
+    assert!(inset >= Scrollbar::width() - px(0.5), "{inset:?} with the pointer still on the row");
 }
 
 // The actions float over the row's end, so the text keeps the whole row. Rows pad both sides alike.

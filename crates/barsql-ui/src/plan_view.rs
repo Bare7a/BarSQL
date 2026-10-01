@@ -4,7 +4,7 @@ use barsql_sql::QueryPlan;
 use barsql_sql::plan::PlanNode;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
-use gpui_kit::component::scroll::{ScrollableElement as _, ScrollbarAxis};
+use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -15,7 +15,7 @@ use crate::plan_tree::{
     Metric, PlanRow, available_metrics, collect_parent_keys, default_metric, flatten, format_cost, format_factor,
     format_ms, format_rows, is_estimate_off,
 };
-use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::scrollbars::HoverScrollbar as _;
 use crate::toast;
 use crate::tokens::{ICON_2XS, ICON_SM, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_SM, TEXT_XS, TINT, TINT_BORDER};
 
@@ -464,8 +464,7 @@ impl PlanView {
             .w(rems(21.))
             .h_full()
             .child(details)
-            .vertical_scrollbar(&self.details_scroll)
-            .scrollbars_on_hover()
+            .hover_scrollbar(&self.details_scroll, ScrollbarAxis::Vertical)
             .into_any_element()
     }
 }
@@ -543,8 +542,7 @@ impl Render for PlanView {
                 .flex_1()
                 .min_h_0()
                 .child(raw)
-                .scrollbar(&self.raw_scroll, ScrollbarAxis::Both)
-                .scrollbars_on_hover()
+                .hover_scrollbar(&self.raw_scroll, ScrollbarAxis::Both)
                 .into_any_element()
         } else {
             let plan = self.plan.clone();
@@ -597,8 +595,7 @@ impl Render for PlanView {
                         .h_full()
                         .min_w_0()
                         .child(tree)
-                        .scrollbar(&self.scroll, ScrollbarAxis::Both)
-                        .scrollbars_on_hover(),
+                        .hover_scrollbar(&self.scroll, ScrollbarAxis::Both),
                 )
                 .children(selected.map(|node| self.details(&node, cx)))
                 .into_any_element()
