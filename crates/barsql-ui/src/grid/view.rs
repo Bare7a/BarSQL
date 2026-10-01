@@ -10,7 +10,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::input::{Copy, Input, InputState, Paste, Redo, SelectAll, Undo};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
-use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::*;
 
 use super::copy::{self, CopyTarget, Staged};
@@ -20,7 +20,6 @@ use super::scroll::GridScroll;
 use super::selection::{Arrow, GUTTER, Selection, View};
 use super::sort::{RowOrder, SortState, sort_order};
 use crate::i18n::t;
-use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::state::{set_setting, setting};
 use crate::toast;
 
@@ -622,7 +621,9 @@ impl Grid {
 
     fn hit(&self, position: Point<Pixels>) -> Option<Target> {
         let bounds = *self.bounds.borrow();
-        if !bounds.contains(&position) {
+        let body = self.scroll.viewport();
+        // The bars' lanes hold nothing.
+        if !bounds.contains(&position) || position.x >= body.right() || position.y >= body.bottom() {
             return None;
         }
         let m = &self.metrics;
@@ -691,13 +692,11 @@ impl Grid {
         if rows == 0 || self.columns.is_empty() {
             return None;
         }
-        let bounds = *self.bounds.borrow();
-        let m = &self.metrics;
-        let scroll = self.scroll.position();
-        let local = position - bounds.origin;
-        let y = local.y.clamp(m.header_height, bounds.size.height - px(1.)) - m.header_height + scroll.y;
-        let x = local.x.clamp(m.gutter_width, bounds.size.width - px(1.)) - m.gutter_width + scroll.x;
-        let row = ((y / m.row_height).floor() as usize).min(rows - 1);
+        let (body, scroll) = (self.scroll.viewport(), self.scroll.position());
+        // Not clamp, which panics on a body squeezed under 1px.
+        let y = position.y.max(body.top()).min(body.bottom() - px(1.)) - body.top() + scroll.y;
+        let x = position.x.max(body.left()).min(body.right() - px(1.)) - body.left() + scroll.x;
+        let row = ((y / self.metrics.row_height).floor() as usize).min(rows - 1);
         let col = self.column_at(x).unwrap_or(self.columns.len() - 1);
         Some(CellCoord { row, col })
     }
@@ -957,27 +956,11 @@ impl Render for Grid {
                 )
                 .size_full(),
             )
-            .child(
-                div()
-                    .absolute()
-                    .top(m.header_height)
-                    .right_0()
-                    .bottom_0()
-                    .w(Scrollbar::width())
-                    .child(Scrollbar::vertical(&self.scroll).viewport_from_layout()),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(m.gutter_width)
-                    .right_0()
-                    .bottom_0()
-                    .h(Scrollbar::width())
-                    .child(Scrollbar::horizontal(&self.scroll).viewport_from_layout()),
-            )
+            // Each bar has a lane of its own, clear of the cells, so it can show at all times.
+            .child(Scrollbar::vertical(&self.scroll.bar(Axis::Vertical)).mode(ScrollbarMode::Always))
+            .child(Scrollbar::horizontal(&self.scroll.bar(Axis::Horizontal)).mode(ScrollbarMode::Always))
             .children(editor)
             .context_menu(move |menu, _, cx| Grid::menu(&weak, menu, cx))
-            .scrollbars_on_hover()
     }
 }
 
@@ -1114,13 +1097,11 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     let grid = entity.read(cx);
     let m = grid.metrics;
     *grid.bounds.borrow_mut() = bounds;
-    let body = Bounds::from_corners(
-        point(bounds.left() + m.gutter_width, bounds.top() + m.header_height),
-        bounds.bottom_right(),
-    );
+    let origin = bounds.origin + point(m.gutter_width, m.header_height);
     let total_width = grid.col_x.last().copied().unwrap_or_default();
     let rows = grid.order.len();
-    grid.scroll.set_layout(body, size(total_width, m.row_height * rows as f32));
+    // The body stops at the bars' lanes, and so do the header and gutter.
+    let body = grid.scroll.set_layout(bounds, origin, size(total_width, m.row_height * rows as f32));
     let scroll = grid.scroll.position();
     let colors = Colors::new(cx);
     let base = grid_font(cx);
@@ -1259,7 +1240,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
 
     let gutter_mask = Bounds::from_corners(
         point(bounds.left(), bounds.top() + m.header_height),
-        point(bounds.left() + m.gutter_width, bounds.bottom()),
+        point(bounds.left() + m.gutter_width, body.bottom()),
     );
     let mut gutter = Layer::new(gutter_mask);
     for row in first_row..last_row {
@@ -1296,7 +1277,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             gutter.quads.push(quad(inner, px(0.), transparent_black(), px(1.), colors.accent, BorderStyle::Solid));
         }
     }
-    let gutter_bottom = rows_bottom.min(bounds.bottom());
+    let gutter_bottom = rows_bottom.min(body.bottom());
     gutter.quads.push(fill(
         Bounds::from_corners(
             point(bounds.left() + m.gutter_width - px(1.), bounds.top() + m.header_height),
@@ -1307,7 +1288,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
 
     let header_mask = Bounds::from_corners(
         point(bounds.left() + m.gutter_width, bounds.top()),
-        point(bounds.right(), bounds.top() + m.header_height),
+        point(body.right(), bounds.top() + m.header_height),
     );
     let mut header = Layer::new(header_mask);
     let mut resize = Vec::new();
@@ -1383,7 +1364,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     header.quads.push(fill(
         Bounds::from_corners(
             point(header_mask.left(), header_mask.bottom() - px(1.)),
-            point(columns_right.min(bounds.right()), header_mask.bottom()),
+            point(columns_right.min(body.right()), header_mask.bottom()),
         ),
         colors.border,
     ));
@@ -1400,6 +1381,22 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         BorderStyle::Solid,
     ));
 
+    // A border along each bar's lane, where the last column and row have theirs at the end of the scroll.
+    let lanes = grid.scroll.lanes();
+    let mut edges = Layer::new(bounds);
+    if lanes.width > px(0.) {
+        edges.quads.push(fill(
+            Bounds::from_corners(point(body.right() - px(1.), bounds.top()), body.bottom_right()),
+            colors.border,
+        ));
+    }
+    if lanes.height > px(0.) {
+        edges.quads.push(fill(
+            Bounds::from_corners(point(bounds.left(), body.bottom() - px(1.)), body.bottom_right()),
+            colors.border,
+        ));
+    }
+
     let resizing = matches!(grid.press, Some(Press::Resize { .. }));
     let line_height = m.line_height;
     let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
@@ -1411,7 +1408,8 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     .map(|area| window.insert_hitbox(area, HitboxBehavior::Normal))
     .collect();
     let resize = resize.into_iter().map(|area| window.insert_hitbox(area, HitboxBehavior::Normal)).collect();
-    Frame { layers: vec![background, cells, gutter, header, corner], hitbox, pointer, resize, line_height, resizing }
+    let layers = vec![background, cells, gutter, header, corner, edges];
+    Frame { layers, hitbox, pointer, resize, line_height, resizing }
 }
 
 fn paint(entity: &Entity<Grid>, _: Bounds<Pixels>, frame: Frame, window: &mut Window, cx: &mut App) {

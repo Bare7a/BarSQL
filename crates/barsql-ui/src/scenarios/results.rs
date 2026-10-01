@@ -189,8 +189,9 @@ fn json_text_in_a_cell_nests_as_an_object(cx: &mut TestAppContext) {
     assert!(shown.contains("\"x\": 42"), "{shown}");
 }
 
+// The bar has a lane of its own, so it shows even where other bars hide until their area scrolls or is hovered.
 #[gpui_kit::test]
-fn a_long_result_shows_the_grid_bar_on_hover(cx: &mut TestAppContext) {
+fn a_long_result_always_shows_the_grid_bar(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();
     app.run("SELECT * FROM things;");
@@ -203,8 +204,5 @@ fn a_long_result_shows_the_grid_bar_on_hover(cx: &mut TestAppContext) {
     let editor = app.bounds("query-editor").expect("the editor is drawn");
     app.hover_at(editor.center());
     app.click_at(track, Modifiers::none());
-    assert_eq!(first(&mut app), before, "away from the grid, its bar is hidden");
-    app.hover_at(frame.center());
-    app.click_at(track, Modifiers::none());
-    assert!(first(&mut app).y < before.y - px(200.), "hovering the grid shows its bar");
+    assert!(first(&mut app).y < before.y - px(200.), "a click on its track jumps, with the pointer away");
 }
