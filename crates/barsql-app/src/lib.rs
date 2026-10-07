@@ -22,6 +22,7 @@ use barsql_db::Engine;
 use barsql_storage::Stores;
 
 pub use backup::{BackupOutcome, BackupRequest};
+pub use barsql_db::tls::install_default_provider;
 pub use barsql_io::{CsvOptions, ImportPreview};
 pub use barsql_storage::{ConnectionFolder, EditorSession, EditorTab, TableViewRef};
 pub use events::{AppEvent, ImportDone, ImportEvent, ImportHandle, ImportProgress, RunEvent, RunHandle, RunResult};
@@ -31,6 +32,10 @@ pub use info::{AppInfo, PathDefaults, app_info, path_defaults};
 pub use runs::BufferedResult;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Stack for the runtime's workers. A debug build gives every future a match arm makes a stack slot of its own, and
+// the engine dispatch makes one per engine, so deep calls can outgrow tokio's default 2 MiB.
+pub const WORKER_STACK: usize = 8 << 20;
 
 // Kept free of GPUI. Methods run on the tokio runtime and streaming ones return a handle with a channel.
 #[derive(Clone)]
@@ -57,6 +62,7 @@ struct PooledEngine {
 
 impl BarApp {
     pub fn open(data_dir: &Path, runtime: tokio::runtime::Handle) -> std::io::Result<Self> {
+        install_default_provider();
         let app = Self {
             inner: Arc::new(Inner {
                 stores: Stores::open(data_dir)?,

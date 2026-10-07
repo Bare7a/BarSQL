@@ -6,15 +6,16 @@ mod values;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use barsql_core::{ConnectionConfig, QueryError};
+use barsql_core::{ConnectionConfig, MessageLevel, QueryError, ServerMessage};
 use jiff::tz::TimeZone;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 use tokio_postgres::config::SslMode;
-use tokio_postgres::error::ErrorPosition;
+use tokio_postgres::error::{DbError, ErrorPosition, Severity};
 use tokio_postgres::tls::MakeTlsConnect;
-use tokio_postgres::{CancelToken, Client, Config, NoTls};
+use tokio_postgres::{AsyncMessage, CancelToken, Client, Config, NoTls};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
+use crate::event::{MessageBuffer, ScriptEvent};
 use crate::ssh::{SshOptions, TunnelSlot};
 use crate::tls::TlsMode;
 
@@ -98,6 +99,56 @@ pub struct PgEngine {
 pub(crate) struct PgConn {
     pub(crate) client: Client,
     pub(crate) cancel: CancelToken,
+    pub(crate) notices: Arc<Notices>,
+}
+
+// The connection's notices, collected by its task as they arrive. A notice comes in before the CommandComplete
+// of the statement that raised it, so it's here by the time the statement ends.
+#[derive(Default)]
+pub(crate) struct Notices {
+    buffer: Mutex<MessageBuffer>,
+    arrived: Notify,
+}
+
+impl Notices {
+    fn push(&self, notice: &DbError) {
+        self.lock().push(notice_message(notice));
+        self.arrived.notify_one();
+    }
+
+    pub(crate) fn reset(&self) {
+        self.lock().reset();
+    }
+
+    pub(crate) fn take(&self, result_index: usize) -> Option<ScriptEvent> {
+        self.lock().take(result_index)
+    }
+
+    pub(crate) async fn arrived(&self) {
+        self.arrived.notified().await;
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, MessageBuffer> {
+        self.buffer.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+fn notice_message(notice: &DbError) -> ServerMessage {
+    let level = match notice.parsed_severity() {
+        Some(Severity::Warning) => MessageLevel::Warning,
+        Some(Severity::Notice) => MessageLevel::Notice,
+        // INFO, LOG and DEBUG. The rest are errors, which never come as notices.
+        _ => MessageLevel::Info,
+    };
+    // 00000 is what RAISE gives without an ERRCODE: no code at all.
+    let code = notice.code().code();
+    ServerMessage {
+        level,
+        code: if code == "00000" { String::new() } else { code.to_string() },
+        text: notice.message().to_string(),
+        detail: notice.detail().unwrap_or_default().to_string(),
+        hint: notice.hint().unwrap_or_default().to_string(),
+    }
 }
 
 impl PgEngine {
@@ -182,12 +233,12 @@ impl PgEngine {
                 }
             }
         };
-        let client = tokio::time::timeout(CONNECT_TIMEOUT, open)
+        let (client, notices) = tokio::time::timeout(CONNECT_TIMEOUT, open)
             .await
             .map_err(|_| QueryError::message("failed to connect: timeout"))??;
         client.batch_execute(SESSION_SETUP).await.map_err(|err| pg_error(&err))?;
         let cancel = client.cancel_token();
-        Ok(PgConn { client, cancel })
+        Ok(PgConn { client, cancel, notices })
     }
 
     // Runs on the caller's runtime. If the cancel can't reach the server, the statement keeps running.
@@ -233,16 +284,25 @@ impl PgEngine {
 
 fn spawn_connection<S, T>(
     result: Result<(Client, tokio_postgres::Connection<S, T>), tokio_postgres::Error>,
-) -> Result<Client, QueryError>
+) -> Result<(Client, Arc<Notices>), QueryError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let (client, connection) = result.map_err(|err| pg_error(&err))?;
+    let (client, mut connection) = result.map_err(|err| pg_error(&err))?;
+    let notices = Arc::new(Notices::default());
+    let collected = notices.clone();
+    // Polled by hand: awaiting the connection would only log its notices.
     tokio::spawn(async move {
-        let _ = connection.await;
+        while let Some(message) = std::future::poll_fn(|cx| connection.poll_message(cx)).await {
+            match message {
+                Ok(AsyncMessage::Notice(notice)) => collected.push(&notice),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
     });
-    Ok(client)
+    Ok((client, notices))
 }
 
 pub(crate) struct PgLease {
@@ -263,6 +323,10 @@ impl PgLease {
 
     pub(crate) fn engine(&self) -> &Arc<PgEngine> {
         &self.engine
+    }
+
+    pub(crate) fn notices(&self) -> &Notices {
+        &self.conn.as_ref().expect("leased connection").notices
     }
 }
 

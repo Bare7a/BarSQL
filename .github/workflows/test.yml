@@ -16,6 +16,11 @@ on:
           - linux
           - e2e
           - macos-windows
+      regenerate_goldens:
+        description: 'Rewrite the SQL Server golden fixtures from this server and upload them'
+        required: false
+        default: false
+        type: boolean
 
   workflow_call:
     inputs:
@@ -71,10 +76,14 @@ jobs:
         run: cargo test --workspace --locked
 
   e2e:
-    name: E2E (PostgreSQL, MySQL, MariaDB)
+    name: E2E (PostgreSQL, MySQL, MariaDB, libSQL, ClickHouse, SQL Server)
     if: ${{ !inputs.suite || inputs.suite == 'all' || inputs.suite == 'e2e' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    # SQL Server comes with the mssql profile, and its suites run only when asked.
+    env:
+      COMPOSE_PROFILES: mssql
+      BARSQL_E2E_MSSQL: "1"
 
     steps:
       - uses: actions/checkout@v7
@@ -96,6 +105,20 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
+      # The fixtures were first written against Azure SQL Edge on arm64. This rewrites them from SQL Server itself.
+      - name: Rewrite the SQL Server golden fixtures
+        if: ${{ inputs.regenerate_goldens }}
+        run: cargo test -p barsql-db --features e2e --locked --test golden_mssql
+        env:
+          BARSQL_GOLDEN_WRITE: "1"
+
+      - name: Upload the rewritten SQL Server fixtures
+        if: ${{ inputs.regenerate_goldens }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sqlserver-golden-fixtures
+          path: fixtures/golden/*/sqlserver.json
+
       - name: Driver and app suites
         run: cargo test -p barsql-db -p barsql-app --features barsql-db/e2e,barsql-app/e2e --locked
 
@@ -105,6 +128,15 @@ jobs:
       - name: Dump database logs on failure
         if: failure()
         run: docker compose logs --no-color
+
+      # What the golden corpus saw instead, next to each fixture it didn't match.
+      - name: Upload golden mismatches
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-mismatches
+          path: fixtures/golden/**/*.actual.json
+          if-no-files-found: ignore
 
       - name: Tear down database stack
         if: always()

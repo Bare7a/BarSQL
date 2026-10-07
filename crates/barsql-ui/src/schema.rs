@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
-use barsql_sql::lang::Catalog;
 use barsql_sql::lang::quoting::column_cache_key;
+use barsql_sql::lang::{Catalog, FunctionCatalog};
 use futures_util::FutureExt as _;
 use futures_util::future::Shared;
 use gpui_kit::{App, AsyncApp, Global, Task};
@@ -29,6 +29,8 @@ pub struct ConnectionSchema {
     tables: HashMap<String, Vec<TableInfo>>,
     tables_loading: HashSet<String>,
     catalog: Option<Arc<Catalog>>,
+    // The server's functions merged with the built-ins. Until they load, the catalog offers the built-ins alone.
+    functions: Option<Arc<FunctionCatalog>>,
     loading: bool,
     error: Option<String>,
     columns: HashMap<String, Columns>,
@@ -93,7 +95,11 @@ impl ConnectionSchema {
                 tables.extend(list.iter().cloned());
             }
         }
-        self.catalog = Some(Arc::new(Catalog::new(self.driver.clone(), schemas.clone(), tables)));
+        let mut catalog = Catalog::new(self.driver.clone(), schemas.clone(), tables);
+        if let Some(functions) = &self.functions {
+            catalog = catalog.with_functions(functions.clone());
+        }
+        self.catalog = Some(Arc::new(catalog));
     }
 }
 
@@ -166,6 +172,7 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
     let id = connection_id.to_string();
     cx.spawn(async move |cx| {
         let bundle = load.await;
+        let loaded = matches!(bundle, Some(Ok(_)));
         apply(cx, &id, generation, |entry| {
             entry.loading = false;
             match bundle {
@@ -180,6 +187,32 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
                 None => {}
             }
         });
+        if loaded {
+            cx.update(|cx| load_functions(&id, generation, cx));
+        }
+    })
+    .detach();
+}
+
+// After the schemas, so the tree isn't waiting on it. A failure keeps the built-ins, and the tree doesn't show it.
+fn load_functions(connection_id: &str, generation: u64, cx: &mut App) {
+    let Some(driver) = get(cx, connection_id).filter(|e| e.generation == generation).map(|e| e.driver.clone()) else {
+        return;
+    };
+    let bar = state::bar(cx);
+    let id = connection_id.to_string();
+    let load = state::spawn(cx, async move {
+        let list = bar.list_functions(&id).await?;
+        Ok::<_, barsql_core::QueryError>(Arc::new(FunctionCatalog::with_server(&driver, list)))
+    });
+    let id = connection_id.to_string();
+    cx.spawn(async move |cx| {
+        if let Some(Ok(functions)) = load.await {
+            apply(cx, &id, generation, |entry| {
+                entry.functions = Some(functions);
+                entry.rebuild_catalog();
+            });
+        }
     })
     .detach();
 }

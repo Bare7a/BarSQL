@@ -1,4 +1,6 @@
+use barsql_core::SqlDialect;
 use barsql_db::Cell;
+use barsql_sql::{Dialect, quote_ident_in, quote_literal_in};
 use serde_json::Value as Json;
 
 pub const EXPORT_CHUNK_ROWS: usize = 5000;
@@ -64,6 +66,8 @@ pub struct Exporter {
     columns: Vec<String>,
     json_columns: Vec<bool>,
     sql_prefix: String,
+    // SQL INSERTs are written for this dialect, or as ANSI SQL without one.
+    dialect: Option<SqlDialect>,
     pending: String,
     pending_rows: usize,
     written: usize,
@@ -76,6 +80,7 @@ impl Exporter {
         columns: &[String],
         column_types: &[String],
         table_name: Option<&str>,
+        dialect: Option<SqlDialect>,
         rows_per_chunk: usize,
     ) -> Self {
         let header = match format {
@@ -87,7 +92,10 @@ impl Exporter {
             ),
             _ => String::new(),
         };
-        let quote = |id: &str| format!("\"{}\"", id.replace('"', "\"\""));
+        let quote = |id: &str| match dialect {
+            Some(dialect) => quote_ident_in(Dialect::of(dialect), id),
+            None => format!("\"{}\"", id.replace('"', "\"\"")),
+        };
         let table = table_name.filter(|t| !t.is_empty()).unwrap_or("results");
         let sql_prefix = format!(
             "INSERT INTO {} ({}) VALUES (",
@@ -103,6 +111,7 @@ impl Exporter {
             columns: columns.to_vec(),
             json_columns,
             sql_prefix,
+            dialect,
             pending: header,
             pending_rows: 0,
             written: 0,
@@ -163,7 +172,8 @@ impl Exporter {
                 )
             }
             ExportFormat::Sql => {
-                format!("{}{});", self.sql_prefix, cells.iter().map(|c| sql_literal(*c)).collect::<Vec<_>>().join(", "))
+                let values = cells.iter().map(|c| sql_literal(*c, self.dialect)).collect::<Vec<_>>();
+                format!("{}{});", self.sql_prefix, values.join(", "))
             }
             ExportFormat::Json => {
                 let mut object = JsonObject::default();
@@ -190,9 +200,10 @@ pub fn export_to_string<'a>(
     columns: &[String],
     column_types: &[String],
     table_name: Option<&str>,
+    dialect: Option<SqlDialect>,
     rows: impl IntoIterator<Item = Vec<Cell<'a>>>,
 ) -> String {
-    let mut exporter = Exporter::new(format, columns, column_types, table_name, EXPORT_CHUNK_ROWS);
+    let mut exporter = Exporter::new(format, columns, column_types, table_name, dialect, EXPORT_CHUNK_ROWS);
     let mut out = String::new();
     for row in rows {
         if let Some(chunk) = exporter.push(&row) {
@@ -236,13 +247,16 @@ fn md_cell(s: &str) -> String {
     s.replace('|', "\\|").replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
-fn sql_literal(cell: Cell<'_>) -> String {
-    match cell {
-        Cell::Null => "NULL".into(),
-        Cell::Bool(true) => "TRUE".into(),
-        Cell::Bool(false) => "FALSE".into(),
-        Cell::Number(s) => s.to_string(),
-        Cell::Text(s) => format!("'{}'", s.replace('\'', "''")),
+fn sql_literal(cell: Cell<'_>, dialect: Option<SqlDialect>) -> String {
+    match (cell, dialect) {
+        (Cell::Null, _) => "NULL".into(),
+        // T-SQL has no TRUE or FALSE, and its bit columns take 1 and 0.
+        (Cell::Bool(b), Some(SqlDialect::TSql)) => if b { "1" } else { "0" }.into(),
+        (Cell::Bool(true), _) => "TRUE".into(),
+        (Cell::Bool(false), _) => "FALSE".into(),
+        (Cell::Number(s), _) => s.to_string(),
+        (Cell::Text(s), Some(dialect)) => quote_literal_in(dialect, s),
+        (Cell::Text(s), None) => format!("'{}'", s.replace('\'', "''")),
     }
 }
 
@@ -480,9 +494,39 @@ mod tests {
             &["wei\"rd".into()],
             &[String::new()],
             Some("tab\"le"),
+            None,
             [vec![Cell::Number("1")]],
         );
         assert!(out.contains(r#"INSERT INTO "tab""le" ("wei""rd") VALUES (1)"#), "{out}");
+    }
+
+    #[test]
+    fn sql_export_writes_the_connections_dialect() {
+        let row = || [vec![Cell::Text(r"it's a\b"), Cell::Bool(true), Cell::Number("2"), Cell::Null]];
+        let columns: Vec<String> = ["note", "flag", "n", "gone"].map(String::from).to_vec();
+        let insert = |dialect| export_to_string(ExportFormat::Sql, &columns, &[], Some("t"), Some(dialect), row());
+        let cases = [
+            (
+                SqlDialect::Postgres,
+                r#"INSERT INTO "t" ("note", "flag", "n", "gone") VALUES (E'it''s a\\b', TRUE, 2, NULL);"#,
+            ),
+            (
+                SqlDialect::MySql,
+                "INSERT INTO `t` (`note`, `flag`, `n`, `gone`) VALUES (CONVERT(X'6974277320615C62' USING utf8mb4), TRUE, 2, NULL);",
+            ),
+            (
+                SqlDialect::Sqlite,
+                r#"INSERT INTO "t" ("note", "flag", "n", "gone") VALUES ('it''s a\b', TRUE, 2, NULL);"#,
+            ),
+            (SqlDialect::TSql, r"INSERT INTO [t] ([note], [flag], [n], [gone]) VALUES (N'it''s a\b', 1, 2, NULL);"),
+            (
+                SqlDialect::ClickHouse,
+                r"INSERT INTO `t` (`note`, `flag`, `n`, `gone`) VALUES ('it\'s a\\b', TRUE, 2, NULL);",
+            ),
+        ];
+        for (dialect, expected) in cases {
+            assert_eq!(insert(dialect), expected, "{dialect:?}");
+        }
     }
 
     #[test]
@@ -491,6 +535,7 @@ mod tests {
             ExportFormat::Markdown,
             &["v".into()],
             &[String::new()],
+            None,
             None,
             [vec![Cell::Text("a\r\nb")], vec![Cell::Text("c\rd")]],
         );

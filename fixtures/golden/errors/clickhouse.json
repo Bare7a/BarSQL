@@ -1,0 +1,556 @@
+{
+  "engine": "clickhouse",
+  "setup": [
+    "DROP TABLE IF EXISTS barsql_test.customers",
+    "CREATE TABLE barsql_test.customers (id UInt32, email String) ENGINE = MergeTree ORDER BY id"
+  ],
+  "probes": [
+    {
+      "name": "syntax",
+      "sql": "SELEC 1",
+      "results": [
+        {
+          "statement": "SELEC 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Syntax error: failed at position 1 (SELEC): SELEC 1. Expected one of: Query, Query with output, EXPLAIN, SELECT query, possibly with UNION, list of union elements, SELECT query, subquery, possibly with UNION, SELECT or EXPLAIN subquery, SELECT query, WITH, FROM, SELECT, SHOW CREATE QUOTA query, SHOW CREATE, SHOW [FULL] [TEMPORARY] TABLES|DATABASES|CLUSTERS|CLUSTER|MERGES 'name' [[NOT] [I]LIKE 'str'] [LIMIT expr], SHOW, SHOW COLUMNS query, SHOW ENGINES query, SHOW ENGINES, SHOW FUNCTIONS query, SHOW FUNCTIONS, SHOW INDEXES query, SHOW SETTING query, SHOW SETTING, EXISTS or SHOW CREATE query, EXISTS, DESCRIBE FILESYSTEM CACHE query, DESCRIBE, DESC, DESCRIBE query, SHOW PROCESSLIST query, SHOW PROCESSLIST, CREATE TABLE or ATTACH TABLE query, CREATE, ATTACH, REPLACE, CREATE DATABASE query, CREATE VIEW query, CREATE DICTIONARY, CREATE WINDOW VIEW query, ALTER query, ALTER TABLE, ALTER TEMPORARY TABLE, ALTER DATABASE, RENAME query, RENAME DATABASE, RENAME TABLE, EXCHANGE TABLES, RENAME DICTIONARY, EXCHANGE DICTIONARIES, RENAME, DROP query, DROP, DETACH, TRUNCATE, UNDROP query, UNDROP, CHECK query, CHECK ALL TABLES, CHECK TABLE, CHECK DATABASE, KILL QUERY query, KILL, OPTIMIZE query, OPTIMIZE TABLE, WATCH query, WATCH, SHOW ACCESS query, SHOW ACCESS, ShowAccessEntitiesQuery, SHOW GRANTS query, SHOW GRANTS, SHOW PRIVILEGES query, SHOW PRIVILEGES, BACKUP or RESTORE query, BACKUP, RESTORE, SNAPSHOT, INSERT query, INSERT INTO, USE query, USE, SET ROLE or SET DEFAULT ROLE query, SET ROLE DEFAULT, SET ROLE, SET DEFAULT ROLE, SET query, SET, SYSTEM query, SYSTEM, CREATE USER or ALTER USER query, ALTER USER, CREATE USER, CREATE ROLE or ALTER ROLE query, ALTER ROLE, CREATE ROLE, CREATE QUOTA or ALTER QUOTA query, ALTER QUOTA, CREATE QUOTA, CREATE ROW POLICY or ALTER ROW POLICY query, ALTER POLICY, ALTER ROW POLICY, CREATE POLICY, CREATE ROW POLICY, CREATE MASKING POLICY or ALTER MASKING POLICY query, ATTACH MASKING POLICY, ALTER MASKING POLICY, CREATE MASKING POLICY, CREATE SETTINGS PROFILE or ALTER SETTINGS PROFILE query, ALTER SETTINGS PROFILE, ALTER PROFILE, CREATE SETTINGS PROFILE, CREATE PROFILE, CREATE FUNCTION query, DROP FUNCTION query, CREATE WORKLOAD query, DROP WORKLOAD query, CREATE RESOURCE query, DROP RESOURCE query, CREATE NAMED COLLECTION, DROP NAMED COLLECTION query, Alter NAMED COLLECTION query, ALTER, CREATE HANDLER query, DROP HANDLER query, CREATE INDEX query, DROP INDEX query, HYPOTHETICAL INDEX query, DROP access entity query, MOVE access entity query, MOVE, GRANT or REVOKE query, REVOKE, GRANT, CHECK GRANT, TCL query, BEGIN TRANSACTION, START TRANSACTION, COMMIT, ROLLBACK, SET TRANSACTION SNAPSHOT, Delete query, DELETE, Update query, UPDATE, COPY query, COPY, EXECUTE AS query, EXECUTE AS",
+            "code": "62",
+            "detail": "SYNTAX_ERROR",
+            "position": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_table",
+      "sql": "SELECT * FROM nope",
+      "results": [
+        {
+          "statement": "SELECT * FROM nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Unknown table expression identifier 'nope' in scope SELECT * FROM nope. Maybe you meant system.one?",
+            "code": "60",
+            "detail": "UNKNOWN_TABLE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_column",
+      "sql": "SELECT nope FROM barsql_test.customers",
+      "results": [
+        {
+          "statement": "SELECT nope FROM barsql_test.customers",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Unknown expression identifier `nope` in scope SELECT nope FROM barsql_test.customers",
+            "code": "47",
+            "detail": "UNKNOWN_IDENTIFIER"
+          }
+        }
+      ]
+    },
+    {
+      "name": "type_error",
+      "sql": "SELECT toInt8('x')",
+      "results": [
+        {
+          "statement": "SELECT toInt8('x')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Cannot parse string 'x' as Int8: syntax error at begin of string. Note: there are toInt8OrZero and toInt8OrNull functions, which returns zero/NULL instead of throwing exception: In scope SELECT toInt8('x')",
+            "code": "6",
+            "detail": "CANNOT_PARSE_TEXT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "second_statement_fails",
+      "sql": "SELECT 1 AS ok; SELECT * FROM nope; SELECT 2 AS never",
+      "results": [
+        {
+          "statement": "SELECT 1 AS ok",
+          "columns": [
+            "ok"
+          ],
+          "columnTypes": [
+            "UInt8"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT * FROM nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Unknown table expression identifier 'nope' in scope SELECT * FROM nope. Maybe you meant system.one?",
+            "code": "60",
+            "detail": "UNKNOWN_TABLE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "multibyte_position",
+      "sql": "SELECT 'héllo 🌍' AS v, 1 +",
+      "results": [
+        {
+          "statement": "SELECT 'héllo 🌍' AS v, 1 +",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Syntax error: failed at position 31 (end of query): . Expected end of query",
+            "code": "62",
+            "detail": "SYNTAX_ERROR",
+            "position": 27
+          }
+        }
+      ]
+    },
+    {
+      "name": "mid_stream",
+      "sql": "SELECT number, throwIf(number = 50, 'boom') AS t FROM numbers(100) SETTINGS max_block_size = 10, max_threads = 1",
+      "results": [
+        {
+          "statement": "SELECT number, throwIf(number = 50, 'boom') AS t FROM numbers(100) SETTINGS max_block_size = 10, max_threads = 1",
+          "columns": [
+            "number",
+            "t"
+          ],
+          "columnTypes": [
+            "UInt64",
+            "UInt8"
+          ],
+          "rows": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              5,
+              0
+            ],
+            [
+              6,
+              0
+            ],
+            [
+              7,
+              0
+            ],
+            [
+              8,
+              0
+            ],
+            [
+              9,
+              0
+            ],
+            [
+              10,
+              0
+            ],
+            [
+              11,
+              0
+            ],
+            [
+              12,
+              0
+            ],
+            [
+              13,
+              0
+            ],
+            [
+              14,
+              0
+            ],
+            [
+              15,
+              0
+            ],
+            [
+              16,
+              0
+            ],
+            [
+              17,
+              0
+            ],
+            [
+              18,
+              0
+            ],
+            [
+              19,
+              0
+            ],
+            [
+              20,
+              0
+            ],
+            [
+              21,
+              0
+            ],
+            [
+              22,
+              0
+            ],
+            [
+              23,
+              0
+            ],
+            [
+              24,
+              0
+            ],
+            [
+              25,
+              0
+            ],
+            [
+              26,
+              0
+            ],
+            [
+              27,
+              0
+            ],
+            [
+              28,
+              0
+            ],
+            [
+              29,
+              0
+            ],
+            [
+              30,
+              0
+            ],
+            [
+              31,
+              0
+            ],
+            [
+              32,
+              0
+            ],
+            [
+              33,
+              0
+            ],
+            [
+              34,
+              0
+            ],
+            [
+              35,
+              0
+            ],
+            [
+              36,
+              0
+            ],
+            [
+              37,
+              0
+            ],
+            [
+              38,
+              0
+            ],
+            [
+              39,
+              0
+            ],
+            [
+              40,
+              0
+            ],
+            [
+              41,
+              0
+            ],
+            [
+              42,
+              0
+            ],
+            [
+              43,
+              0
+            ],
+            [
+              44,
+              0
+            ],
+            [
+              45,
+              0
+            ],
+            [
+              46,
+              0
+            ],
+            [
+              47,
+              0
+            ],
+            [
+              48,
+              0
+            ],
+            [
+              49,
+              0
+            ]
+          ],
+          "display": [
+            [
+              "0",
+              "0"
+            ],
+            [
+              "1",
+              "0"
+            ],
+            [
+              "2",
+              "0"
+            ],
+            [
+              "3",
+              "0"
+            ],
+            [
+              "4",
+              "0"
+            ],
+            [
+              "5",
+              "0"
+            ],
+            [
+              "6",
+              "0"
+            ],
+            [
+              "7",
+              "0"
+            ],
+            [
+              "8",
+              "0"
+            ],
+            [
+              "9",
+              "0"
+            ],
+            [
+              "10",
+              "0"
+            ],
+            [
+              "11",
+              "0"
+            ],
+            [
+              "12",
+              "0"
+            ],
+            [
+              "13",
+              "0"
+            ],
+            [
+              "14",
+              "0"
+            ],
+            [
+              "15",
+              "0"
+            ],
+            [
+              "16",
+              "0"
+            ],
+            [
+              "17",
+              "0"
+            ],
+            [
+              "18",
+              "0"
+            ],
+            [
+              "19",
+              "0"
+            ],
+            [
+              "20",
+              "0"
+            ],
+            [
+              "21",
+              "0"
+            ],
+            [
+              "22",
+              "0"
+            ],
+            [
+              "23",
+              "0"
+            ],
+            [
+              "24",
+              "0"
+            ],
+            [
+              "25",
+              "0"
+            ],
+            [
+              "26",
+              "0"
+            ],
+            [
+              "27",
+              "0"
+            ],
+            [
+              "28",
+              "0"
+            ],
+            [
+              "29",
+              "0"
+            ],
+            [
+              "30",
+              "0"
+            ],
+            [
+              "31",
+              "0"
+            ],
+            [
+              "32",
+              "0"
+            ],
+            [
+              "33",
+              "0"
+            ],
+            [
+              "34",
+              "0"
+            ],
+            [
+              "35",
+              "0"
+            ],
+            [
+              "36",
+              "0"
+            ],
+            [
+              "37",
+              "0"
+            ],
+            [
+              "38",
+              "0"
+            ],
+            [
+              "39",
+              "0"
+            ],
+            [
+              "40",
+              "0"
+            ],
+            [
+              "41",
+              "0"
+            ],
+            [
+              "42",
+              "0"
+            ],
+            [
+              "43",
+              "0"
+            ],
+            [
+              "44",
+              "0"
+            ],
+            [
+              "45",
+              "0"
+            ],
+            [
+              "46",
+              "0"
+            ],
+            [
+              "47",
+              "0"
+            ],
+            [
+              "48",
+              "0"
+            ],
+            [
+              "49",
+              "0"
+            ]
+          ],
+          "rowCount": 50,
+          "affectedRows": 0,
+          "error": {
+            "message": "boom: while executing 'FUNCTION throwIf(equals(__table1.number, 50_UInt8) :: 0, 'boom'_String :: 2) -> throwIf(equals(__table1.number, 50_UInt8), 'boom'_String) UInt8 : 3'",
+            "code": "395",
+            "detail": "FUNCTION_THROW_IF_VALUE_IS_NON_ZERO"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, IndexInfo, ObjectKind, ObjectRef, QueryError,
-    RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionList, FunctionSignature, IndexInfo,
+    ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{render_constraint, render_create_index, terminate_statement, unsupported_ddl};
 use barsql_sql::{qualified_table, quote_ident_list};
@@ -138,7 +138,8 @@ impl MyEngine {
                           AND k.COLUMN_NAME = c.COLUMN_NAME
                           AND k.REFERENCED_TABLE_NAME IS NOT NULL
                         LIMIT 1
-                    ), '')
+                    ), ''),
+                    c.EXTRA
                 FROM information_schema.COLUMNS c
                 WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
                 ORDER BY c.ORDINAL_POSITION",
@@ -149,6 +150,9 @@ impl MyEngine {
             .iter()
             .map(|r| {
                 let foreign_table = string(r, 5);
+                // auto_increment, or VIRTUAL/STORED/PERSISTENT GENERATED. MySQL also tags an expression default
+                // DEFAULT_GENERATED, and that column still takes values.
+                let extra = string(r, 7).to_lowercase().replace("default_generated", "");
                 ColumnInfo {
                     name: string(r, 0),
                     data_type: string(r, 1),
@@ -158,6 +162,8 @@ impl MyEngine {
                     is_foreign: !foreign_table.is_empty(),
                     foreign_table,
                     foreign_column: string(r, 6),
+                    is_identity: extra.contains("auto_increment"),
+                    is_computed: extra.contains("generated"),
                 }
             })
             .collect())
@@ -307,6 +313,55 @@ impl MyEngine {
                 }
             })
             .collect())
+    }
+
+    // Stored functions only, since MySQL doesn't list its built-ins. The sys schema's helpers count as the
+    // server's own and need their schema.
+    pub async fn list_functions(self: &Arc<Self>) -> Result<FunctionList, QueryError> {
+        let (_, about) = self.text_rows("SELECT VERSION(), DATABASE()").await?;
+        let (version, database) = about.first().map(|r| (string(r, 0), string(r, 1))).unwrap_or_default();
+        let routines = self
+            .rows(
+                "SELECT ROUTINE_SCHEMA, ROUTINE_NAME, COALESCE(DTD_IDENTIFIER, ''), COALESCE(ROUTINE_COMMENT, '')
+                FROM information_schema.ROUTINES
+                WHERE ROUTINE_TYPE = 'FUNCTION'
+                    AND ROUTINE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql')
+                ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME",
+                Vec::new(),
+            )
+            .await?;
+        let params = self
+            .rows(
+                "SELECT SPECIFIC_SCHEMA, SPECIFIC_NAME, COALESCE(PARAMETER_NAME, ''), COALESCE(DTD_IDENTIFIER, '')
+                FROM information_schema.PARAMETERS
+                WHERE ROUTINE_TYPE = 'FUNCTION' AND ORDINAL_POSITION > 0
+                    AND SPECIFIC_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql')
+                ORDER BY SPECIFIC_SCHEMA, SPECIFIC_NAME, ORDINAL_POSITION",
+                Vec::new(),
+            )
+            .await?;
+        let mut args: HashMap<(String, String), Vec<String>> = HashMap::new();
+        for r in &params {
+            let arg = format!("{} {}", string(r, 2), string(r, 3)).trim().to_string();
+            args.entry((string(r, 0), string(r, 1))).or_default().push(arg);
+        }
+        let functions = routines
+            .iter()
+            .map(|r| {
+                let (schema, name) = (string(r, 0), string(r, 1));
+                let args = args.remove(&(schema.clone(), name.clone())).unwrap_or_default().join(", ");
+                FunctionInfo {
+                    signatures: vec![FunctionSignature { args, returns: string(r, 2) }],
+                    description: string(r, 3),
+                    qualified_only: schema != database,
+                    source: if schema == "sys" { schema.clone() } else { String::new() },
+                    name,
+                    schema,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        Ok(FunctionList { functions, combinators: Vec::new(), mariadb: version.contains("MariaDB") })
     }
 
     pub async fn object_ddl(self: &Arc<Self>, object: &ObjectRef) -> Result<String, QueryError> {

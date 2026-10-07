@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-use barsql_core::{DriverType, HistoryEntry, QueryError, TableDataRequest, Value};
+use barsql_core::{DriverType, HistoryEntry, QueryError, SqlDialect, TableDataRequest, Value};
 use barsql_db::{Cancel, ScriptEvent, Session};
 use barsql_sql::plan::{NOTE_ROLLED_BACK, NOTE_TAB_TRANSACTION};
 use barsql_sql::{
-    QueryPlan, ServerVersion, assert_read_only, build_explain_sql, is_read_only, parse_plan, single_statement,
-    split_statement_texts,
+    ExplainStrategy, QueryPlan, ServerVersion, assert_read_only, build_explain, is_read_only, parse_plan,
+    single_statement, split_statement_texts,
 };
 
 use crate::BarApp;
@@ -100,6 +100,9 @@ impl BarApp {
                         RunEvent::Meta { result_index, columns, schema_name: String::new(), table_name: String::new() }
                     }
                     ScriptEvent::Rows { result_index, chunk } => RunEvent::Rows { result_index, chunk },
+                    ScriptEvent::Messages { result_index, messages, dropped } => {
+                        RunEvent::Messages { result_index, messages, dropped }
+                    }
                     ScriptEvent::Result(result) => {
                         result_count = result.result_index + 1;
                         let duration = result.summary.as_ref().map_or(0, |s| s.duration_ms);
@@ -193,6 +196,8 @@ impl BarApp {
                         table_name: req.table.clone(),
                     },
                     ScriptEvent::Rows { result_index, chunk } => RunEvent::Rows { result_index, chunk },
+                    // Pages are the app's own SQL.
+                    ScriptEvent::Messages { .. } => continue,
                     ScriptEvent::Result(result) => {
                         let mut summary = result.summary.unwrap_or_default();
                         summary.primary_keys = query.primary_keys.clone();
@@ -345,6 +350,8 @@ async fn explain_in(
     analyze: bool,
     cancel: &Cancel,
 ) -> Result<QueryPlan, QueryError> {
+    // First, so a plan the server can't give opens no transaction.
+    let strategy = explain_strategy(session, driver, stmt, analyze, cancel).await?;
     let note = if session.in_transaction() {
         Some(NOTE_TAB_TRANSACTION)
     } else if analyze && !is_read_only(driver, stmt) {
@@ -356,7 +363,7 @@ async fn explain_in(
     if isolate {
         session.begin().await?;
     }
-    let plan = plan_of(session, driver, stmt, analyze, cancel).await;
+    let plan = plan_of(session, driver, stmt, &strategy, analyze, cancel).await;
     if isolate {
         let _ = session.rollback().await;
     }
@@ -367,24 +374,34 @@ async fn explain_in(
     Ok(plan)
 }
 
-async fn plan_of(
+async fn explain_strategy(
     session: &mut Session,
     driver: &DriverType,
     stmt: &str,
     analyze: bool,
     cancel: &Cancel,
-) -> Result<QueryPlan, QueryError> {
+) -> Result<ExplainStrategy, QueryError> {
     // MariaDB and MySQL ask for a measured plan differently.
-    let version = if *driver == DriverType::MySql && analyze {
+    let version = if driver.dialect() == Some(SqlDialect::MySql) && analyze {
         let res = session.buffered("SELECT VERSION()", cancel).await?;
         ServerVersion::parse(res.text(0, 0).unwrap_or_default())
     } else {
         ServerVersion::default()
     };
-    let explain_sql = build_explain_sql(driver, version, stmt, analyze).map_err(QueryError::message)?;
+    build_explain(driver, version, stmt, analyze).map_err(QueryError::message)
+}
+
+async fn plan_of(
+    session: &mut Session,
+    driver: &DriverType,
+    stmt: &str,
+    strategy: &ExplainStrategy,
+    analyze: bool,
+    cancel: &Cancel,
+) -> Result<QueryPlan, QueryError> {
     let started = Instant::now();
-    let res = session.buffered(&explain_sql, cancel).await?;
-    let mut plan = parse_plan(driver, stmt, &explain_sql, analyze, &res.plan_rows()).map_err(QueryError::message)?;
+    let rows = session.plan_rows(strategy, cancel).await?;
+    let mut plan = parse_plan(driver, stmt, &strategy.display_sql(), analyze, &rows).map_err(QueryError::message)?;
     plan.duration_ms = started.elapsed().as_millis() as i64;
     Ok(plan)
 }

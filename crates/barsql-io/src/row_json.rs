@@ -2,11 +2,16 @@ use barsql_db::{Cell, ResultSet};
 use regex::{Regex, RegexBuilder};
 use serde_json::Value as Json;
 
+use crate::array_literal::array_value;
 use crate::export::{JsonObject, JsonValue, is_space};
 
-// Text starting with { or [ that parses as JSON shows as that value.
-fn parse_value(cell: Cell<'_>) -> JsonValue {
+// An array, map or tuple shows as its JSON. Other text starting with { or [ that parses as JSON shows as that
+// value.
+fn parse_value(cell: Cell<'_>, type_name: &str) -> JsonValue {
     if let Cell::Text(text) = cell {
+        if let Some(value) = array_value(text, type_name) {
+            return value;
+        }
         let trimmed = text.trim_matches(is_space);
         if (trimmed.starts_with('{') || trimmed.starts_with('['))
             && let Ok(json) = serde_json::from_str::<Json>(trimmed)
@@ -21,7 +26,8 @@ fn parse_value(cell: Cell<'_>) -> JsonValue {
 fn row_object(set: &ResultSet, row: usize, columns: &[usize]) -> JsonValue {
     let mut object = JsonObject::default();
     for &column in columns {
-        object.insert(set.columns[column].name.clone(), parse_value(set.cell(row, column)));
+        let meta = &set.columns[column];
+        object.insert(meta.name.clone(), parse_value(set.cell(row, column), &meta.type_name));
     }
     JsonValue::Object(object)
 }
@@ -114,8 +120,15 @@ mod tests {
     use super::*;
 
     fn set(columns: &[&str], cells: &[Option<&str>]) -> ResultSet {
-        let meta: Arc<[ColumnMeta]> =
-            columns.iter().map(|name| ColumnMeta { name: name.to_string(), type_name: "TEXT".into() }).collect();
+        let typed: Vec<(&str, &str)> = columns.iter().map(|name| (*name, "TEXT")).collect();
+        typed_set(&typed, cells)
+    }
+
+    fn typed_set(columns: &[(&str, &str)], cells: &[Option<&str>]) -> ResultSet {
+        let meta: Arc<[ColumnMeta]> = columns
+            .iter()
+            .map(|(name, type_name)| ColumnMeta { name: name.to_string(), type_name: type_name.to_string() })
+            .collect();
         let mut builder = ChunkBuilder::new(columns.len(), 1);
         for cell in cells {
             match cell {
@@ -132,6 +145,16 @@ mod tests {
 
     fn object(set: &ResultSet, columns: &[usize], query: &str) -> Option<Json> {
         row_json(set, 0, columns, query).map(|text| serde_json::from_str(&text).unwrap())
+    }
+
+    #[test]
+    fn arrays_maps_and_tuples_show_as_json_by_their_type() {
+        let columns = [("tags", "_TEXT"), ("ids", "_INT8"), ("attrs", "Map(String, UInt8)"), ("note", "TEXT")];
+        let row = typed_set(&columns, &[Some("{a,\"b c\"}"), Some("{1,NULL}"), Some("{'k':1}"), Some("{x,y}")]);
+        assert_eq!(
+            object(&row, &[0, 1, 2, 3], ""),
+            Some(serde_json::json!({ "tags": ["a", "b c"], "ids": [1, null], "attrs": { "k": 1 }, "note": "{x,y}" }))
+        );
     }
 
     #[test]

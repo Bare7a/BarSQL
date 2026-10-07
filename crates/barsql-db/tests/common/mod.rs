@@ -55,6 +55,112 @@ pub fn mysql_config(prefix: &str, port: &str) -> ConnectionConfig {
     }
 }
 
+// sqld from docker-compose.yml, or a Turso database given by URL and token.
+pub fn turso_config() -> ConnectionConfig {
+    ConnectionConfig {
+        id: "golden-turso".into(),
+        driver: DriverType::Turso,
+        url: env_or("BARSQL_E2E_TURSO_URL", "http://127.0.0.1:38080"),
+        auth_token: env_or("BARSQL_E2E_TURSO_TOKEN", ""),
+        ..Default::default()
+    }
+}
+
+// ClickHouse from docker-compose.yml over HTTP.
+pub fn clickhouse_config() -> ConnectionConfig {
+    ConnectionConfig {
+        id: "golden-clickhouse".into(),
+        driver: DriverType::ClickHouse,
+        host: env_or("BARSQL_E2E_CH_HOST", "127.0.0.1"),
+        port: env_or("BARSQL_E2E_CH_PORT", "38123").parse().unwrap(),
+        username: env_or("BARSQL_E2E_CH_USER", "default"),
+        password: env_or("BARSQL_E2E_CH_PASSWORD", "clickhouse"),
+        database: env_or("BARSQL_E2E_CH_DB", "barsql_test"),
+        ssl_mode: "disable".into(),
+        ..Default::default()
+    }
+}
+
+// SQL Server from docker-compose.yml's mssql profile, Azure SQL Edge on arm64. Its suites run only with
+// BARSQL_E2E_MSSQL=1, since the profile is off by default.
+pub fn mssql_config() -> Option<ConnectionConfig> {
+    if env_or("BARSQL_E2E_MSSQL", "") != "1" {
+        eprintln!("skipped: set BARSQL_E2E_MSSQL=1 and start the mssql profile");
+        return None;
+    }
+    Some(ConnectionConfig {
+        id: "golden-mssql".into(),
+        driver: DriverType::SqlServer,
+        host: env_or("BARSQL_E2E_MSSQL_HOST", "127.0.0.1"),
+        port: env_or("BARSQL_E2E_MSSQL_PORT", "31433").parse().unwrap(),
+        username: env_or("BARSQL_E2E_MSSQL_USER", "sa"),
+        password: env_or("BARSQL_E2E_MSSQL_PASSWORD", "BarSQL-e2e-Passw0rd"),
+        database: env_or("BARSQL_E2E_MSSQL_DB", "barsql_test"),
+        ssl_mode: env_or("BARSQL_E2E_MSSQL_SSL", "require"),
+        ..Default::default()
+    })
+}
+
+// Creates the database, with readers that see the last committed rows instead of waiting on a writer's locks, as
+// Postgres and MySQL readers do. Azure SQL works this way too; a plain SQL Server doesn't.
+pub fn mssql_setup(database: &str) -> [String; 2] {
+    [
+        format!("IF DB_ID(N'{database}') IS NULL CREATE DATABASE [{database}]"),
+        format!(
+            "IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{database}' AND is_read_committed_snapshot_on = 0)
+            ALTER DATABASE [{database}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE"
+        ),
+    ]
+}
+
+// The stack's SQL Server has no barsql_test until the first run makes it. Logins fail for a few seconds after the
+// container reports healthy, so this retries.
+pub async fn mssql_engine(cfg: &ConnectionConfig) -> barsql_db::Engine {
+    let master = ConnectionConfig { database: "master".into(), ..cfg.clone() };
+    let mut last = None;
+    for _ in 0..30 {
+        match barsql_db::Engine::connect(&master).await {
+            Ok(engine) => {
+                let mut session = engine.session().await.unwrap();
+                for sql in mssql_setup(&cfg.database) {
+                    session.buffered(&sql, &Cancel::new()).await.unwrap();
+                }
+                engine.close().await;
+                return barsql_db::Engine::connect(cfg).await.expect("SQL Server is reachable");
+            }
+            Err(error) => last = Some(error),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    panic!("SQL Server is not reachable; start it with BARSQL_E2E_MSSQL=1 cargo xtask e2e up: {last:?}");
+}
+
+// BARSQL_GOLDEN_WRITE=1 rewrites fixtures from what the server returns, for a new engine or a deliberate change.
+// Review the diff before keeping it.
+pub fn golden_write() -> bool {
+    std::env::var("BARSQL_GOLDEN_WRITE").is_ok_and(|v| v == "1")
+}
+
+pub fn write_fixture(rel: &str, value: &Json) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/golden").join(rel);
+    fs::write(&path, serde_json::to_string_pretty(value).unwrap() + "\n")
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
+// Each probe of `template` with the results this session gives, in fixture form.
+pub async fn snapshot_probes(session: &mut Session, driver: &DriverType, template: &Json) -> Json {
+    let mut out = Vec::new();
+    for p in template.as_array().expect("probes") {
+        let actual = probe(session, driver, p["sql"].as_str().unwrap()).await;
+        let mut entry = json!({ "name": p["name"], "sql": p["sql"] });
+        for (key, value) in fixture_probe(&actual).as_object().unwrap() {
+            entry[key] = value.clone();
+        }
+        out.push(entry);
+    }
+    Json::Array(out)
+}
+
 pub fn sqlite_config(path: &std::path::Path) -> ConnectionConfig {
     ConnectionConfig {
         id: "golden-sqlite".into(),
@@ -133,6 +239,16 @@ pub async fn probe(session: &mut Session, driver: &DriverType, sql: &str) -> Jso
                     push_array(r, "display", json!(display));
                 }
             }
+            ScriptEvent::Messages { result_index, messages, dropped } => {
+                at(result_index, &mut results);
+                let r = results.get_mut(&result_index).unwrap();
+                for m in messages {
+                    push_array(r, "messages", json!({ "level": m.level, "code": m.code, "text": m.text }));
+                }
+                if dropped > 0 {
+                    r.insert("messagesDropped".into(), json!(dropped));
+                }
+            }
             ScriptEvent::Result(result) => {
                 at(result.result_index, &mut results);
                 let r = results.get_mut(&result.result_index).unwrap();
@@ -192,6 +308,8 @@ pub fn fixture_probe(probe: &Json) -> Json {
         "rowCount",
         "affectedRows",
         "message",
+        "messages",
+        "messagesDropped",
         "plan",
         "error",
     ];
@@ -284,9 +402,18 @@ pub async fn schema_snapshot(engine: &Engine, schema: &str, fixture: &Json) -> J
         })
         .collect();
     ddl.extend(object_ddl(engine, routine_refs).await);
+    // ClickHouse's own functions belong to the server, not a database.
+    let functions: Vec<_> = engine
+        .list_functions()
+        .await
+        .unwrap()
+        .functions
+        .into_iter()
+        .filter(|f| f.schema == schema || (f.schema.is_empty() && !f.builtin))
+        .collect();
     json!({
         "engine": fixture["engine"], "schema": schema, "setup": fixture["setup"], "schemas": schemas,
-        "tables": tables, "routines": routines, "ddl": ddl,
+        "tables": tables, "routines": routines, "functions": functions, "ddl": ddl,
     })
 }
 

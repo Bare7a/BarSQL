@@ -37,10 +37,13 @@ each_engine!(async fn schema_explorer(e) {
     assert!(tables.iter().filter(|t| t.name == parent).all(|t| t.kind == "table"), "{tables:?}");
 
     let columns = by_name(e.app.list_columns(&e.id, &e.schema(), &child).await.unwrap());
-    let id = &columns["id"];
-    assert!(id.is_primary && !id.is_foreign, "{id:?}");
-    let fk = &columns["author_id"];
-    assert!(fk.is_foreign && !fk.is_primary && fk.is_nullable, "{fk:?}");
+    // ClickHouse has neither unique keys nor foreign keys.
+    if !e.is_clickhouse() {
+        let id = &columns["id"];
+        assert!(id.is_primary && !id.is_foreign, "{id:?}");
+        let fk = &columns["author_id"];
+        assert!(fk.is_foreign && !fk.is_primary && fk.is_nullable, "{fk:?}");
+    }
     let isbn = &columns["isbn"];
     assert!(!isbn.is_nullable && !isbn.data_type.is_empty(), "{isbn:?}");
 
@@ -60,9 +63,19 @@ each_engine!(async fn views(e) {
     assert_eq!(found.kind, "view");
 });
 
-fn create_function_sql(e: &E2e, name: &str) -> String {
+// None on SQLite, which has no routines.
+fn create_function_sql(e: &E2e, name: &str) -> Option<String> {
+    if e.is_lite() {
+        return None;
+    }
+    Some(create_routine_sql(e, name))
+}
+
+fn create_routine_sql(e: &E2e, name: &str) -> String {
     if e.is_postgres() {
         format!("CREATE FUNCTION {name}(a int) RETURNS int LANGUAGE sql AS $$ SELECT a + 1 $$")
+    } else if e.is_sqlserver() {
+        format!("CREATE FUNCTION {name}(@a INT) RETURNS INT AS BEGIN RETURN @a + 1 END")
     } else {
         format!("CREATE FUNCTION {name}(a INT) RETURNS INT DETERMINISTIC RETURN a + 1")
     }
@@ -70,11 +83,17 @@ fn create_function_sql(e: &E2e, name: &str) -> String {
 
 fn create_trigger_sql(e: &E2e, trigger: &str, table: &str, helper: &str) -> Vec<String> {
     let target = e.qualified(table);
+    if e.is_lite() {
+        return vec![format!("CREATE TRIGGER {trigger} AFTER UPDATE ON {target} FOR EACH ROW BEGIN SELECT 1; END")];
+    }
     if e.is_postgres() {
         return vec![
             format!("CREATE FUNCTION {helper}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"),
             format!("CREATE TRIGGER {trigger} AFTER UPDATE ON {target} FOR EACH ROW EXECUTE FUNCTION {helper}()"),
         ];
+    }
+    if e.is_sqlserver() {
+        return vec![format!("CREATE TRIGGER {trigger} ON {target} AFTER UPDATE AS SET NOCOUNT ON")];
     }
     vec![format!("CREATE TRIGGER {trigger} AFTER UPDATE ON {target} FOR EACH ROW SET @barsql_e2e = 1")]
 }
@@ -83,8 +102,12 @@ fn object(e: &E2e, kind: ObjectKind, name: &str, table: &str) -> ObjectRef {
     ObjectRef { kind, schema: e.schema(), name: name.into(), table: table.into(), ..Default::default() }
 }
 
-// Table DDL is checked by round trip. Drop the table, replay the statements and compare the shape.
+// Table DDL is checked by round trip. Drop the table, replay the statements and compare the shape. ClickHouse's
+// DDL comes from SHOW CREATE and is pinned by its schema golden instead.
 each_engine!(async fn object_ddl(e) {
+    if e.is_clickhouse() {
+        return;
+    }
     let parent = unique_table("ddl_orgs");
     let child = unique_table("ddl_users");
     let index = format!("{child}_nickname_idx");
@@ -104,7 +127,8 @@ each_engine!(async fn object_ddl(e) {
     let idx = indexes.iter().find(|i| i.name == index).unwrap_or_else(|| panic!("{index} missing from {indexes:?}"));
     assert!(!idx.is_unique && !idx.is_primary, "a plain index: {idx:?}");
     assert_eq!(idx.columns, ["nickname"]);
-    assert!(indexes.iter().any(|i| i.is_primary), "a primary-key index: {indexes:?}");
+    // A rowid table keeps its INTEGER PRIMARY KEY without an index.
+    assert!(e.is_lite() || indexes.iter().any(|i| i.is_primary), "a primary-key index: {indexes:?}");
 
     let constraints = e.app.list_constraints(&e.id, &e.schema(), &child).await.unwrap();
     let of_kind = |kind: &str| constraints.iter().find(|c| c.kind == kind);
@@ -137,23 +161,27 @@ each_engine!(async fn object_ddl(e) {
     }
 
     let function = unique_table("ddl_fn");
-    e.exec(&create_function_sql(&e, &function)).await;
-    let drop_function = format!("DROP FUNCTION IF EXISTS {function}{}", if e.is_postgres() { "(int)" } else { "" });
-    e.defer(drop_function.clone());
-    let routines = e.app.list_routines(&e.id, &e.schema()).await.unwrap();
-    let found = routines.iter().find(|r| r.name == function).unwrap_or_else(|| panic!("{function} missing"));
-    assert_eq!(found.kind, ObjectKind::Function);
-    let routine = ObjectRef { args: found.args.clone(), ..object(&e, ObjectKind::Function, &function, "") };
-    let ddl = e.app.object_ddl(&e.id, &routine).await.unwrap();
-    assert!(ddl.to_uppercase().contains("FUNCTION"), "{ddl}");
-    e.exec(&drop_function).await;
+    if let Some(create) = create_function_sql(&e, &function) {
+        e.exec(&create).await;
+        let drop_function = format!("DROP FUNCTION IF EXISTS {function}{}", if e.is_postgres() { "(int)" } else { "" });
+        e.defer(drop_function.clone());
+        let routines = e.app.list_routines(&e.id, &e.schema()).await.unwrap();
+        let found = routines.iter().find(|r| r.name == function).unwrap_or_else(|| panic!("{function} missing"));
+        assert_eq!(found.kind, ObjectKind::Function);
+        let routine = ObjectRef { args: found.args.clone(), ..object(&e, ObjectKind::Function, &function, "") };
+        let ddl = e.app.object_ddl(&e.id, &routine).await.unwrap();
+        assert!(ddl.to_uppercase().contains("FUNCTION"), "{ddl}");
+        e.exec(&drop_function).await;
+    }
 
     let ddl = e.app.object_ddl(&e.id, &object(&e, ObjectKind::Index, &index, &child)).await.unwrap();
     assert!(ddl.to_uppercase().contains("CREATE INDEX") && ddl.contains("nickname"), "{ddl}");
 
     let constraint = object(&e, ObjectKind::Constraint, &format!("{child}_org_fk"), &child);
     let ddl = e.app.object_ddl(&e.id, &constraint).await.unwrap().to_uppercase();
-    assert!(ddl.contains("ALTER TABLE") && ddl.contains("FOREIGN KEY"), "{ddl}");
+    // SQLite's constraints live in the CREATE TABLE.
+    let carrier = if e.is_lite() { "CREATE TABLE" } else { "ALTER TABLE" };
+    assert!(ddl.contains(carrier) && ddl.contains("FOREIGN KEY"), "{ddl}");
 
     let view = unique_table("ddl_view");
     e.exec(&format!("CREATE VIEW {} AS SELECT id, email FROM {}", e.qualified(&view), e.qualified(&child))).await;

@@ -463,5 +463,298 @@
       },
       "error": "no column values provided"
     }
+  ],
+  "tsql": [
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "name": "x",
+          "note": null
+        },
+        "pk": {
+          "id": 1
+        },
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE [s].[t] SET [name] = @P1, [note] = @P2 WHERE [id] = @P3",
+      "args": [
+        "x",
+        null,
+        1
+      ]
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "a b": 2
+        },
+        "pk": {
+          "k1": "a",
+          "k2": 2
+        },
+        "pkCols": [
+          "k2",
+          "k1"
+        ],
+        "schema": "",
+        "table": "we\"ird"
+      },
+      "sql": "UPDATE [we\"ird] SET [a b] = @P1 WHERE [k2] = @P2 AND [k1] = @P3",
+      "args": [
+        2,
+        2,
+        "a"
+      ]
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "name": "x"
+        },
+        "pk": {},
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "missing primary key value for \"id\""
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {},
+        "pk": {
+          "id": 1
+        },
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "no changes to apply"
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "pk": {
+          "id": 7
+        },
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "DELETE FROM [s].[t] WHERE [id] = @P1",
+      "args": [
+        7
+      ]
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "pk": {
+          "a": null,
+          "b": "x"
+        },
+        "pkCols": [
+          "a",
+          "b"
+        ],
+        "schema": "",
+        "table": "t"
+      },
+      "sql": "DELETE FROM [t] WHERE [a] = @P1 AND [b] = @P2",
+      "args": [
+        null,
+        "x"
+      ]
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "pk": {},
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "missing primary key value for \"id\""
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "id": 1,
+          "name": "x",
+          "note": null
+        }
+      },
+      "sql": "INSERT INTO [s].[t] ([id], [name], [note]) VALUES (@P1, @P2, @P3)",
+      "args": [
+        1,
+        "x",
+        null
+      ]
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "schema": "",
+        "table": "t",
+        "values": {}
+      },
+      "error": "no column values provided"
+    }
+  ],
+  "clickhouse": [
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "name": "x",
+          "note": null
+        },
+        "pk": {
+          "id": 1
+        },
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "a b": 2
+        },
+        "pk": {
+          "k1": "a",
+          "k2": 2
+        },
+        "pkCols": [
+          "k2",
+          "k1"
+        ],
+        "schema": "",
+        "table": "we\"ird"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "name": "x"
+        },
+        "pk": {},
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {},
+        "pk": {
+          "id": 1
+        },
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "no changes to apply"
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "pk": {
+          "id": 7
+        },
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "pk": {
+          "a": null,
+          "b": "x"
+        },
+        "pkCols": [
+          "a",
+          "b"
+        ],
+        "schema": "",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "pk": {},
+        "pkCols": [
+          "id"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "id": 1,
+          "name": "x",
+          "note": null
+        }
+      },
+      "sql": "INSERT INTO `s`.`t` (`id`, `name`, `note`) VALUES (?, ?, ?)",
+      "args": [
+        1,
+        "x",
+        null
+      ]
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "schema": "",
+        "table": "t",
+        "values": {}
+      },
+      "error": "no column values provided"
+    }
   ]
 }

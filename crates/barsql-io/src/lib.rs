@@ -1,3 +1,4 @@
+pub mod array_literal;
 pub mod csv;
 pub mod csv_import;
 pub mod export;
@@ -6,6 +7,7 @@ pub mod row_json;
 mod time_layouts;
 pub mod write;
 
+pub use array_literal::{ArrayKind, array_json, array_kind};
 pub use csv::{CsvField, CsvReader, csv_values};
 pub use csv_import::{CsvOptions, ImportPreview, count_rows, infer_column_type, new_reader, preview_file};
 pub use export::{EXPORT_FORMATS, ExportChunk, ExportFormat, Exporter, export_to_string, is_space, restringify_json};

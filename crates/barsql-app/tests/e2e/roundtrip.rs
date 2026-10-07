@@ -12,7 +12,7 @@ fn first_error(result: &ImportResult) -> &str {
 async fn fresh_tables(e: &E2e, prefix: &str, columns: &str) -> (String, String) {
     let (src, dst) = (unique_table(&format!("{prefix}_src")), unique_table(&format!("{prefix}_dst")));
     for table in [&src, &dst] {
-        e.create_temp_table(&format!("CREATE TABLE {table} ({columns})"), table).await;
+        e.create_temp_table(&format!("CREATE TABLE {table} ({columns}){}", e.engine_clause()), table).await;
     }
     (src, dst)
 }
@@ -24,16 +24,26 @@ fn write_csv(e: &E2e, csv: &str) -> String {
 
 // NULL vs '' quoting, the formula guard and MySQL datetime literals must survive the trip.
 each_engine!(async fn round_trip_export_then_import(e) {
-    let columns = format!(
-        "id INT, nullable_text TEXT, empty_text TEXT NOT NULL, payload {}, amount DECIMAL(10,2), flag {}, note TEXT",
-        e.json_type(),
-        e.bool_type()
-    );
+    let columns = match e.kind {
+        Kind::ClickHouse => "id Int32, nullable_text Nullable(String), empty_text String, payload Nullable(String), \
+                             amount Nullable(Decimal(10, 2)), flag Nullable(Bool), note Nullable(String)"
+            .to_string(),
+        Kind::SqlServer => "id INT, nullable_text NVARCHAR(MAX), empty_text NVARCHAR(MAX) NOT NULL, \
+                            payload NVARCHAR(MAX), amount DECIMAL(10,2), flag BIT, note NVARCHAR(MAX)"
+            .to_string(),
+        Kind::Postgres | Kind::MySql | Kind::MariaDb | Kind::Turso => format!(
+            "id INT, nullable_text TEXT, empty_text TEXT NOT NULL, payload {}, amount DECIMAL(10,2), flag {}, note TEXT",
+            e.json_type(),
+            e.bool_type()
+        ),
+    };
     let (src, dst) = fresh_tables(&e, "rt", &columns).await;
+    // T-SQL has no TRUE and FALSE.
+    let (yes, no) = if e.is_sqlserver() { ("1", "0") } else { ("TRUE", "FALSE") };
     e.exec(&format!(
         r#"INSERT INTO {src} (id, nullable_text, empty_text, payload, amount, flag, note) VALUES
-            (1, NULL, '', '{{"a": 1, "b": [true, null]}}', 12.34, TRUE, 'plain'),
-            (2, 'set', 'x', '{{"nested": {{"k": "v, with comma"}}}}', NULL, FALSE, ''),
+            (1, NULL, '', '{{"a": 1, "b": [true, null]}}', 12.34, {yes}, 'plain'),
+            (2, 'set', 'x', '{{"nested": {{"k": "v, with comma"}}}}', NULL, {no}, ''),
             (3, NULL, '', 'null', 0.00, NULL, '-not a number')"#
     ))
     .await;
@@ -80,8 +90,44 @@ each_engine!(async fn round_trip_value_shapes(e) {
     let mut vals = vec!["1".to_string()];
     for (col, pg_type, my_type, value) in SHAPES {
         cols.push(col.to_string());
-        defs.push(format!("{col} {}", if e.is_postgres() { pg_type } else { my_type }));
-        vals.push(value.to_string());
+        // SQLite takes Postgres' names, except for the types it has no affinity for.
+        let lite_type = match *pg_type {
+            "JSONB" => "TEXT",
+            "BYTEA" => "BLOB",
+            other => other,
+        };
+        // ClickHouse columns take NULL only when Nullable.
+        let ch_type = match *pg_type {
+            "TEXT" | "JSONB" | "BYTEA" => "Nullable(String)".to_string(),
+            "BOOLEAN" => "Nullable(Bool)".to_string(),
+            "DECIMAL(10,2)" => "Nullable(Decimal(10, 2))".to_string(),
+            "TIMESTAMP" => "Nullable(DateTime)".to_string(),
+            "DATE" => "Nullable(Date)".to_string(),
+            other => format!("Nullable({other})"),
+        };
+        let ms_type = match *pg_type {
+            "TEXT" | "JSONB" => "NVARCHAR(MAX)",
+            "BYTEA" => "VARBINARY(MAX)",
+            "BOOLEAN" => "BIT",
+            "TIMESTAMP" => "DATETIME2",
+            other => other,
+        };
+        let column_type = match e.kind {
+            Kind::Postgres => pg_type,
+            Kind::MySql | Kind::MariaDb => my_type,
+            Kind::Turso => lite_type,
+            Kind::ClickHouse => ch_type.as_str(),
+            Kind::SqlServer => ms_type,
+        };
+        defs.push(format!("{col} {column_type}"));
+        // T-SQL has no TRUE or FALSE, and text goes into varbinary only by CAST.
+        let value = match (e.kind, *value) {
+            (Kind::SqlServer, "TRUE") => "1".to_string(),
+            (Kind::SqlServer, "FALSE") => "0".to_string(),
+            (Kind::SqlServer, text) if *pg_type == "BYTEA" => format!("CAST({text} AS VARBINARY(MAX))"),
+            (_, value) => value.to_string(),
+        };
+        vals.push(value);
     }
     let (src, dst) = fresh_tables(&e, "rt2", &defs.join(", ")).await;
     e.exec(&format!("INSERT INTO {src} ({}) VALUES ({})", cols.join(", "), vals.join(", "))).await;
@@ -93,8 +139,10 @@ each_engine!(async fn round_trip_value_shapes(e) {
     for (i, (col, ..)) in SHAPES.iter().enumerate() {
         let pair = names(&["rid", col]);
         let types = [before.types[0].clone(), before.types[i + 1].clone()];
-        let csv = export_to_string(ExportFormat::Csv, &pair, &types, None, [vec![chunk.cell(0, 0), chunk.cell(0, i + 1)]]);
-        e.exec(&format!("DELETE FROM {dst}")).await;
+        let csv = export_to_string(ExportFormat::Csv, &pair, &types, None, None, [vec![chunk.cell(0, 0), chunk.cell(0, i + 1)]]);
+        // ClickHouse deletes only with a WHERE.
+        let empty = if e.is_clickhouse() { format!("TRUNCATE TABLE {dst}") } else { format!("DELETE FROM {dst}") };
+        e.exec(&empty).await;
         let result = e.import_csv(&dst, &pair, &write_csv(&e, &csv)).await;
         if result.skipped > 0 {
             failures.push(format!("{col:<18} rejected: {}", first_error(&result)));
@@ -111,8 +159,16 @@ each_engine!(async fn round_trip_value_shapes(e) {
 // A file that quotes every field still loads, with '' only where the column can hold one.
 each_engine!(async fn import_quoted_empty_fields_by_column_type(e) {
     let table = unique_table("quoted_all");
-    let ts = if e.is_postgres() { "TIMESTAMP" } else { "DATETIME" };
-    e.create_temp_table(&format!("CREATE TABLE {table} (n INT, amount DECIMAL(10,2), when_ts {ts}, note TEXT)"), &table).await;
+    let columns = match e.kind {
+        Kind::ClickHouse => {
+            "n Int32, amount Nullable(Decimal(10, 2)), when_ts Nullable(DateTime), note String".to_string()
+        }
+        Kind::MySql | Kind::MariaDb => "n INT, amount DECIMAL(10,2), when_ts DATETIME, note TEXT".to_string(),
+        Kind::Postgres | Kind::Turso => "n INT, amount DECIMAL(10,2), when_ts TIMESTAMP, note TEXT".to_string(),
+        Kind::SqlServer => "n INT, amount DECIMAL(10,2), when_ts DATETIME2, note NVARCHAR(MAX)".to_string(),
+    };
+    let ddl = format!("CREATE TABLE {table} ({columns}){}", e.engine_clause());
+    e.create_temp_table(&ddl, &table).await;
     let path = e.write("quoted.csv", "\"n\",\"amount\",\"when_ts\",\"note\"\n\"1\",\"\",\"\",\"\"\n");
     let result = e.import_csv(&table, &names(&["n", "amount", "when_ts", "note"]), &path).await;
     assert_eq!(result.skipped, 0, "rejected: {}", first_error(&result));
@@ -123,11 +179,14 @@ each_engine!(async fn import_quoted_empty_fields_by_column_type(e) {
 // Bool-like values become engine bools, 1/0 in numeric columns, and stay as written in text.
 each_engine!(async fn import_bool_shaped_columns(e) {
     let table = unique_table("bool_targets");
-    e.create_temp_table(&format!("CREATE TABLE {table} (rid INT, flag {}, hits INT, note TEXT)", e.bool_type()), &table).await;
+    let note = if e.is_sqlserver() { "NVARCHAR(MAX)" } else { "TEXT" };
+    let ddl = format!("CREATE TABLE {table} (rid INT, flag {}, hits INT, note {note}){}", e.bool_type(), e.engine_clause());
+    e.create_temp_table(&ddl, &table).await;
     let path = e.write("bools.csv", "rid,flag,hits,note\n1,1,1,true\n2,0,0,false\n3,true,1,t\n4,false,0,f\n");
     let result = e.import_csv(&table, &names(&["rid", "flag", "hits", "note"]), &path).await;
     assert_eq!(result.skipped, 0, "rejected {} rows: {}", result.skipped, first_error(&result));
-    let flagged = e.query(&format!("SELECT COUNT(*) FROM {table} WHERE flag = TRUE")).await;
+    let yes = if e.is_sqlserver() { "1" } else { "TRUE" };
+    let flagged = e.query(&format!("SELECT COUNT(*) FROM {table} WHERE flag = {yes}")).await;
     assert_eq!(text(&flagged.rows[0][0]), "2");
     let notes = e.query(&format!("SELECT note FROM {table} ORDER BY rid")).await;
     let notes: Vec<String> = notes.rows.iter().map(|r| text(&r[0])).collect();

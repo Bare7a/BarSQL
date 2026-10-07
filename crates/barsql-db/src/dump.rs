@@ -1,4 +1,7 @@
-use barsql_core::DriverType;
+use std::borrow::Cow;
+use std::fmt::Write;
+
+use barsql_core::{DriverType, SqlDialect};
 use barsql_sql::{quote_ident, quote_ident_list, quote_literal};
 
 // `select` makes the server render every value as an SQL literal, so its rows append straight onto `insert`.
@@ -12,8 +15,33 @@ pub struct DumpQuery {
     // restore in any order.
     pub prologue: Vec<String>,
     pub epilogue: Vec<String>,
-    // Runs after the rows to move Postgres sequences past them.
+    // Right before the rows, after the table's DDL: SQL Server lets identity values in here.
+    pub before_rows: Vec<String>,
+    // Right after the rows: Postgres moves its sequences past them, SQL Server stops taking identity values.
     pub sequences: Vec<String>,
+    // Each row comes back as one value, already a parenthesized tuple, rather than a value per column.
+    pub whole_row: bool,
+    // Written after each statement, for SQL Server's tools: GO.
+    pub batch_separator: Option<&'static str>,
+}
+
+impl DumpQuery {
+    // The tuple of a `whole_row` row. A ClickHouse String holds any bytes, and a tuple that isn't UTF-8 arrives as
+    // hex (see `push_bytes`). Its stray bytes go back as `\xHH` escapes: in a VALUES tuple they can only sit inside a
+    // quoted literal, which reads the escape as the byte.
+    pub fn tuple<'a>(&self, cell: &'a str) -> Cow<'a, str> {
+        let Some(bytes) = cell.strip_prefix("\\x").and_then(|hex| hex::decode(hex).ok()) else {
+            return Cow::Borrowed(cell);
+        };
+        let mut out = String::with_capacity(bytes.len());
+        for chunk in bytes.utf8_chunks() {
+            out.push_str(chunk.valid());
+            for byte in chunk.invalid() {
+                let _ = write!(out, "\\x{byte:02X}");
+            }
+        }
+        Cow::Owned(out)
+    }
 }
 
 // Generated columns take no value, so backups leave them out.
@@ -53,25 +81,68 @@ fn my_literal(column: &DumpColumn) -> String {
     }
 }
 
-// `source` is fully qualified. `target` is qualified only on Postgres, matching the DDL, so MySQL and SQLite
-// files restore into whatever database runs them.
-pub(crate) fn dump_query(driver: &DriverType, source: &str, target: &str, columns: &[DumpColumn]) -> DumpQuery {
+// Every value as T-SQL source. Text is N-quoted, numbers and binary are written bare, dates are quoted ISO 8601.
+// float keeps 17 digits, and money its four decimals.
+fn ms_literal(column: &DumpColumn) -> String {
+    let ident = quote_ident(&DriverType::SqlServer, &column.name);
+    let text = |value: &str| format!("N'N''' + REPLACE({value}, N'''', N'''''') + N''''");
+    let quoted = |value: String| format!("N'''' + {value} + N''''");
+    let expr = match column.data_type.to_lowercase().as_str() {
+        "bit" | "tinyint" | "smallint" | "int" | "bigint" | "decimal" | "numeric" => {
+            format!("CAST({ident} AS varchar(100))")
+        }
+        "money" | "smallmoney" => format!("CONVERT(varchar(100), {ident}, 2)"),
+        "float" | "real" => format!("CONVERT(varchar(100), {ident}, 3)"),
+        "date" | "time" | "datetime" | "datetime2" | "smalldatetime" | "datetimeoffset" => {
+            quoted(format!("CONVERT(nvarchar(40), {ident}, 126)"))
+        }
+        "uniqueidentifier" => quoted(format!("CAST({ident} AS char(36))")),
+        // Binary, and CLR types like hierarchyid and geometry as their binary form. Style 2 leaves out the 0x, which
+        // style 1 also leaves out of an empty value.
+        "binary" | "varbinary" | "image" | "hierarchyid" | "geometry" | "geography" => {
+            format!("'0x' + CONVERT(varchar(max), CAST({ident} AS varbinary(max)), 2)")
+        }
+        _ => text(&format!("CAST({ident} AS nvarchar(max))")),
+    };
+    format!("CASE WHEN {ident} IS NULL THEN 'NULL' ELSE {expr} END")
+}
+
+// `source` is fully qualified. `target` is qualified only on Postgres and SQL Server, matching the DDL, so MySQL and
+// SQLite files restore into whatever database runs them.
+pub(crate) fn dump_query(
+    driver: &DriverType,
+    source: &str,
+    target: &str,
+    columns: &[DumpColumn],
+) -> Result<DumpQuery, String> {
+    let dialect = driver.dialect();
     let stored: Vec<&DumpColumn> = columns.iter().filter(|c| !c.generated).collect();
-    let literals: Vec<String> = stored
-        .iter()
-        .map(|column| match driver {
-            DriverType::Postgres => format!("pg_catalog.quote_nullable({})", quote_ident(driver, &column.name)),
-            DriverType::MySql => my_literal(column),
-            _ => format!("quote({})", quote_ident(driver, &column.name)),
-        })
-        .collect();
+    let literal = |column: &DumpColumn| match dialect {
+        Some(SqlDialect::Postgres) => Ok(format!("pg_catalog.quote_nullable({})", quote_ident(driver, &column.name))),
+        Some(SqlDialect::MySql) => Ok(my_literal(column)),
+        Some(SqlDialect::Sqlite) => Ok(format!("quote({})", quote_ident(driver, &column.name))),
+        Some(SqlDialect::ClickHouse) => Ok(quote_ident(driver, &column.name)),
+        Some(SqlDialect::TSql) => Ok(ms_literal(column)),
+        None => Err(format!("backups aren't supported on {driver}")),
+    };
+    let literals = stored.iter().map(|column| literal(column)).collect::<Result<Vec<_>, _>>()?;
     let names: Vec<String> = stored.iter().map(|c| c.name.clone()).collect();
-    let overriding = stored.iter().any(|c| c.identity_always);
+    // ClickHouse writes a whole row as a VALUES tuple, with every type in its own literal syntax.
+    let (select, whole_row) = match dialect {
+        Some(SqlDialect::ClickHouse) => {
+            (format!("SELECT formatRowNoNewline('Values', {}) FROM {source}", literals.join(", ")), true)
+        }
+        Some(SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::TSql) | None => {
+            (format!("SELECT {} FROM {source}", literals.join(", ")), false)
+        }
+    };
+    let postgres = dialect == Some(SqlDialect::Postgres);
+    let overriding = postgres && stored.iter().any(|c| c.identity_always);
     // Look the sequence up when the file runs. A renamed table keeps its old sequence name, but the
     // restored table's sequence gets a fresh one.
-    let sequences = stored
+    let mut sequences: Vec<String> = stored
         .iter()
-        .filter(|c| c.serial)
+        .filter(|c| postgres && c.serial)
         .map(|c| {
             let ident = quote_ident(driver, &c.name);
             format!(
@@ -84,20 +155,30 @@ pub(crate) fn dump_query(driver: &DriverType, source: &str, target: &str, column
         .collect();
     // MySQL writes TIMESTAMPs in the session's zone, so both ends use UTC.
     let utc = "SET time_zone = '+00:00'".to_string();
-    let (setup, prologue, epilogue) = match driver {
-        DriverType::MySql => (
+    let (setup, prologue, epilogue) = match dialect {
+        Some(SqlDialect::MySql) => (
             vec![utc.clone()],
             vec![utc, "SET FOREIGN_KEY_CHECKS = 0".into()],
             vec!["SET FOREIGN_KEY_CHECKS = 1".into()],
         ),
-        DriverType::Sqlite => {
+        Some(SqlDialect::Sqlite) => {
             (vec![], vec!["PRAGMA foreign_keys = OFF".into()], vec!["PRAGMA foreign_keys = ON".into()])
         }
-        _ => (vec![], vec![], vec![]),
+        Some(SqlDialect::Postgres | SqlDialect::TSql | SqlDialect::ClickHouse) | None => (vec![], vec![], vec![]),
     };
-    DumpQuery {
+    // SQL Server takes identity values only between these, one table at a time.
+    let mut before_rows = Vec::new();
+    if dialect == Some(SqlDialect::TSql) && stored.iter().any(|c| c.serial) {
+        before_rows.push(format!("SET IDENTITY_INSERT {target} ON"));
+        sequences.push(format!("SET IDENTITY_INSERT {target} OFF"));
+    }
+    let batch_separator = (dialect == Some(SqlDialect::TSql)).then_some("GO");
+    Ok(DumpQuery {
         setup,
-        select: format!("SELECT {} FROM {source}", literals.join(", ")),
+        select,
+        whole_row,
+        before_rows,
+        batch_separator,
         insert: format!(
             "INSERT INTO {target} ({}){} VALUES",
             quote_ident_list(driver, &names),
@@ -106,7 +187,7 @@ pub(crate) fn dump_query(driver: &DriverType, source: &str, target: &str, column
         prologue,
         epilogue,
         sequences,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -125,7 +206,7 @@ mod tests {
             DumpColumn { generated: true, ..column("upper_name", "text") },
         ];
         let table = r#""public"."users""#;
-        let query = dump_query(&DriverType::Postgres, table, table, &columns);
+        let query = dump_query(&DriverType::Postgres, table, table, &columns).unwrap();
         assert_eq!(
             query.select,
             r#"SELECT pg_catalog.quote_nullable("id"), pg_catalog.quote_nullable("name") FROM "public"."users""#
@@ -149,7 +230,7 @@ mod tests {
             column("at", "point"),
             column("ratio", "float"),
         ];
-        let query = dump_query(&DriverType::MySql, "`shop`.`users`", "`users`", &columns);
+        let query = dump_query(&DriverType::MySql, "`shop`.`users`", "`users`", &columns).unwrap();
         assert_eq!(
             query.select,
             "SELECT QUOTE(`id`), IF(`photo` IS NULL, 'NULL', CONCAT('X''', HEX(`photo`), '''')), \
@@ -164,9 +245,25 @@ mod tests {
     }
 
     #[test]
+    fn clickhouse_rows_come_back_as_values_tuples_with_binary_escaped() {
+        let columns =
+            [column("id", "UInt64"), column("blob", "String"), DumpColumn { generated: true, ..column("n", "UInt8") }];
+        let query = dump_query(&DriverType::ClickHouse, "`db`.`t`", "`db`.`t`", &columns).unwrap();
+        assert_eq!(query.select, "SELECT formatRowNoNewline('Values', `id`, `blob`) FROM `db`.`t`");
+        assert_eq!(query.insert, "INSERT INTO `db`.`t` (`id`, `blob`) VALUES");
+        assert!(query.whole_row);
+        assert_eq!(query.tuple("(1,'a')"), "(1,'a')");
+        let mut hex = String::new();
+        crate::display::push_bytes(b"(1,'\xde\xad\xbe\xef\\\\','\xc3\xa9')", &mut hex);
+        assert!(hex.starts_with("\\x"), "{hex}");
+        // de ad is a whole UTF-8 sequence, so it stays a character.
+        assert_eq!(query.tuple(&hex), "(1,'\u{7ad}\\xBE\\xEF\\\\','é')");
+    }
+
+    #[test]
     fn sqlite_uses_its_quote_function_and_pauses_foreign_keys() {
         let columns = [column("id", "INTEGER"), column("body", "")];
-        let query = dump_query(&DriverType::Sqlite, r#""notes""#, r#""notes""#, &columns);
+        let query = dump_query(&DriverType::Sqlite, r#""notes""#, r#""notes""#, &columns).unwrap();
         assert_eq!(query.select, r#"SELECT quote("id"), quote("body") FROM "notes""#);
         assert_eq!(query.insert, r#"INSERT INTO "notes" ("id", "body") VALUES"#);
         assert_eq!(query.prologue, ["PRAGMA foreign_keys = OFF"]);

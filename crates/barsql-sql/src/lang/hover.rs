@@ -1,6 +1,7 @@
 use barsql_core::TableInfo;
 
 use super::catalog::{Catalog, TableBinding};
+use super::functions::{CallForm, FunctionDoc};
 use super::query::{ParsedQuery, resolve_dot_completion};
 use super::quoting::{is_quote_forcing_keyword, unquote_ident};
 use super::tokens::{Token, TokenKind, tokenize};
@@ -26,6 +27,7 @@ pub enum HoverSubject {
     Schema { name: String },
     // A table column. The caller searches these tables' columns in order and takes the first match.
     Column(ColumnLookup),
+    Function(Box<FunctionDoc>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,11 +38,48 @@ pub struct HoverQuery {
     pub subject: HoverSubject,
 }
 
+// Words a `(` follows without making them calls.
+const NOT_CALLS: [&str; 9] = ["values", "in", "exists", "over", "using", "as", "filter", "within", "on"];
+// Before a name that a `(` follows, these make it something being defined or a table's column list.
+const DEFINES: [&str; 9] =
+    ["into", "table", "references", "view", "index", "function", "procedure", "trigger", "exists"];
+
+// A call like `lower(` or `pg_catalog.now(`, or a word like CURRENT_DATE that is a call without parentheses.
+// Some(None) is a call to something the catalog doesn't know, which nothing else describes either.
+fn function_hover(tokens: &[&Token], idx: usize, catalog: &Catalog) -> Option<Option<HoverQuery>> {
+    let tok = tokens[idx];
+    let qualified = idx >= 2 && tokens[idx - 1].is_punct(".") && tokens[idx - 2].is_ident_like();
+    let before = if qualified { idx.checked_sub(3) } else { idx.checked_sub(1) }.map(|i| tokens[i]);
+    if before.is_some_and(|t| t.kind == TokenKind::Ident && DEFINES.contains(&t.lower.as_str())) {
+        return None;
+    }
+    let found = |doc: FunctionDoc| {
+        Some(Some(HoverQuery { start: tok.start, end: tok.end, subject: HoverSubject::Function(Box::new(doc)) }))
+    };
+    if tokens.get(idx + 1).is_some_and(|t| t.is_punct("(")) {
+        if tok.kind == TokenKind::Ident && NOT_CALLS.contains(&tok.lower.as_str()) {
+            return None;
+        }
+        let schema = qualified.then(|| tokens[idx - 2].ident_text());
+        return match catalog.functions.lookup(schema.as_deref(), &tok.ident_text()) {
+            Some(doc) => found(doc),
+            None => Some(None),
+        };
+    }
+    if qualified || tok.kind != TokenKind::Ident {
+        return None;
+    }
+    catalog.functions.lookup(None, tok.text).filter(|doc| doc.call == CallForm::NoParens).and_then(found)
+}
+
 pub fn analyze_hover(stmt_text: &str, offset: usize, parsed: &ParsedQuery, catalog: &Catalog) -> Option<HoverQuery> {
     let all = tokenize(stmt_text, Some(&catalog.driver));
     let tokens: Vec<&Token> = all.iter().filter(|t| t.kind != TokenKind::Comment).collect();
     let idx = tokens.iter().position(|t| offset >= t.start && offset < t.end && t.is_ident_like())?;
     let tok = tokens[idx];
+    if let Some(function) = function_hover(&tokens, idx, catalog) {
+        return function;
+    }
     // A bare keyword isn't an identifier. A quoted token always is.
     if tok.kind == TokenKind::Ident && is_quote_forcing_keyword(&tok.lower) {
         return None;

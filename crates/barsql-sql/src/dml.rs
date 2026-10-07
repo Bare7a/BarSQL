@@ -1,6 +1,7 @@
-use barsql_core::{ColumnInfo, DriverType, Row, TableDataRequest, Value, schema::column_exists};
+use barsql_core::{ColumnInfo, DriverType, Row, SqlDialect, TableDataRequest, Value, schema::column_exists};
 
 use crate::ddl::{DdlColumn, compose_create_table};
+use crate::dialect::{Dialect, Paging, Preview};
 use crate::quote::{placeholder, qualified_table, quote_ident, quote_ident_list, table_ref};
 use crate::sql_text::to_upper;
 
@@ -17,6 +18,7 @@ pub fn build_update(
     if changes.is_empty() {
         return Err("no changes to apply".into());
     }
+    require_row_edits(driver)?;
     require_pk_values(pk_cols, pk_values)?;
     let mut args = Vec::with_capacity(changes.len() + pk_cols.len());
     let mut sets = Vec::with_capacity(changes.len());
@@ -41,6 +43,7 @@ pub fn build_delete(
     pk_cols: &[String],
     pk_row: &Row,
 ) -> Result<Statement, String> {
+    require_row_edits(driver)?;
     require_pk_values(pk_cols, pk_row)?;
     let mut args = Vec::with_capacity(pk_cols.len());
     let mut filters = Vec::with_capacity(pk_cols.len());
@@ -61,6 +64,11 @@ pub fn build_insert(driver: &DriverType, schema: &str, table: &str, values: &Row
     let sql =
         format!("INSERT INTO {} ({}) VALUES ({})", table_ref(driver, schema, table), cols.join(", "), marks.join(", "));
     Ok((sql, values.values().cloned().collect()))
+}
+
+// ClickHouse keys aren't unique, so a key can't pick out the one row to change.
+fn require_row_edits(driver: &DriverType) -> Result<(), String> {
+    if Dialect::for_driver(driver).row_edits { Ok(()) } else { Err(format!("{driver} can't edit single rows")) }
 }
 
 // A missing key value turns the WHERE into `pk = NULL`, a no-op that still reports success.
@@ -92,14 +100,31 @@ pub fn build_table_select(
     } else {
         pks.first().map(String::as_str).or_else(|| cols.first().map(|c| c.name.as_str()))
     };
+    let paging = Dialect::for_driver(driver).paging;
     if let Some(order_by) = order_by.filter(|o| !o.is_empty()) {
         let dir = if req.order_dir.eq_ignore_ascii_case("DESC") { "DESC" } else { "ASC" };
         sql.push_str(&format!(" ORDER BY {} {dir}", quote_ident(driver, order_by)));
+    } else if paging == Paging::OffsetFetch {
+        // OFFSET ... FETCH needs an ORDER BY, even one that orders nothing.
+        sql.push_str(" ORDER BY (SELECT NULL)");
     }
     // SQLite reads LIMIT -1 as "no limit" and Postgres rejects it. A negative OFFSET errors everywhere.
     let limit = if req.limit <= 0 { 100 } else { req.limit };
-    sql.push_str(&format!(" LIMIT {limit} OFFSET {}", req.offset.max(0)));
+    let offset = req.offset.max(0);
+    match paging {
+        Paging::LimitOffset => sql.push_str(&format!(" LIMIT {limit} OFFSET {offset}")),
+        Paging::OffsetFetch => sql.push_str(&format!(" OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY")),
+    }
     sql
+}
+
+// The schema tree's "Select in new tab".
+pub fn preview_select(driver: &DriverType, schema: &str, table: &str, limit: i64) -> String {
+    let target = table_ref(driver, schema, table);
+    match Dialect::for_driver(driver).preview {
+        Preview::Limit => format!("SELECT * FROM {target} LIMIT {limit};"),
+        Preview::Top => format!("SELECT TOP ({limit}) * FROM {target};"),
+    }
 }
 
 pub fn first_integer_primary_key(cols: &[ColumnInfo]) -> Option<&str> {
@@ -114,18 +139,14 @@ pub const IMPORT_TIMESTAMP: &str = "timestamp";
 pub const IMPORT_TEXT: &str = "text";
 
 pub fn sql_type_for(driver: &DriverType, import_type: &str) -> &'static str {
-    let (postgres, mysql, sqlite) = match import_type {
-        IMPORT_BOOL => ("boolean", "TINYINT(1)", "INTEGER"),
-        IMPORT_INT => ("bigint", "BIGINT", "INTEGER"),
-        IMPORT_FLOAT => ("double precision", "DOUBLE", "REAL"),
-        IMPORT_DATE => ("date", "DATE", "TEXT"),
-        IMPORT_TIMESTAMP => ("timestamp", "DATETIME", "TEXT"),
-        _ => ("text", "TEXT", "TEXT"),
-    };
-    match driver {
-        DriverType::MySql => mysql,
-        DriverType::Sqlite => sqlite,
-        _ => postgres,
+    let types = &Dialect::for_driver(driver).import_types;
+    match import_type {
+        IMPORT_BOOL => types.boolean,
+        IMPORT_INT => types.int,
+        IMPORT_FLOAT => types.float,
+        IMPORT_DATE => types.date,
+        IMPORT_TIMESTAMP => types.timestamp,
+        _ => types.text,
     }
 }
 
@@ -178,6 +199,18 @@ pub fn build_batch_insert(
     columns: &[String],
     rows: &[Vec<Value>],
 ) -> Result<Statement, String> {
+    build_batch_insert_with(driver, schema, table, columns, rows, &[])
+}
+
+// `wraps[c]`, where set, is SQL with `{}` for column c's placeholder, like a CONVERT the server needs.
+pub fn build_batch_insert_with(
+    driver: &DriverType,
+    schema: &str,
+    table: &str,
+    columns: &[String],
+    rows: &[Vec<Value>],
+    wraps: &[Option<&str>],
+) -> Result<Statement, String> {
     if columns.is_empty() {
         return Err("no target columns".into());
     }
@@ -203,16 +236,38 @@ pub fn build_batch_insert(
                 sql.push_str(", ");
             }
             args.push(value.clone());
-            sql.push_str(&placeholder(driver, args.len()));
+            let mark = placeholder(driver, args.len());
+            match wraps.get(c).copied().flatten() {
+                Some(wrap) => sql.push_str(&wrap.replace("{}", &mark)),
+                None => sql.push_str(&mark),
+            }
         }
         sql.push(')');
     }
     Ok((sql, args))
 }
 
-// DELETE, because SQLite has no TRUNCATE and elsewhere it needs extra privileges.
+// SQL Server's COUNT stops at 2^31 - 1, so it counts in bigint there.
+pub fn build_count(driver: &DriverType, schema: &str, table: &str) -> String {
+    let count = match Dialect::for_driver(driver).id {
+        Some(SqlDialect::TSql) => "COUNT_BIG(*)",
+        Some(SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::ClickHouse) | None => {
+            "COUNT(*)"
+        }
+    };
+    format!("SELECT {count} FROM {}", table_ref(driver, schema, table))
+}
+
+// DELETE, because SQLite has no TRUNCATE and elsewhere it needs extra privileges. ClickHouse's DELETE is a
+// mutation that rewrites parts, so it truncates.
 pub fn build_truncate(driver: &DriverType, schema: &str, table: &str) -> String {
-    format!("DELETE FROM {}", qualified_table(driver, schema, table))
+    let target = qualified_table(driver, schema, table);
+    match Dialect::for_driver(driver).id {
+        Some(SqlDialect::ClickHouse) => format!("TRUNCATE TABLE {target}"),
+        Some(SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::TSql) | None => {
+            format!("DELETE FROM {target}")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -267,10 +322,43 @@ mod tests {
             (DriverType::Sqlite, IMPORT_FLOAT, "REAL"),
             (DriverType::Sqlite, IMPORT_DATE, "TEXT"),
             (DriverType::Postgres, "nonsense", "text"),
+            (DriverType::Turso, IMPORT_FLOAT, "REAL"),
+            (DriverType::SqlServer, IMPORT_TIMESTAMP, "DATETIME2"),
+            (DriverType::ClickHouse, IMPORT_INT, "Nullable(Int64)"),
         ];
         for (driver, t, want) in cases {
             assert_eq!(sql_type_for(&driver, t), want, "{driver} {t}");
         }
+    }
+
+    #[test]
+    fn paging_and_previews_follow_the_dialect() {
+        let req = TableDataRequest { table: "t".into(), limit: 50, offset: 100, ..Default::default() };
+        let mssql = DriverType::SqlServer;
+        assert_eq!(
+            build_table_select(&mssql, "dbo", &req, &[], &[]),
+            "SELECT * FROM [dbo].[t] ORDER BY (SELECT NULL) OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY"
+        );
+        assert_eq!(
+            build_table_select(&mssql, "dbo", &req, &[], &["id".into()]),
+            "SELECT * FROM [dbo].[t] ORDER BY [id] ASC OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY"
+        );
+        assert_eq!(preview_select(&mssql, "dbo", "t", 100), "SELECT TOP (100) * FROM [dbo].[t];");
+        assert_eq!(
+            preview_select(&DriverType::Postgres, "public", "t", 100),
+            "SELECT * FROM \"public\".\"t\" LIMIT 100;"
+        );
+        assert_eq!(preview_select(&DriverType::Turso, "main", "t", 100), "SELECT * FROM \"t\" LIMIT 100;");
+        let edit = build_update(
+            &DriverType::ClickHouse,
+            "db",
+            "t",
+            &row(&[("a", 1.into())]),
+            &row(&[("id", 1.into())]),
+            &cols(&["id"]),
+        );
+        assert!(edit.is_err());
+        assert_eq!(build_truncate(&DriverType::ClickHouse, "db", "t"), "TRUNCATE TABLE `db`.`t`");
     }
 
     #[test]

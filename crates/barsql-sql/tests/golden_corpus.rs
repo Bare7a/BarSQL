@@ -9,8 +9,14 @@ use barsql_sql::{
 };
 use serde_json::{Value as Json, json};
 
-const DRIVERS: [(&str, DriverType); 3] =
-    [("postgres", DriverType::Postgres), ("mysql", DriverType::MySql), ("sqlite", DriverType::Sqlite)];
+// One per dialect, keyed by the dialect's id. Turso speaks SQLite, so it has no column of its own.
+const DRIVERS: [(&str, DriverType); 5] = [
+    ("postgres", DriverType::Postgres),
+    ("mysql", DriverType::MySql),
+    ("sqlite", DriverType::Sqlite),
+    ("tsql", DriverType::SqlServer),
+    ("clickhouse", DriverType::ClickHouse),
+];
 
 fn fixture(rel: &str) -> Json {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/golden").join(rel);
@@ -36,29 +42,60 @@ fn assert_all(rel: &str, failures: Vec<String>) {
     assert!(failures.is_empty(), "{} {rel} case(s) differ from the fixtures:\n{}", failures.len(), failures.join("\n"));
 }
 
+// On drift, writes corpus/<name>.actual.json beside the fixture with every dialect's actual output, so a
+// deliberate change can be reviewed and copied over.
+fn write_actual(name: &str, failures: &[String], actual: Json) {
+    if failures.is_empty() {
+        return;
+    }
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../fixtures/golden/corpus/{name}.actual.json"));
+    let text = serde_json::to_string_pretty(&sorted(&actual)).expect("json");
+    fs::write(&path, text + "\n").unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
+fn sorted(v: &Json) -> Json {
+    match v {
+        Json::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            Json::Object(keys.into_iter().map(|k| (k.clone(), sorted(&map[k]))).collect())
+        }
+        Json::Array(items) => Json::Array(items.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
+}
+
 #[test]
 fn statement_splits_match() {
     let mut failures = Vec::new();
+    let mut actual = Vec::new();
     for case in cases("corpus/splits.json") {
+        let mut output = json!({});
         for (name, driver) in &DRIVERS {
             let deviation = SPLIT_DEVIATIONS.iter().find(|(d, sql, _)| d == name && *sql == input(&case));
-            let want = match deviation {
-                Some((_, _, split)) => split.iter().map(|s| json!(s)).collect(),
-                None => case["output"][name].as_array().cloned().unwrap_or_default(),
-            };
             let got: Vec<Json> = split_statement_texts(driver, input(&case)).into_iter().map(Json::String).collect();
-            if got != want {
+            output[*name] = Json::Array(got.clone());
+            let want = match deviation {
+                Some((_, _, split)) => Some(split.iter().map(|s| json!(s)).collect()),
+                None => case["output"].get(*name).and_then(Json::as_array).cloned(),
+            };
+            if want.as_ref() != Some(&got) {
                 failures.push(format!("{name} {:?}\n  want: {want:?}\n  got:  {got:?}", input(&case)));
             }
         }
+        actual.push(json!({ "input": case["input"], "output": output }));
     }
+    write_actual("splits", &failures, Json::Array(actual));
     assert_all("splits", failures);
 }
 
 #[test]
 fn read_only_verdicts_match() {
     let mut failures = Vec::new();
+    let mut actual = Vec::new();
     for case in cases("corpus/readonly.json") {
+        let mut output = json!({});
         for (name, driver) in &DRIVERS {
             let mut got = json!({ "readOnly": is_read_only(driver, input(&case)) });
             if let Err(err) = assert_read_only(driver, input(&case)) {
@@ -68,28 +105,52 @@ fn read_only_verdicts_match() {
             if &got != want {
                 failures.push(format!("{name} {:?}: want {want} got {got}", input(&case)));
             }
+            output[*name] = got;
         }
+        actual.push(json!({ "input": case["input"], "output": output }));
     }
+    write_actual("readonly", &failures, Json::Array(actual));
     assert_all("readonly", failures);
 }
 
 #[test]
 fn table_filter_validation_matches() {
     let mut failures = Vec::new();
+    let mut actual = Vec::new();
     for case in cases("corpus/table_filter.json") {
-        let got = validate_table_filter(input(&case)).err();
-        let want = case.get("error").and_then(Json::as_str).map(str::to_string);
-        if got != want {
-            failures.push(format!("{:?}: want {want:?} got {got:?}", input(&case)));
+        let shared = validate_table_filter(&DriverType::Postgres, input(&case)).err();
+        let mut entry = json!({ "input": case["input"] });
+        if let Some(err) = &shared {
+            entry["error"] = json!(err);
         }
+        let mut by_dialect = json!({});
+        for (name, driver) in &DRIVERS {
+            let got = validate_table_filter(driver, input(&case)).err();
+            // `byDialect` overrides the shared expectation where a dialect lexes the filter differently.
+            let expected = case.get("byDialect").and_then(|d| d.get(name)).unwrap_or(&case["error"]);
+            let want = expected.as_str().map(str::to_string);
+            if got != want {
+                failures.push(format!("{name} {:?}: want {want:?} got {got:?}", input(&case)));
+            }
+            if got != shared {
+                by_dialect[*name] = got.map_or(Json::Null, Json::String);
+            }
+        }
+        if by_dialect.as_object().is_some_and(|m| !m.is_empty()) {
+            entry["byDialect"] = by_dialect;
+        }
+        actual.push(entry);
     }
+    write_actual("table_filter", &failures, Json::Array(actual));
     assert_all("table_filter", failures);
 }
 
 #[test]
 fn identifier_quoting_matches() {
     let mut failures = Vec::new();
+    let mut actual = Vec::new();
     for case in cases("corpus/quote_ident.json") {
+        let mut output = json!({});
         for (name, driver) in &DRIVERS {
             let got = json!({
                 "quoted": quote_ident(driver, input(&case)),
@@ -98,25 +159,34 @@ fn identifier_quoting_matches() {
             if got != case["output"][name] {
                 failures.push(format!("{name} {:?}: want {} got {got}", input(&case), case["output"][name]));
             }
+            output[*name] = got;
         }
+        actual.push(json!({ "input": case["input"], "output": output }));
     }
+    write_actual("quote_ident", &failures, Json::Array(actual));
     assert_all("quote_ident", failures);
 }
 
 #[test]
 fn plan_request_detection_matches() {
     let mut failures = Vec::new();
+    let mut actual = Vec::new();
     for case in cases("corpus/plan_requests.json") {
+        let mut output = json!({});
         for (name, driver) in &DRIVERS {
             let got = match detect_plan_request(driver, input(&case)) {
                 Some(req) => json!({ "sql": req.sql, "analyze": req.analyze }),
                 None => Json::Null,
             };
-            if got != case["output"][name] {
+            // A missing key reads as null, so check the key itself.
+            if case["output"].get(*name) != Some(&got) {
                 failures.push(format!("{name} {:?}: want {} got {got}", input(&case), case["output"][name]));
             }
+            output[*name] = got;
         }
+        actual.push(json!({ "input": case["input"], "output": output }));
     }
+    write_actual("plan_requests", &failures, Json::Array(actual));
     assert_all("plan_requests", failures);
 }
 
@@ -132,8 +202,18 @@ fn strings(v: &Json) -> Vec<String> {
 fn row_edit_sql_matches() {
     let all = fixture("corpus/row_edit_sql.json");
     let mut failures = Vec::new();
+    let mut actual = json!({});
     for (name, driver) in &DRIVERS {
-        for edit in all[name].as_array().expect("edits") {
+        // A new dialect starts from Postgres' inputs.
+        let edits = match all.get(*name) {
+            Some(edits) => edits.as_array().expect("edits").clone(),
+            None => {
+                failures.push(format!("{name}: no edits in the fixture"));
+                all["postgres"].as_array().expect("edits").clone()
+            }
+        };
+        let mut built_edits = Vec::new();
+        for edit in &edits {
             let i = &edit["input"];
             let schema = i["schema"].as_str().expect("schema");
             let table = i["table"].as_str().expect("table");
@@ -163,8 +243,11 @@ fn row_edit_sql_matches() {
             if &got != edit {
                 failures.push(format!("{name}\n  want: {edit}\n  got:  {got}"));
             }
+            built_edits.push(got);
         }
+        actual[*name] = Json::Array(built_edits);
     }
+    write_actual("row_edit_sql", &failures, actual);
     assert_all("row_edit_sql", failures);
 }
 
@@ -210,7 +293,7 @@ fn to_value(v: &Json) -> Value {
 #[test]
 fn stored_explain_output_parses_into_the_same_plans() {
     let mut failures = Vec::new();
-    for engine in ["postgres", "mysql", "mariadb", "sqlite"] {
+    for engine in ["postgres", "mysql", "mariadb", "sqlite", "clickhouse", "sqlserver"] {
         let stored = fixture(&format!("explain/{engine}.json"));
         let driver = DriverType::parse(stored["driver"].as_str().expect("driver"));
         for entry in stored["plans"].as_array().expect("plans") {

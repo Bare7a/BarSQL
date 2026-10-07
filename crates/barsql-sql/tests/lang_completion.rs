@@ -1,9 +1,13 @@
-use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
+use std::sync::Arc;
+
+use barsql_core::{
+    ColumnInfo, DriverType, FunctionInfo, FunctionKind, FunctionList, FunctionSignature, SchemaInfo, TableInfo,
+};
 use barsql_sql::lang::quoting::{column_cache_key, identifier_needs_quote};
 use barsql_sql::lang::{
-    Catalog, ColumnMap, CompletionContext, CompletionItem, CursorSlot, ItemKind, SqlLabels, analyze_cursor,
-    bindings_needing_columns, build_completion_items, completion_replace_range, current_statement_start, parse_query,
-    parse_statements,
+    Catalog, ColumnMap, CompletionContext, CompletionItem, CursorSlot, FunctionCatalog, ItemKind, SqlLabels,
+    analyze_cursor, bindings_needing_columns, build_completion_items, completion_replace_range,
+    current_statement_start, parse_query, parse_statements,
 };
 
 const PG: DriverType = DriverType::Postgres;
@@ -667,4 +671,130 @@ fn multi_byte_text_uses_byte_offsets() {
     assert_eq!(column_labels(text), ["email"]);
     let range = completion_replace_range(text.len(), text, text.len()..text.len(), Some(&PG));
     assert_eq!(&text[range], "em");
+}
+
+fn function_items(setup: &Setup, text: &str) -> Vec<CompletionItem> {
+    setup.items(text).into_iter().filter(|i| i.kind == ItemKind::Function).collect()
+}
+
+fn functions_in(text: &str, driver: DriverType) -> Vec<String> {
+    function_items(&Setup::standard(driver), text).into_iter().map(|i| i.label).collect()
+}
+
+fn functions(text: &str) -> Vec<String> {
+    functions_in(text, PG)
+}
+
+#[test]
+fn functions_fit_the_clause() {
+    // Aggregates where rows are grouped, window functions where rows are listed.
+    assert!(has(&functions("SELECT cou"), "count"));
+    assert!(has(&functions("SELECT * FROM users GROUP BY id HAVING cou"), "count"));
+    assert!(has(&functions("SELECT * FROM users ORDER BY cou"), "count"));
+    assert!(!has(&functions("SELECT * FROM users WHERE cou"), "count"));
+    assert!(!has(&functions("SELECT * FROM users GROUP BY cou"), "count"));
+    assert!(has(&functions("SELECT row_n"), "row_number"));
+    assert!(!has(&functions("SELECT * FROM users GROUP BY id HAVING row_n"), "row_number"));
+    // A subquery has its own clause, and a call's arguments belong to the clause around it.
+    assert!(has(&functions("SELECT * FROM users WHERE id IN (SELECT ma"), "max"));
+    assert!(!has(&functions("SELECT * FROM users WHERE id IN (SELECT max(id) FROM orders WHERE ma"), "max"));
+    assert!(has(&functions("SELECT sum(coalesce(id, 0)), cou"), "count"));
+    // Scalars go anywhere an expression does.
+    for text in [
+        "SELECT * FROM users WHERE low",
+        "SELECT * FROM users WHERE email = low",
+        "UPDATE users SET name = low",
+        "SELECT * FROM users GROUP BY low",
+        "SELECT * FROM users JOIN orders ON low",
+    ] {
+        assert!(has(&functions(text), "lower"), "{text}");
+    }
+    // Table functions only in FROM.
+    assert!(has(&functions("SELECT * FROM generate_s"), "generate_series"));
+    assert!(has(&functions("SELECT * FROM users, generate_s"), "generate_series"));
+    assert!(!has(&functions("SELECT generate_s"), "generate_series"));
+    assert!(!has(&functions("INSERT INTO generate_s"), "generate_series"));
+}
+
+#[test]
+fn functions_stay_out_where_no_call_fits() {
+    for text in [
+        "cou",
+        "SELECT ",
+        "SELECT * FROM users u WHERE u.low",
+        "SELECT * FROM users LIMIT a",
+        "INSERT INTO users (low",
+        "UPDATE users SET low",
+        "SELECT \"low",
+        "SELECT id AS low",
+    ] {
+        assert!(functions(text).is_empty(), "{text}: {:?}", functions(text));
+    }
+}
+
+#[test]
+fn function_inserts_leave_the_caret_inside_the_call() {
+    let setup = Setup::standard(PG);
+    let insert = |text: &str, label: &str| {
+        let item = function_items(&setup, text).into_iter().find(|i| i.label == label)?;
+        Some((item.insert_text, item.snippet))
+    };
+    assert_eq!(insert("SELECT cou", "count"), Some(("count($0)".into(), true)));
+    assert_eq!(insert("SELECT no", "now"), Some(("now()".into(), false)));
+    assert_eq!(insert("SELECT current_d", "current_date"), Some(("current_date".into(), false)));
+    assert_eq!(insert("SELECT COU", "count"), Some(("COUNT($0)".into(), true)), "capitals stay capitals");
+    assert_eq!(insert("SELECT ca", "cast"), Some(("cast($0)".into(), true)), "CAST is a function, not a keyword");
+    assert!(!has(&labels("SELECT ca"), "CAST"));
+    // With the parenthesis already there, only the name goes in.
+    let text = "SELECT cou(*) FROM users";
+    let items = setup.items_at(text, "SELECT cou".len(), 0);
+    let count = items.iter().find(|i| i.label == "count").unwrap();
+    assert_eq!((count.insert_text.as_str(), count.snippet), ("count", false));
+    assert_eq!(count.label_detail.as_deref(), Some("(*)"));
+    assert!(count.detail.as_deref().is_some_and(|d| d.starts_with("aggregate")), "{:?}", count.detail);
+}
+
+#[test]
+fn function_names_follow_the_dialect() {
+    // T-SQL spells shared names in capitals. ClickHouse keeps camelCase even when capitals are typed.
+    assert!(has(&functions_in("SELECT cou", DriverType::SqlServer), "COUNT"));
+    let items = function_items(&Setup::standard(DriverType::ClickHouse), "SELECT TOSTARTOFD");
+    let item = items.iter().find(|i| i.label == "toStartOfDay").expect("toStartOfDay");
+    assert_eq!(item.insert_text, "toStartOfDay($0)");
+    let items = function_items(&Setup::standard(DriverType::ClickHouse), "SELECT COU");
+    assert!(items.iter().any(|i| i.insert_text == "COUNT($0)"), "count ignores case on ClickHouse");
+}
+
+fn server_function(name: &str, schema: &str, qualified_only: bool) -> FunctionInfo {
+    FunctionInfo {
+        name: name.into(),
+        schema: schema.into(),
+        kind: FunctionKind::Scalar,
+        signatures: vec![FunctionSignature { args: "a integer".into(), returns: "integer".into() }],
+        qualified_only,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn user_functions_rank_first_and_carry_their_schema_when_needed() {
+    let mut setup = Setup::standard(PG);
+    let list = FunctionList {
+        functions: vec![server_function("add_tax", "billing", true), server_function("add_one", "public", false)],
+        ..Default::default()
+    };
+    let functions = Arc::new(FunctionCatalog::with_server(&PG, list));
+    setup.catalog =
+        Catalog::new(PG, setup.catalog.schemas.clone(), setup.catalog.tables.clone()).with_functions(functions);
+    let mut items = function_items(&setup, "SELECT * FROM users WHERE add");
+    items.retain(|i| i.label.starts_with("add"));
+    items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
+    let found: Vec<(&str, &str)> = items.iter().map(|i| (i.label.as_str(), i.insert_text.as_str())).collect();
+    assert_eq!(found, [("add_one", "add_one($0)"), ("add_tax", "billing.add_tax($0)")]);
+    assert_eq!(items[1].detail.as_deref(), Some("user function · integer · billing"));
+    let mut all = setup.items("SELECT * FROM users WHERE a");
+    all.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
+    let first_builtin = all.iter().position(|i| i.label == "abs").unwrap();
+    let first_user = all.iter().position(|i| i.label == "add_one").unwrap();
+    assert!(first_user < first_builtin, "user functions before built-ins");
 }

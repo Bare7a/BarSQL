@@ -58,7 +58,7 @@ fn keeps_lone_semicolons_but_drops_blank_chunks() {
 fn keeps_a_trailing_statement_without_semicolon() {
     assert_eq!(
         parse_statements("SELECT 1", None),
-        [EditorStatement { text: "SELECT 1", run_line: 1, start: 0, end: 8 }]
+        [EditorStatement { text: "SELECT 1", run_line: 1, start: 0, end: 8, terminated: false }]
     );
 }
 

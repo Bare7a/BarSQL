@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use barsql_core::{DriverType, Value};
+use barsql_core::{DriverType, SqlDialect, Value};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{Map, Value as Json};
@@ -108,11 +108,13 @@ pub fn parse_plan(
         raw: join_first_column(res),
         ..Default::default()
     };
-    match driver {
-        DriverType::Postgres => parse_postgres_plan(&mut plan)?,
-        DriverType::MySql => parse_mysql_plan(&mut plan)?,
-        DriverType::Sqlite => parse_sqlite_plan(&mut plan, res),
-        _ => return Err(format!("unsupported driver: {driver}")),
+    match driver.dialect() {
+        Some(SqlDialect::Postgres) => parse_postgres_plan(&mut plan)?,
+        Some(SqlDialect::MySql) => parse_mysql_plan(&mut plan)?,
+        Some(SqlDialect::Sqlite) => parse_sqlite_plan(&mut plan, res),
+        Some(SqlDialect::ClickHouse) => parse_clickhouse_plan(&mut plan)?,
+        Some(SqlDialect::TSql) => crate::plan_showplan::parse_showplan(&mut plan, res)?,
+        None => return Err(format!("unsupported driver: {driver}")),
     }
     if plan.nodes.is_empty() {
         return Err("the server returned no plan".into());
@@ -147,7 +149,7 @@ impl PlanTree {
 
 // Fills in whichever of the inclusive or exclusive metrics the engine left out. Clamped at zero because
 // Postgres leaves InitPlan and SubPlan children out of the parent's total.
-fn finalize_node(n: &mut PlanNode) {
+pub(crate) fn finalize_node(n: &mut PlanNode) {
     let child_cost: Vec<f64> = n.children.iter().filter_map(|c| c.cost_total).collect();
     let child_time: Vec<f64> = n.children.iter().filter_map(|c| c.time_ms).collect();
     (n.cost_total, n.cost_self) =
@@ -289,6 +291,71 @@ fn pg_relation(raw: &Map<String, Json>) -> String {
     } else {
         format!("{relation} {alias}")
     }
+}
+
+const CH_FIRST_CLASS_KEYS: &[&str] = &["Node Type", "Node Id", "Description", "Plans", "Indexes"];
+
+// EXPLAIN PLAN json = 1, indexes = 1. ClickHouse estimates no costs or rows, so a plan is its steps and how
+// far each index narrowed the read.
+fn parse_clickhouse_plan(plan: &mut QueryPlan) -> Result<(), String> {
+    let envelopes: Vec<Json> =
+        serde_json::from_str(&plan.raw).map_err(|err| format!("could not read the ClickHouse plan: {err}"))?;
+    for env in envelopes.iter().filter_map(Json::as_object) {
+        if let Some(root) = env.get("Plan").and_then(Json::as_object) {
+            plan.nodes.push(ch_node(root));
+        }
+    }
+    plan.add_note(NOTE_NO_METRICS);
+    Ok(())
+}
+
+fn ch_node(raw: &Map<String, Json>) -> PlanNode {
+    let label = plan_string(raw.get("Node Type"));
+    let description = plan_string(raw.get("Description"));
+    // A ReadFrom step's description names the table it reads.
+    let reads = label.starts_with("ReadFrom");
+    let indexes = object_slice(raw.get("Indexes"));
+    let mut fields = plan_fields(Some(raw), CH_FIRST_CLASS_KEYS, "");
+    fields.extend(indexes.iter().map(|index| PlanField { key: ch_index_name(index), value: ch_index_summary(index) }));
+    let named: Vec<String> = indexes.iter().map(|i| ch_index_name(i)).collect();
+    PlanNode {
+        label: if label.is_empty() { "Step".into() } else { label },
+        detail: if reads { String::new() } else { description.clone() },
+        relation: if reads { description } else { String::new() },
+        index: named.join(", "),
+        fields,
+        children: object_slice(raw.get("Plans")).into_iter().map(ch_node).collect(),
+        ..Default::default()
+    }
+}
+
+// PrimaryKey, or a skip index by name.
+fn ch_index_name(index: &Map<String, Json>) -> String {
+    let (kind, name) = (plan_string(index.get("Type")), plan_string(index.get("Name")));
+    if name.is_empty() { kind } else { name }
+}
+
+// Keys and condition, then how many parts and granules the index kept of those it was given.
+fn ch_index_summary(index: &Map<String, Json>) -> String {
+    let mut parts = Vec::new();
+    let keys: Vec<String> = index.get("Keys").and_then(Json::as_array).into_iter().flatten().map(json_string).collect();
+    if !keys.is_empty() {
+        parts.push(keys.join(", "));
+    }
+    for key in ["Condition", "Description"] {
+        let text = plan_string(index.get(key));
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+    for (unit, selected, initial) in
+        [("parts", "Selected Parts", "Initial Parts"), ("granules", "Selected Granules", "Initial Granules")]
+    {
+        if let (Some(selected), Some(initial)) = (opt_float(index.get(selected)), opt_float(index.get(initial))) {
+            parts.push(format!("{selected} of {initial} {unit}"));
+        }
+    }
+    parts.join(" · ")
 }
 
 fn parse_mysql_plan(plan: &mut QueryPlan) -> Result<(), String> {

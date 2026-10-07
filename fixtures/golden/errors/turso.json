@@ -1,0 +1,205 @@
+{
+  "engine": "turso",
+  "setup": [
+    "CREATE TABLE customers (\n\t\tid INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\temail TEXT NOT NULL UNIQUE,\n\t\tname TEXT NOT NULL DEFAULT 'anon' CHECK (length(name) > 0),\n\t\tcreated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n\t)",
+    "CREATE TABLE orders (\n\t\tid INTEGER PRIMARY KEY,\n\t\tcustomer_id INTEGER NOT NULL REFERENCES customers (id) ON DELETE CASCADE,\n\t\ttotal NUMERIC NOT NULL DEFAULT 0,\n\t\tstatus TEXT NOT NULL DEFAULT 'new',\n\t\ttotal_with_tax NUMERIC GENERATED ALWAYS AS (total * 1.2) STORED\n\t)",
+    "CREATE INDEX orders_customer_idx ON orders (customer_id)",
+    "CREATE UNIQUE INDEX orders_status_partial_idx ON orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE VIEW customer_totals AS SELECT c.id, c.email, coalesce(sum(o.total), 0) AS total FROM customers c LEFT JOIN orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER orders_touch AFTER INSERT ON orders BEGIN UPDATE orders SET status = lower(NEW.status) WHERE id = NEW.id; END",
+    "INSERT INTO customers (email, name, created_at) VALUES ('a@x.io', 'Ann', '2024-01-01 10:00:00'), ('b@x.io', 'Bob', '2024-01-02 11:30:00')",
+    "INSERT INTO orders (customer_id, total, status) VALUES (1, 10.50, 'NEW'), (1, 5, 'Paid'), (2, 7.25, 'new')",
+    "CREATE TABLE types (\n\t\tid INTEGER PRIMARY KEY, c_integer INTEGER, c_bigint BIGINT, c_real REAL, c_double DOUBLE,\n\t\tc_numeric NUMERIC, c_decimal DECIMAL(10,2), c_boolean BOOLEAN, c_text TEXT, c_varchar VARCHAR(20),\n\t\tc_blob BLOB, c_date DATE, c_datetime DATETIME, c_timestamp TIMESTAMP, c_time TIME, c_json JSON, c_untyped\n\t)",
+    "INSERT INTO types VALUES (1, 42, 9007199254740993, 1.1, 0.1, 12.50, 3.14159, 1, 'héllo 🌍', 'abc', X'68656C6C6F', '2024-02-29', '2024-02-29 13:45:30.123', '2024-02-29T13:45:30Z', '13:45:30', '{\"b\": 1, \"a\": [1, 2]}', 'text')",
+    "INSERT INTO types VALUES (2, -9223372036854775808, 9223372036854775807, 1e21, -0.0, '1e3', 'abc', 0, '', '', X'DEADBEEF', 1709214330, 1709214330123, 1709214330, 'not a time', '[]', 3.5)",
+    "INSERT INTO types (id) VALUES (3)",
+    "INSERT INTO types VALUES (4, 1.5, '12', 3, 4, 5, 6, 'true', X'00', 7, 'text-in-blob', 'not a date', '2024-02-29 13:45', '2024-02-29', NULL, NULL, X'00')"
+  ],
+  "probes": [
+    {
+      "name": "syntax",
+      "sql": "SELEC 1",
+      "results": [
+        {
+          "statement": "SELEC 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "SQL string could not be parsed: syntax error around L1:6: `SELEC`",
+            "position": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_table",
+      "sql": "SELECT * FROM nope",
+      "results": [
+        {
+          "statement": "SELECT * FROM nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "no such table: nope",
+            "code": "SQLITE_UNKNOWN"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_column",
+      "sql": "SELECT nope FROM customers",
+      "results": [
+        {
+          "statement": "SELECT nope FROM customers",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "no such column: nope",
+            "code": "SQL_INPUT_ERROR",
+            "position": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "unique_violation",
+      "sql": "INSERT INTO customers (email, name) VALUES ('a@x.io', 'Dup')",
+      "results": [
+        {
+          "statement": "INSERT INTO customers (email, name) VALUES ('a@x.io', 'Dup')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "UNIQUE constraint failed: customers.email",
+            "code": "SQLITE_CONSTRAINT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "not_null_violation",
+      "sql": "INSERT INTO customers (email, name) VALUES (NULL, 'x')",
+      "results": [
+        {
+          "statement": "INSERT INTO customers (email, name) VALUES (NULL, 'x')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "NOT NULL constraint failed: customers.email",
+            "code": "SQLITE_CONSTRAINT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fk_violation",
+      "sql": "INSERT INTO orders (customer_id) VALUES (999)",
+      "results": [
+        {
+          "statement": "INSERT INTO orders (customer_id) VALUES (999)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "FOREIGN KEY constraint failed",
+            "code": "SQLITE_CONSTRAINT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "check_violation",
+      "sql": "INSERT INTO customers (email, name) VALUES ('z@x.io', '')",
+      "results": [
+        {
+          "statement": "INSERT INTO customers (email, name) VALUES ('z@x.io', '')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "CHECK constraint failed: length(name) > 0",
+            "code": "SQLITE_CONSTRAINT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "division_by_zero",
+      "sql": "SELECT 1/0 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1/0 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "second_statement_fails",
+      "sql": "SELECT 1 AS ok; SELECT * FROM nope; SELECT 2 AS never",
+      "results": [
+        {
+          "statement": "SELECT 1 AS ok",
+          "columns": [
+            "ok"
+          ],
+          "columnTypes": [
+            ""
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT * FROM nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "no such table: nope",
+            "code": "SQLITE_UNKNOWN"
+          }
+        }
+      ]
+    },
+    {
+      "name": "multibyte_position",
+      "sql": "SELECT 'héllo 🌍' AS v, nope",
+      "results": [
+        {
+          "statement": "SELECT 'héllo 🌍' AS v, nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "no such column: nope",
+            "code": "SQL_INPUT_ERROR",
+            "position": 24
+          }
+        }
+      ]
+    }
+  ]
+}

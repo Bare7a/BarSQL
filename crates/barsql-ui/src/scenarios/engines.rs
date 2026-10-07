@@ -4,18 +4,30 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use barsql_core::{ConnectionConfig, DriverType};
+use barsql_sql::plan::NOTE_NO_METRICS;
+use barsql_sql::system_views::{SystemView, ViewScope, views};
 use gpui_kit::{Entity, Modifiers, TestAppContext};
 
 use super::driver::{Driver, open_with, selector};
+use crate::cell_content::Kind;
+use crate::cell_viewer::Opened;
 use crate::file_dialogs::Stub;
 use crate::grid::Grid;
+use crate::i18n::t;
 use crate::table_tab::TableTab;
+
+// In a table's menu, after Browse data, SELECT in new tab and Count rows.
+const SYSTEM_VIEWS: usize = 3;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Engine {
     Postgres,
     MySql,
     MariaDb,
+    Turso,
+    ClickHouse,
+    // The mssql profile's server. Only with BARSQL_E2E_MSSQL=1.
+    SqlServer,
 }
 
 impl Engine {
@@ -24,8 +36,27 @@ impl Engine {
             Self::Postgres => "PG",
             Self::MySql => "MYSQL",
             Self::MariaDb => "MARIADB",
+            Self::Turso => "TURSO",
+            Self::ClickHouse => "CH",
+            Self::SqlServer => "MSSQL",
         };
         std::env::var(format!("BARSQL_E2E_{prefix}_{key}")).unwrap_or_else(|_| default.to_string())
+    }
+
+    fn driver(self) -> DriverType {
+        match self {
+            Self::Postgres => DriverType::Postgres,
+            Self::MySql | Self::MariaDb => DriverType::MySql,
+            Self::Turso => DriverType::Turso,
+            Self::ClickHouse => DriverType::ClickHouse,
+            Self::SqlServer => DriverType::SqlServer,
+        }
+    }
+
+    // The driver's row in the dialog's menu, which lists the supported drivers in order.
+    fn menu_index(self) -> usize {
+        let driver = self.driver();
+        DriverType::KNOWN.iter().filter(|d| d.is_supported()).position(|d| *d == driver).expect("listed")
     }
 
     // Keep in sync with the app's e2e harness.
@@ -34,24 +65,69 @@ impl Engine {
             Self::Postgres => ("55432", "postgres", "postgres"),
             Self::MySql => ("33306", "root", "root"),
             Self::MariaDb => ("33307", "root", "root"),
+            Self::ClickHouse => ("38123", "default", "clickhouse"),
+            Self::SqlServer => ("31433", "sa", "BarSQL-e2e-Passw0rd"),
+            Self::Turso => {
+                return ConnectionConfig {
+                    name: "E2E Turso".into(),
+                    driver: self.driver(),
+                    url: self.env("URL", "http://127.0.0.1:38080"),
+                    auth_token: self.env("TOKEN", ""),
+                    color: "#3b82f6".into(),
+                    ..Default::default()
+                };
+            }
         };
         let name = match self {
             Self::Postgres => "E2E Postgres",
             Self::MySql => "E2E MySQL",
             Self::MariaDb => "E2E MariaDB",
+            Self::ClickHouse => "E2E ClickHouse",
+            Self::SqlServer => "E2E SQL Server",
+            Self::Turso => unreachable!("returned above"),
         };
         ConnectionConfig {
             name: name.into(),
-            driver: if self == Self::Postgres { DriverType::Postgres } else { DriverType::MySql },
+            driver: self.driver(),
             host: self.env("HOST", "127.0.0.1"),
             port: self.env("PORT", port).parse().expect("port"),
             database: self.env("DB", "barsql_test"),
             username: self.env("USER", user),
             password: self.env("PASSWORD", password),
-            ssl_mode: "disable".into(),
+            // SQL Server encrypts with the certificate it made itself.
+            ssl_mode: if self == Self::SqlServer { "require".into() } else { "disable".into() },
             color: "#3b82f6".into(),
             ..Default::default()
         }
+    }
+
+    // SQL Server runs only with its compose profile, and starts without barsql_test.
+    fn ready(self) -> bool {
+        if self != Self::SqlServer {
+            return true;
+        }
+        if std::env::var("BARSQL_E2E_MSSQL").as_deref() != Ok("1") {
+            return false;
+        }
+        let config = self.config();
+        let master = ConnectionConfig { database: "master".into(), ..config.clone() };
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let engine = barsql_db::Engine::connect(&master).await.expect("SQL Server is reachable");
+            let mut session = engine.session().await.unwrap();
+            let cancel = barsql_db::Cancel::new();
+            let create = format!("IF DB_ID(N'{0}') IS NULL CREATE DATABASE [{0}]", config.database);
+            session.buffered(&create, &cancel).await.unwrap();
+            // Only when off: switching ends every other connection to the database, a parallel test's included.
+            let snapshot = format!(
+                "IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{0}' AND is_read_committed_snapshot_on = 0)
+                ALTER DATABASE [{0}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE",
+                config.database
+            );
+            session.buffered(&snapshot, &cancel).await.unwrap();
+            engine.close().await;
+        });
+        true
     }
 }
 
@@ -93,6 +169,24 @@ fn browse(app: &mut Driver, name: &str) {
     view(app);
 }
 
+// Drop is a table menu's last item, one further down where the System views submenu comes first.
+fn drop_item(engine: Engine) -> usize {
+    12 + usize::from(views(&engine.driver(), ViewScope::Table).next().is_some())
+}
+
+fn label(app: &mut Driver, view: &SystemView) -> String {
+    app.cx.update(|_, cx| t(cx, &view.title_key()).to_string())
+}
+
+// A view opened from a menu gets a tab of its own, titled `title`, and runs there.
+fn ran_in_new_tab(app: &mut Driver, tabs: usize, title: &str) {
+    assert_eq!(app.titles().len(), tabs + 1);
+    assert_eq!(app.titles().last().map(String::as_str), Some(title));
+    app.wait_idle();
+    assert!(!app.status_is_error(), "{:?}", app.error());
+    assert!(app.grid().is_some(), "a grid of the view's rows");
+}
+
 fn plan_rows(app: &mut Driver) -> Vec<(String, String, f64)> {
     let plan = app.plan().expect("the plan view");
     app.cx.update(|_, cx| plan.read(cx).rows())
@@ -121,17 +215,25 @@ fn explain(cx: &mut TestAppContext, engine: Engine) {
     assert!(!analyzed(&mut app), "Estimated");
     assert!(plan_rows(&mut app).iter().all(|(_, label, _)| !label.is_empty()));
     let plan = app.plan().unwrap();
-    assert!(app.cx.update(|_, cx| plan.read(cx).notes()).is_empty(), "notes are SQLite's");
+    // A plan without numbers says so.
+    let notes: &[&str] = if engine.driver().capabilities().plan_metrics { &[] } else { &[NOTE_NO_METRICS] };
+    assert_eq!(app.cx.update(|_, cx| plan.read(cx).notes()), notes);
 }
 
 fn typed_explain(cx: &mut TestAppContext, engine: Engine) {
+    // T-SQL has no EXPLAIN to type.
+    if !engine.driver().capabilities().typed_explain {
+        return;
+    }
     let mut app = open_on(cx, engine);
     let name = unique("plan_typed");
     app.seed(&format!(
         "CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice')"
     ));
     app.connect();
-    app.run(&format!("EXPLAIN SELECT * FROM {name} WHERE id = 1;"));
+    // SQLite's plain EXPLAIN lists bytecode. Its plan is EXPLAIN QUERY PLAN.
+    let explain = if engine == Engine::Turso { "EXPLAIN QUERY PLAN" } else { "EXPLAIN" };
+    app.run(&format!("{explain} SELECT * FROM {name} WHERE id = 1;"));
     assert!(app.grid().is_none());
     assert!(plan_rows(&mut app).iter().all(|(_, label, _)| !label.is_empty()));
 }
@@ -141,6 +243,11 @@ fn transactions(cx: &mut TestAppContext, engine: Engine) {
     let name = unique("e2e_txn");
     app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50))"));
     let tab = app.connect();
+    // Turso can't hold a transaction between runs, so the toolbar leaves the buttons out.
+    if !engine.driver().capabilities().interactive_transactions {
+        assert!(app.cx.debug_bounds("begin-txn").is_none(), "no transaction buttons");
+        return;
+    }
     let in_txn = |app: &mut Driver, expected: bool| {
         app.settle(|cx| cx.update(|_, cx| tab.read(cx).in_transaction() == expected));
     };
@@ -185,7 +292,58 @@ fn browse_rows(cx: &mut TestAppContext, engine: Engine) {
     assert_eq!(column(&mut app, 1), [Some("Alice".into()), Some("Bob".into())]);
 }
 
+// The filter bar's button lists the server views. SQLite keeps no statistics, so Turso has no button.
+fn server_views(cx: &mut TestAppContext, engine: Engine) {
+    let mut app = open_on(cx, engine);
+    app.connect();
+    let Some(first) = views(&engine.driver(), ViewScope::Server).next() else {
+        assert!(app.cx.debug_bounds("server-views").is_none(), "no views, so no button");
+        return;
+    };
+    let (tabs, title) = (app.titles().len(), label(&mut app, first));
+    app.menu_pick("server-views", 0);
+    ran_in_new_tab(&mut app, tabs, &title);
+}
+
+fn table_views(cx: &mut TestAppContext, engine: Engine) {
+    let Some(first) = views(&engine.driver(), ViewScope::Table).next() else { return };
+    let mut app = open_on(cx, engine);
+    let name = unique("e2e_stats");
+    app.seed(&format!(
+        "CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice')"
+    ));
+    app.connect();
+    app.refresh_schema();
+    let (tabs, title) = (app.titles().len(), format!("{}: {name}", label(&mut app, first)));
+    let row = table(&mut app, &name);
+    app.context_submenu(selector(format!("tree:{row}")), SYSTEM_VIEWS, 0);
+    ran_in_new_tab(&mut app, tabs, &title);
+}
+
+// The engine names the column's type, which is what makes the viewer read the cell as an array.
+fn array_cells(cx: &mut TestAppContext, engine: Engine) {
+    let (sql, json) = match engine {
+        Engine::Postgres => ("SELECT ARRAY['a', 'b c'] AS a;", "[\n  \"a\",\n  \"b c\"\n]"),
+        Engine::ClickHouse => ("SELECT map('k', [1, 2]) AS a;", "{\n  \"k\": [\n    1,\n    2\n  ]\n}"),
+        Engine::MySql | Engine::MariaDb | Engine::Turso | Engine::SqlServer => return,
+    };
+    let mut app = open_on(cx, engine);
+    app.connect();
+    app.run(sql);
+    let grid = app.grid().expect("a grid");
+    let at = app.grid_point(&grid, |grid| grid.cell_point(0, 0));
+    app.click_at(at, Modifiers::none());
+    app.keys("shift-enter");
+    let viewer = app.cx.update(|_, cx| cx.try_global::<Opened>().and_then(|opened| opened.0.upgrade()));
+    let viewer = viewer.expect("the cell viewer");
+    assert_eq!(app.cx.update(|_, cx| viewer.read(cx).shown(cx)), (Kind::Array, json.to_string()));
+}
+
 fn foreign_key(cx: &mut TestAppContext, engine: Engine) {
+    // ClickHouse parses FOREIGN KEY and keeps nothing of it.
+    if !engine.driver().capabilities().catalog.constraints {
+        return;
+    }
     let mut app = open_on(cx, engine);
     let (parent, child) = (unique("e2e_fk_parent"), unique("e2e_fk_child"));
     app.seed(&format!(
@@ -219,17 +377,25 @@ fn dialog(cx: &mut TestAppContext, engine: Engine) {
     assert!(app.dialog_open());
     app.click("conn-name");
     app.type_text(&format!("{} dialog", config.name));
-    app.menu_pick("conn-driver", if engine == Engine::Postgres { 1 } else { 2 });
-    for (field, value) in [
-        ("conn-host", config.host.clone()),
-        ("conn-port", config.port.to_string()),
-        ("conn-database", config.database.clone()),
-        ("conn-username", config.username.clone()),
-        ("conn-password", config.password.clone()),
-    ] {
+    app.menu_pick("conn-driver", engine.menu_index());
+    let fields = match engine {
+        Engine::Turso => vec![("conn-url", config.url.clone())],
+        Engine::Postgres | Engine::MySql | Engine::MariaDb | Engine::ClickHouse | Engine::SqlServer => vec![
+            ("conn-host", config.host.clone()),
+            ("conn-port", config.port.to_string()),
+            ("conn-database", config.database.clone()),
+            ("conn-username", config.username.clone()),
+            ("conn-password", config.password.clone()),
+        ],
+    };
+    for (field, value) in fields {
         app.click(field);
         app.keys("mod-a");
         app.type_text(&value);
+    }
+    if engine == Engine::Turso {
+        // A plain-http sqld, so the certificate check has nothing to check.
+        app.menu_pick("conn-ssl", 0);
     }
     app.click("connection-test");
     app.settle(|cx| {
@@ -251,11 +417,14 @@ fn dialog(cx: &mut TestAppContext, engine: Engine) {
 
 // Lists databases with the unsaved credentials, before any database is set.
 fn database_picker(cx: &mut TestAppContext, engine: Engine) {
+    if !engine.driver().capabilities().database_picker {
+        return;
+    }
     let mut app = open_on(cx, engine);
     let config = engine.config();
     app.click("connection-switcher");
     app.click("new-connection");
-    app.menu_pick("conn-driver", if engine == Engine::Postgres { 1 } else { 2 });
+    app.menu_pick("conn-driver", engine.menu_index());
     for (field, value) in [
         ("conn-host", config.host.clone()),
         ("conn-port", config.port.to_string()),
@@ -288,6 +457,19 @@ macro_rules! per_engine {
         mod mariadb {
             $(#[gpui_kit::test] fn $test(cx: &mut gpui_kit::TestAppContext) { super::$body(cx, super::Engine::MariaDb) })*
         }
+        mod turso {
+            $(#[gpui_kit::test] fn $test(cx: &mut gpui_kit::TestAppContext) { super::$body(cx, super::Engine::Turso) })*
+        }
+        mod clickhouse {
+            $(#[gpui_kit::test] fn $test(cx: &mut gpui_kit::TestAppContext) { super::$body(cx, super::Engine::ClickHouse) })*
+        }
+        mod sqlserver {
+            $(#[gpui_kit::test] fn $test(cx: &mut gpui_kit::TestAppContext) {
+                if super::Engine::SqlServer.ready() {
+                    super::$body(cx, super::Engine::SqlServer)
+                }
+            })*
+        }
     };
 }
 
@@ -301,12 +483,18 @@ per_engine! {
     a_created_table_shows_in_the_schema_browser => created_table;
     browsing_a_table_shows_its_rows => browse_rows;
     a_foreign_key_cell_jumps_to_the_referenced_row => foreign_key;
+    a_server_view_opens_in_a_tab_and_runs => server_views;
+    a_tables_system_view_opens_in_a_tab_and_runs => table_views;
+    an_array_cell_opens_as_json => array_cells;
 }
 
 mod postgres_only {
     use gpui_kit::TestAppContext;
 
-    use super::{Engine, analyzed, open_on, plan_rows, unique};
+    use barsql_core::DriverType;
+    use barsql_sql::system_views::{ViewScope, views};
+
+    use super::{Engine, analyzed, drop_item, label, open_on, plan_rows, ran_in_new_tab, unique};
     use crate::scenarios::driver::{Driver, selector};
 
     fn seeded(cx: &mut TestAppContext) -> (Driver<'_>, String) {
@@ -327,6 +515,18 @@ mod postgres_only {
         app.cx.update(|_, cx| plan.read(cx).columns().iter().map(|metric| metric.key()).collect())
     }
 
+    // A connection's own menu lists the server views too, after Connect, Edit and Duplicate.
+    #[gpui_kit::test]
+    fn the_connection_menu_opens_a_server_view(cx: &mut TestAppContext) {
+        let mut app = open_on(cx, Engine::Postgres);
+        app.connect();
+        let first = views(&DriverType::Postgres, ViewScope::Server).next().expect("Postgres has server views");
+        let (tabs, title, id) = (app.titles().len(), label(&mut app, first), app.connection.id.clone());
+        app.click("connection-switcher");
+        app.context_submenu(selector(format!("connection-row-{id}")), 3, 0);
+        ran_in_new_tab(&mut app, tabs, &title);
+    }
+
     // Postgres won't drop a table a view depends on. Cascade drops the view too.
     #[gpui_kit::test]
     fn a_blocked_drop_goes_through_with_cascade(cx: &mut TestAppContext) {
@@ -335,7 +535,7 @@ mod postgres_only {
         app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY); CREATE VIEW {view} AS SELECT id FROM {name}"));
         app.connect();
         app.refresh_schema();
-        app.context_menu(selector(format!("tree:t:public.{name}")), 12);
+        app.context_menu(selector(format!("tree:t:public.{name}")), drop_item(Engine::Postgres));
         app.click("change-confirm");
         app.settle(|cx| cx.debug_bounds("change-error").is_some());
         app.click("change-cascade");
@@ -419,6 +619,20 @@ mod postgres_only {
         assert!(app.cell(0, 0).is_some());
     }
 
+    // A DO block returns nothing, so a run of one opens on what it said.
+    #[gpui_kit::test]
+    fn a_do_blocks_notices_open_the_messages_tab(cx: &mut TestAppContext) {
+        let mut app = open_on(cx, Engine::Postgres);
+        app.connect();
+        app.run("DO $$ BEGIN RAISE NOTICE 'hello from the server'; RAISE WARNING 'careful'; END $$;");
+        let results = app.results();
+        assert!(app.cx.update(|_, cx| results.read(cx).messages_shown()));
+        let texts = app.cx.update(|_, cx| results.read(cx).message_texts());
+        let texts: Vec<&str> = texts.iter().map(|(_, _, text)| text.as_str()).collect();
+        assert_eq!(texts, ["hello from the server", "careful"]);
+        assert!(app.cx.debug_bounds("result-tab-messages").is_some());
+    }
+
     #[gpui_kit::test]
     fn schema_functions_are_listed_under_routines(cx: &mut TestAppContext) {
         let mut app = open_on(cx, Engine::Postgres);
@@ -433,5 +647,65 @@ mod postgres_only {
         let wanted = function.clone();
         app.settle(|cx| cx.update(|_, cx| tree.read(cx).listed().iter().any(|(_, label, _)| label.contains(&wanted))));
         app.seed(&format!("DROP FUNCTION {function}(int)"));
+    }
+}
+
+mod sqlserver_only {
+    use barsql_core::MessageLevel;
+    use gpui_kit::TestAppContext;
+
+    use super::{Engine, open_on, table, unique};
+    use crate::scenarios::driver::selector;
+
+    // A batch of PRINTs returns no rows, so the run opens on its Messages.
+    #[gpui_kit::test]
+    fn print_shows_in_the_messages_tab(cx: &mut TestAppContext) {
+        if !Engine::SqlServer.ready() {
+            return;
+        }
+        let mut app = open_on(cx, Engine::SqlServer);
+        app.connect();
+        app.run("PRINT 'hello from BarSQL'");
+        let results = app.results();
+        let (shown, texts) =
+            app.cx.update(|_, cx| (results.read(cx).messages_shown(), results.read(cx).message_texts()));
+        assert!(shown, "the Messages tab is open");
+        assert_eq!(texts, [(MessageLevel::Notice, String::new(), "hello from BarSQL".to_string())]);
+    }
+
+    // T-SQL has no LIMIT.
+    #[gpui_kit::test]
+    fn the_menus_select_takes_the_top_rows(cx: &mut TestAppContext) {
+        if !Engine::SqlServer.ready() {
+            return;
+        }
+        let mut app = open_on(cx, Engine::SqlServer);
+        let name = unique("e2e_top");
+        app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY); INSERT INTO {name} VALUES (1)"));
+        app.connect();
+        app.refresh_schema();
+        let row = table(&mut app, &name);
+        app.context_menu(selector(format!("tree:{row}")), 1);
+        let sql = app.sql();
+        assert!(sql.starts_with("SELECT TOP (100) "), "{sql}");
+        app.click("run-all");
+        app.wait_idle();
+        assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
+    }
+}
+
+mod turso_only {
+    use gpui_kit::TestAppContext;
+
+    use super::{Engine, open_on};
+    use crate::scenarios::editor::suggest;
+
+    // libSQL's vector functions come from its own pack, and the server's function list keeps them.
+    #[gpui_kit::test]
+    fn completion_offers_libsqls_vector_functions(cx: &mut TestAppContext) {
+        let mut app = open_on(cx, Engine::Turso);
+        app.connect();
+        app.refresh_schema();
+        suggest(&mut app, "SELECT vector_dist", "vector_distance_cos");
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use barsql_core::SqlDialect;
 use barsql_db::{Cell, ResultSet};
 use barsql_io::export::EXPORT_CHUNK_ROWS;
 use barsql_io::{ExportChunk, ExportFormat, Exporter, export_to_string};
@@ -68,11 +69,12 @@ pub fn chunks(
     staged: Option<Staged>,
     format: ExportFormat,
     table: Option<String>,
+    dialect: Option<SqlDialect>,
     target: CopyTarget,
 ) -> impl Iterator<Item = ExportChunk> {
     let names: Vec<String> = target.columns.iter().map(|&c| set.columns[c].name.clone()).collect();
     let types: Vec<String> = target.columns.iter().map(|&c| set.columns[c].type_name.clone()).collect();
-    let mut exporter = Some(Exporter::new(format, &names, &types, table.as_deref(), EXPORT_CHUNK_ROWS));
+    let mut exporter = Some(Exporter::new(format, &names, &types, table.as_deref(), dialect, EXPORT_CHUNK_ROWS));
     let mut rows = target.rows.into_iter();
     std::iter::from_fn(move || {
         loop {
@@ -92,12 +94,13 @@ pub fn export(
     staged: Option<&Staged>,
     format: ExportFormat,
     table: Option<&str>,
+    dialect: Option<SqlDialect>,
     target: &CopyTarget,
 ) -> String {
     let names: Vec<String> = target.columns.iter().map(|&c| set.columns[c].name.clone()).collect();
     let types: Vec<String> = target.columns.iter().map(|&c| set.columns[c].type_name.clone()).collect();
     let rows = target.rows.iter().map(|&row| target.columns.iter().map(|&c| shown(set, staged, row, c)).collect());
-    export_to_string(format, &names, &types, table, rows)
+    export_to_string(format, &names, &types, table, dialect, rows)
 }
 
 // Keeps NULLs as None so a paste can put back exactly what was copied.
@@ -208,9 +211,9 @@ mod tests {
         let view = View { order: &order, columns: &columns };
         let target = resolve(&Selection::default(), &view);
         assert_eq!(target, CopyTarget { columns: vec![2, 0], rows: vec![2, 0, 1] });
-        assert_eq!(export(&set(), None, ExportFormat::Csv, None, &target), "note,id\nx,3\n\"a,b\",1\n,2");
+        assert_eq!(export(&set(), None, ExportFormat::Csv, None, None, &target), "note,id\nx,3\n\"a,b\",1\n,2");
         let staged: Staged = Arc::new(HashMap::from([((0, 2), Some("staged".into())), ((2, 0), None)]));
-        assert_eq!(export(&set(), Some(&staged), ExportFormat::Csv, None, &target), "note,id\nx,\nstaged,1\n,2");
+        assert_eq!(export(&set(), Some(&staged), ExportFormat::Csv, None, None, &target), "note,id\nx,\nstaged,1\n,2");
         assert_eq!(values(&set(), Some(&staged), &target)[1], [Some("staged".into()), Some("1".into())]);
     }
 
@@ -228,7 +231,7 @@ mod tests {
         assert_eq!(resolve(&select(&[0, 2], &[]), &view), CopyTarget { columns: vec![0, 1, 2], rows: vec![2, 0] });
         assert_eq!(resolve(&select(&[1], &[2, 1]), &view), CopyTarget { columns: vec![1, 2], rows: vec![1] });
         let target = resolve(&select(&[], &[1]), &view);
-        assert_eq!(export(&set(), None, ExportFormat::Text, None, &target), "cy\nann\nbob");
+        assert_eq!(export(&set(), None, ExportFormat::Text, None, None, &target), "cy\nann\nbob");
     }
 
     #[test]
@@ -238,10 +241,11 @@ mod tests {
         let view = View { order: &order, columns: &columns };
         let target = resolve(&Selection::default(), &view);
         for format in barsql_io::EXPORT_FORMATS {
-            let joined: String = chunks(set(), None, format, None, target.clone()).map(|chunk| chunk.text).collect();
-            assert_eq!(joined, export(&set(), None, format, None, &target), "{format:?}");
+            let joined: String =
+                chunks(set(), None, format, None, None, target.clone()).map(|chunk| chunk.text).collect();
+            assert_eq!(joined, export(&set(), None, format, None, None, &target), "{format:?}");
         }
-        let rows: usize = chunks(set(), None, ExportFormat::Json, None, target).map(|chunk| chunk.rows).sum();
+        let rows: usize = chunks(set(), None, ExportFormat::Json, None, None, target).map(|chunk| chunk.rows).sum();
         assert_eq!(rows, 3);
     }
 
@@ -267,7 +271,7 @@ mod tests {
         let columns = [0, 1, 2];
         let view = View { order: &order, columns: &columns };
         let target = resolve(&Selection::default(), &view);
-        let text = export(&set(), None, ExportFormat::Text, None, &target);
+        let text = export(&set(), None, ExportFormat::Text, None, None, &target);
         let item = clipboard_item(text.clone(), Some(ExportFormat::Text), &set(), None, &target);
         assert_eq!(item.text(), Some(text.clone()), "other apps get the text");
         assert_eq!(copied_cells(&item), Some(values(&set(), None, &target)));

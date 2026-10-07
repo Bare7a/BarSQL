@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use barsql_app::ConnectionFolder;
-use barsql_core::{ConnectionConfig, DriverType};
+use barsql_core::ConnectionConfig;
+use barsql_core::capabilities::Location;
+use barsql_sql::system_views::{ViewScope, views};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
@@ -64,16 +66,29 @@ pub enum ConnectionsEvent {
     Edit(Box<ConnectionConfig>),
     // Connections or folders changed on disk.
     Changed,
+    // A server view to open in a new tab for the connection, and run.
+    OpenQuery { connection_id: String, sql: String, title: String },
 }
 
 pub fn connection_subtitle(c: &ConnectionConfig) -> String {
-    if c.driver == DriverType::Sqlite {
+    if c.driver.capabilities().location == Location::LocalFile {
         // Split on both separators since the path may have been saved on another OS.
         let file = c.file_path.rsplit(['/', '\\']).next().unwrap_or_default();
         return if file.is_empty() { "sqlite".into() } else { format!("sqlite · {file}") };
     }
+    if c.driver.capabilities().location == Location::Url {
+        // The host only: the scheme says little and a token may follow in the query.
+        let rest = c.url.split_once("://").map_or(c.url.as_str(), |(_, rest)| rest);
+        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        return if host.is_empty() { c.driver.to_string() } else { format!("{} · {host}", c.driver) };
+    }
+    // A SQL Server named instance, host\INSTANCE as its own tools write it.
+    let host = match c.instance.as_str() {
+        "" => c.host.clone(),
+        instance => format!("{}\\{instance}", c.host),
+    };
     let place =
-        [c.host.as_str(), c.database.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("/");
+        [host.as_str(), c.database.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("/");
     if place.is_empty() { c.driver.to_string() } else { format!("{} · {place}", c.driver) }
 }
 
@@ -313,7 +328,7 @@ impl ConnectionsPanel {
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let this = cx.entity().downgrade();
         let (connection, folders) = (connection.clone(), self.folders.clone());
-        move |menu, _, cx| {
+        move |menu, window, cx| {
             let with = |f: PanelAction| {
                 let this = this.clone();
                 move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
@@ -344,6 +359,22 @@ impl ConnectionsPanel {
                         ConnectionConfig { id: String::new(), name: duplicate_name.clone(), ..duplicate.clone() };
                     cx.emit(ConnectionsEvent::Edit(Box::new(copy)))
                 }))));
+            if views(&connection.driver, ViewScope::Server).next().is_some() {
+                let (this, connection) = (this.clone(), connection.clone());
+                menu = menu.separator().submenu(t(cx, "sidebar.serverViews"), window, cx, move |mut menu, _, cx| {
+                    for view in views(&connection.driver, ViewScope::Server) {
+                        let label = t(cx, &view.title_key());
+                        let (this, connection_id) = (this.clone(), connection.id.clone());
+                        let (sql, title) = (view.sql(&connection.driver, "", ""), label.to_string());
+                        menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                            let (connection_id, sql, title) = (connection_id.clone(), sql.clone(), title.clone());
+                            let _ = this
+                                .update(cx, |_, cx| cx.emit(ConnectionsEvent::OpenQuery { connection_id, sql, title }));
+                        }));
+                    }
+                    menu
+                });
+            }
             if !folders.is_empty() {
                 menu = menu.separator();
                 for folder in &folders {
@@ -698,6 +729,7 @@ mod tests {
                     ConnectionsEvent::Connected(id) => format!("connected {id}"),
                     ConnectionsEvent::Edit(_) => "edit".into(),
                     ConnectionsEvent::Changed => "changed".into(),
+                    ConnectionsEvent::OpenQuery { title, .. } => format!("open {title}"),
                 })
             })
             .detach()
@@ -739,6 +771,20 @@ mod tests {
         assert_eq!(connection_subtitle(&pg), "postgres · db.local/shop");
         let bare = ConnectionConfig { driver: DriverType::MySql, ..Default::default() };
         assert_eq!(connection_subtitle(&bare), "mysql");
+        let turso = ConnectionConfig {
+            driver: DriverType::Turso,
+            url: "libsql://notes-acme.turso.io?tls=1".into(),
+            ..Default::default()
+        };
+        assert_eq!(connection_subtitle(&turso), "turso · notes-acme.turso.io");
+        let named = ConnectionConfig {
+            driver: DriverType::SqlServer,
+            host: "db.local".into(),
+            instance: "SQLEXPRESS".into(),
+            database: "sales".into(),
+            ..Default::default()
+        };
+        assert_eq!(connection_subtitle(&named), r"sqlserver · db.local\SQLEXPRESS/sales");
         assert!(parse_color("#22c55e").is_some());
         assert!(parse_color("green").is_none());
     }

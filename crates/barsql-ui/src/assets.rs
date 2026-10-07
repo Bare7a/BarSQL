@@ -7,6 +7,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 icon_assets!(
     pub ExtraIcons,
     [
+        Activity,
         ArrowDownAZ,
         Ban,
         Bookmark,
@@ -33,6 +34,7 @@ icon_assets!(
         KeyRound,
         ListTree,
         Lock,
+        MessageSquareText,
         Minimize2,
         Pencil,
         Pin,
@@ -42,6 +44,7 @@ icon_assets!(
         Route,
         Save,
         Sheet,
+        Sigma,
         SlidersHorizontal,
         Square,
         SquareFunction,

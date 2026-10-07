@@ -19,6 +19,10 @@ each_engine!(async fn query_lifecycle(e) {
     assert!(selected.column_types.len() == 2 && !selected.column_types[0].is_empty(), "{:?}", selected.column_types);
     assert_eq!([&selected.rows[0][1], &selected.rows[1][1]], [&Value::from("alpha"), &Value::from("beta")]);
 
+    // ClickHouse changes rows through mutations, which this doesn't cover.
+    if e.is_clickhouse() {
+        return;
+    }
     let updated = e.query(&format!("UPDATE {t} SET name = 'ALPHA' WHERE name = 'alpha'")).await;
     assert_eq!(updated.affected_rows, 1);
     let deleted = e.query(&format!("DELETE FROM {t} WHERE name = 'beta'")).await;
@@ -44,12 +48,23 @@ each_engine!(async fn value_normalization(e) {
     let res = e.query("SELECT 'hi' AS t, 9007199254740993 AS big, NULL AS n").await;
     assert_eq!(res.rows[0], [Value::from("hi"), Value::from("9007199254740993"), Value::Null]);
 
-    let sql = if e.is_postgres() {
-        r#"SELECT '2021-06-07 08:09:10'::timestamp AS ts, decode('deadbeef','hex') AS b, '{"k": 1}'::jsonb AS j"#
-    } else {
-        "SELECT CAST('2021-06-07 08:09:10' AS DATETIME) AS ts, UNHEX('deadbeef') AS b"
+    // SQLite only reads text as a time in a column declared as one.
+    let lite = unique_table("values");
+    let sql = match e.kind {
+        Kind::Postgres => {
+            r#"SELECT '2021-06-07 08:09:10'::timestamp AS ts, decode('deadbeef','hex') AS b, '{"k": 1}'::jsonb AS j"#
+                .to_string()
+        }
+        Kind::MySql | Kind::MariaDb => "SELECT CAST('2021-06-07 08:09:10' AS DATETIME) AS ts, UNHEX('deadbeef') AS b".into(),
+        Kind::ClickHouse => "SELECT toDateTime('2021-06-07 08:09:10', 'UTC') AS ts, unhex('deadbeef') AS b".into(),
+        Kind::SqlServer => "SELECT CAST('2021-06-07 08:09:10' AS datetime2) AS ts, 0xDEADBEEF AS b".into(),
+        Kind::Turso => {
+            e.create_temp_table(&format!("CREATE TABLE {lite} (ts DATETIME, b BLOB)"), &lite).await;
+            e.exec(&format!("INSERT INTO {lite} VALUES ('2021-06-07 08:09:10', X'deadbeef')")).await;
+            format!("SELECT ts, b FROM {lite}")
+        }
     };
-    let row = e.query(sql).await.rows.remove(0);
+    let row = e.query(&sql).await.rows.remove(0);
     assert!(text(&row[0]).starts_with("2021-06-07T08:09:10"), "timestamps are RFC 3339: {row:?}");
     assert_eq!(row[1], Value::from(r"\xdeadbeef"), "binary is hex-encoded");
     if e.is_postgres() {
@@ -71,9 +86,20 @@ async fn returning_clause() {
     .await
 }
 
-fn series_sql(e: &E2e, rows: u32) -> String {
+// SQLite types only declared columns, so the series goes into a table first.
+async fn series_sql(e: &E2e, rows: u32) -> String {
     if e.is_postgres() {
         return format!("SELECT g AS id, 'r' || g AS name FROM generate_series(1, {rows}) AS g");
+    }
+    if e.is_lite() {
+        let table = unique_table("series");
+        e.create_temp_table(&format!("CREATE TABLE {table} (id INTEGER, name TEXT)"), &table).await;
+        e.exec(&format!(
+            "INSERT INTO {table} WITH RECURSIVE g(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < {rows}) \
+             SELECT n, 'r' || n FROM g"
+        ))
+        .await;
+        return format!("SELECT id, name FROM {table} ORDER BY id");
     }
     let digits = (0..10).map(|d| format!("SELECT {d} AS d")).collect::<Vec<_>>().join(" UNION ALL ");
     let (mut terms, mut joins, mut scale, mut n) = (Vec::new(), Vec::new(), 1, 0);
@@ -90,7 +116,7 @@ fn series_sql(e: &E2e, rows: u32) -> String {
 }
 
 each_engine!(async fn stream_batching(e) {
-    let events = e.run_on_tab("tab-stream", &series_sql(&e, 12_000)).await;
+    let events = e.run_on_tab("tab-stream", &series_sql(&e, 12_000).await).await;
     let meta = events.iter().position(|ev| matches!(ev, RunEvent::Meta { .. })).expect("column metadata");
     let first_rows = events.iter().position(|ev| matches!(ev, RunEvent::Rows { .. })).expect("rows");
     assert!(meta < first_rows, "column metadata must arrive before the rows");
@@ -120,7 +146,8 @@ each_engine!(async fn query_table_stream(e) {
     };
     let page = e.table_page(req).await.unwrap();
     assert_eq!((page.summary.row_count, page.rows.len()), (7, 7));
-    assert_eq!(page.summary.primary_keys, ["id"]);
+    let keys: &[&str] = if e.driver().capabilities().row_editing { &["id"] } else { &[] };
+    assert_eq!(page.summary.primary_keys, keys);
 });
 
 each_engine!(async fn multi_statement_script(e) {

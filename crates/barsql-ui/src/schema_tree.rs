@@ -2,13 +2,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 
-use barsql_core::{ColumnInfo, ConnectionConfig, ObjectKind, ObjectRef, TableInfo};
+use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, ObjectKind, ObjectRef, TableInfo};
 use barsql_sql::alter::ConstraintKind;
+use barsql_sql::dml::preview_select;
 use barsql_sql::lang::quoting::build_qualified_table;
+use barsql_sql::system_views::{ViewScope, views};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -54,7 +56,8 @@ pub fn init(cx: &mut App) {
 pub enum SchemaTreeEvent {
     // Insert at the active editor's caret.
     Insert(String),
-    OpenQuery { sql: String, title: String },
+    // `run` runs it as soon as its tab opens, as the system views do.
+    OpenQuery { sql: String, title: String, run: bool },
     Browse { schema: String, table: String },
     // Connect button succeeded for this connection id, so land in a tab for it.
     Connected(String),
@@ -478,7 +481,7 @@ impl SchemaTree {
                     self.push_table(&mut rows, conn, schema_name, table, cx);
                 }
             }
-            if !loading && needle.is_empty() {
+            if !loading && needle.is_empty() && Group::Routines.listed(&conn.driver) {
                 let group = routines_key(&conn.id, &sch.name);
                 self.push_group(&mut rows, 1, group, Group::Routines, &sch.name, None, cx);
             }
@@ -541,7 +544,7 @@ impl SchemaTree {
         }
         // Searching is a column hunt, so hide the object groups.
         if needle.is_empty() {
-            for group in Group::TABLE {
+            for group in Group::TABLE.into_iter().filter(|g| g.listed(&conn.driver)) {
                 let key = group_key(&conn.id, schema_name, &table.name, group);
                 self.push_group(rows, 2, key, group, schema_name, Some(&table.name), cx);
             }
@@ -616,6 +619,7 @@ impl SchemaTree {
                 Some(Ok(ddl)) if open => cx.emit(SchemaTreeEvent::OpenQuery {
                     sql: ddl,
                     title: t_with(cx, "sidebar.ddlTabTitle", &[("name", &object.name)]).to_string(),
+                    run: false,
                 }),
                 Some(Ok(ddl)) => Self::copy(ddl, t(cx, "toast.copiedDDL"), cx),
                 Some(Err(error)) => {
@@ -808,11 +812,12 @@ impl SchemaTree {
         let this = cx.entity().downgrade();
         let connection = self.connection.clone().unwrap_or_default();
         let writable = self.writable();
-        move |menu, _, cx| {
+        move |menu, window, cx| {
             let driver = &connection.driver;
             let qualified = build_qualified_table(driver, &schema_name, &table.name);
             let kind = ObjectKind::for_relation(&table.kind);
             let is_table = kind == ObjectKind::Table;
+            let table_views = is_table && views(driver, ViewScope::Table).next().is_some();
             let object = ObjectRef {
                 schema: schema_name.clone(),
                 name: table.name.clone(),
@@ -858,17 +863,26 @@ impl SchemaTree {
                 }
             };
             let select = SchemaTreeEvent::OpenQuery {
-                sql: format!("SELECT * FROM {qualified} LIMIT 100;"),
+                sql: preview_select(driver, &schema_name, &table.name, 100),
                 title: table.name.clone(),
+                run: false,
             };
             let browse = SchemaTreeEvent::Browse { schema: schema_name.clone(), table: table.name.clone() };
             let (schema, name) = (schema_name.clone(), table.name.clone());
             let rename = Change::RenameTable { schema: schema.clone(), table: name.clone(), kind: kind.clone() };
             let truncate = Change::Truncate { schema: schema.clone(), table: name.clone() };
             let drop = Change::DropTable { schema, table: name, kind };
+            let system_views = {
+                let (this, driver, schema, name) =
+                    (this.clone(), driver.clone(), schema_name.clone(), table.name.clone());
+                move |menu, _: &mut Window, cx: &mut Context<PopupMenu>| {
+                    Self::view_items(menu, &this, &driver, Some((&schema, &name)), cx)
+                }
+            };
             menu.item(PopupMenuItem::new(t(cx, "sidebar.browseData")).on_click(emit(browse)))
                 .item(PopupMenuItem::new(t(cx, "sidebar.selectInNewTab")).on_click(emit(select)))
                 .item(PopupMenuItem::new(t(cx, "sidebar.countRows")).on_click(count))
+                .when(table_views, |menu| menu.submenu(t(cx, "sidebar.systemViews"), window, cx, system_views))
                 .when(is_table, |menu| {
                     menu.separator()
                         .item(PopupMenuItem::new(t(cx, "sidebar.importIntoTable")).disabled(!writable).on_click(import))
@@ -893,6 +907,32 @@ impl SchemaTree {
                 })
                 .item(Self::change_item(&this, "sidebar.drop", drop.clone(), writable, cx))
         }
+    }
+
+    // One item per system view, each opening its query in a new tab and running it. With a table, the views are
+    // that table's and their tabs carry its name.
+    fn view_items(
+        mut menu: PopupMenu,
+        this: &WeakEntity<Self>,
+        driver: &DriverType,
+        table: Option<(&str, &str)>,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let scope = if table.is_some() { ViewScope::Table } else { ViewScope::Server };
+        let (schema, name) = table.unwrap_or_default();
+        for view in views(driver, scope) {
+            let label = t(cx, &view.title_key());
+            let title = match table {
+                Some(_) => t_with(cx, "systemViews.tableTabTitle", &[("view", label.as_ref()), ("name", name)]),
+                None => label.clone(),
+            };
+            let (this, sql, title) = (this.clone(), view.sql(driver, schema, name), title.to_string());
+            menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                let event = SchemaTreeEvent::OpenQuery { sql: sql.clone(), title: title.clone(), run: true };
+                let _ = this.update(cx, |_, cx| cx.emit(event));
+            }));
+        }
+        menu
     }
 
     // No Insert item since a click already inserts the name. A view's columns only offer Copy.
@@ -1219,6 +1259,9 @@ impl SchemaTree {
     fn filter_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let enabled = self.connected(cx);
         let loading = self.connection.as_ref().is_some_and(|c| schema::get(cx, &c.id).is_some_and(|d| d.loading()));
+        let driver = self.connection.as_ref().map(|c| c.driver.clone()).unwrap_or_default();
+        let server_views = views(&driver, ViewScope::Server).next().is_some();
+        let this = cx.entity().downgrade();
         let field = div()
             .debug_selector(|| "schema-search".into())
             .child(form::filter_input(&self.search, window, cx).cleanable(true).disabled(!enabled));
@@ -1230,6 +1273,15 @@ impl SchemaTree {
                     .disabled(!enabled)
                     .on_click(cx.listener(|this, _, window, cx| this.import_default(window, cx))),
             )
+            .when(server_views, |bar| {
+                bar.child(
+                    form::filter_button("server-views", Icon::new(Lucide::Activity))
+                        .debug_selector(|| "server-views".into())
+                        .tooltip(t(cx, "sidebar.serverViews"))
+                        .disabled(!enabled)
+                        .dropdown_menu(move |menu, _, cx| Self::view_items(menu, &this, &driver, None, cx)),
+                )
+            })
             .child(
                 form::filter_button("refresh-schema", Icon::new(Lucide::RefreshCw))
                     .debug_selector(|| "refresh-schema".into())

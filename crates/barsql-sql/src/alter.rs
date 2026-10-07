@@ -1,6 +1,7 @@
-use barsql_core::{DriverType, ObjectKind, ObjectRef};
+use barsql_core::{DriverType, ObjectKind, ObjectRef, SqlDialect};
 
-use crate::quote::{quote_ident, table_ref};
+use crate::dialect::Dialect;
+use crate::quote::{quote_ident, quote_literal, table_ref};
 
 // SQL for the schema tree's Rename, Truncate and Drop actions. None of it ends with a semicolon.
 
@@ -28,7 +29,14 @@ impl ConstraintKind {
 
 // Only Postgres gets CASCADE. The other engines lack the clause or ignore it.
 fn cascade(driver: &DriverType, on: bool) -> &'static str {
-    if on && *driver == DriverType::Postgres { " CASCADE" } else { "" }
+    if on && Dialect::for_driver(driver).cascade { " CASCADE" } else { "" }
+}
+
+// SQL Server renames through sp_rename. Its first argument may use brackets, but its second is the bare new
+// name, so brackets there would become part of it.
+fn sp_rename(object: &str, new_name: &str, kind: Option<&str>) -> String {
+    let kind = kind.map(|k| format!(", {}", quote_literal(k))).unwrap_or_default();
+    format!("EXEC sp_rename N{}, N{}{kind}", quote_literal(object), quote_literal(new_name))
 }
 
 // SQLite can't rename views, so those return None.
@@ -41,20 +49,26 @@ pub fn rename_relation(
 ) -> Option<String> {
     let from = table_ref(driver, schema, name);
     let to = quote_ident(driver, new_name);
-    Some(match (driver, kind) {
-        (DriverType::MySql, _) => format!("RENAME TABLE {from} TO {}", table_ref(driver, schema, new_name)),
-        (DriverType::Sqlite, ObjectKind::Table) => format!("ALTER TABLE {from} RENAME TO {to}"),
-        (DriverType::Sqlite, _) => return None,
-        (_, ObjectKind::View) => format!("ALTER VIEW {from} RENAME TO {to}"),
-        (_, ObjectKind::MaterializedView) => format!("ALTER MATERIALIZED VIEW {from} RENAME TO {to}"),
-        _ => format!("ALTER TABLE {from} RENAME TO {to}"),
+    Some(match Dialect::for_driver(driver).id {
+        Some(SqlDialect::MySql | SqlDialect::ClickHouse) => {
+            format!("RENAME TABLE {from} TO {}", table_ref(driver, schema, new_name))
+        }
+        Some(SqlDialect::Sqlite) if *kind == ObjectKind::Table => format!("ALTER TABLE {from} RENAME TO {to}"),
+        Some(SqlDialect::Sqlite) => return None,
+        Some(SqlDialect::TSql) => sp_rename(&from, new_name, None),
+        Some(SqlDialect::Postgres) | None => match kind {
+            ObjectKind::View => format!("ALTER VIEW {from} RENAME TO {to}"),
+            ObjectKind::MaterializedView => format!("ALTER MATERIALIZED VIEW {from} RENAME TO {to}"),
+            _ => format!("ALTER TABLE {from} RENAME TO {to}"),
+        },
     })
 }
 
 pub fn drop_relation(driver: &DriverType, kind: &ObjectKind, schema: &str, name: &str, cascades: bool) -> String {
+    let postgres = Dialect::for_driver(driver).id == Some(SqlDialect::Postgres);
     let what = match kind {
         ObjectKind::View => "VIEW",
-        ObjectKind::MaterializedView if *driver == DriverType::Postgres => "MATERIALIZED VIEW",
+        ObjectKind::MaterializedView if postgres => "MATERIALIZED VIEW",
         ObjectKind::MaterializedView => "VIEW",
         _ => "TABLE",
     };
@@ -70,23 +84,32 @@ pub fn truncate_table(
     cascades: bool,
 ) -> String {
     let target = table_ref(driver, schema, table);
-    match driver {
-        DriverType::Sqlite => format!("DELETE FROM {target}"),
-        DriverType::Postgres => {
+    match Dialect::for_driver(driver).id {
+        Some(SqlDialect::Sqlite) => format!("DELETE FROM {target}"),
+        Some(SqlDialect::Postgres) => {
             let restart = if restart_identity { " RESTART IDENTITY" } else { "" };
             format!("TRUNCATE TABLE {target}{restart}{}", cascade(driver, cascades))
         }
-        _ => format!("TRUNCATE TABLE {target}"),
+        Some(SqlDialect::MySql | SqlDialect::TSql | SqlDialect::ClickHouse) | None => {
+            format!("TRUNCATE TABLE {target}")
+        }
     }
 }
 
 pub fn rename_column(driver: &DriverType, schema: &str, table: &str, column: &str, new_name: &str) -> String {
-    format!(
-        "ALTER TABLE {} RENAME COLUMN {} TO {}",
-        table_ref(driver, schema, table),
-        quote_ident(driver, column),
-        quote_ident(driver, new_name)
-    )
+    let table = table_ref(driver, schema, table);
+    match Dialect::for_driver(driver).id {
+        Some(SqlDialect::TSql) => {
+            sp_rename(&format!("{table}.{}", quote_ident(driver, column)), new_name, Some("COLUMN"))
+        }
+        Some(SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::ClickHouse) | None => {
+            format!(
+                "ALTER TABLE {table} RENAME COLUMN {} TO {}",
+                quote_ident(driver, column),
+                quote_ident(driver, new_name)
+            )
+        }
+    }
 }
 
 pub fn drop_column(driver: &DriverType, schema: &str, table: &str, column: &str, cascades: bool) -> String {
@@ -107,29 +130,46 @@ pub fn drop_object(
 ) -> Option<String> {
     let name = quote_ident(driver, &object.name);
     let table = table_ref(driver, &object.schema, &object.table);
+    let qualified = table_ref(driver, &object.schema, &object.name);
     let tail = cascade(driver, cascades);
-    let sql = match (&object.kind, driver) {
-        (ObjectKind::Index, DriverType::Sqlite) if object.name.starts_with("sqlite_autoindex_") => return None,
-        (ObjectKind::Index, DriverType::MySql) => format!("DROP INDEX {name} ON {table}"),
-        (ObjectKind::Index, _) => format!("DROP INDEX {}{tail}", table_ref(driver, &object.schema, &object.name)),
-        (ObjectKind::Constraint, DriverType::Sqlite) => return None,
-        (ObjectKind::Constraint, _) if object.name.is_empty() => return None,
-        (ObjectKind::Constraint, DriverType::MySql) => match constraint {
-            ConstraintKind::PrimaryKey => format!("ALTER TABLE {table} DROP PRIMARY KEY"),
-            ConstraintKind::ForeignKey => format!("ALTER TABLE {table} DROP FOREIGN KEY {name}"),
-            ConstraintKind::Unique => format!("ALTER TABLE {table} DROP INDEX {name}"),
-            ConstraintKind::Check | ConstraintKind::Other => format!("ALTER TABLE {table} DROP CONSTRAINT {name}"),
+    let dialect = Dialect::for_driver(driver).id;
+    let sql = match &object.kind {
+        ObjectKind::Index => match dialect {
+            Some(SqlDialect::Sqlite) if object.name.starts_with("sqlite_autoindex_") => return None,
+            Some(SqlDialect::MySql | SqlDialect::TSql) => format!("DROP INDEX {name} ON {table}"),
+            // A ClickHouse data-skipping index belongs to its table.
+            Some(SqlDialect::ClickHouse) => format!("ALTER TABLE {table} DROP INDEX {name}"),
+            Some(SqlDialect::Postgres | SqlDialect::Sqlite) | None => format!("DROP INDEX {qualified}{tail}"),
         },
-        (ObjectKind::Constraint, _) => format!("ALTER TABLE {table} DROP CONSTRAINT {name}{tail}"),
-        (ObjectKind::Trigger, DriverType::Postgres) => format!("DROP TRIGGER {name} ON {table}{tail}"),
-        (ObjectKind::Trigger, _) => format!("DROP TRIGGER {}", table_ref(driver, &object.schema, &object.name)),
-        (ObjectKind::Function | ObjectKind::Procedure, DriverType::Sqlite) => return None,
-        (ObjectKind::Function | ObjectKind::Procedure, _) => {
+        ObjectKind::Constraint if object.name.is_empty() => return None,
+        ObjectKind::Constraint => match dialect {
+            Some(SqlDialect::Sqlite) => return None,
+            Some(SqlDialect::MySql) => match constraint {
+                ConstraintKind::PrimaryKey => format!("ALTER TABLE {table} DROP PRIMARY KEY"),
+                ConstraintKind::ForeignKey => format!("ALTER TABLE {table} DROP FOREIGN KEY {name}"),
+                ConstraintKind::Unique => format!("ALTER TABLE {table} DROP INDEX {name}"),
+                ConstraintKind::Check | ConstraintKind::Other => format!("ALTER TABLE {table} DROP CONSTRAINT {name}"),
+            },
+            Some(SqlDialect::Postgres | SqlDialect::TSql | SqlDialect::ClickHouse) | None => {
+                format!("ALTER TABLE {table} DROP CONSTRAINT {name}{tail}")
+            }
+        },
+        ObjectKind::Trigger => match dialect {
+            Some(SqlDialect::Postgres) => format!("DROP TRIGGER {name} ON {table}{tail}"),
+            Some(SqlDialect::ClickHouse) => return None,
+            Some(SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::TSql) | None => {
+                format!("DROP TRIGGER {qualified}")
+            }
+        },
+        ObjectKind::Function | ObjectKind::Procedure => {
             let what = if object.kind == ObjectKind::Procedure { "PROCEDURE" } else { "FUNCTION" };
-            let routine = table_ref(driver, &object.schema, &object.name);
-            match driver {
-                DriverType::Postgres => format!("DROP {what} {routine}({}){tail}", object.args),
-                _ => format!("DROP {what} {routine}"),
+            match dialect {
+                Some(SqlDialect::Sqlite) => return None,
+                Some(SqlDialect::Postgres) => format!("DROP {what} {qualified}({}){tail}", object.args),
+                // ClickHouse user functions are global and there are no procedures.
+                Some(SqlDialect::ClickHouse) if object.kind == ObjectKind::Function => format!("DROP FUNCTION {name}"),
+                Some(SqlDialect::ClickHouse) => return None,
+                Some(SqlDialect::MySql | SqlDialect::TSql) | None => format!("DROP {what} {qualified}"),
             }
         }
         _ => return None,
@@ -243,6 +283,42 @@ mod tests {
         let procedure = object(ObjectKind::Procedure, "tidy");
         assert_eq!(drop(&PG, &procedure, ConstraintKind::Other).unwrap(), r#"DROP PROCEDURE "app"."tidy"()"#);
         assert_eq!(drop(&MY, &procedure, ConstraintKind::Other).unwrap(), "DROP PROCEDURE `app`.`tidy`");
+    }
+
+    #[test]
+    fn new_dialects_rename_and_drop_their_way() {
+        let mssql = DriverType::SqlServer;
+        let ch = DriverType::ClickHouse;
+        assert_eq!(
+            rename_relation(&mssql, &ObjectKind::Table, "dbo", "users", "people").unwrap(),
+            "EXEC sp_rename N'[dbo].[users]', N'people'"
+        );
+        assert_eq!(
+            rename_column(&mssql, "dbo", "users", "e'mail", "email"),
+            "EXEC sp_rename N'[dbo].[users].[e''mail]', N'email', 'COLUMN'"
+        );
+        assert_eq!(
+            rename_relation(&ch, &ObjectKind::Table, "db", "users", "people").unwrap(),
+            "RENAME TABLE `db`.`users` TO `db`.`people`"
+        );
+        assert_eq!(truncate_table(&mssql, "dbo", "t", true, true), "TRUNCATE TABLE [dbo].[t]");
+        assert_eq!(drop_relation(&ch, &ObjectKind::MaterializedView, "db", "mv", true), "DROP VIEW `db`.`mv`");
+        let index = object(ObjectKind::Index, "ix");
+        assert_eq!(
+            drop_object(&mssql, &index, ConstraintKind::Other, true).unwrap(),
+            "DROP INDEX [ix] ON [app].[users]"
+        );
+        assert_eq!(
+            drop_object(&ch, &index, ConstraintKind::Other, true).unwrap(),
+            "ALTER TABLE `app`.`users` DROP INDEX `ix`"
+        );
+        assert_eq!(drop_object(&ch, &object(ObjectKind::Trigger, "t"), ConstraintKind::Other, false), None);
+        assert_eq!(
+            drop_object(&ch, &object(ObjectKind::Function, "f"), ConstraintKind::Other, false).unwrap(),
+            "DROP FUNCTION `f`"
+        );
+        let turso = DriverType::Turso;
+        assert_eq!(rename_relation(&turso, &ObjectKind::View, "main", "v", "w"), None);
     }
 
     #[test]

@@ -21,6 +21,7 @@ mod import_dialog;
 mod insert_row;
 mod json_panel;
 mod list_nav;
+mod message_log;
 mod modal;
 mod plan_tree;
 mod plan_view;

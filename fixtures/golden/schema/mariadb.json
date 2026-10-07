@@ -36,7 +36,8 @@
           "dataType": "int",
           "isNullable": false,
           "isPrimary": true,
-          "isForeign": false
+          "isForeign": false,
+          "isIdentity": true
         },
         {
           "name": "email",
@@ -171,7 +172,8 @@
           "dataType": "bigint",
           "isNullable": false,
           "isPrimary": true,
-          "isForeign": false
+          "isForeign": false,
+          "isIdentity": true
         },
         {
           "name": "customer_id",
@@ -204,7 +206,8 @@
           "isNullable": true,
           "isPrimary": false,
           "isForeign": false,
-          "defaultVal": "NULL"
+          "defaultVal": "NULL",
+          "isComputed": true
         }
       ],
       "indexes": [
@@ -562,6 +565,21 @@
       "name": "reset_status",
       "schema": "barsql_golden",
       "kind": "procedure"
+    }
+  ],
+  "functions": [
+    {
+      "name": "add_one",
+      "schema": "barsql_golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "a int(11)",
+          "returns": "int(11)"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true
     }
   ],
   "ddl": [

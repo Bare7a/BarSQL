@@ -8,6 +8,7 @@ use barsql_ui::LaunchOptions;
 use single_instance::Instance;
 
 fn main() -> anyhow::Result<()> {
+    barsql_app::install_default_provider();
     if let Some(code) = barsql_app::update::helper_mode() {
         std::process::exit(code);
     }
@@ -23,7 +24,11 @@ fn main() -> anyhow::Result<()> {
         },
     };
     barsql_app::update::sweep_update_leftovers();
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().context("tokio runtime")?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(barsql_app::WORKER_STACK)
+        .enable_all()
+        .build()
+        .context("tokio runtime")?;
     let bar = BarApp::open(&data_dir, runtime.handle().clone()).context("open data folder")?;
     if let Some(path) = find_sqlite_arg(&args) {
         bar.set_pending_file(&path);

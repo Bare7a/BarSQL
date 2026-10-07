@@ -19,6 +19,11 @@ pub enum Kind {
     Postgres,
     MySql,
     MariaDb,
+    // sqld from docker-compose.yml, or a Turso database given by BARSQL_E2E_TURSO_URL and _TOKEN.
+    Turso,
+    ClickHouse,
+    // The mssql profile's server, Azure SQL Edge on arm64. Runs only with BARSQL_E2E_MSSQL=1.
+    SqlServer,
 }
 
 impl Kind {
@@ -27,6 +32,9 @@ impl Kind {
             Self::Postgres => "postgres",
             Self::MySql => "mysql",
             Self::MariaDb => "mariadb",
+            Self::Turso => "turso",
+            Self::ClickHouse => "clickhouse",
+            Self::SqlServer => "sqlserver",
         }
     }
 
@@ -35,12 +43,21 @@ impl Kind {
             Self::Postgres => "PG",
             Self::MySql => "MYSQL",
             Self::MariaDb => "MARIADB",
+            Self::Turso => "TURSO",
+            Self::ClickHouse => "CH",
+            Self::SqlServer => "MSSQL",
         };
         std::env::var(format!("BARSQL_E2E_{prefix}_{key}")).unwrap_or_else(|_| default.to_string())
     }
 
     pub fn driver(self) -> DriverType {
-        if self == Self::Postgres { DriverType::Postgres } else { DriverType::MySql }
+        match self {
+            Self::Postgres => DriverType::Postgres,
+            Self::MySql | Self::MariaDb => DriverType::MySql,
+            Self::Turso => DriverType::Turso,
+            Self::ClickHouse => DriverType::ClickHouse,
+            Self::SqlServer => DriverType::SqlServer,
+        }
     }
 
     pub fn config(self) -> ConnectionConfig {
@@ -48,6 +65,17 @@ impl Kind {
             Self::Postgres => ("55432", "postgres", "postgres"),
             Self::MySql => ("33306", "root", "root"),
             Self::MariaDb => ("33307", "root", "root"),
+            Self::ClickHouse => ("38123", "default", "clickhouse"),
+            Self::SqlServer => ("31433", "sa", "BarSQL-e2e-Passw0rd"),
+            Self::Turso => {
+                return ConnectionConfig {
+                    name: format!("e2e-{}", self.name()),
+                    driver: self.driver(),
+                    url: self.env("URL", "http://127.0.0.1:38080"),
+                    auth_token: self.env("TOKEN", ""),
+                    ..Default::default()
+                };
+            }
         };
         ConnectionConfig {
             name: format!("e2e-{}", self.name()),
@@ -57,10 +85,44 @@ impl Kind {
             database: self.env("DB", "barsql_test"),
             username: self.env("USER", user),
             password: self.env("PASSWORD", password),
-            ssl_mode: if self == Self::Postgres { "disable".into() } else { String::new() },
+            ssl_mode: match self {
+                Self::Postgres | Self::ClickHouse => "disable".into(),
+                Self::SqlServer => "require".into(),
+                Self::MySql | Self::MariaDb | Self::Turso => String::new(),
+            },
             ..Default::default()
         }
     }
+}
+
+// The stack's SQL Server starts without barsql_test, and refuses logins for a few seconds after it reports healthy.
+// False when the profile is off.
+async fn mssql_ready() -> bool {
+    if std::env::var("BARSQL_E2E_MSSQL").as_deref() != Ok("1") {
+        eprintln!("skipped: set BARSQL_E2E_MSSQL=1 and start the mssql profile");
+        return false;
+    }
+    let cfg = Kind::SqlServer.config();
+    let master = ConnectionConfig { database: "master".into(), ..cfg.clone() };
+    for _ in 0..30 {
+        if let Ok(engine) = Engine::connect(&master).await {
+            // Readers see the last committed rows instead of waiting on a writer, as on the other engines.
+            let snapshot = format!(
+                "IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{0}' AND is_read_committed_snapshot_on = 0)
+                ALTER DATABASE [{0}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE",
+                cfg.database
+            );
+            let create = format!("IF DB_ID(N'{0}') IS NULL CREATE DATABASE [{0}]", cfg.database);
+            let mut session = engine.session().await.unwrap();
+            for sql in [create, snapshot] {
+                session.buffered(&sql, &Cancel::new()).await.unwrap();
+            }
+            engine.close().await;
+            return true;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("SQL Server is not reachable; start it with BARSQL_E2E_MSSQL=1 cargo xtask e2e up");
 }
 
 // Fresh per run, so repeated or parallel runs never collide with a leftover table.
@@ -86,11 +148,25 @@ pub struct E2e {
     drops: Mutex<Vec<String>>,
 }
 
+// The app's own runtime settings, with two workers.
+pub fn block_on<F: Future>(test: F) -> F::Output {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_stack_size(barsql_app::WORKER_STACK)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(test)
+}
+
 pub async fn run<F, Fut>(kind: Kind, body: F)
 where
     F: FnOnce(Arc<E2e>) -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
+    if kind == Kind::SqlServer && !mssql_ready().await {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let app = BarApp::open(&dir.path().join("data"), tokio::runtime::Handle::current()).unwrap();
     let id = app.save_connection(kind.config()).await.unwrap_or_else(|e| panic!("[{}] save: {e:?}", kind.name())).id;
@@ -120,37 +196,103 @@ impl E2e {
         self.kind == Kind::Postgres
     }
 
-    pub fn schema(&self) -> String {
-        if self.is_postgres() { "public".into() } else { self.kind.config().database }
+    pub fn is_mysql(&self) -> bool {
+        matches!(self.kind, Kind::MySql | Kind::MariaDb)
     }
 
+    // SQLite's dialect over a server.
+    pub fn is_lite(&self) -> bool {
+        self.kind == Kind::Turso
+    }
+
+    pub fn is_clickhouse(&self) -> bool {
+        self.kind == Kind::ClickHouse
+    }
+
+    pub fn is_sqlserver(&self) -> bool {
+        self.kind == Kind::SqlServer
+    }
+
+    pub fn schema(&self) -> String {
+        match self.kind {
+            Kind::Postgres => "public".into(),
+            Kind::MySql | Kind::MariaDb | Kind::ClickHouse => self.kind.config().database,
+            Kind::Turso => "main".into(),
+            Kind::SqlServer => "dbo".into(),
+        }
+    }
+
+    // ClickHouse tables need an engine. A table without a key orders by nothing.
+    pub fn engine_clause(&self) -> &'static str {
+        if self.is_clickhouse() { " ENGINE = MergeTree ORDER BY tuple()" } else { "" }
+    }
+
+    // SQLite takes no schema in REFERENCES or CREATE INDEX … ON, and main is the only one anyway.
     pub fn qualified(&self, table: &str) -> String {
+        if self.is_lite() {
+            return barsql_sql::quote_ident(&self.driver(), table);
+        }
         qualified_table(&self.driver(), &self.schema(), table)
     }
 
+    // A lone INTEGER PRIMARY KEY is SQLite's rowid, which fills itself in.
     pub fn pk_column(&self) -> &'static str {
-        if self.is_postgres() { "id SERIAL PRIMARY KEY" } else { "id INT AUTO_INCREMENT PRIMARY KEY" }
+        match self.kind {
+            Kind::Postgres => "id SERIAL PRIMARY KEY",
+            Kind::MySql | Kind::MariaDb => "id INT AUTO_INCREMENT PRIMARY KEY",
+            Kind::Turso => "id INTEGER PRIMARY KEY",
+            // No auto-increment, but snowflake ids are unique and grow.
+            Kind::ClickHouse => "id UInt64 DEFAULT generateSnowflakeID()",
+            Kind::SqlServer => "id INT IDENTITY(1, 1) PRIMARY KEY",
+        }
     }
 
     pub fn auto_pk_table(&self, table: &str) -> String {
-        let name = if self.is_postgres() { "TEXT" } else { "VARCHAR(255)" };
+        if self.is_clickhouse() {
+            return format!("CREATE TABLE {table} ({}, name String) ENGINE = MergeTree ORDER BY id", self.pk_column());
+        }
+        let name = match self.kind {
+            Kind::MySql | Kind::MariaDb => "VARCHAR(255)",
+            // text is deprecated there, and can't be compared.
+            Kind::SqlServer => "NVARCHAR(255)",
+            Kind::Postgres | Kind::Turso | Kind::ClickHouse => "TEXT",
+        };
         format!("CREATE TABLE {table} ({}, name {name} NOT NULL)", self.pk_column())
     }
 
     pub fn json_type(&self) -> &'static str {
-        if self.is_postgres() { "jsonb" } else { "json" }
+        match self.kind {
+            Kind::Postgres => "jsonb",
+            Kind::MySql | Kind::MariaDb => "json",
+            Kind::Turso => "TEXT",
+            Kind::ClickHouse => "Nullable(String)",
+            Kind::SqlServer => "NVARCHAR(MAX)",
+        }
     }
 
     pub fn bool_type(&self) -> &'static str {
-        if self.is_postgres() { "BOOLEAN" } else { "TINYINT(1)" }
+        match self.kind {
+            Kind::MySql | Kind::MariaDb => "TINYINT(1)",
+            Kind::Postgres | Kind::Turso => "BOOLEAN",
+            Kind::ClickHouse => "Nullable(Bool)",
+            Kind::SqlServer => "BIT",
+        }
     }
 
-    // MySQL answers a killed bare SELECT SLEEP(n) with 1 instead of an error, so it sleeps per row.
+    // MySQL answers a killed bare SELECT SLEEP(n) with 1 instead of an error, so it sleeps per row. SQLite has no
+    // sleep, so it counts for about as long.
     pub fn sleep_sql(&self, seconds: u32) -> String {
         match self.kind {
             Kind::Postgres => format!("SELECT pg_sleep({seconds})"),
             Kind::MySql => format!("SELECT SLEEP({seconds}) FROM (SELECT 1 AS x UNION ALL SELECT 2) AS t"),
             Kind::MariaDb => format!("SELECT SLEEP({seconds})"),
+            Kind::Turso => format!(
+                "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < {}) SELECT max(x) FROM c",
+                u64::from(seconds) * 2_000_000
+            ),
+            // sleep() stops at 3 seconds a block, so a second a row.
+            Kind::ClickHouse => format!("SELECT sleepEachRow(1) FROM numbers({seconds}) SETTINGS max_block_size = 1"),
+            Kind::SqlServer => format!("WAITFOR DELAY '00:00:{seconds:02}'; SELECT 1 AS slept"),
         }
     }
 
@@ -307,7 +449,7 @@ impl Streamed {
     }
 
     pub fn export(&self, format: ExportFormat) -> String {
-        export_to_string(format, &self.columns, &self.types, None, self.rows())
+        export_to_string(format, &self.columns, &self.types, None, None, self.rows())
     }
 }
 

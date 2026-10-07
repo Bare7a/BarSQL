@@ -15,20 +15,44 @@ macro_rules! each_engine {
             #[allow(unused_imports)]
             use super::*;
 
-            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-            async fn postgres() {
-                crate::harness::run(crate::harness::Kind::Postgres, |$e| async move $body).await
+            #[test]
+            fn postgres() {
+                crate::harness::block_on(crate::harness::run(crate::harness::Kind::Postgres, |$e| async move $body))
             }
 
-            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-            async fn mysql() {
-                crate::harness::run(crate::harness::Kind::MySql, |$e| async move $body).await
+            #[test]
+            fn mysql() {
+                crate::harness::block_on(crate::harness::run(crate::harness::Kind::MySql, |$e| async move $body))
             }
 
-            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-            async fn mariadb() {
-                crate::harness::run(crate::harness::Kind::MariaDb, |$e| async move $body).await
+            #[test]
+            fn mariadb() {
+                crate::harness::block_on(crate::harness::run(crate::harness::Kind::MariaDb, |$e| async move $body))
             }
+
+            #[test]
+            fn turso() {
+                crate::harness::block_on(crate::harness::run(crate::harness::Kind::Turso, |$e| async move $body))
+            }
+
+            #[test]
+            fn clickhouse() {
+                crate::harness::block_on(crate::harness::run(crate::harness::Kind::ClickHouse, |$e| async move $body))
+            }
+
+            #[test]
+            fn sqlserver() {
+                crate::harness::block_on(crate::harness::run(crate::harness::Kind::SqlServer, |$e| async move $body))
+            }
+        }
+    };
+}
+
+// Ends the test early on an engine without the capability, like interactive transactions on Turso.
+macro_rules! require {
+    ($e:ident, $capability:ident) => {
+        if !$e.driver().capabilities().$capability {
+            return;
         }
     };
 }
@@ -41,4 +65,5 @@ mod query;
 mod roundtrip;
 mod schema;
 mod ssh;
+mod system_views;
 mod transactions;

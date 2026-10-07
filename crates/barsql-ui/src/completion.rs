@@ -10,7 +10,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
-    CompletionTriggerKind,
+    CompletionTriggerKind, InsertTextFormat,
 };
 
 use crate::scrollbars::HoverScrollbar as _;
@@ -247,10 +247,18 @@ impl<M: InputModeKind> Completion<M> {
             (state.value(), state.cursor())
         };
         let (range, new_text) = edit(&item, self.start.min(cursor)..cursor, &text);
+        let (new_text, caret) = if item.insert_text_format == Some(InsertTextFormat::SNIPPET) {
+            expand_snippet(&new_text)
+        } else {
+            let end = new_text.len();
+            (new_text, end)
+        };
         self.hide(cx);
+        let at = range.start + caret;
         self.editor.update(cx, |state, cx| {
             state.set_selected_range(range, cx);
             state.replace(new_text, window, cx);
+            state.set_selected_range(at..at, cx);
         });
     }
 
@@ -264,6 +272,7 @@ impl<M: InputModeKind> Completion<M> {
             HighlightStyle { color: Some(highlight), font_weight: Some(FontWeight::BOLD), ..Default::default() };
         let label = StyledText::new(suggestion.item.label.clone())
             .with_highlights(suggestion.matched.iter().map(|range| (range.clone(), style)));
+        let args = suggestion.item.label_details.as_ref().and_then(|details| details.detail.clone());
         h_flex()
             .id(ix)
             .w_full()
@@ -286,10 +295,22 @@ impl<M: InputModeKind> Completion<M> {
                     Icon::new(icon).size(px(14.)).text_color(if selected { palette.selected_text } else { color }),
                 ),
             )
-            .child(div().min_w_0().truncate().child(label))
+            // A function's arguments follow its name, dimmed, and give way first when the row runs out of room.
+            .map(|row| match args {
+                Some(args) => row.child(
+                    h_flex().min_w_0().child(div().flex_none().max_w(px(210.)).truncate().child(label)).child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(if selected { palette.selected_text.opacity(0.7) } else { palette.dim })
+                            .child(args),
+                    ),
+                ),
+                None => row.child(div().min_w_0().truncate().child(label)),
+            })
             .children(suggestion.item.detail.clone().filter(|_| selected).map(|detail| {
                 let size = metrics.font_size * 0.85;
-                div().flex_none().ml_auto().pl(size * 1.1).text_size(size).child(detail)
+                div().flex_none().max_w(px(170.)).truncate().ml_auto().pl(size * 1.1).text_size(size).child(detail)
             }))
             .into_any_element()
     }
@@ -299,6 +320,7 @@ struct Palette {
     background: Hsla,
     border: Hsla,
     text: Hsla,
+    dim: Hsla,
     selected: Hsla,
     selected_text: Hsla,
     hover: Hsla,
@@ -320,6 +342,7 @@ fn palette(cx: &App) -> Palette {
             background: theme.sidebar,
             border: hsla(0., 0., 0.8, 0.2),
             text: theme.foreground,
+            dim: theme.muted_foreground,
             selected: rgb_hsla(0x04395e),
             selected_text: rgb_hsla(0xffffff),
             hover: rgb_hsla(0x2a2d2e),
@@ -331,6 +354,7 @@ fn palette(cx: &App) -> Palette {
             background: theme.background,
             border: hsla(0., 0., 0.38, 0.2),
             text: theme.foreground,
+            dim: theme.muted_foreground,
             selected: rgb_hsla(0x0060c0),
             selected_text: rgb_hsla(0xffffff),
             hover: rgb_hsla(0xe8e8e8),
@@ -351,7 +375,7 @@ fn kind_icon(kind: Option<CompletionItemKind>, dark: bool) -> (Lucide, Hsla) {
         Some(CompletionItemKind::CLASS) => (Lucide::Workflow, 0xee9d28, 0xd67e00),
         Some(CompletionItemKind::FIELD) => (Lucide::Box, 0x75beff, 0x007acc),
         Some(CompletionItemKind::MODULE) => (Lucide::Braces, 0xcccccc, 0x616161),
-        Some(CompletionItemKind::FUNCTION | CompletionItemKind::METHOD) => (Lucide::Box, 0xb180d7, 0x652d90),
+        Some(CompletionItemKind::FUNCTION | CompletionItemKind::METHOD) => (Lucide::SquareFunction, 0xb180d7, 0x652d90),
         _ => (Lucide::TextAlignStart, 0xcccccc, 0x616161),
     };
     (icon, rgb(if dark { dark_color } else { light_color }).into())
@@ -389,6 +413,26 @@ fn fuzzy(label: &str, word: &str) -> Option<(u8, Vec<Range<usize>>)> {
         }
         rest.peek().is_none().then_some((2, matched))
     })
+}
+
+// Only the final tab stop, `$0`, which marks the caret. `\$`, `\\` and `\}` are escapes. The caret is a byte
+// offset into the expanded text, at its end when there's no `$0`.
+fn expand_snippet(snippet: &str) -> (String, usize) {
+    let mut out = String::with_capacity(snippet.len());
+    let mut caret = None;
+    let mut chars = snippet.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek().is_some_and(|n| matches!(n, '$' | '\\' | '}')) => out.extend(chars.next()),
+            '$' if chars.peek() == Some(&'0') => {
+                chars.next();
+                caret.get_or_insert(out.len());
+            }
+            _ => out.push(c),
+        }
+    }
+    let caret = caret.unwrap_or(out.len());
+    (out, caret)
 }
 
 // Matches how GPUI Kit's editor applies a completion. Text edit first, else insert text at the caret, else the
@@ -484,7 +528,16 @@ impl<M: InputModeKind> Completion<M> {
 
 #[cfg(test)]
 mod tests {
-    use super::fuzzy;
+    use super::{expand_snippet, fuzzy};
+
+    #[test]
+    fn snippets_place_the_caret_and_unescape() {
+        assert_eq!(expand_snippet("count($0)"), ("count()".to_string(), 6));
+        assert_eq!(expand_snippet("now()"), ("now()".to_string(), 5));
+        assert_eq!(expand_snippet("a\\$b($0)"), ("a$b()".to_string(), 4));
+        assert_eq!(expand_snippet("x\\}\\\\($0)"), ("x}\\()".to_string(), 4));
+        assert_eq!(expand_snippet("é($0)"), ("é()".to_string(), 3), "byte offsets");
+    }
 
     fn bold<'a>(label: &'a str, word: &str) -> Option<(u8, Vec<&'a str>)> {
         fuzzy(label, word).map(|(rank, spans)| (rank, spans.into_iter().map(|span| &label[span]).collect()))

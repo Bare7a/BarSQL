@@ -1,0 +1,283 @@
+{
+  "engine": "clickhouse",
+  "schema": "barsql_golden",
+  "setup": [
+    "DROP DATABASE IF EXISTS barsql_golden",
+    "CREATE DATABASE barsql_golden",
+    "CREATE TABLE barsql_golden.customers (\n\tid UInt32,\n\temail String,\n\tname String DEFAULT 'anon',\n\tcreated_at DateTime DEFAULT now(),\n\tINDEX email_idx email TYPE bloom_filter GRANULARITY 1\n) ENGINE = MergeTree ORDER BY id",
+    "CREATE TABLE barsql_golden.orders (\n\tid UInt64,\n\tcustomer_id UInt32,\n\ttotal Decimal(12, 2),\n\tday Date,\n\ttotal_with_tax Decimal(12, 2) MATERIALIZED total * 1.2,\n\tlabel String ALIAS concat('#', toString(id))\n) ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (customer_id, day, id)",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT customer_id, sum(total) AS total FROM barsql_golden.orders GROUP BY customer_id",
+    "CREATE MATERIALIZED VIEW barsql_golden.daily ENGINE = SummingMergeTree ORDER BY day AS SELECT day, sum(total) AS total FROM barsql_golden.orders GROUP BY day",
+    "DROP FUNCTION IF EXISTS barsql_golden_add",
+    "CREATE FUNCTION barsql_golden_add AS (a, b) -> a + b"
+  ],
+  "schemas": [
+    "barsql_golden"
+  ],
+  "tables": [
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "customer_totals",
+        "type": "view"
+      },
+      "columns": [
+        {
+          "name": "customer_id",
+          "dataType": "UInt32",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "Decimal(38, 2)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": []
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "customers",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "UInt32",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "email",
+          "dataType": "String",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "name",
+          "dataType": "String",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "'anon'"
+        },
+        {
+          "name": "created_at",
+          "dataType": "DateTime",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": false,
+          "method": "primary key"
+        },
+        {
+          "name": "email_idx",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "columns": [
+            "email"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "method": "bloom_filter"
+        }
+      ],
+      "constraints": [],
+      "triggers": []
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "daily",
+        "type": "materialized view"
+      },
+      "columns": [
+        {
+          "name": "day",
+          "dataType": "Date",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "Decimal(38, 2)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": []
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "orders",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "UInt64",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "customer_id",
+          "dataType": "UInt32",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "Decimal(12, 2)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "day",
+          "dataType": "Date",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total_with_tax",
+          "dataType": "Decimal(12, 2)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "total * 1.2",
+          "isComputed": true
+        },
+        {
+          "name": "label",
+          "dataType": "String",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "concat('#', toString(id))",
+          "isComputed": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "customer_id",
+            "day",
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": false,
+          "method": "primary key"
+        }
+      ],
+      "constraints": [],
+      "triggers": []
+    }
+  ],
+  "routines": [],
+  "functions": [
+    {
+      "name": "barsql_golden_add",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "a, b"
+        }
+      ],
+      "builtin": false,
+      "caseSensitive": true
+    }
+  ],
+  "ddl": [
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customer_totals",
+        "kind": "view"
+      },
+      "ddl": "CREATE VIEW barsql_golden.customer_totals\n(\n    `customer_id` UInt32,\n    `total` Decimal(38, 2)\n)\nAS SELECT\n    customer_id,\n    sum(total) AS total\nFROM barsql_golden.orders\nGROUP BY customer_id;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customers",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE barsql_golden.customers\n(\n    `id` UInt32,\n    `email` String,\n    `name` String DEFAULT 'anon',\n    `created_at` DateTime DEFAULT now(),\n    INDEX email_idx email TYPE bloom_filter GRANULARITY 1\n)\nENGINE = MergeTree\nORDER BY id\nSETTINGS index_granularity = 8192;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "index",
+        "table": "customers"
+      },
+      "error": "index PRIMARY is the table's primary key, part of its DDL"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "email_idx",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE `barsql_golden`.`customers` ADD INDEX `email_idx` email TYPE bloom_filter GRANULARITY 1;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "daily",
+        "kind": "materialized view"
+      },
+      "ddl": "CREATE MATERIALIZED VIEW barsql_golden.daily\n(\n    `day` Date,\n    `total` Decimal(38, 2)\n)\nENGINE = SummingMergeTree\nORDER BY day\nSETTINGS index_granularity = 8192\nAS SELECT\n    day,\n    sum(total) AS total\nFROM barsql_golden.orders\nGROUP BY day;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE barsql_golden.orders\n(\n    `id` UInt64,\n    `customer_id` UInt32,\n    `total` Decimal(12, 2),\n    `day` Date,\n    `total_with_tax` Decimal(12, 2) MATERIALIZED total * 1.2,\n    `label` String ALIAS concat('#', toString(id))\n)\nENGINE = MergeTree\nPARTITION BY toYYYYMM(day)\nORDER BY (customer_id, day, id)\nSETTINGS index_granularity = 8192;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "PRIMARY",
+        "kind": "index",
+        "table": "orders"
+      },
+      "error": "index PRIMARY is the table's primary key, part of its DDL"
+    }
+  ]
+}

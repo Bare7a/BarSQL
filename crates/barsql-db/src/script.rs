@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use barsql_core::{DriverType, QueryError, ResultSummary, Value};
-use barsql_sql::{PlanRows, detect_plan_request, first_keyword, parse_plan, strip_leading_comments};
+use barsql_sql::{ExplainStrategy, PlanRows, detect_plan_request, first_keyword, parse_plan, strip_leading_comments};
 
 use crate::event::{BATCH_ROWS, ScriptEvent, Sink, StatementResult, emit};
 use crate::{Cancel, ColumnMeta, ResultChunk};
@@ -16,6 +16,12 @@ pub struct StatementRun {
 pub(crate) trait StatementRunner {
     fn driver(&self) -> DriverType;
 
+    // On while a script runs. Off, a statement sends no messages, and MySQL skips the extra SHOW WARNINGS.
+    fn set_reporting(&mut self, _on: bool) {}
+
+    // The session's state is unknown, so it must not be used again.
+    fn mark_broken(&mut self) {}
+
     // Emits Meta, Rows and Result per result set, numbered from `first_index`.
     async fn stream_statement(
         &mut self,
@@ -25,6 +31,32 @@ pub(crate) trait StatementRunner {
         sink: &Sink,
         cancel: &Cancel,
     ) -> StatementRun;
+}
+
+// Most sessions are boxed in `Session`.
+impl<T: StatementRunner> StatementRunner for Box<T> {
+    fn driver(&self) -> DriverType {
+        (**self).driver()
+    }
+
+    fn set_reporting(&mut self, on: bool) {
+        (**self).set_reporting(on);
+    }
+
+    fn mark_broken(&mut self) {
+        (**self).mark_broken();
+    }
+
+    async fn stream_statement(
+        &mut self,
+        stmt: &str,
+        first_index: usize,
+        batch_rows: usize,
+        sink: &Sink,
+        cancel: &Cancel,
+    ) -> StatementRun {
+        (**self).stream_statement(stmt, first_index, batch_rows, sink, cancel).await
+    }
 }
 
 // Held in memory, so only for plans, catalog reads and small helper queries.
@@ -91,8 +123,95 @@ pub(crate) async fn buffered<R: StatementRunner>(
     }
 }
 
+// The rows a plan comes in. A session option is always turned back off, even after a failure or a cancel. A
+// session where that fails is broken, since it would only plan every later statement.
+pub(crate) async fn plan_rows<R: StatementRunner>(
+    runner: &mut R,
+    strategy: &ExplainStrategy,
+    cancel: &Cancel,
+) -> Result<PlanRows, QueryError> {
+    let (setup, statement, teardown, plan_column) = match strategy {
+        ExplainStrategy::Query(sql) => return Ok(buffered(runner, sql, cancel).await?.plan_rows()),
+        ExplainStrategy::Session { setup, statement, teardown, plan_column } => {
+            (setup, statement, teardown, plan_column)
+        }
+    };
+    let mut result = Ok(PlanRows::default());
+    for sql in setup {
+        if let Err(error) = buffered(runner, sql, cancel).await {
+            result = Err(error);
+            break;
+        }
+    }
+    if result.is_ok() {
+        result = plan_set(runner, statement, plan_column, cancel).await;
+    }
+    for sql in teardown {
+        if buffered(runner, sql, &Cancel::new()).await.is_err() {
+            runner.mark_broken();
+        }
+    }
+    result
+}
+
+// The result set holding `column`. A measured plan comes after the statement's own results, which are dropped as
+// they arrive.
+async fn plan_set<R: StatementRunner>(
+    runner: &mut R,
+    sql: &str,
+    column: &str,
+    cancel: &Cancel,
+) -> Result<PlanRows, QueryError> {
+    let (tx, rx) = async_channel::bounded(16);
+    let run = async {
+        let run = runner.stream_statement(sql, 0, BATCH_ROWS, &tx, cancel).await;
+        drop(tx);
+        run
+    };
+    let collect = async {
+        let mut plan: Option<(usize, PlanRows)> = None;
+        while let Ok(event) = rx.recv().await {
+            match event {
+                ScriptEvent::Meta { result_index, columns }
+                    if plan.is_none() && columns.iter().any(|c| c.name == column) =>
+                {
+                    let names = columns.iter().map(|c| c.name.clone()).collect();
+                    plan = Some((result_index, PlanRows { columns: names, rows: Vec::new() }));
+                }
+                ScriptEvent::Rows { result_index, chunk } => {
+                    if let Some((_, rows)) = plan.as_mut().filter(|(ix, _)| *ix == result_index) {
+                        for r in 0..chunk.rows() {
+                            rows.rows.push((0..chunk.columns()).map(|c| chunk.cell(r, c).to_value()).collect());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        plan.map(|(_, rows)| rows)
+    };
+    let (run, plan) = tokio::join!(run, collect);
+    match (run.error, plan) {
+        (Some(error), _) => Err(error),
+        (None, Some(rows)) => Ok(rows),
+        (None, None) => Err(QueryError::message("the server returned no plan")),
+    }
+}
+
 // Stops at the first failing statement. Result indexes keep counting across statements.
 pub(crate) async fn run_script<R: StatementRunner>(
+    runner: &mut R,
+    statements: &[String],
+    sink: &Sink,
+    cancel: &Cancel,
+) -> Result<usize, QueryError> {
+    runner.set_reporting(true);
+    let result = run_statements(runner, statements, sink, cancel).await;
+    runner.set_reporting(false);
+    result
+}
+
+async fn run_statements<R: StatementRunner>(
     runner: &mut R,
     statements: &[String],
     sink: &Sink,

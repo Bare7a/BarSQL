@@ -2,10 +2,10 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use anyhow::Result;
-use barsql_core::{ColumnInfo, ObjectKind, TableInfo};
+use barsql_core::{ColumnInfo, FunctionKind, ObjectKind, TableInfo};
 use barsql_sql::lang::labels::fill;
 use barsql_sql::lang::suggestions::relation_type_label;
-use barsql_sql::lang::{HoverSubject, SqlLabels, TableBinding};
+use barsql_sql::lang::{CallForm, FunctionDoc, HoverSubject, SqlLabels, TableBinding};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{EditorState, HoverProvider, InputEvent};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
@@ -13,7 +13,7 @@ use gpui_kit::component::{ActiveTheme, Icon, Rope, StyledExt as _, h_flex, v_fle
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::i18n::{I18n, t_count, t_with};
+use crate::i18n::{I18n, t, t_count, t_with};
 use crate::sql_language::SqlLanguage;
 use crate::tokens::{RADIUS, TEXT_2XS};
 use crate::{completion, form, schema, theme};
@@ -32,6 +32,10 @@ const MAX_WIDTH: Pixels = px(760.);
 const NAME_CAP: usize = 32;
 const TYPE_CAP: usize = 32;
 const NOTE_CAP: usize = 48;
+// Full-width lines, like a function's signatures. Docs wrap at this width.
+const TEXT_CAP: usize = 80;
+// Overloads listed before a "+N more" line.
+const MAX_SIGNATURES: usize = 8;
 const LIST_PAD: Pixels = px(4.);
 // Added on the right of a list that scrolls, so its longest line stays clear of the bar.
 const BAR_ROOM: Pixels = px(8.);
@@ -83,7 +87,8 @@ struct Header {
     count: Option<SharedString>,
 }
 
-// A line of the list: a column with its type, keys and notes, or just a name for a CTE's columns.
+// A line of the list: a column with its type, keys and notes, just a name for a CTE's columns, or a line of text
+// across the card for a function.
 #[derive(Default)]
 struct Row {
     name: Option<SharedString>,
@@ -91,6 +96,15 @@ struct Row {
     pk: bool,
     fk: bool,
     note: Option<SharedString>,
+    text: Option<SharedString>,
+    // Docs rather than code, so muted.
+    prose: bool,
+}
+
+impl Row {
+    fn text(text: impl Into<SharedString>, prose: bool) -> Self {
+        Self { text: Some(text.into()), prose, ..Default::default() }
+    }
 }
 
 impl HoverCard {
@@ -216,6 +230,17 @@ impl HoverCard {
         let cell = |width: Pixels, text: &Option<SharedString>, color: Hsla| {
             div().w(width).min_w_0().truncate().text_color(color).children(text.clone())
         };
+        if row.text.is_some() {
+            let color = if row.prose { style.muted } else { style.text };
+            return h_flex()
+                .id(ix)
+                .debug_selector(move || format!("hover-row-{ix}"))
+                .h(m.row)
+                .pl(m.pad)
+                .pr(m.pad + layout.bar_room)
+                .child(cell(layout.text, &row.text, color))
+                .into_any_element();
+        }
         h_flex()
             .id(ix)
             .debug_selector(move || format!("hover-row-{ix}"))
@@ -250,7 +275,7 @@ impl HoverCard {
         let mut lines = vec![format!("{} {}", card.header.name, card.header.detail)];
         lines.extend(card.rows.iter().map(|row| {
             let mut parts: Vec<String> =
-                [&row.name, &row.data_type].into_iter().flatten().map(|s| s.to_string()).collect();
+                [&row.name, &row.data_type, &row.text].into_iter().flatten().map(|s| s.to_string()).collect();
             parts.extend(row.pk.then(|| "PK".to_string()));
             parts.extend(row.fk.then(|| "FK".to_string()));
             parts.extend(row.note.iter().map(|s| s.to_string()));
@@ -283,6 +308,7 @@ fn column_row(column: &ColumnInfo, name: bool, labels: &SqlLabels, cx: &App) -> 
         pk: column.is_primary,
         fk: column.is_foreign,
         note: (!note.is_empty()).then(|| note.into()),
+        ..Default::default()
     }
 }
 
@@ -362,9 +388,78 @@ fn named_card(span: Range<usize>, subject: HoverSubject, labels: &SqlLabels, lan
         HoverSubject::Alias { name, table } => {
             (header(Lucide::Table2, name, fill(&labels.alias_for, &[("table", &table)]), None), Vec::new())
         }
+        HoverSubject::Function(doc) => return function_card(span, *doc, labels, cx),
         HoverSubject::Table { .. } | HoverSubject::Column(_) => unreachable!("tables and columns load first"),
     };
     Card { span, header, rows }
+}
+
+// Greedy word wrap. The card's font is monospaced, so characters are columns.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+// Each overload as it's called, then the docs.
+fn function_card(span: Range<usize>, doc: FunctionDoc, labels: &SqlLabels, cx: &App) -> Card {
+    let (icon, kind) = match doc.kind {
+        FunctionKind::Scalar if doc.builtin => (Lucide::SquareFunction, &labels.function),
+        FunctionKind::Scalar => (Lucide::SquareFunction, &labels.user_function),
+        FunctionKind::Aggregate => (Lucide::Sigma, &labels.aggregate_function),
+        FunctionKind::Window => (Lucide::SquareFunction, &labels.window_function),
+        FunctionKind::Table => (Lucide::Table2, &labels.table_function),
+    };
+    let deprecated = if doc.deprecated { t(cx, "editor.sql.deprecated").to_string() } else { String::new() };
+    let detail = joined([kind.clone(), doc.schema.clone(), deprecated]);
+    let overloads = doc.signatures.len();
+    let count = (overloads > 1).then(|| t_count(cx, "editor.sql.signaturesCount", overloads as i64, &[]));
+    let mut rows: Vec<Row> = doc
+        .signatures
+        .iter()
+        .take(MAX_SIGNATURES)
+        .map(|(args, returns)| {
+            let call = if doc.call == CallForm::NoParens { doc.name.clone() } else { format!("{}({args})", doc.name) };
+            Row::text(if returns.is_empty() { call } else { format!("{call} → {returns}") }, false)
+        })
+        .collect();
+    if overloads > MAX_SIGNATURES {
+        let more = (overloads - MAX_SIGNATURES) as i64;
+        rows.push(Row::text(t_count(cx, "editor.sql.moreSignatures", more, &[]), true));
+    }
+    let mut prose: Vec<String> = Vec::new();
+    if let Some((base, chain)) = &doc.combinator {
+        prose.extend(wrap(&t_with(cx, "editor.sql.combinatorOf", &[("base", base)]), TEXT_CAP));
+        for (suffix, about) in chain.iter().filter(|(_, about)| !about.is_empty()) {
+            prose.extend(wrap(&format!("{suffix}: {about}"), TEXT_CAP));
+        }
+    }
+    prose.extend(wrap(&doc.summary, TEXT_CAP));
+    prose.extend(wrap(&doc.description, TEXT_CAP));
+    if !doc.since.is_empty() {
+        prose.push(t_with(cx, "editor.sql.since", &[("version", doc.since)]).to_string());
+    }
+    if !doc.source.is_empty() {
+        prose.push(t_with(cx, "editor.sql.source", &[("name", &doc.source)]).to_string());
+    }
+    // A blank line between the calls and the docs.
+    if !rows.is_empty() && !prose.is_empty() {
+        rows.push(Row::text("", true));
+    }
+    rows.extend(prose.into_iter().map(|line| Row::text(line, true)));
+    Card { span, header: Header { icon, accent: false, name: doc.name.into(), detail: detail.into(), count }, rows }
 }
 
 #[derive(Clone, Copy)]
@@ -422,6 +517,8 @@ struct Layout {
     name: Option<Pixels>,
     data_type: Option<Pixels>,
     notes: bool,
+    // The widest full-width line.
+    text: Pixels,
     // Rows shown without scrolling.
     shown: usize,
     bar_room: Pixels,
@@ -445,7 +542,9 @@ fn layout(card: &Card, m: Metrics, badges: [&str; 2], trigger: Bounds<Pixels>, v
         })
         .fold(px(0.), |widest, width| if width > widest { width } else { widest });
     let cells: Vec<Pixels> = [name, data_type, notes].into_iter().filter(|width| *width > px(0.)).collect();
+    let text = m.ch * widest(|row| chars(&row.text), TEXT_CAP) as f32;
     let list = cells.iter().sum::<Pixels>() + m.gap * cells.len().saturating_sub(1) as f32;
+    let list = if text > list { text } else { list };
     let header = &card.header;
     let count =
         header.count.as_ref().map_or(px(0.), |count| m.title_gap + m.gap + m.small_ch * count.chars().count() as f32);
@@ -471,6 +570,7 @@ fn layout(card: &Card, m: Metrics, badges: [&str; 2], trigger: Bounds<Pixels>, v
         name: (name > px(0.)).then_some(name),
         data_type: (data_type > px(0.)).then_some(data_type),
         notes: notes > px(0.),
+        text,
         shown,
         bar_room,
     }
@@ -656,7 +756,18 @@ fn dismissal(card: WeakEntity<HoverCard>, keep_open: Bounds<Pixels>, inside: Bou
 mod tests {
     use gpui_kit::{Bounds, Pixels, Size, point, px, size};
 
-    use super::{MARGIN, MAX_ROWS, MIN_ROWS, place};
+    use super::{MARGIN, MAX_ROWS, MIN_ROWS, place, wrap};
+
+    #[test]
+    fn docs_wrap_at_word_boundaries() {
+        assert_eq!(
+            wrap("Number of rows, or of non-null values.", 16),
+            ["Number of rows,", "or of non-null", "values."]
+        );
+        assert_eq!(wrap("  spaced   out  ", 80), ["spaced out"]);
+        assert!(wrap("", 80).is_empty());
+        assert_eq!(wrap("a_very_long_identifier_name", 10), ["a_very_long_identifier_name"], "a long word stays whole");
+    }
 
     const WINDOW: Size<Pixels> = Size { width: px(1200.), height: px(800.) };
 

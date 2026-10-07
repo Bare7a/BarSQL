@@ -14,9 +14,9 @@ usage: cargo xtask lint
        cargo xtask bump-version [--dry-run] (--major | --minor | --patch | <version>)
 
 lint       cargo fmt --check, then clippy with the e2e and snapshot features and -D warnings, as CI runs them.
-e2e        The PostgreSQL, MySQL and MariaDB suites, against the stack in docker-compose.yml. up, down and logs
-           manage the stack (COMPOSE=\"podman compose\" swaps the tool); all brings it up, runs the suites and
-           tears it down.
+e2e        The PostgreSQL, MySQL, MariaDB, libSQL and ClickHouse suites, against the stack in docker-compose.yml. up,
+           down and logs manage the stack (COMPOSE=\"podman compose\" swaps the tool); all brings it up, runs the
+           suites and tears it down. BARSQL_E2E_MSSQL=1 adds SQL Server, as Azure SQL Edge on arm64.
 screenshots
            The README screenshots, in .github/screenshots. Restores fixtures/screenshots/forum.sql into the
            stack's PostgreSQL, then plays the scenes in a snapshot build on a copy of
@@ -116,7 +116,20 @@ fn compose_with(args: &[&str], stdin: Option<&Path>) -> Result<(), String> {
     let mut words = tool.split_whitespace();
     let program = words.next().ok_or("COMPOSE is empty")?;
     let args: Vec<&str> = words.chain(args.iter().copied()).collect();
-    run_with(program, &args, stdin, &[])
+    run_with(program, &args, stdin, &mssql_env())
+}
+
+// SQL Server's image is amd64 only. Azure SQL Edge runs the same engine on arm64, so it stands in there.
+fn mssql_env() -> Vec<(&'static str, &'static Path)> {
+    if env::var("BARSQL_E2E_MSSQL").as_deref() != Ok("1") {
+        return Vec::new();
+    }
+    let mut envs = vec![("COMPOSE_PROFILES", Path::new("mssql"))];
+    if env::consts::ARCH == "aarch64" && env::var_os("MSSQL_IMAGE").is_none() {
+        envs.push(("MSSQL_IMAGE", Path::new("mcr.microsoft.com/azure-sql-edge:latest")));
+        envs.push(("MSSQL_PLATFORM", Path::new("linux/arm64")));
+    }
+    envs
 }
 
 // Recreate the forum database every run. The scenes insert and roll back, which still moves its sequences.

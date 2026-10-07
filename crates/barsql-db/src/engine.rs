@@ -2,27 +2,37 @@ use std::sync::Arc;
 
 use barsql_core::schema::primary_keys;
 use barsql_core::{
-    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, IndexInfo, ObjectKind, ObjectRef,
-    QueryError, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest, TableInfo, TriggerInfo, Value,
+    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, FunctionList, IndexInfo, ObjectKind,
+    ObjectRef, QueryError, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest, TableInfo,
+    TriggerInfo, Value,
 };
 use barsql_sql::dml::{build_delete, build_insert, build_table_select, build_update, first_integer_primary_key};
-use barsql_sql::{READ_ONLY_ERROR, assert_read_only, quote_ident, table_ref, validate_table_filter};
+use barsql_sql::{
+    ExplainStrategy, PlanRows, READ_ONLY_ERROR, assert_read_only, quote_ident, table_ref, validate_table_filter,
+};
 use mysql_async::prelude::Queryable;
 
+use crate::clickhouse::{ChEngine, ChOptions, ChSession};
 use crate::dump::{DumpQuery, dump_query};
 use crate::event::{ScriptEvent, Sink, StatementResult};
+use crate::mssql::{MsEngine, MsOptions, MsSession};
 use crate::mysql::{MyConnectOptions, MyEngine, MySession};
 use crate::postgres::{PgConnectOptions, PgEngine, PgSession};
 use crate::script::{Buffered, StatementRunner};
 use crate::sqlite::{SqliteConnectOptions, SqliteEngine, SqliteSession};
+use crate::turso::{TursoEngine, TursoOptions, TursoSession};
 use crate::{Cancel, ChunkBuilder, ResultChunk};
 
-// A pool for Postgres and MySQL, a single connection for SQLite.
+// A pool for Postgres, MySQL and SQL Server, a single connection for SQLite, an HTTP client for Turso and
+// ClickHouse.
 #[derive(Clone)]
 pub enum Engine {
     Postgres(Arc<PgEngine>),
     MySql(Arc<MyEngine>),
     Sqlite(Arc<SqliteEngine>),
+    Turso(Arc<TursoEngine>),
+    ClickHouse(Arc<ChEngine>),
+    SqlServer(Arc<MsEngine>),
 }
 
 // One per editor tab, import or transaction.
@@ -30,6 +40,9 @@ pub enum Session {
     Postgres(Box<PgSession>),
     MySql(Box<MySession>),
     Sqlite(SqliteSession),
+    Turso(Box<TursoSession>),
+    ClickHouse(Box<ChSession>),
+    SqlServer(Box<MsSession>),
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +59,9 @@ macro_rules! dispatch {
             Engine::Postgres($engine) => $body,
             Engine::MySql($engine) => $body,
             Engine::Sqlite($engine) => $body,
+            Engine::Turso($engine) => $body,
+            Engine::ClickHouse($engine) => $body,
+            Engine::SqlServer($engine) => $body,
         }
     };
 }
@@ -56,6 +72,9 @@ macro_rules! dispatch_session {
             Session::Postgres($session) => $body,
             Session::MySql($session) => $body,
             Session::Sqlite($session) => $body,
+            Session::Turso($session) => $body,
+            Session::ClickHouse($session) => $body,
+            Session::SqlServer($session) => $body,
         }
     };
 }
@@ -67,6 +86,7 @@ impl Engine {
 
     // Only Postgres uses `local`, to render timestamptz values.
     pub async fn connect_in_zone(cfg: &ConnectionConfig, local: jiff::tz::TimeZone) -> Result<Self, QueryError> {
+        crate::tls::install_default_provider();
         let mut cfg = cfg.clone();
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
@@ -78,7 +98,12 @@ impl Engine {
             }
             DriverType::MySql => Self::MySql(MyEngine::connect(MyConnectOptions::from_config(&cfg)?).await?),
             DriverType::Sqlite => Self::Sqlite(SqliteEngine::connect(SqliteConnectOptions::from_config(&cfg)).await?),
-            ref other => return Err(QueryError::message(format!("unsupported driver: {other}"))),
+            DriverType::Turso => Self::Turso(TursoEngine::connect(TursoOptions::from_config(&cfg)?).await?),
+            DriverType::ClickHouse => Self::ClickHouse(ChEngine::connect(ChOptions::from_config(&cfg)?).await?),
+            DriverType::SqlServer => Self::SqlServer(MsEngine::connect(MsOptions::from_config(&cfg)?).await?),
+            DriverType::Other(_) | DriverType::Unset => {
+                return Err(QueryError::message(format!("unsupported driver: {}", cfg.driver)));
+            }
         })
     }
 
@@ -93,11 +118,11 @@ impl Engine {
     pub async fn databases(cfg: &ConnectionConfig) -> Result<Vec<String>, QueryError> {
         let mut cfg = cfg.clone();
         cfg.normalize();
-        let fallbacks: &[&str] = match cfg.driver {
-            DriverType::Postgres => &["postgres", "template1"],
-            DriverType::MySql => &["information_schema"],
-            ref other => return Err(QueryError::message(format!("{other} has no databases to list"))),
-        };
+        let caps = cfg.driver.capabilities();
+        if !caps.database_picker {
+            return Err(QueryError::message(format!("{} has no databases to list", cfg.driver)));
+        }
+        let fallbacks = caps.database_fallbacks;
         let typed = Some(cfg.database.clone()).filter(|d| !d.is_empty());
         let mut missing = None;
         // MySQL would connect to the browse schema instead of the database.
@@ -112,8 +137,9 @@ impl Engine {
             }
             .await;
             match listed {
-                // Postgres' invalid_catalog_name, MySQL's ER_BAD_DB_ERROR.
-                Err(error) if matches!(error.code.as_str(), "3D000" | "1049") => missing = Some(error),
+                // Postgres' invalid_catalog_name, MySQL's ER_BAD_DB_ERROR, ClickHouse's UNKNOWN_DATABASE, SQL Server's
+                // "Cannot open database".
+                Err(error) if matches!(error.code.as_str(), "3D000" | "1049" | "81" | "4060") => missing = Some(error),
                 other => return other,
             }
         }
@@ -125,6 +151,9 @@ impl Engine {
             Self::Postgres(_) => DriverType::Postgres,
             Self::MySql(_) => DriverType::MySql,
             Self::Sqlite(_) => DriverType::Sqlite,
+            Self::Turso(_) => DriverType::Turso,
+            Self::ClickHouse(_) => DriverType::ClickHouse,
+            Self::SqlServer(_) => DriverType::SqlServer,
         }
     }
 
@@ -145,6 +174,9 @@ impl Engine {
             Self::Postgres(e) => Session::Postgres(Box::new(e.session().await?)),
             Self::MySql(e) => Session::MySql(Box::new(e.session().await?)),
             Self::Sqlite(e) => Session::Sqlite(e.session().await?),
+            Self::Turso(e) => Session::Turso(Box::new(e.session().await?)),
+            Self::ClickHouse(e) => Session::ClickHouse(Box::new(e.session().await?)),
+            Self::SqlServer(e) => Session::SqlServer(Box::new(e.session().await?)),
         })
     }
 
@@ -152,15 +184,18 @@ impl Engine {
     pub async fn pooled_session(&self) -> Result<Session, QueryError> {
         match self {
             Self::Postgres(e) => Ok(Session::Postgres(Box::new(e.pooled_session().await?))),
-            _ => self.session().await,
+            Self::ClickHouse(e) => Ok(Session::ClickHouse(Box::new(e.pooled_session().await?))),
+            Self::SqlServer(e) => Ok(Session::SqlServer(Box::new(e.pooled_session().await?))),
+            Self::MySql(_) | Self::Sqlite(_) | Self::Turso(_) => self.session().await,
         }
     }
 
     pub async fn close(&self) {
         match self {
             Self::Postgres(e) => e.close(),
+            Self::SqlServer(e) => e.close(),
             Self::MySql(e) => e.close().await,
-            Self::Sqlite(_) => {}
+            Self::Sqlite(_) | Self::Turso(_) | Self::ClickHouse(_) => {}
         }
     }
 
@@ -201,6 +236,11 @@ impl Engine {
         dispatch!(self, e => e.list_routines(schema).await)
     }
 
+    // Every schema at once, built-ins included where the server lists them.
+    pub async fn list_functions(&self) -> Result<FunctionList, QueryError> {
+        dispatch!(self, e => e.list_functions().await)
+    }
+
     // Reads the catalog only, so it stays available on read-only connections.
     pub async fn object_ddl(&self, object: &ObjectRef) -> Result<String, QueryError> {
         if object.name.is_empty() {
@@ -213,7 +253,9 @@ impl Engine {
         match self {
             Self::Postgres(e) => e.list_databases().await,
             Self::MySql(e) => Ok(e.list_schemas().await?.into_iter().map(|s| s.name).collect()),
-            Self::Sqlite(_) => Ok(Vec::new()),
+            Self::ClickHouse(e) => e.list_databases().await,
+            Self::SqlServer(e) => e.list_databases().await,
+            Self::Sqlite(_) | Self::Turso(_) => Ok(Vec::new()),
         }
     }
 
@@ -224,11 +266,14 @@ impl Engine {
             Self::Postgres(e) => (e.dump_columns(&schema, table).await?, table_ref(&driver, &schema, table)),
             Self::MySql(e) => (e.dump_columns(&schema, table).await?, quote_ident(&driver, table)),
             Self::Sqlite(e) => (e.dump_columns(table).await?, quote_ident(&driver, table)),
+            Self::Turso(e) => (e.dump_columns(table).await?, quote_ident(&driver, table)),
+            Self::ClickHouse(e) => (e.dump_columns(&schema, table).await?, quote_ident(&driver, table)),
+            Self::SqlServer(e) => (e.dump_columns(&schema, table).await?, table_ref(&driver, &schema, table)),
         };
         if columns.is_empty() {
             return Err(QueryError::message(format!("table {table} not found")));
         }
-        Ok(dump_query(&driver, &table_ref(&driver, &schema, table), &target, &columns))
+        dump_query(&driver, &table_ref(&driver, &schema, table), &target, &columns).map_err(QueryError::message)
     }
 
     // Postgres returns its foreign keys separately, to add after the rows. The other engines' files turn FK
@@ -237,6 +282,7 @@ impl Engine {
         let schema = self.schema_or(schema);
         match self {
             Self::Postgres(e) => e.table_ddl(&schema, table, true).await,
+            Self::SqlServer(e) => e.table_ddl(&schema, table, true).await,
             _ => {
                 let object =
                     ObjectRef { schema, name: table.to_string(), kind: ObjectKind::Table, ..Default::default() };
@@ -247,7 +293,7 @@ impl Engine {
 
     // Validated even on writable connections so the filter can never escape the WHERE clause.
     pub async fn table_query(&self, req: &TableDataRequest) -> Result<TableQuery, QueryError> {
-        validate_table_filter(&req.filter).map_err(QueryError::message)?;
+        validate_table_filter(&self.driver(), &req.filter).map_err(QueryError::message)?;
         let schema = self.schema_or(&req.schema);
         let columns = self.list_columns(&schema, &req.table).await?;
         let pks = primary_keys(&columns);
@@ -322,6 +368,45 @@ impl Engine {
                     None => Ok(Row::from([("id".to_string(), Value::Int(id as i64))])),
                 }
             }
+            // OUTPUT goes before VALUES. A table with triggers takes no plain OUTPUT (error 334), so an identity
+            // key finds the row instead, in the same scope as the insert.
+            Self::SqlServer(engine) => {
+                let schema = self.schema_or(schema);
+                let (sql, args) = build_insert(&driver, &schema, table, values).map_err(QueryError::message)?;
+                let mut session = engine.session().await?;
+                let output = sql.replacen(") VALUES (", ") OUTPUT INSERTED.* VALUES (", 1);
+                match session.query_params(&output, &args).await {
+                    Ok(res) => Ok(first_row(&res)),
+                    Err(error) if error.code == "334" => {
+                        let cols = self.list_columns(&schema, table).await.unwrap_or_default();
+                        let Some(pk) = cols.iter().find(|c| c.is_primary && c.is_identity) else {
+                            session.execute_params(&sql, &args).await?;
+                            return Ok(Row::new());
+                        };
+                        let target = table_ref(&driver, &schema, table);
+                        let reselect = format!(
+                            "{sql}; SELECT * FROM {target} WHERE {} = SCOPE_IDENTITY()",
+                            quote_ident(&driver, &pk.name)
+                        );
+                        Ok(first_row(&session.query_params(&reselect, &args).await?))
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            // No RETURNING and no unique keys to look the row up by, so the view reloads instead.
+            Self::ClickHouse(_) => {
+                let schema = self.schema_or(schema);
+                let (sql, args) = build_insert(&driver, &schema, table, values).map_err(QueryError::message)?;
+                self.execute_params(&sql, &args).await?;
+                Ok(Row::new())
+            }
+            // libSQL has RETURNING, so the stored row comes back with the insert.
+            Self::Turso(engine) => {
+                let (sql, args) = build_insert(&driver, schema, table, values).map_err(QueryError::message)?;
+                let mut session = engine.session().await?;
+                let res = session.buffered_params(&format!("{sql} RETURNING *"), &args).await?;
+                Ok(first_row(&res))
+            }
             Self::Sqlite(engine) => {
                 let (sql, args) = build_insert(&driver, schema, table, values).map_err(QueryError::message)?;
                 let params: Vec<rusqlite::types::Value> = args.iter().map(crate::sqlite::lite_value).collect();
@@ -356,7 +441,7 @@ impl Engine {
                 // No integer key, so look the row up by the values just written.
                 let filters: Vec<String> = values
                     .iter()
-                    .map(|(col, value)| format!("{} = {}", quote_ident(&driver, col), sqlite_literal(value)))
+                    .map(|(col, value)| format!("{} = {}", quote_ident(&driver, col), crate::lite::literal(value)))
                     .collect();
                 let sql =
                     format!("SELECT * FROM {} WHERE {} LIMIT 1", quote_ident(&driver, table), filters.join(" AND "));
@@ -424,6 +509,10 @@ impl Session {
         dispatch_session!(self, s => s.buffered(sql, cancel).await)
     }
 
+    pub async fn plan_rows(&mut self, strategy: &ExplainStrategy, cancel: &Cancel) -> Result<PlanRows, QueryError> {
+        dispatch_session!(self, s => crate::script::plan_rows(s, strategy, cancel).await)
+    }
+
     pub async fn execute_params(&mut self, sql: &str, params: &[Value]) -> Result<u64, QueryError> {
         dispatch_session!(self, s => s.execute_params(sql, params).await)
     }
@@ -470,16 +559,6 @@ fn postgres_insert_sql(schema: &str, table: &str, values: &Row) -> Result<String
         cols.join(", "),
         literals.join(", ")
     ))
-}
-
-fn sqlite_literal(value: &Value) -> String {
-    match value {
-        Value::Null => "NULL".into(),
-        Value::Bool(b) => i64::from(*b).to_string(),
-        Value::Int(i) => i.to_string(),
-        Value::Float(f) => format!("{f:?}"),
-        Value::Text(s) => format!("'{}'", s.replace('\'', "''")),
-    }
 }
 
 // Goes through a prepared statement, so values arrive in the binary protocol.

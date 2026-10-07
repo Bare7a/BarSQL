@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use barsql_app::{BackupOutcome, BackupRequest};
 use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError};
+use barsql_sql::Dialect;
 use barsql_sql::alter::{self, ConstraintKind};
 use barsql_sql::ddl::terminate_statement;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -261,14 +262,14 @@ fn message(error: &QueryError) -> String {
 
 impl Render for ChangeDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let postgres = self.connection.driver == DriverType::Postgres;
+        let dialect = Dialect::for_driver(&self.connection.driver);
         let truncate = matches!(self.change, Change::Truncate { .. });
         let mut body = modal::body().children(self.change.description(cx).map(|d| modal::description(d, cx)));
         if let Some(name) = &self.name {
             let field = div().debug_selector(|| "change-name".into()).child(form::input(name, window, cx));
             body = body.child(form::group(t(cx, "schemaChange.newName"), field, cx));
         }
-        if postgres && !self.change.renames() {
+        if dialect.cascade && !self.change.renames() {
             let hint = if truncate { "schemaChange.cascadeTruncateHint" } else { "schemaChange.cascadeHint" };
             let cascade = self.option(
                 "change-cascade",
@@ -280,7 +281,7 @@ impl Render for ChangeDialog {
             );
             body = body.child(cascade);
         }
-        if postgres && truncate {
+        if dialect.restart_identity && truncate {
             body = body.child(self.option(
                 "change-restart-identity",
                 self.options.restart_identity,

@@ -1,14 +1,16 @@
 use barsql_core::DriverType;
 
 use super::text::{
-    LexOptions, block_comment_end, char_at, dollar_tag, is_escape_string_prefix, is_space, line_comment_end, quote_end,
+    block_comment_end, char_at, dollar_tag, is_escape_string_prefix, is_space, line_comment_end, quote_end,
 };
+use crate::lex::LexRules;
+use crate::lex::prim::{bracket_end, dash_comment_at, hash_comment_at};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     // Bare identifier or keyword. `lower` has the lowercased text.
     Ident,
-    // "ident" or `ident`
+    // "ident", `ident` or [ident]
     Quoted,
     // '...', and "..." on MySQL where it's a literal
     String,
@@ -45,7 +47,7 @@ impl Token<'_> {
         self.kind == TokenKind::Punct && self.text == ch
     }
 
-    // "a""b" -> a"b and `x` -> x. Bare idents pass through.
+    // "a""b" -> a"b, `x` -> x and [a]]b] -> a]b. Bare idents pass through.
     pub fn ident_text(&self) -> String {
         if self.kind != TokenKind::Quoted {
             return self.text.to_string();
@@ -56,6 +58,7 @@ impl Token<'_> {
         match quote {
             b'"' => inner.replace("\"\"", "\""),
             b'`' => inner.replace("``", "`"),
+            b'[' => inner.replace("]]", "]"),
             _ => inner.to_string(),
         }
     }
@@ -75,17 +78,17 @@ pub fn is_punct(t: Option<&Token>, ch: &str) -> bool {
 
 const TWO_CHAR_OPS: [&str; 7] = ["<=", ">=", "<>", "!=", "::", "||", ":="];
 
-fn is_ident_start(c: u8) -> bool {
-    c.is_ascii_alphabetic() || c == b'_'
+fn is_ident_start(c: u8, rules: &LexRules) -> bool {
+    c.is_ascii_alphabetic() || c == b'_' || (rules.at_hash_words && matches!(c, b'@' | b'#'))
 }
 
-fn is_ident_char(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'$'
+fn is_ident_char(c: u8, rules: &LexRules) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || (rules.at_hash_words && matches!(c, b'@' | b'#'))
 }
 
 // $tag$ delimiters are ops, so dollar-quoted bodies stay tokenized and completion works inside them.
 pub fn tokenize<'a>(text: &'a str, driver: Option<&DriverType>) -> Vec<Token<'a>> {
-    let opts = LexOptions::for_driver(driver);
+    let rules = LexRules::for_driver(driver);
     let b = text.as_bytes();
     let len = b.len();
     let mut tokens = Vec::new();
@@ -113,34 +116,48 @@ pub fn tokenize<'a>(text: &'a str, driver: Option<&DriverType>) -> Vec<Token<'a>
         }
         let next = b.get(i + 1).copied();
 
-        if (c == b'-' && next == Some(b'-')) || (c == b'#' && opts.hash_line_comments) {
-            let nl = line_comment_end(text, if c == b'#' { i + 1 } else { i + 2 });
+        let dash = dash_comment_at(b, i, rules.dash_needs_space);
+        if dash || hash_comment_at(b, i, rules.hash_comments) {
+            let nl = line_comment_end(text, if dash { i + 2 } else { i + 1 });
             let end = nl.unwrap_or(len);
             push(TokenKind::Comment, i, end, nl.is_none());
             i = end;
             continue;
         }
         if c == b'/' && next == Some(b'*') {
-            let close = block_comment_end(text, i, opts.nested_block_comments);
+            let close = block_comment_end(text, i, rules.nested_block_comments);
             push(TokenKind::Comment, i, close.unwrap_or(len), close.is_none());
             i = close.unwrap_or(len);
             continue;
         }
-        if c == b'\'' || (c == b'"' && opts.double_quote_strings) {
-            let escapes = opts.backslash_escapes || is_escape_string_prefix(text, i);
-            let close = quote_end(text, i, c, true, escapes).map(|e| e.min(len));
+        if c == b'\'' || (c == b'"' && rules.double_quote_strings) {
+            let escapes = rules.backslash_escapes || (rules.escape_strings && is_escape_string_prefix(text, i));
+            let close = quote_end(text, i, c, escapes).map(|e| e.min(len));
+            push(TokenKind::String, i, close.unwrap_or(len), close.is_none());
+            i = close.unwrap_or(len);
+            continue;
+        }
+        // T-SQL N'...' is one string.
+        if rules.national_strings && matches!(c, b'N' | b'n') && next == Some(b'\'') {
+            let close = quote_end(text, i + 1, b'\'', false);
             push(TokenKind::String, i, close.unwrap_or(len), close.is_none());
             i = close.unwrap_or(len);
             continue;
         }
         if c == b'"' || c == b'`' {
-            let close = quote_end(text, i, c, true, false);
+            let close = quote_end(text, i, c, rules.ident_backslash);
+            push(TokenKind::Quoted, i, close.unwrap_or(len), close.is_none());
+            i = close.unwrap_or(len);
+            continue;
+        }
+        if c == b'[' && rules.bracket_idents {
+            let close = bracket_end(b, i);
             push(TokenKind::Quoted, i, close.unwrap_or(len), close.is_none());
             i = close.unwrap_or(len);
             continue;
         }
         if c == b'$' {
-            if opts.dollar_quotes
+            if rules.dollar_quotes
                 && let Some(tag) = dollar_tag(text, i)
             {
                 push(TokenKind::Op, i, i + tag.len(), false);
@@ -160,9 +177,9 @@ pub fn tokenize<'a>(text: &'a str, driver: Option<&DriverType>) -> Vec<Token<'a>
             i += 1;
             continue;
         }
-        if is_ident_start(c) {
+        if is_ident_start(c, &rules) {
             let mut j = i + 1;
-            while j < len && is_ident_char(b[j]) {
+            while j < len && is_ident_char(b[j], &rules) {
                 j += 1;
             }
             push(TokenKind::Ident, i, j, false);
@@ -183,7 +200,8 @@ pub fn tokenize<'a>(text: &'a str, driver: Option<&DriverType>) -> Vec<Token<'a>
             i += 1;
             continue;
         }
-        if next.is_some_and(|n| n < 0x80 && TWO_CHAR_OPS.contains(&&text[i..i + 2])) {
+        let two_char_op = |op: &str| TWO_CHAR_OPS.contains(&op) || (rules.arrow_op && op == "->");
+        if next.is_some_and(|n| n < 0x80 && two_char_op(&text[i..i + 2])) {
             push(TokenKind::Op, i, i + 2, false);
             i += 2;
             continue;

@@ -46,6 +46,17 @@ pub enum Group {
 impl Group {
     pub const TABLE: [Group; 3] = [Group::Indexes, Group::Constraints, Group::Triggers];
 
+    // Whether the driver's catalog has this kind of object at all.
+    pub fn listed(self, driver: &barsql_core::DriverType) -> bool {
+        let catalog = &driver.capabilities().catalog;
+        match self {
+            Self::Indexes => catalog.indexes,
+            Self::Constraints => catalog.constraints,
+            Self::Triggers => catalog.triggers,
+            Self::Routines => catalog.routines,
+        }
+    }
+
     pub fn key(self) -> &'static str {
         match self {
             Self::Indexes => "indexes",

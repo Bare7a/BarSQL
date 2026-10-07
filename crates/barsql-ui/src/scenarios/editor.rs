@@ -231,12 +231,12 @@ fn the_toolbar_rolls_back_and_commits(cx: &mut TestAppContext) {
     assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
 }
 
-fn suggestions(app: &mut super::driver::Driver) -> Vec<String> {
+pub(super) fn suggestions(app: &mut super::driver::Driver) -> Vec<String> {
     let tab = app.tab();
     app.cx.update(|_, cx| tab.read(cx).completion().read(cx).labels(cx))
 }
 
-fn suggest(app: &mut super::driver::Driver, sql: &str, expected: &str) -> Vec<String> {
+pub(super) fn suggest(app: &mut super::driver::Driver, sql: &str, expected: &str) -> Vec<String> {
     app.set_sql("");
     app.type_text(sql);
     app.keys("escape");

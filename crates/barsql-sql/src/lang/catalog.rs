@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
 
 use super::cache::Lru;
+use super::functions::FunctionCatalog;
 use super::query::ParsedQuery;
+use crate::dialect::Dialect;
 
 // Completion, hover and diagnostics reparse on every keystroke, and most statements haven't changed.
 const PARSE_CACHE: usize = 256;
@@ -15,6 +17,8 @@ pub struct Catalog {
     pub driver: DriverType,
     pub schemas: Vec<SchemaInfo>,
     pub tables: Vec<TableInfo>,
+    // The driver's built-ins until the server's list arrives.
+    pub functions: Arc<FunctionCatalog>,
     by_name: HashMap<String, Vec<usize>>,
     by_schema: HashMap<String, Vec<usize>>,
     schema_names: HashSet<String>,
@@ -23,7 +27,7 @@ pub struct Catalog {
 
 impl Clone for Catalog {
     fn clone(&self) -> Self {
-        Self::new(self.driver.clone(), self.schemas.clone(), self.tables.clone())
+        Self::new(self.driver.clone(), self.schemas.clone(), self.tables.clone()).with_functions(self.functions.clone())
     }
 }
 
@@ -45,6 +49,7 @@ pub struct TableBinding {
 impl Catalog {
     pub fn new(driver: DriverType, schemas: Vec<SchemaInfo>, tables: Vec<TableInfo>) -> Self {
         let mut catalog = Self {
+            functions: Arc::new(FunctionCatalog::builtin(&driver)),
             driver,
             schemas,
             tables,
@@ -59,6 +64,11 @@ impl Catalog {
             catalog.schema_names.insert(t.schema.to_lowercase());
         }
         catalog
+    }
+
+    pub fn with_functions(mut self, functions: Arc<FunctionCatalog>) -> Self {
+        self.functions = functions;
+        self
     }
 
     pub(crate) fn cached_parse(&self, sql: &str, parse: impl FnOnce() -> ParsedQuery) -> Arc<ParsedQuery> {
@@ -90,15 +100,15 @@ impl Catalog {
             schema_hint.filter(|h| !h.is_empty()).map(str::to_string).or_else(|| found.map(|t| t.schema.clone()));
         if schema.as_deref().is_none_or(str::is_empty) {
             let first = self.schemas.first().map(|s| s.name.clone());
-            schema = Some(if self.driver == DriverType::Postgres {
-                self.schemas
+            schema = Some(match Dialect::for_driver(&self.driver).default_schema {
+                Some(default) => self
+                    .schemas
                     .iter()
-                    .find(|s| s.name == "public")
+                    .find(|s| s.name == default)
                     .map(|s| s.name.clone())
                     .or(first)
-                    .unwrap_or_else(|| "public".into())
-            } else {
-                first.unwrap_or_default()
+                    .unwrap_or_else(|| default.into()),
+                None => first.unwrap_or_default(),
             });
         }
         TableBinding {

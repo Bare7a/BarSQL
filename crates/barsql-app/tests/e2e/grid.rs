@@ -21,7 +21,9 @@ each_engine!(async fn query_table(e) {
     let all = e.table_page(req(100, 0, "", "", "")).await.unwrap();
     assert_eq!(all.summary.row_count, 5);
     assert_eq!(all.summary.table_name, table);
-    assert_eq!(all.summary.primary_keys, ["id"]);
+    // ClickHouse keys aren't unique, so none is reported and the grid stays read-only.
+    let keys: &[&str] = if e.driver().capabilities().row_editing { &["id"] } else { &[] };
+    assert_eq!(all.summary.primary_keys, keys);
 
     let page = e.table_page(req(2, 1, "id", "ASC", "")).await.unwrap();
     assert_eq!(page.column(1), ["b", "c"], "offset 1 over a..e ordered by id");
@@ -38,6 +40,7 @@ each_engine!(async fn query_table(e) {
 });
 
 each_engine!(async fn grid_editing(e) {
+    require!(e, row_editing);
     let table = unique_table("edit");
     e.create_temp_table(&e.auto_pk_table(&table), &table).await;
     let inserted = e.app.insert_row(&e.id, &e.schema(), &table, &row(&[("name", Value::from("first"))])).await.unwrap();

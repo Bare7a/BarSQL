@@ -1,0 +1,406 @@
+{
+  "engine": "sqlserver",
+  "serverVersion": "15.0 (Azure SQL Edge); CI runs 2022",
+  "setup": [
+    "DROP VIEW IF EXISTS barsql_golden.customer_totals",
+    "DROP TABLE IF EXISTS barsql_golden.orders",
+    "DROP TABLE IF EXISTS barsql_golden.customers",
+    "DROP TABLE IF EXISTS barsql_golden.items",
+    "DROP FUNCTION IF EXISTS barsql_golden.with_tax",
+    "DROP PROCEDURE IF EXISTS barsql_golden.count_orders",
+    "DROP SCHEMA IF EXISTS barsql_golden",
+    "CREATE SCHEMA barsql_golden",
+    "CREATE TABLE barsql_golden.customers (\n    id int IDENTITY(1, 1) CONSTRAINT pk_customers PRIMARY KEY,\n    email nvarchar(255) NOT NULL CONSTRAINT uq_customers_email UNIQUE,\n    name nvarchar(100) NOT NULL CONSTRAINT df_customers_name DEFAULT N'anon',\n    created_at datetime2(3) NOT NULL CONSTRAINT df_customers_created DEFAULT SYSUTCDATETIME(),\n    CONSTRAINT ck_customers_name CHECK (LEN(name) > 0)\n)",
+    "CREATE TABLE barsql_golden.orders (\n    id int NOT NULL CONSTRAINT pk_orders PRIMARY KEY,\n    customer_id int NOT NULL CONSTRAINT fk_orders_customer REFERENCES barsql_golden.customers (id) ON DELETE CASCADE,\n    total decimal(10, 2) NOT NULL CONSTRAINT df_orders_total DEFAULT 0,\n    status varchar(20) NOT NULL CONSTRAINT df_orders_status DEFAULT 'new',\n    total_with_tax AS (total * 1.2) PERSISTED,\n    note nvarchar(max) NULL\n)",
+    "CREATE INDEX ix_orders_customer ON barsql_golden.orders (customer_id) INCLUDE (total)",
+    "CREATE UNIQUE INDEX ux_orders_status ON barsql_golden.orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER barsql_golden.orders_touch ON barsql_golden.orders AFTER INSERT AS UPDATE o SET status = LOWER(o.status) FROM barsql_golden.orders o JOIN inserted i ON i.id = o.id",
+    "CREATE FUNCTION barsql_golden.with_tax(@total decimal(10, 2)) RETURNS decimal(12, 2) AS BEGIN RETURN @total * 1.2 END",
+    "CREATE PROCEDURE barsql_golden.count_orders @status varchar(20) AS SELECT COUNT(*) AS n FROM barsql_golden.orders WHERE status = @status",
+    "INSERT INTO barsql_golden.customers (email, name, created_at) VALUES ('a@x.io', N'Ann', '2024-01-01T10:00:00'), ('b@x.io', N'Bob', '2024-01-02T11:30:00')",
+    "INSERT INTO barsql_golden.orders (id, customer_id, total, status) VALUES (1, 1, 10.50, 'NEW'), (2, 1, 5, 'Paid'), (3, 2, 7.25, 'new')",
+    "CREATE TABLE barsql_golden.items (n int NOT NULL)",
+    "INSERT INTO barsql_golden.items VALUES (1), (2), (3)"
+  ],
+  "probes": [
+    {
+      "name": "syntax",
+      "sql": "SELEC 1",
+      "results": [
+        {
+          "statement": "SELEC 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Could not find stored procedure 'SELEC'.",
+            "code": "2812",
+            "detail": "Msg 2812, Level 16, State 62, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "syntax_position",
+      "sql": "SELECT *\nFROM barsql_golden.customers\nWHERE",
+      "results": [
+        {
+          "statement": "SELECT *\nFROM barsql_golden.customers\nWHERE",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Incorrect syntax near 'WHERE'.",
+            "code": "102",
+            "detail": "Msg 102, Level 15, State 1, Line 3",
+            "position": 39,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_table",
+      "sql": "SELECT * FROM barsql_golden.nope",
+      "results": [
+        {
+          "statement": "SELECT * FROM barsql_golden.nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Invalid object name 'barsql_golden.nope'.",
+            "code": "208",
+            "detail": "Msg 208, Level 16, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "undefined_column",
+      "sql": "SELECT nope FROM barsql_golden.customers",
+      "results": [
+        {
+          "statement": "SELECT nope FROM barsql_golden.customers",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Invalid column name 'nope'.",
+            "code": "207",
+            "detail": "Msg 207, Level 16, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "unique_violation",
+      "sql": "INSERT INTO barsql_golden.customers (email, name) VALUES ('a@x.io', N'Dup')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name) VALUES ('a@x.io', N'Dup')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "notice",
+              "code": "",
+              "text": "The statement has been terminated."
+            }
+          ],
+          "error": {
+            "message": "Violation of UNIQUE KEY constraint 'uq_customers_email'. Cannot insert duplicate key in object 'barsql_golden.customers'. The duplicate key value is (a@x.io).",
+            "code": "2627",
+            "detail": "Msg 2627, Level 14, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "not_null_violation",
+      "sql": "INSERT INTO barsql_golden.customers (email, name) VALUES (NULL, N'x')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name) VALUES (NULL, N'x')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "notice",
+              "code": "",
+              "text": "The statement has been terminated."
+            }
+          ],
+          "error": {
+            "message": "Cannot insert the value NULL into column 'email', table 'barsql_test.barsql_golden.customers'; column does not allow nulls. INSERT fails.",
+            "code": "515",
+            "detail": "Msg 515, Level 16, State 2, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fk_violation",
+      "sql": "INSERT INTO barsql_golden.orders (id, customer_id) VALUES (99, 999)",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.orders (id, customer_id) VALUES (99, 999)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "notice",
+              "code": "",
+              "text": "The statement has been terminated."
+            }
+          ],
+          "error": {
+            "message": "The INSERT statement conflicted with the FOREIGN KEY constraint \"fk_orders_customer\". The conflict occurred in database \"barsql_test\", table \"barsql_golden.customers\", column 'id'.",
+            "code": "547",
+            "detail": "Msg 547, Level 16, State 0, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "check_violation",
+      "sql": "INSERT INTO barsql_golden.customers (email, name) VALUES ('z@x.io', N'')",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_golden.customers (email, name) VALUES ('z@x.io', N'')",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "notice",
+              "code": "",
+              "text": "The statement has been terminated."
+            }
+          ],
+          "error": {
+            "message": "The INSERT statement conflicted with the CHECK constraint \"ck_customers_name\". The conflict occurred in database \"barsql_test\", table \"barsql_golden.customers\", column 'name'.",
+            "code": "547",
+            "detail": "Msg 547, Level 16, State 0, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "division_by_zero",
+      "sql": "SELECT 1 / 0 AS v",
+      "results": [
+        {
+          "statement": "SELECT 1 / 0 AS v",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Divide by zero error encountered.",
+            "code": "8134",
+            "detail": "Msg 8134, Level 16, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "invalid_input",
+      "sql": "SELECT CAST('abc' AS int) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('abc' AS int) AS v",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Conversion failed when converting the varchar value 'abc' to data type int.",
+            "code": "245",
+            "detail": "Msg 245, Level 16, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "raiserror_state",
+      "sql": "RAISERROR('custom failure', 16, 7)",
+      "results": [
+        {
+          "statement": "RAISERROR('custom failure', 16, 7)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "custom failure",
+            "code": "50000",
+            "detail": "Msg 50000, Level 16, State 7, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "throw",
+      "sql": "THROW 50001, 'thrown on purpose', 1",
+      "results": [
+        {
+          "statement": "THROW 50001, 'thrown on purpose', 1",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "thrown on purpose",
+            "code": "50001",
+            "detail": "Msg 50001, Level 16, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "batch_abort",
+      "sql": "SELECT 1 AS ok;\nSELECT * FROM barsql_golden.nope;\nSELECT 2 AS never",
+      "results": [
+        {
+          "statement": "SELECT 1 AS ok;\nSELECT * FROM barsql_golden.nope;\nSELECT 2 AS never",
+          "columns": [
+            "ok"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 1 AS ok;\nSELECT * FROM barsql_golden.nope;\nSELECT 2 AS never",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Invalid object name 'barsql_golden.nope'.",
+            "code": "208",
+            "detail": "Msg 208, Level 16, State 1, Line 2",
+            "position": 17,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "statement_error_continues",
+      "sql": "SELECT 1 AS ok;\nRAISERROR('mid batch', 16, 1);\nSELECT 2 AS after",
+      "results": [
+        {
+          "statement": "SELECT 1 AS ok;\nRAISERROR('mid batch', 16, 1);\nSELECT 2 AS after",
+          "columns": [
+            "ok"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 1 AS ok;\nRAISERROR('mid batch', 16, 1);\nSELECT 2 AS after",
+          "columns": [
+            "after"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              2
+            ]
+          ],
+          "display": [
+            [
+              "2"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 1 AS ok;\nRAISERROR('mid batch', 16, 1);\nSELECT 2 AS after",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "mid batch",
+            "code": "50000",
+            "detail": "Msg 50000, Level 16, State 1, Line 2",
+            "position": 17,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "multibyte_position",
+      "sql": "SELECT N'héllo 🌍' AS v,\n  nope",
+      "results": [
+        {
+          "statement": "SELECT N'héllo 🌍' AS v,\n  nope",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Invalid column name 'nope'.",
+            "code": "207",
+            "detail": "Msg 207, Level 16, State 1, Line 2",
+            "position": 27,
+            "severity": "ERROR"
+          }
+        }
+      ]
+    },
+    {
+      "name": "in_procedure",
+      "sql": "EXEC barsql_golden.count_orders",
+      "results": [
+        {
+          "statement": "EXEC barsql_golden.count_orders",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Procedure or function 'count_orders' expects parameter '@status', which was not supplied.",
+            "code": "201",
+            "detail": "Msg 201, Level 16, State 4, Line 0, Procedure barsql_golden.count_orders",
+            "severity": "ERROR"
+          }
+        }
+      ]
+    }
+  ]
+}

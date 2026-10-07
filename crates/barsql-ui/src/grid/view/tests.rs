@@ -214,6 +214,19 @@ fn copy_takes_a_lone_cell_raw_and_a_selection_in_the_copy_format(cx: &mut TestAp
     assert_eq!(text.as_deref(), Some("id,name,note\n3,name 0,note 0\n2,name 1,note 1\n1,name 2,"));
 }
 
+// SQL INSERTs copy in the connection's own quoting, so they run there as they are.
+#[gpui_kit::test]
+fn a_sql_copy_quotes_for_the_connections_dialect(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 1);
+    grid.update(cx, |grid, _| grid.set_dialect(Some(barsql_core::SqlDialect::TSql)));
+    cx.update(|_, cx| super::set_copy_format(ExportFormat::Sql, cx));
+    cx.simulate_keystrokes(&format!("{}-a", modifier()));
+    cx.simulate_keystrokes(&format!("{}-c", modifier()));
+    cx.run_until_parked();
+    let text = cx.read_from_clipboard().and_then(|item| item.text());
+    assert_eq!(text.as_deref(), Some("INSERT INTO [results] ([id], [name], [note]) VALUES (1, N'name 0', N'note 0');"));
+}
+
 // Copied from a grid that can't be edited, like query results, and pasted into a table view.
 #[gpui_kit::test]
 fn a_text_copy_pastes_exact_values_into_an_editable_grid(cx: &mut TestAppContext) {

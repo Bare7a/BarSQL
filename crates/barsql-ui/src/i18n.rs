@@ -264,4 +264,16 @@ mod tests {
             assert!(missing.is_empty(), "{lang} misses {missing:?}");
         }
     }
+
+    // Their keys are built from the ids, so no search for the literal key would find a missing one.
+    #[test]
+    fn every_system_view_has_a_title() {
+        use barsql_sql::system_views::{ViewScope, views};
+        let en = I18n::new("en");
+        for driver in barsql_core::DriverType::KNOWN {
+            for view in views(&driver, ViewScope::Server).chain(views(&driver, ViewScope::Table)) {
+                assert!(en.raw(&view.title_key()).is_some(), "{driver}: {}", view.id);
+            }
+        }
+    }
 }

@@ -40,5 +40,20 @@
   },
   {
     "input": "id = 1 UNION SELECT 1"
+  },
+  {
+    "byDialect": {
+      "clickhouse": "filter must not contain comment markers",
+      "mysql": "filter must not contain comment markers"
+    },
+    "input": "1=1 # x"
+  },
+  {
+    "byDialect": {
+      "sqlite": null,
+      "tsql": null
+    },
+    "error": "filter must be a single boolean expression: ';' is not allowed",
+    "input": "x = 'a\\'' ; DELETE FROM t -- '"
   }
 ]

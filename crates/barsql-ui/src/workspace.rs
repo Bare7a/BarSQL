@@ -375,8 +375,11 @@ impl Workspace {
             cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, window, cx| match event {
                 SidebarEvent::Selected(connection) => this.focus_or_open_tab(connection.clone(), window, cx),
                 SidebarEvent::Insert(text) => this.insert_into_editor(text, window, cx),
-                SidebarEvent::OpenQuery { connection, sql, title } => {
-                    this.open_query_tab_with(connection.clone(), sql.clone(), title.clone().into(), window, cx)
+                SidebarEvent::OpenQuery { connection, sql, title, run } => {
+                    this.open_query_tab_with(connection.clone(), sql.clone(), title.clone().into(), window, cx);
+                    if *run && let Some(tab) = this.active_query().cloned() {
+                        tab.update(cx, |tab, cx| tab.run_all(window, cx));
+                    }
                 }
                 SidebarEvent::OpenSql { connection, sql } => this.open_sql(connection.clone(), sql.clone(), window, cx),
                 SidebarEvent::OpenSaved(query) => this.open_saved(query.clone(), window, cx),

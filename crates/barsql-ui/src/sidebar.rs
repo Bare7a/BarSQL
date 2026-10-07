@@ -31,8 +31,8 @@ const PANELS: [Panel; 3] = [Panel::Schema, Panel::Saved, Panel::Recent];
 pub enum SidebarEvent {
     Selected(ConnectionConfig),
     Insert(String),
-    // Opens a new tab for SQL from the tree, like SELECT, COUNT or DDL.
-    OpenQuery { connection: ConnectionConfig, sql: String, title: String },
+    // Opens a new tab for SQL from the tree, like SELECT, COUNT or DDL. `run` runs it there, as system views do.
+    OpenQuery { connection: ConnectionConfig, sql: String, title: String, run: bool },
     Browse { connection: ConnectionConfig, schema: String, table: String },
     // SQL from history. Goes into the connection's plain query tab.
     OpenSql { connection: ConnectionConfig, sql: String },
@@ -76,9 +76,9 @@ impl Sidebar {
                         let Some(connection) = this.connection(id).cloned() else { return };
                         SidebarEvent::Selected(connection)
                     }
-                    SchemaTreeEvent::OpenQuery { sql, title } => {
+                    SchemaTreeEvent::OpenQuery { sql, title, run } => {
                         let Some(connection) = this.selected().cloned() else { return };
-                        SidebarEvent::OpenQuery { connection, sql: sql.clone(), title: title.clone() }
+                        SidebarEvent::OpenQuery { connection, sql: sql.clone(), title: title.clone(), run: *run }
                     }
                     SchemaTreeEvent::Browse { schema, table } => {
                         let Some(connection) = this.selected().cloned() else { return };
@@ -264,6 +264,11 @@ impl Sidebar {
                 self.edit_connection(config, window, cx);
             }
             ConnectionsEvent::Changed => self.reload_connections(cx),
+            ConnectionsEvent::OpenQuery { connection_id, sql, title } => {
+                self.set_switcher_open(false, cx);
+                let Some(connection) = self.connection(connection_id).cloned() else { return };
+                cx.emit(SidebarEvent::OpenQuery { connection, sql: sql.clone(), title: title.clone(), run: true });
+            }
         }
     }
 

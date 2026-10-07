@@ -1,0 +1,1387 @@
+{
+  "engine": "sqlserver",
+  "serverVersion": "15.0 (Azure SQL Edge); CI runs 2022",
+  "setup": [
+    "DROP VIEW IF EXISTS barsql_golden.customer_totals",
+    "DROP TABLE IF EXISTS barsql_golden.orders",
+    "DROP TABLE IF EXISTS barsql_golden.customers",
+    "DROP TABLE IF EXISTS barsql_golden.items",
+    "DROP FUNCTION IF EXISTS barsql_golden.with_tax",
+    "DROP PROCEDURE IF EXISTS barsql_golden.count_orders",
+    "DROP SCHEMA IF EXISTS barsql_golden",
+    "CREATE SCHEMA barsql_golden",
+    "CREATE TABLE barsql_golden.customers (\n    id int IDENTITY(1, 1) CONSTRAINT pk_customers PRIMARY KEY,\n    email nvarchar(255) NOT NULL CONSTRAINT uq_customers_email UNIQUE,\n    name nvarchar(100) NOT NULL CONSTRAINT df_customers_name DEFAULT N'anon',\n    created_at datetime2(3) NOT NULL CONSTRAINT df_customers_created DEFAULT SYSUTCDATETIME(),\n    CONSTRAINT ck_customers_name CHECK (LEN(name) > 0)\n)",
+    "CREATE TABLE barsql_golden.orders (\n    id int NOT NULL CONSTRAINT pk_orders PRIMARY KEY,\n    customer_id int NOT NULL CONSTRAINT fk_orders_customer REFERENCES barsql_golden.customers (id) ON DELETE CASCADE,\n    total decimal(10, 2) NOT NULL CONSTRAINT df_orders_total DEFAULT 0,\n    status varchar(20) NOT NULL CONSTRAINT df_orders_status DEFAULT 'new',\n    total_with_tax AS (total * 1.2) PERSISTED,\n    note nvarchar(max) NULL\n)",
+    "CREATE INDEX ix_orders_customer ON barsql_golden.orders (customer_id) INCLUDE (total)",
+    "CREATE UNIQUE INDEX ux_orders_status ON barsql_golden.orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER barsql_golden.orders_touch ON barsql_golden.orders AFTER INSERT AS UPDATE o SET status = LOWER(o.status) FROM barsql_golden.orders o JOIN inserted i ON i.id = o.id",
+    "CREATE FUNCTION barsql_golden.with_tax(@total decimal(10, 2)) RETURNS decimal(12, 2) AS BEGIN RETURN @total * 1.2 END",
+    "CREATE PROCEDURE barsql_golden.count_orders @status varchar(20) AS SELECT COUNT(*) AS n FROM barsql_golden.orders WHERE status = @status",
+    "INSERT INTO barsql_golden.customers (email, name, created_at) VALUES ('a@x.io', N'Ann', '2024-01-01T10:00:00'), ('b@x.io', N'Bob', '2024-01-02T11:30:00')",
+    "INSERT INTO barsql_golden.orders (id, customer_id, total, status) VALUES (1, 1, 10.50, 'NEW'), (2, 1, 5, 'Paid'), (3, 2, 7.25, 'new')",
+    "CREATE TABLE barsql_golden.items (n int NOT NULL)",
+    "INSERT INTO barsql_golden.items VALUES (1), (2), (3)"
+  ],
+  "probes": [
+    {
+      "name": "tinyint",
+      "sql": "SELECT CAST(255 AS tinyint) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(255 AS tinyint) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "tinyint"
+          ],
+          "rows": [
+            [
+              255
+            ]
+          ],
+          "display": [
+            [
+              "255"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "smallint",
+      "sql": "SELECT CAST(-32768 AS smallint) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(-32768 AS smallint) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "smallint"
+          ],
+          "rows": [
+            [
+              -32768
+            ]
+          ],
+          "display": [
+            [
+              "-32768"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "int_min",
+      "sql": "SELECT CAST(-2147483648 AS int) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(-2147483648 AS int) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              -2147483648
+            ]
+          ],
+          "display": [
+            [
+              "-2147483648"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bigint_safe",
+      "sql": "SELECT CAST(9007199254740991 AS bigint) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(9007199254740991 AS bigint) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "bigint"
+          ],
+          "rows": [
+            [
+              9007199254740991
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740991"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bigint_unsafe",
+      "sql": "SELECT CAST(9007199254740992 AS bigint) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(9007199254740992 AS bigint) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "bigint"
+          ],
+          "rows": [
+            [
+              "9007199254740992"
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740992"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bigint_max",
+      "sql": "SELECT CAST(9223372036854775807 AS bigint) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(9223372036854775807 AS bigint) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "bigint"
+          ],
+          "rows": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "display": [
+            [
+              "9223372036854775807"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bigint_min",
+      "sql": "SELECT CAST(-9223372036854775808 AS bigint) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(-9223372036854775808 AS bigint) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "bigint"
+          ],
+          "rows": [
+            [
+              "-9223372036854775808"
+            ]
+          ],
+          "display": [
+            [
+              "-9223372036854775808"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "numeric_literal",
+      "sql": "SELECT 9007199254740993 AS v",
+      "results": [
+        {
+          "statement": "SELECT 9007199254740993 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "numeric"
+          ],
+          "rows": [
+            [
+              "9007199254740993"
+            ]
+          ],
+          "display": [
+            [
+              "9007199254740993"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "decimal_big",
+      "sql": "SELECT CAST(12345678901234567890.123456789 AS decimal(38, 9)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(12345678901234567890.123456789 AS decimal(38, 9)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "decimal"
+          ],
+          "rows": [
+            [
+              "12345678901234567890.123456789"
+            ]
+          ],
+          "display": [
+            [
+              "12345678901234567890.123456789"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "decimal_scale",
+      "sql": "SELECT CAST(1.5 AS decimal(10, 2)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(1.5 AS decimal(10, 2)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "decimal"
+          ],
+          "rows": [
+            [
+              "1.50"
+            ]
+          ],
+          "display": [
+            [
+              "1.50"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "decimal_negative",
+      "sql": "SELECT CAST(-0.005 AS decimal(10, 3)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(-0.005 AS decimal(10, 3)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "decimal"
+          ],
+          "rows": [
+            [
+              "-0.005"
+            ]
+          ],
+          "display": [
+            [
+              "-0.005"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "real",
+      "sql": "SELECT CAST(1.1 AS real) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(1.1 AS real) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "real"
+          ],
+          "rows": [
+            [
+              1.1
+            ]
+          ],
+          "display": [
+            [
+              "1.1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float",
+      "sql": "SELECT CAST(0.1 AS float) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(0.1 AS float) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "float"
+          ],
+          "rows": [
+            [
+              0.1
+            ]
+          ],
+          "display": [
+            [
+              "0.1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float_sum",
+      "sql": "SELECT CAST(0.1 AS float) + CAST(0.2 AS float) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(0.1 AS float) + CAST(0.2 AS float) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "float"
+          ],
+          "rows": [
+            [
+              0.30000000000000004
+            ]
+          ],
+          "display": [
+            [
+              "0.30000000000000004"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float_1e20",
+      "sql": "SELECT CAST(1e20 AS float) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(1e20 AS float) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "float"
+          ],
+          "rows": [
+            [
+              1e+20
+            ]
+          ],
+          "display": [
+            [
+              "100000000000000000000"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float_1e21",
+      "sql": "SELECT CAST(1e21 AS float) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(1e21 AS float) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "float"
+          ],
+          "rows": [
+            [
+              1e+21
+            ]
+          ],
+          "display": [
+            [
+              "1e+21"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "float_tiny",
+      "sql": "SELECT CAST(1e-7 AS float) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(1e-7 AS float) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "float"
+          ],
+          "rows": [
+            [
+              1e-7
+            ]
+          ],
+          "display": [
+            [
+              "1e-7"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "money",
+      "sql": "SELECT CAST(12.34 AS money) AS v, CAST(-1.5 AS smallmoney) AS s",
+      "results": [
+        {
+          "statement": "SELECT CAST(12.34 AS money) AS v, CAST(-1.5 AS smallmoney) AS s",
+          "columns": [
+            "v",
+            "s"
+          ],
+          "columnTypes": [
+            "money",
+            "money"
+          ],
+          "rows": [
+            [
+              "12.3400",
+              "-1.5000"
+            ]
+          ],
+          "display": [
+            [
+              "12.3400",
+              "-1.5000"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "money_big",
+      "sql": "SELECT CAST(922337203685477.5807 AS money) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(922337203685477.5807 AS money) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "money"
+          ],
+          "rows": [
+            [
+              "922337203685477.6250"
+            ]
+          ],
+          "display": [
+            [
+              "922337203685477.6250"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "bit",
+      "sql": "SELECT CAST(1 AS bit) AS t, CAST(0 AS bit) AS f",
+      "results": [
+        {
+          "statement": "SELECT CAST(1 AS bit) AS t, CAST(0 AS bit) AS f",
+          "columns": [
+            "t",
+            "f"
+          ],
+          "columnTypes": [
+            "bit",
+            "bit"
+          ],
+          "rows": [
+            [
+              true,
+              false
+            ]
+          ],
+          "display": [
+            [
+              "true",
+              "false"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "nvarchar_unicode",
+      "sql": "SELECT N'héllo 🌍' + NCHAR(10) + NCHAR(9) + N'tab' AS v",
+      "results": [
+        {
+          "statement": "SELECT N'héllo 🌍' + NCHAR(10) + NCHAR(9) + N'tab' AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "nvarchar"
+          ],
+          "rows": [
+            [
+              "héllo 🌍\n\ttab"
+            ]
+          ],
+          "display": [
+            [
+              "héllo 🌍\n\ttab"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "varchar_empty",
+      "sql": "SELECT CAST('' AS varchar(10)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('' AS varchar(10)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "varchar"
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ],
+          "display": [
+            [
+              ""
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "char_padded",
+      "sql": "SELECT CAST('ab' AS char(4)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('ab' AS char(4)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "char"
+          ],
+          "rows": [
+            [
+              "ab  "
+            ]
+          ],
+          "display": [
+            [
+              "ab  "
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "varchar_max_long",
+      "sql": "SELECT LEN(v) AS length, RIGHT(v, 3) AS tail FROM (SELECT REPLICATE(CAST('x' AS varchar(max)), 5000) + 'end' AS v) t",
+      "results": [
+        {
+          "statement": "SELECT LEN(v) AS length, RIGHT(v, 3) AS tail FROM (SELECT REPLICATE(CAST('x' AS varchar(max)), 5000) + 'end' AS v) t",
+          "columns": [
+            "length",
+            "tail"
+          ],
+          "columnTypes": [
+            "bigint",
+            "varchar"
+          ],
+          "rows": [
+            [
+              5003,
+              "end"
+            ]
+          ],
+          "display": [
+            [
+              "5003",
+              "end"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "varchar_max_whole",
+      "sql": "SELECT REPLICATE(CAST('ab' AS varchar(max)), 2100) AS v",
+      "results": [
+        {
+          "statement": "SELECT REPLICATE(CAST('ab' AS varchar(max)), 2100) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "varchar"
+          ],
+          "rows": [
+            [
+              "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+            ]
+          ],
+          "display": [
+            [
+              "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "binary_utf8",
+      "sql": "SELECT CAST('hello' AS varbinary(10)) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('hello' AS varbinary(10)) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "varbinary"
+          ],
+          "rows": [
+            [
+              "hello"
+            ]
+          ],
+          "display": [
+            [
+              "hello"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "binary",
+      "sql": "SELECT 0xDEADBEEF AS v",
+      "results": [
+        {
+          "statement": "SELECT 0xDEADBEEF AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "varbinary"
+          ],
+          "rows": [
+            [
+              "\\xdeadbeef"
+            ]
+          ],
+          "display": [
+            [
+              "\\xdeadbeef"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "binary_empty",
+      "sql": "SELECT 0x AS v",
+      "results": [
+        {
+          "statement": "SELECT 0x AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "varbinary"
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ],
+          "display": [
+            [
+              ""
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "uniqueidentifier",
+      "sql": "SELECT CAST('6F9619FF-8B86-D011-B42D-00C04FC964FF' AS uniqueidentifier) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('6F9619FF-8B86-D011-B42D-00C04FC964FF' AS uniqueidentifier) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "uniqueidentifier"
+          ],
+          "rows": [
+            [
+              "6F9619FF-8B86-D011-B42D-00C04FC964FF"
+            ]
+          ],
+          "display": [
+            [
+              "6F9619FF-8B86-D011-B42D-00C04FC964FF"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "date",
+      "sql": "SELECT CAST('2024-02-29' AS date) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29' AS date) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "date"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "date_min",
+      "sql": "SELECT CAST('0001-01-01' AS date) AS lo, CAST('9999-12-31' AS date) AS hi",
+      "results": [
+        {
+          "statement": "SELECT CAST('0001-01-01' AS date) AS lo, CAST('9999-12-31' AS date) AS hi",
+          "columns": [
+            "lo",
+            "hi"
+          ],
+          "columnTypes": [
+            "date",
+            "date"
+          ],
+          "rows": [
+            [
+              "0001-01-01T00:00:00Z",
+              "9999-12-31T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "0001-01-01T00:00:00Z",
+              "9999-12-31T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "time",
+      "sql": "SELECT CAST('13:45:30.1234567' AS time(7)) AS v, CAST('13:45:30' AS time(0)) AS whole",
+      "results": [
+        {
+          "statement": "SELECT CAST('13:45:30.1234567' AS time(7)) AS v, CAST('13:45:30' AS time(0)) AS whole",
+          "columns": [
+            "v",
+            "whole"
+          ],
+          "columnTypes": [
+            "time",
+            "time"
+          ],
+          "rows": [
+            [
+              "13:45:30.1234567",
+              "13:45:30"
+            ]
+          ],
+          "display": [
+            [
+              "13:45:30.1234567",
+              "13:45:30"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "datetime",
+      "sql": "SELECT CAST('2024-02-29T13:45:30.123' AS datetime) AS v, CAST('1753-01-01' AS datetime) AS lo",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29T13:45:30.123' AS datetime) AS v, CAST('1753-01-01' AS datetime) AS lo",
+          "columns": [
+            "v",
+            "lo"
+          ],
+          "columnTypes": [
+            "datetime",
+            "datetime"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123Z",
+              "1753-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123Z",
+              "1753-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "datetime_ticks",
+      "sql": "SELECT CAST('2024-02-29T13:45:30.997' AS datetime) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29T13:45:30.997' AS datetime) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "datetime"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.997Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.997Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "smalldatetime",
+      "sql": "SELECT CAST('2024-02-29T13:45:29' AS smalldatetime) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29T13:45:29' AS smalldatetime) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "smalldatetime"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:00Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "datetime2",
+      "sql": "SELECT CAST('2024-02-29T13:45:30.1234567' AS datetime2(7)) AS v, CAST('2024-02-29T13:45:30.5' AS datetime2(0)) AS rounded",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29T13:45:30.1234567' AS datetime2(7)) AS v, CAST('2024-02-29T13:45:30.5' AS datetime2(0)) AS rounded",
+          "columns": [
+            "v",
+            "rounded"
+          ],
+          "columnTypes": [
+            "datetime2",
+            "datetime2"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.1234567Z",
+              "2024-02-29T13:45:31Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.1234567Z",
+              "2024-02-29T13:45:31Z"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "datetimeoffset",
+      "sql": "SELECT CAST('2024-02-29T23:30:00.25+02:00' AS datetimeoffset(7)) AS v, CAST('2024-02-29T01:00:00-05:30' AS datetimeoffset(0)) AS west",
+      "results": [
+        {
+          "statement": "SELECT CAST('2024-02-29T23:30:00.25+02:00' AS datetimeoffset(7)) AS v, CAST('2024-02-29T01:00:00-05:30' AS datetimeoffset(0)) AS west",
+          "columns": [
+            "v",
+            "west"
+          ],
+          "columnTypes": [
+            "datetimeoffset",
+            "datetimeoffset"
+          ],
+          "rows": [
+            [
+              "2024-02-29T23:30:00.25+02:00",
+              "2024-02-29T01:00:00-05:30"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T23:30:00.25+02:00",
+              "2024-02-29T01:00:00-05:30"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "xml",
+      "sql": "SELECT CAST('<a>1 &amp; 2</a>' AS xml) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST('<a>1 &amp; 2</a>' AS xml) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "xml"
+          ],
+          "rows": [
+            [
+              "<a>1 &amp; 2</a>"
+            ]
+          ],
+          "display": [
+            [
+              "<a>1 &amp; 2</a>"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "sql_variant",
+      "sql": "SELECT CAST(CAST(42 AS int) AS sql_variant) AS v",
+      "results": [
+        {
+          "statement": "SELECT CAST(CAST(42 AS int) AS sql_variant) AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "sql_variant"
+          ],
+          "rows": [
+            [
+              42
+            ]
+          ],
+          "display": [
+            [
+              "42"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "typed_null",
+      "sql": "SELECT CAST(NULL AS int) AS i, CAST(NULL AS nvarchar(10)) AS s, CAST(NULL AS datetime2) AS t",
+      "results": [
+        {
+          "statement": "SELECT CAST(NULL AS int) AS i, CAST(NULL AS nvarchar(10)) AS s, CAST(NULL AS datetime2) AS t",
+          "columns": [
+            "i",
+            "s",
+            "t"
+          ],
+          "columnTypes": [
+            "int",
+            "nvarchar",
+            "datetime2"
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null
+            ]
+          ],
+          "display": [
+            [
+              null,
+              null,
+              null
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "two_result_sets",
+      "sql": "SELECT 1 AS a; SELECT N'b' AS b",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a; SELECT N'b' AS b",
+          "columns": [
+            "a"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT 1 AS a; SELECT N'b' AS b",
+          "columns": [
+            "b"
+          ],
+          "columnTypes": [
+            "nvarchar"
+          ],
+          "rows": [
+            [
+              "b"
+            ]
+          ],
+          "display": [
+            [
+              "b"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "print_then_rows",
+      "sql": "PRINT 'hello'; SELECT 1 AS v",
+      "results": [
+        {
+          "statement": "PRINT 'hello'; SELECT 1 AS v",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "notice",
+              "code": "",
+              "text": "hello"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update_count",
+      "sql": "UPDATE barsql_golden.items SET n = n WHERE n > 1",
+      "results": [
+        {
+          "statement": "UPDATE barsql_golden.items SET n = n WHERE n > 1",
+          "rowCount": 0,
+          "affectedRows": 2,
+          "message": "2 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "two_counts",
+      "sql": "UPDATE barsql_golden.items SET n = n WHERE n > 1; UPDATE barsql_golden.items SET n = n",
+      "results": [
+        {
+          "statement": "UPDATE barsql_golden.items SET n = n WHERE n > 1; UPDATE barsql_golden.items SET n = n",
+          "rowCount": 0,
+          "affectedRows": 5,
+          "message": "5 row(s) affected",
+          "messages": [
+            {
+              "level": "info",
+              "code": "",
+              "text": "(2 rows affected)"
+            },
+            {
+              "level": "info",
+              "code": "",
+              "text": "(3 rows affected)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nocount",
+      "sql": "SET NOCOUNT ON; UPDATE barsql_golden.items SET n = n; SET NOCOUNT OFF",
+      "results": [
+        {
+          "statement": "SET NOCOUNT ON; UPDATE barsql_golden.items SET n = n; SET NOCOUNT OFF",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "Commands completed successfully."
+        }
+      ]
+    },
+    {
+      "name": "procedure",
+      "sql": "EXEC barsql_golden.count_orders 'new'",
+      "results": [
+        {
+          "statement": "EXEC barsql_golden.count_orders 'new'",
+          "columns": [
+            "n"
+          ],
+          "columnTypes": [
+            "int"
+          ],
+          "rows": [
+            [
+              2
+            ]
+          ],
+          "display": [
+            [
+              "2"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "trigger_rewrites",
+      "sql": "SELECT id, status FROM barsql_golden.orders ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT id, status FROM barsql_golden.orders ORDER BY id",
+          "columns": [
+            "id",
+            "status"
+          ],
+          "columnTypes": [
+            "int",
+            "varchar"
+          ],
+          "rows": [
+            [
+              1,
+              "new"
+            ],
+            [
+              2,
+              "paid"
+            ],
+            [
+              3,
+              "new"
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "new"
+            ],
+            [
+              "2",
+              "paid"
+            ],
+            [
+              "3",
+              "new"
+            ]
+          ],
+          "rowCount": 3,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "computed",
+      "sql": "SELECT total, total_with_tax, barsql_golden.with_tax(total) AS via_function FROM barsql_golden.orders WHERE id = 1",
+      "results": [
+        {
+          "statement": "SELECT total, total_with_tax, barsql_golden.with_tax(total) AS via_function FROM barsql_golden.orders WHERE id = 1",
+          "columns": [
+            "total",
+            "total_with_tax",
+            "via_function"
+          ],
+          "columnTypes": [
+            "decimal",
+            "numeric",
+            "decimal"
+          ],
+          "rows": [
+            [
+              "10.50",
+              "12.600",
+              "12.60"
+            ]
+          ],
+          "display": [
+            [
+              "10.50",
+              "12.600",
+              "12.60"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    }
+  ]
+}

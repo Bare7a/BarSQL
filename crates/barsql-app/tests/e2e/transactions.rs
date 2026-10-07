@@ -17,6 +17,7 @@ fn insert(e: &E2e, table: &str, name: &str) -> String {
 }
 
 each_engine!(async fn transaction_commit(e) {
+    require!(e, interactive_transactions);
     let table = temp_table(&e, "txn_commit").await;
     let tab = format!("tab-commit-{table}");
     e.app.begin_transaction(&e.id, &tab).await.unwrap();
@@ -30,6 +31,7 @@ each_engine!(async fn transaction_commit(e) {
 });
 
 each_engine!(async fn transaction_rollback(e) {
+    require!(e, interactive_transactions);
     let table = temp_table(&e, "txn_rollback").await;
     let tab = format!("tab-rollback-{table}");
     e.app.begin_transaction(&e.id, &tab).await.unwrap();
@@ -40,6 +42,7 @@ each_engine!(async fn transaction_rollback(e) {
 });
 
 each_engine!(async fn transaction_guards(e) {
+    require!(e, interactive_transactions);
     assert!(e.app.begin_transaction(&e.id, "").await.is_err());
     let table = temp_table(&e, "txn_guard").await;
     let tab = format!("tab-guard-{table}");
@@ -53,6 +56,7 @@ each_engine!(async fn transaction_guards(e) {
 });
 
 each_engine!(async fn transactions_are_concurrent_per_tab(e) {
+    require!(e, interactive_transactions);
     let table = temp_table(&e, "txn_multi").await;
     let (tab_a, tab_b) = (format!("tabA-{table}"), format!("tabB-{table}"));
     e.app.begin_transaction(&e.id, &tab_a).await.unwrap();
@@ -114,18 +118,27 @@ each_engine!(async fn cancel_is_scoped_to_the_tab(e) {
 });
 
 each_engine!(async fn cancel_inside_a_transaction_keeps_it(e) {
+    require!(e, interactive_transactions);
     let table = temp_table(&e, "txn_cancel").await;
     let tab = format!("tab-cancel-{table}");
     e.app.begin_transaction(&e.id, &tab).await.unwrap();
     e.exec_on_tab(&tab, &insert(&e, &table, "kept")).await;
     let error = cancel_sleep(&e, &tab).await.expect("a cancelled query reports an error");
     assert!(error.cancelled, "{error:?}");
+    // tiberius 0.13 can't read the server's acknowledgement of a cancel, so the connection goes, and the server
+    // rolls back what it held. The tab must say so rather than claim the transaction.
+    if e.is_sqlserver() {
+        assert!(!e.app.transaction_status(&tab), "the tab still claims a transaction its connection lost");
+        assert_eq!(e.count(&table).await, 0);
+        return;
+    }
     assert!(e.app.transaction_status(&tab), "the cancel must not end the tab's transaction");
     e.app.commit_transaction(&tab).await.unwrap();
     assert_eq!(e.count(&table).await, 1, "the write before the cancel commits");
 });
 
 each_engine!(async fn saving_or_disconnecting_ends_tab_transactions(e) {
+    require!(e, interactive_transactions);
     let table = temp_table(&e, "txn_ended").await;
     let events = e.app.events();
     let saved = e.app.list_connections().into_iter().find(|c| c.id == e.id).unwrap();
@@ -148,18 +161,53 @@ each_engine!(async fn saving_or_disconnecting_ends_tab_transactions(e) {
 
 each_engine!(async fn idle_tabs_release_their_sessions(e) {
     let (idle, busy) = ("tab-idle", "tab-idle-in-transaction");
-    e.exec_on_tab(idle, "CREATE TEMPORARY TABLE tmp_idle (a INT)").await;
+    let caps = e.driver().capabilities();
+    let (transactions, state) = (caps.interactive_transactions, caps.session_state);
+    // sqld refuses temp tables, so a Turso tab holds nothing to lose.
+    let (create, read) = match e.kind {
+        Kind::SqlServer => ("CREATE TABLE #tmp_idle (a INT)", "SELECT a FROM #tmp_idle"),
+        _ => ("CREATE TEMPORARY TABLE tmp_idle (a INT)", "SELECT a FROM tmp_idle"),
+    };
+    if state {
+        e.exec_on_tab(idle, create).await;
+    }
     let table = temp_table(&e, "txn_idle").await;
-    e.app.begin_transaction(&e.id, busy).await.unwrap();
-    e.exec_on_tab(busy, &insert(&e, &table, "kept")).await;
+    if transactions {
+        e.app.begin_transaction(&e.id, busy).await.unwrap();
+        e.exec_on_tab(busy, &insert(&e, &table, "kept")).await;
+    }
 
     e.app.release_idle_tabs(Duration::from_secs(3600));
-    assert!(run_error(&e.run_on_tab(idle, "SELECT a FROM tmp_idle").await).is_none(), "a recent tab keeps its session");
+    if state {
+        let kept = run_error(&e.run_on_tab(idle, read).await);
+        assert!(kept.is_none(), "a recent tab keeps its session");
+    }
 
     e.app.release_idle_tabs(Duration::ZERO);
-    assert!(run_error(&e.run_on_tab(idle, "SELECT a FROM tmp_idle").await).is_some(), "the session state went with it");
+    if state {
+        let gone = run_error(&e.run_on_tab(idle, read).await);
+        assert!(gone.is_some(), "the session state went with it");
+    }
     assert!(run_error(&e.run_on_tab(idle, "SELECT 1").await).is_none(), "the tab opens a fresh session");
-    assert!(e.app.transaction_status(busy), "a tab in a transaction keeps its session");
-    e.app.commit_transaction(busy).await.unwrap();
-    assert_eq!(e.count(&table).await, 1);
+    if transactions {
+        assert!(e.app.transaction_status(busy), "a tab in a transaction keeps its session");
+        e.app.commit_transaction(busy).await.unwrap();
+        assert_eq!(e.count(&table).await, 1);
+    }
 });
+
+// The server drops an idle stream within seconds, so a run can't leave a transaction behind.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn turso_rolls_back_what_a_run_leaves_open() {
+    run(Kind::Turso, |e| async move {
+        let table = temp_table(&e, "txn_open").await;
+        assert!(e.app.begin_transaction(&e.id, "tab-turso").await.is_err(), "no transaction button on Turso");
+        let events = e.run_on_tab("tab-open", &format!("BEGIN; {}", insert(&e, &table, "lost"))).await;
+        let error = run_error(&events).expect("the run reports the rollback");
+        assert!(error.message.contains("Rolled back"), "{error:?}");
+        assert_eq!(e.count(&table).await, 0);
+        e.exec_on_tab("tab-open", &format!("BEGIN; {}; COMMIT", insert(&e, &table, "kept"))).await;
+        assert_eq!(e.count(&table).await, 1, "a transaction that ends in the run commits");
+    })
+    .await
+}

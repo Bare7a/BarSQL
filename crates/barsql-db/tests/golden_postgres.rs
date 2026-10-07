@@ -4,7 +4,7 @@ mod common;
 
 use std::time::Duration;
 
-use barsql_core::DriverType;
+use barsql_core::{DriverType, FunctionKind};
 use barsql_db::{Cancel, Engine};
 use common::{Report, assert_matches, compare_probes, fixture, postgres_config, run_all, schema_snapshot, strings};
 use jiff::tz::{Offset, TimeZone};
@@ -50,6 +50,32 @@ async fn postgres_schema_and_ddl_match_the_fixtures() {
     run_all(&mut session, &strings(&expected["setup"])).await;
     let actual = schema_snapshot(&engine, expected["schema"].as_str().unwrap(), &expected).await;
     assert_matches(&format!("schema/{}.json", expected["engine"].as_str().unwrap()), &expected, &actual);
+}
+
+// Built-ins come with every overload. Functions that only back operators, casts, types, aggregates and index
+// methods aren't callable as written, so they stay out.
+#[tokio::test]
+async fn postgres_lists_callable_functions() {
+    let _serial = common::serial().await;
+    let engine = connect(TimeZone::UTC).await;
+    let started = std::time::Instant::now();
+    let list = engine.list_functions().await.unwrap();
+    let elapsed = started.elapsed();
+    let find = |name: &str| list.functions.iter().find(|f| f.schema == "pg_catalog" && f.name == name);
+    let kind = |name: &str| find(name).map(|f| f.kind);
+    assert_eq!(kind("jsonb_build_object"), Some(FunctionKind::Scalar));
+    assert_eq!(kind("count"), Some(FunctionKind::Aggregate));
+    assert_eq!(kind("row_number"), Some(FunctionKind::Window));
+    assert_eq!(kind("rank"), Some(FunctionKind::Window), "a window function and a hypothetical-set aggregate");
+    assert_eq!(kind("generate_series"), Some(FunctionKind::Table));
+    let series = find("generate_series").unwrap();
+    assert!(series.builtin && !series.qualified_only && series.signatures.len() > 2, "{series:?}");
+    for hidden in ["int4pl", "array_in", "float8_accum", "btint4cmp", "eqsel", "plpgsql_call_handler", "textin"] {
+        assert!(find(hidden).is_none(), "{hidden} isn't callable as written");
+    }
+    let names: std::collections::HashSet<_> = list.functions.iter().map(|f| (&f.schema, &f.name)).collect();
+    assert_eq!(names.len(), list.functions.len(), "overloads fold into one entry");
+    assert!(elapsed < Duration::from_secs(2), "{} functions took {elapsed:?}", list.functions.len());
 }
 
 #[tokio::test]

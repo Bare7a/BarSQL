@@ -1,4 +1,6 @@
-use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, Row, RowDelete, RowUpdate, Value};
+use barsql_core::{
+    ConnectionConfig, DriverType, FunctionKind, ObjectKind, ObjectRef, Row, RowDelete, RowUpdate, Value,
+};
 use barsql_db::sqlite::SqliteConnectOptions;
 use barsql_db::{Cancel, Engine, ScriptEvent};
 
@@ -91,6 +93,23 @@ async fn ping_and_schema_info() {
     assert_eq!(schemas, ["main"]);
     let info = engine.connection_info().await.unwrap();
     assert_eq!((info.database.as_str(), info.schema.as_str()), ("main", "main"));
+}
+
+// The bundled build lists its built-ins. It leaves out the math functions, so completion won't offer them.
+#[tokio::test]
+async fn functions_come_from_the_function_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("functions.db"), false).await;
+    let list = engine.list_functions().await.unwrap();
+    let find = |name: &str| list.functions.iter().find(|f| f.name == name);
+    for name in ["abs", "json_extract", "iif", "unixepoch", "group_concat", "bm25", "snippet"] {
+        assert!(find(name).is_some_and(|f| f.builtin), "{name} missing from {:?}", list.functions.len());
+    }
+    assert_eq!(find("group_concat").map(|f| f.kind), Some(FunctionKind::Aggregate));
+    assert_eq!(find("abs").map(|f| f.kind), Some(FunctionKind::Scalar));
+    assert!(list.functions.windows(2).all(|w| w[0].name < w[1].name), "one entry per name, sorted");
+    assert!(find("json_each").is_none(), "table-valued functions are modules");
+    assert!(find("->").is_none(), "operators aren't callable by name");
 }
 
 #[tokio::test]
