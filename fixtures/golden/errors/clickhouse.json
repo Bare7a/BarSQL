@@ -126,10 +126,10 @@
     },
     {
       "name": "mid_stream",
-      "sql": "SELECT number, throwIf(number = 50, 'boom') AS t FROM numbers(100) SETTINGS max_block_size = 10, max_threads = 1",
+      "sql": "SELECT number, throwIf(number = 50, 'boom') AS t FROM numbers(100) SETTINGS max_block_size = 10, max_threads = 1, output_format_parallel_formatting = 0",
       "results": [
         {
-          "statement": "SELECT number, throwIf(number = 50, 'boom') AS t FROM numbers(100) SETTINGS max_block_size = 10, max_threads = 1",
+          "statement": "SELECT number, throwIf(number = 50, 'boom') AS t FROM numbers(100) SETTINGS max_block_size = 10, max_threads = 1, output_format_parallel_formatting = 0",
           "columns": [
             "number",
             "t"
