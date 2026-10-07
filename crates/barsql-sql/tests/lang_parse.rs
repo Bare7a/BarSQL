@@ -138,8 +138,21 @@ fn detects_transaction_control() {
         ("BEGIN; SELECT 1; COMMIT;", None),
         ("BEGIN; UPDATE t SET x = 1", None),
     ] {
-        assert_eq!(detect_transaction_control(sql), want, "{sql:?}");
+        assert_eq!(detect_transaction_control(sql, None), want, "{sql:?}");
     }
+    let mssql = DriverType::SqlServer;
+    for (sql, want) in [
+        ("BEGIN TRAN", Some(Begin)),
+        ("begin transaction;", Some(Begin)),
+        ("COMMIT TRAN", Some(Commit)),
+        ("ROLLBACK", Some(Rollback)),
+        ("BEGIN", None),
+        ("BEGIN SELECT 1 END", None),
+    ] {
+        assert_eq!(detect_transaction_control(sql, Some(&mssql)), want, "{sql:?}");
+    }
+    assert_eq!(detect_transaction_control("BEGIN", Some(&DriverType::ClickHouse)), None);
+    assert_eq!(detect_transaction_control("BEGIN", Some(&DriverType::Turso)), Some(Begin));
 }
 
 fn locale(lang: &str) -> serde_json::Value {

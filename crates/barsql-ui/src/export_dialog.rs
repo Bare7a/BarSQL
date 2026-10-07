@@ -73,9 +73,10 @@ impl ExportDialog {
         self.busy = true;
         cx.notify();
         let (set, staged, table) = (self.source.set.clone(), self.source.staged.clone(), self.source.table.clone());
-        let (target, format) = (self.target(), copy_format(cx));
-        let text =
-            cx.background_spawn(async move { copy::export(&set, staged.as_ref(), format, table.as_deref(), &target) });
+        let (target, format, dialect) = (self.target(), copy_format(cx), self.source.dialect);
+        let text = cx.background_spawn(async move {
+            copy::export(&set, staged.as_ref(), format, table.as_deref(), dialect, &target)
+        });
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let text = text.await;
             this.update_in(cx, |dialog, window, cx| {
@@ -127,10 +128,10 @@ impl ExportDialog {
         self.progress = Some(0);
         cx.notify();
         let (set, staged, table) = (self.source.set.clone(), self.source.staged.clone(), self.source.table.clone());
-        let (target, stop) = (self.target(), self.stop.clone());
+        let (target, stop, dialect) = (self.target(), self.stop.clone(), self.source.dialect);
         let (sender, receiver) = async_channel::unbounded();
         let write = cx.background_spawn(async move {
-            write_chunks(&path, copy::chunks(set, staged, format, table, target), &stop, |rows| {
+            write_chunks(&path, copy::chunks(set, staged, format, table, dialect, target), &stop, |rows| {
                 sender.try_send(rows).ok();
             })
         });
@@ -409,6 +410,7 @@ mod tests {
             set,
             staged: None,
             table: None,
+            dialect: None,
             order: vec![2, 0, 1],
             selected_rows: vec![1],
             visible: vec![1, 0],

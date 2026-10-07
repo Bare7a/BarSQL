@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use barsql_core::SqlDialect;
 use barsql_db::{ColumnMeta, ResultChunk, ResultSet};
 use barsql_io::ExportFormat;
 use gpui_kit::assets::IconName as Lucide;
@@ -109,6 +110,7 @@ pub struct ExportSource {
     pub set: ResultSet,
     pub staged: Option<Staged>,
     pub table: Option<String>,
+    pub dialect: Option<SqlDialect>,
     pub order: Vec<usize>,
     pub selected_rows: Vec<usize>,
     pub visible: Vec<usize>,
@@ -242,6 +244,8 @@ impl Metrics {
 pub struct Grid {
     set: ResultSet,
     table: Option<String>,
+    // The connection's, so SQL INSERTs copy and export in its own syntax.
+    dialect: Option<SqlDialect>,
     focus_handle: FocusHandle,
     scroll: GridScroll,
     metrics: Metrics,
@@ -283,6 +287,7 @@ impl Grid {
         Self {
             set: ResultSet::new(columns),
             table: None,
+            dialect: None,
             focus_handle: cx.focus_handle(),
             scroll: GridScroll::default(),
             metrics: Metrics::default(),
@@ -490,6 +495,7 @@ impl Grid {
             set: self.set.clone(),
             staged: self.staged(),
             table: self.table.clone(),
+            dialect: self.dialect,
             order,
             selected_rows,
             visible: self.columns.clone(),
@@ -511,10 +517,10 @@ impl Grid {
             toast::success(t(cx, "toast.copiedCell"), cx);
             return;
         }
-        let (set, target, table) = (self.set.clone(), self.copy_target(), self.table.clone());
+        let (set, target, table, dialect) = (self.set.clone(), self.copy_target(), self.table.clone(), self.dialect);
         let format = copy_format(cx);
         let item = cx.background_spawn(async move {
-            let text = copy::export(&set, staged.as_ref(), format, table.as_deref(), &target);
+            let text = copy::export(&set, staged.as_ref(), format, table.as_deref(), dialect, &target);
             copy::clipboard_item(text, Some(format), &set, staged.as_ref(), &target)
         });
         cx.spawn_in(window, async move |this, cx| {

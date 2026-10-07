@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod completion;
 pub mod context;
 pub mod diagnostics;
+pub mod functions;
 pub mod hover;
 pub mod labels;
 pub mod query;
@@ -17,8 +18,9 @@ pub mod transaction;
 
 pub use catalog::{Catalog, ColumnMap, OrderedMap, TableBinding};
 pub use completion::{bindings_needing_columns, build_completion_items, completion_replace_range};
-pub use context::{CursorSlot, SqlCursor, StatementShape, analyze_cursor};
+pub use context::{Clause, CursorSlot, SqlCursor, StatementShape, analyze_cursor};
 pub use diagnostics::{SqlDiagnostic, collect_schema_diagnostics};
+pub use functions::{CallForm, FunctionCatalog, FunctionDoc, KindMask};
 pub use hover::{ColumnLookup, HoverQuery, HoverSubject, analyze_hover};
 pub use labels::SqlLabels;
 pub use query::{ParsedQuery, QueryTableRef, parse_query, resolve_dot_completion, resolve_qualifier_to_table};

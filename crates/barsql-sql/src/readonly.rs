@@ -1,32 +1,15 @@
 use std::sync::LazyLock;
 
-use barsql_core::DriverType;
+use barsql_core::{DriverType, SqlDialect};
 use regex::Regex;
 
-use crate::split::{dollar_quoted_end, dollar_tag_len};
-use crate::sql_text::{first_keyword, to_upper};
+use crate::dialect::Dialect;
+use crate::lex::LexRules;
+use crate::lex::boundary::{Boundary, Mode, boundaries, is_word_start, quoted_span_end as lexed_span_end, word_end};
+use crate::lex::prim::{block_comment_end, dash_comment_at, hash_comment_at, line_comment_end};
 
 pub const READ_ONLY_ERROR: &str = "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed";
 
-// \b is ASCII-only here, \s is spelled [\t\n\f\r ] and \w is spelled [0-9A-Za-z_].
-static WITH_WRITE_AFTER_CTE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)\)[\t\n\f\r ]*(insert|update|delete|merge|replace)(?-u:\b)").unwrap());
-static FORBIDDEN_IN_STATEMENT: LazyLock<[Regex; 4]> = LazyLock::new(|| {
-    [
-        // SELECT ... INTO writes (a new table on Postgres, OUTFILE on MySQL). Columns can sit in between.
-        Regex::new(r"(?is)(?-u:\b)select(?-u:\b).*(?-u:\b)into(?-u:\b)").unwrap(),
-        Regex::new(r"(?is)(?-u:\b)copy[\t\n\f\r ]+").unwrap(),
-        // Only REPLACE INTO. The REPLACE() function is a read.
-        Regex::new(r"(?is)(?-u:\b)replace[\t\n\f\r ]+into(?-u:\b)").unwrap(),
-        Regex::new(
-            r"(?is)(?-u:\b)(insert|update|delete|drop|create|alter|truncate|merge|grant|revoke|vacuum|reindex|attach|detach)(?-u:\b)",
-        )
-        .unwrap(),
-    ]
-});
-// FOR UPDATE and FOR NO KEY UPDATE are locking reads. Blank them so the bare `update` rule skips them.
-static LOCKING_CLAUSE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?-u:\b)for[\t\n\f\r ]+(no[\t\n\f\r ]+key[\t\n\f\r ]+)?update(?-u:\b)").unwrap());
 static PRAGMA_WITH_ARGUMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)^[\t\n\f\r ]*pragma[\t\n\f\r ]+(?:[0-9A-Za-z_]+\.)?([0-9A-Za-z_]+)[\t\n\f\r ]*(?:=|\()").unwrap()
 });
@@ -74,60 +57,318 @@ const DENIED_FIRST_KEYWORDS: &[&str] = &[
     "REFRESH",
 ];
 
+// Which statements a read-only connection may run, per dialect.
+#[derive(Debug)]
+pub struct ReadOnlyRules {
+    pub allowed_first: &'static [&'static str],
+    pub denied_first: &'static [&'static str],
+    // Words that make a statement a write wherever they appear. T-SQL statements need no separator, so
+    // `SELECT 1 EXEC p` runs the procedure.
+    pub denied_anywhere: &'static [&'static str],
+    // Whether a denied word right before a `.` only names a database, as `system` does in ClickHouse.
+    pub qualifier_names: bool,
+}
+
+// A statement holding any of these as a word writes, unless the UPDATE is a FOR UPDATE lock.
+const WRITE_WORDS: &[&str] = &[
+    "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "MERGE", "GRANT", "REVOKE", "VACUUM",
+    "REINDEX", "ATTACH", "DETACH",
+];
+const WRITES_AFTER_CTE: &[&str] = &["INSERT", "UPDATE", "DELETE", "MERGE", "REPLACE"];
+
+pub static STANDARD: ReadOnlyRules = ReadOnlyRules {
+    allowed_first: ALLOWED_FIRST_KEYWORDS,
+    denied_first: DENIED_FIRST_KEYWORDS,
+    denied_anywhere: &[],
+    qualifier_names: false,
+};
+
+pub static TSQL: ReadOnlyRules = ReadOnlyRules {
+    allowed_first: &[
+        "SELECT",
+        "WITH",
+        "DECLARE",
+        "SET",
+        "PRINT",
+        "RAISERROR",
+        "THROW",
+        "WAITFOR",
+        "IF",
+        "WHILE",
+        "BEGIN",
+        "COMMIT",
+        "ROLLBACK",
+        "SAVE",
+        "END",
+    ],
+    denied_first: DENIED_FIRST_KEYWORDS,
+    denied_anywhere: &[
+        "EXEC",
+        "EXECUTE",
+        "BULK",
+        "BACKUP",
+        "RESTORE",
+        "DBCC",
+        "KILL",
+        "SHUTDOWN",
+        "RECONFIGURE",
+        "OPENROWSET",
+        "OPENDATASOURCE",
+        "OPENQUERY",
+        "WRITETEXT",
+        "UPDATETEXT",
+        "DENY",
+        "DISABLE",
+        "ENABLE",
+        "SEND",
+        "RECEIVE",
+        "CHECKPOINT",
+        "SETUSER",
+    ],
+    qualifier_names: false,
+};
+
+// The server enforces readonly=2 as well. Settings may change, data may not. None of the denied words can come
+// right before a `.` as a keyword, so `system.tables` reads.
+pub static CLICKHOUSE: ReadOnlyRules = ReadOnlyRules {
+    allowed_first: &["SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "EXISTS", "SET"],
+    denied_first: DENIED_FIRST_KEYWORDS,
+    denied_anywhere: &[
+        "RENAME", "OPTIMIZE", "SYSTEM", "KILL", "EXCHANGE", "BACKUP", "RESTORE", "UNDROP", "MOVE", "WATCH", "OUTFILE",
+    ],
+    qualifier_names: true,
+};
+
+// Every way the server might lex the text. A statement counts as read-only only when it is under all of them.
+fn interpretations(driver: &DriverType) -> Vec<LexRules> {
+    let base = Dialect::for_driver(driver).lex;
+    match driver.dialect() {
+        // standard_conforming_strings may be off, making backslash an escape in '...'.
+        Some(SqlDialect::Postgres) => vec![base, LexRules { backslash_escapes: true, ..base }],
+        // NO_BACKSLASH_ESCAPES turns escapes off and ANSI_QUOTES makes "..." an identifier.
+        Some(SqlDialect::MySql) => {
+            let literal = LexRules { backslash_escapes: false, escape_strings: false, ..base };
+            let ansi = LexRules { double_quote_strings: false, ..base };
+            vec![base, literal, ansi, LexRules { double_quote_strings: false, ..literal }]
+        }
+        Some(SqlDialect::Sqlite | SqlDialect::TSql | SqlDialect::ClickHouse) | None => vec![base],
+    }
+}
+
 pub fn assert_read_only(driver: &DriverType, sql: &str) -> Result<(), String> {
     if is_read_only(driver, sql) { Ok(()) } else { Err(READ_ONLY_ERROR.into()) }
 }
 
-// Only MySQL gets # comments stripped. On Postgres # is an operator, and stripping to end of line could
-// hide a write that follows.
 pub fn is_read_only(driver: &DriverType, sql: &str) -> bool {
-    let cleaned = mask_string_literals(&strip_sql_comments(sql, *driver == DriverType::MySql));
-    split_on_semicolons(&cleaned).iter().all(|stmt| is_read_only_statement(stmt))
+    let rules = Dialect::for_driver(driver).read_only;
+    interpretations(driver).iter().all(|lex| {
+        statement_chunks(sql, lex).into_iter().all(|chunk| {
+            let masked = mask_exact(chunk, lex, true);
+            read_only_words(&masked, lex, rules)
+        })
+    })
 }
 
 // Runs on writable connections too, since the table-data path must never escape its WHERE clause.
-pub fn validate_table_filter(filter: &str) -> Result<(), String> {
+pub fn validate_table_filter(driver: &DriverType, filter: &str) -> Result<(), String> {
     let filter = filter.trim();
     if filter.is_empty() {
         return Ok(());
     }
-    // Mask strings but not comments, because a bare `--` or `/*` would comment out the LIMIT.
-    let masked = mask_string_literals(filter);
-    if masked.contains(';') {
-        return Err("filter must be a single boolean expression: ';' is not allowed".into());
-    }
-    if masked.contains("--") || masked.contains("/*") || masked.contains("*/") {
-        return Err("filter must not contain comment markers".into());
-    }
-    let upper = to_upper(&masked);
-    let upper = LOCKING_CLAUSE.replace_all(&upper, " ");
-    if FORBIDDEN_IN_STATEMENT.iter().any(|re| re.is_match(&upper)) {
-        return Err("filter must not contain write keywords".into());
+    let rules = Dialect::for_driver(driver).read_only;
+    for lex in interpretations(driver) {
+        // Mask strings but not comments, because a bare `--` or `/*` would comment out the LIMIT.
+        let masked = mask_exact(filter, &lex, false);
+        if masked.contains(';') {
+            return Err("filter must be a single boolean expression: ';' is not allowed".into());
+        }
+        let hash_comment = (0..masked.len()).any(|i| hash_comment_at(masked.as_bytes(), i, lex.hash_comments));
+        if masked.contains("--") || masked.contains("/*") || masked.contains("*/") || hash_comment {
+            return Err("filter must not contain comment markers".into());
+        }
+        if writes(&tokens(&masked, &lex), rules) {
+            return Err("filter must not contain write keywords".into());
+        }
     }
     Ok(())
 }
 
-fn is_read_only_statement(stmt: &str) -> bool {
-    let stmt = stmt.trim();
-    if stmt.is_empty() {
-        return true;
+// The statements the server would run, cut with the dialect's own lexer. T-SQL cuts at `;` and GO lines.
+fn statement_chunks<'a>(sql: &'a str, lex: &LexRules) -> Vec<&'a str> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    for boundary in boundaries(sql, lex, Mode::Statements) {
+        let (at, end) = match boundary {
+            Boundary::Terminator { at, len, .. } => (at, at + len),
+            Boundary::DelimiterLine { at, end } | Boundary::BatchSeparator { at, end, .. } => (at, end),
+        };
+        chunks.push(&sql[start..at]);
+        start = end;
     }
-    let first = first_keyword(stmt);
-    if first.is_empty() {
-        return true;
+    chunks.push(&sql[start..]);
+    chunks
+}
+
+// Each string, quoted identifier and dollar quote becomes one space, so their contents can't look like keywords.
+// Comments become a space too when `strip_comments` is set, since servers treat them as token separators. MySQL
+// runs the body of an executable comment, so only its markers go.
+fn mask_exact(sql: &str, lex: &LexRules, strip_comments: bool) -> String {
+    let b = sql.as_bytes();
+    let n = b.len();
+    let mut out = String::with_capacity(n);
+    let mut copied = 0;
+    let mut in_exec_comment = false;
+    let mut i = 0;
+    while i < n {
+        // A whole word, so a `$` inside an identifier can't open a dollar quote.
+        if lex.dollar_in_words && lex.dollar_quotes && is_word_start(b[i], lex) {
+            i = word_end(b, i, lex);
+            continue;
+        }
+        let marker_end = if !strip_comments || !lex.exec_comments {
+            None
+        } else if in_exec_comment && b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+            in_exec_comment = false;
+            Some(i + 2)
+        } else if b[i..].starts_with(b"/*!") || b[i..].starts_with(b"/*M!") {
+            in_exec_comment = true;
+            let body = i + if b[i + 2] == b'!' { 3 } else { 4 };
+            Some(body + b[body..].iter().take_while(|c| c.is_ascii_digit()).count())
+        } else {
+            None
+        };
+        let comment_end = if !strip_comments || marker_end.is_some() {
+            None
+        } else if dash_comment_at(b, i, lex.dash_needs_space) {
+            Some(line_comment_end(b, i + 2).unwrap_or(n))
+        } else if hash_comment_at(b, i, lex.hash_comments) {
+            Some(line_comment_end(b, i + 1).unwrap_or(n))
+        } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+            Some(block_comment_end(b, i, lex.nested_block_comments).unwrap_or(n))
+        } else {
+            None
+        };
+        let end = marker_end.or(comment_end).or_else(|| {
+            lexed_span_end(b, i, lex).map(|end| end.unwrap_or(n)).filter(|&end| end > i + 1 || b[i] != b'$')
+        });
+        match end {
+            Some(end) => {
+                out.push_str(&sql[copied..i]);
+                out.push(' ');
+                i = end;
+                copied = end;
+            }
+            None => i += 1,
+        }
     }
-    if DENIED_FIRST_KEYWORDS.contains(&first.as_str()) || !ALLOWED_FIRST_KEYWORDS.contains(&first.as_str()) {
+    out.push_str(&sql[copied..]);
+    out
+}
+
+#[derive(Debug, PartialEq)]
+enum Tok {
+    Word(String),
+    Open,
+    Close,
+    Dot,
+    Other,
+}
+
+// Words, uppercased, and parentheses of masked text. The flag marks a token with whitespace right after it.
+fn tokens(masked: &str, lex: &LexRules) -> Vec<(Tok, bool)> {
+    let b = masked.as_bytes();
+    let special = |c: u8| lex.at_hash_words && matches!(c, b'@' | b'#');
+    let word_start = |c: u8| c.is_ascii_alphabetic() || c == b'_' || c >= 0x80 || special(c);
+    let word_char =
+        |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80 || special(c) || (lex.dollar_in_words && c == b'$');
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_whitespace() || c == 0x0b {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let tok = if word_start(c) {
+            while i < b.len() && word_char(b[i]) {
+                i += 1;
+            }
+            Tok::Word(masked[start..i].to_ascii_uppercase())
+        } else if c.is_ascii_digit() {
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'.' | b'_')) {
+                i += 1;
+            }
+            Tok::Other
+        } else {
+            i += 1;
+            match c {
+                b'(' => Tok::Open,
+                b')' => Tok::Close,
+                b'.' => Tok::Dot,
+                _ => Tok::Other,
+            }
+        };
+        let spaced = b.get(i).is_some_and(|c| c.is_ascii_whitespace() || *c == 0x0b);
+        out.push((tok, spaced));
+    }
+    out
+}
+
+fn word(tok: Option<&(Tok, bool)>) -> Option<&str> {
+    match tok {
+        Some((Tok::Word(w), _)) => Some(w),
+        _ => None,
+    }
+}
+
+fn read_only_words(masked: &str, lex: &LexRules, rules: &ReadOnlyRules) -> bool {
+    let toks = tokens(masked, lex);
+    let Some(first) = toks.iter().find(|(t, _)| *t != Tok::Open) else { return true };
+    let Tok::Word(first) = &first.0 else { return false };
+    if rules.denied_first.contains(&first.as_str()) || !rules.allowed_first.contains(&first.as_str()) {
         return false;
     }
-    if first == "WITH" && WITH_WRITE_AFTER_CTE.is_match(stmt) {
+    let write_after_cte = toks
+        .windows(2)
+        .any(|w| w[0].0 == Tok::Close && word(Some(&w[1])).is_some_and(|x| WRITES_AFTER_CTE.contains(&x)));
+    if first == "WITH" && write_after_cte {
         return false;
     }
-    if first == "PRAGMA" && !is_read_only_pragma(stmt) {
+    if first == "PRAGMA" && !is_read_only_pragma(masked) {
         return false;
     }
-    let upper = to_upper(stmt);
-    let upper = LOCKING_CLAUSE.replace_all(&upper, " ");
-    !FORBIDDEN_IN_STATEMENT.iter().any(|re| re.is_match(&upper))
+    !writes(&toks, rules)
+}
+
+fn writes(toks: &[(Tok, bool)], rules: &ReadOnlyRules) -> bool {
+    let mut selected = false;
+    for (i, (tok, spaced)) in toks.iter().enumerate() {
+        let Tok::Word(w) = tok else { continue };
+        let w = w.as_str();
+        // FOR UPDATE and FOR NO KEY UPDATE lock rows. They don't write.
+        let before = |back: usize| i.checked_sub(back).and_then(|j| word(toks.get(j)));
+        let locking = w == "UPDATE"
+            && (before(1) == Some("FOR")
+                || (before(1) == Some("KEY") && before(2) == Some("NO") && before(3) == Some("FOR")));
+        let qualifier = rules.qualifier_names && toks.get(i + 1).is_some_and(|(next, _)| *next == Tok::Dot);
+        if !locking && (WRITE_WORDS.contains(&w) || (rules.denied_anywhere.contains(&w) && !qualifier)) {
+            return true;
+        }
+        // SELECT ... INTO writes: a new table on Postgres and SQL Server, OUTFILE on MySQL.
+        if w == "INTO" && selected {
+            return true;
+        }
+        if w == "COPY" && *spaced {
+            return true;
+        }
+        // Only REPLACE INTO. The REPLACE() function is a read.
+        if w == "REPLACE" && word(toks.get(i + 1)) == Some("INTO") {
+            return true;
+        }
+        selected |= w == "SELECT";
+    }
+    false
 }
 
 fn is_read_only_pragma(stmt: &str) -> bool {
@@ -135,109 +376,6 @@ fn is_read_only_pragma(stmt: &str) -> bool {
         None => true,
         Some(caps) => READ_ONLY_PRAGMAS.contains(&caps[1].to_lowercase().as_str()),
     }
-}
-
-// Blanks quoted and dollar-quoted spans so their keywords, quotes, comments and `;` can't confuse the
-// classifier. Byte offsets stay the same.
-pub fn mask_string_literals(sql: &str) -> String {
-    let b = sql.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        let end = match b[i] {
-            quote @ (b'\'' | b'"' | b'`') => quoted_span_end(b, i, quote),
-            b'$' if dollar_tag_len(b, i).is_some() => dollar_quoted_end(b, i),
-            other => {
-                out.push(other);
-                i += 1;
-                continue;
-            }
-        };
-        out.resize(out.len() + (end - i), b' ');
-        i = end;
-    }
-    String::from_utf8(out).unwrap_or_default()
-}
-
-// Quoted spans stay intact. MySQL runs the body of /*! ... */, so unwrap it instead of stripping it.
-pub fn strip_sql_comments(sql: &str, hash_line_comments: bool) -> String {
-    let b = sql.as_bytes();
-    let n = b.len();
-    let mut out = Vec::with_capacity(n);
-    let mut i = 0;
-    while i < n {
-        let c = b[i];
-        if (c == b'-' && b.get(i + 1) == Some(&b'-')) || (c == b'#' && hash_line_comments) {
-            while i < n && b[i] != b'\n' {
-                i += 1;
-            }
-        } else if c == b'/' && b.get(i + 1) == Some(&b'*') {
-            if b.get(i + 2) == Some(&b'!') {
-                i += 3;
-                while i < n && b[i].is_ascii_digit() {
-                    i += 1;
-                }
-                out.push(b' ');
-                continue;
-            }
-            i += 2;
-            while i + 1 < n && !(b[i] == b'*' && b[i + 1] == b'/') {
-                i += 1;
-            }
-            i = if i + 1 < n { i + 2 } else { n };
-        } else if matches!(c, b'\'' | b'"' | b'`') {
-            let end = quoted_span_end(b, i, c);
-            out.extend_from_slice(&b[i..end]);
-            i = end;
-        } else if c == b'$' && dollar_tag_len(b, i).is_some() {
-            let end = dollar_quoted_end(b, i);
-            out.extend_from_slice(&b[i..end]);
-            i = end;
-        } else {
-            out.push(c);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).unwrap_or_default()
-}
-
-fn quoted_span_end(b: &[u8], mut i: usize, quote: u8) -> usize {
-    i += 1;
-    while i < b.len() {
-        if b[i] != quote {
-            i += 1;
-        } else if b.get(i + 1) == Some(&quote) {
-            i += 2;
-        } else {
-            return i + 1;
-        }
-    }
-    i
-}
-
-// Classifier-only splitter that ignores `;` inside quoted and dollar-quoted spans.
-fn split_on_semicolons(sql: &str) -> Vec<&str> {
-    let b = sql.as_bytes();
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            quote @ (b'\'' | b'"' | b'`') => i = quoted_span_end(b, i, quote),
-            b'$' if dollar_tag_len(b, i).is_some() => i = dollar_quoted_end(b, i),
-            b';' => {
-                out.push(&sql[start..i]);
-                start = i + 1;
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
-    let tail = sql[start..].trim();
-    if !tail.is_empty() {
-        out.push(tail);
-    }
-    out
 }
 
 #[cfg(test)]
@@ -333,6 +471,21 @@ mod tests {
     }
 
     #[test]
+    fn comments_cannot_glue_or_hide_a_write() {
+        for driver in [DriverType::Postgres, DriverType::MySql, DriverType::Sqlite] {
+            assert!(!is_read_only(&driver, "EXPLAIN ANALYZE DELETE/**/FROM t"), "{driver:?}");
+            assert!(!is_read_only(&driver, "WITH d AS (DELETE/**/FROM t RETURNING 1) SELECT 1"), "{driver:?}");
+            assert!(is_read_only(&driver, "SELECT/**/1"), "{driver:?}");
+        }
+        assert!(!is_read_only(&DriverType::MySql, "SELECT 1--1; DELETE FROM t"));
+        assert!(is_read_only(&DriverType::MySql, "SELECT 1 -- ; DELETE FROM t"));
+        assert!(is_read_only(&DriverType::MySql, "SELECT 1 --\t; DELETE FROM t"));
+        assert!(is_read_only(&DriverType::MySql, "SELECT 1 --"));
+        assert!(is_read_only(&DriverType::Postgres, "SELECT 1--1; DELETE FROM t"));
+        assert!(is_read_only(&DriverType::Sqlite, "SELECT 1--1; DELETE FROM t"));
+    }
+
+    #[test]
     fn edge_cases() {
         let cases = [
             ("SELECT ';DELETE FROM t;' FROM dual", true),
@@ -400,17 +553,40 @@ mod tests {
             ("name = REPLACE(other, 'a', 'b')", false),
         ];
         for (filter, want_err) in cases {
-            assert_eq!(validate_table_filter(filter).is_err(), want_err, "{filter}");
+            assert_eq!(validate_table_filter(&DriverType::Unset, filter).is_err(), want_err, "{filter}");
         }
     }
 
     #[test]
     fn helpers_keep_strings() {
-        assert_eq!(split_on_semicolons(r#"SELECT ';' FROM t; SELECT "a;b""#).len(), 2);
-        let out = strip_sql_comments("SELECT '-- not a comment', 1 -- real comment\nFROM t", false);
-        assert!(out.contains("'-- not a comment'"));
-        assert!(!out.contains("real comment"));
+        let lex = LexRules::COMMON;
+        assert_eq!(statement_chunks(r#"SELECT ';' FROM t; SELECT "a;b""#, &lex).len(), 2);
+        let out = mask_exact("SELECT '-- not a comment', 1 -- real comment\nFROM t", &lex, true);
+        assert!(!out.contains("not a comment") && !out.contains("real comment") && out.contains("FROM t"), "{out}");
         assert!(assert_read_only(&DriverType::Unset, "SELECT 1").is_ok());
         assert!(assert_read_only(&DriverType::Unset, "DROP TABLE t").is_err());
+    }
+
+    #[test]
+    fn every_reading_of_quotes_must_be_read_only() {
+        let pg = DriverType::Postgres;
+        let mysql = DriverType::MySql;
+        // Postgres honours the backslash in E'...', so the DELETE is code.
+        assert!(!is_read_only(&pg, "WITH x AS (SELECT E'\\'') DELETE FROM t WHERE 'a'='a'"));
+        // `$` continues a Postgres identifier, so `a$x$` doesn't open a dollar quote.
+        assert!(!is_read_only(&pg, "WITH d AS (SELECT 1 AS a$x$) DELETE FROM t RETURNING 1 AS b$x$"));
+        // With backslash escapes on, MySQL ends the string later and runs INTO OUTFILE.
+        assert!(!is_read_only(&mysql, "SELECT 'a\\'' , 1 INTO OUTFILE '/tmp/x' -- '"));
+        // With NO_BACKSLASH_ESCAPES, E is a column and the DELETE runs.
+        assert!(!is_read_only(&mysql, "SELECT E'\\'; DELETE FROM t; -- '"));
+        // Under ANSI_QUOTES "..." is an identifier, so the CALL runs.
+        assert!(!is_read_only(&mysql, r#"SELECT "a\"; CALL p(); -- ""#));
+        assert!(validate_table_filter(&mysql, "x = 'a\\'' ; DELETE FROM t -- '").is_err());
+        // $$DELETE$$ is one MySQL identifier, not a keyword.
+        assert!(is_read_only(&mysql, "SELECT $$DELETE$$"));
+        // MySQL runs the bodies of executable comments.
+        assert!(!is_read_only(&mysql, "SELECT 1 /*!; DELETE FROM t */"));
+        assert!(!is_read_only(&mysql, "SELECT 1 /*M!100000 ; DELETE FROM t */"));
+        assert!(is_read_only(&mysql, "SELECT /*!40001 SQL_NO_CACHE */ * FROM t"));
     }
 }

@@ -4,13 +4,13 @@ mod values;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use barsql_core::{ConnectionConfig, DriverType, QueryError, Value};
+use barsql_core::{ConnectionConfig, DriverType, MessageLevel, QueryError, ServerMessage, Value};
 use barsql_sql::{first_keyword, strip_leading_comments};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, Row, SslOpts, Value as MyValue};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::event::{ScriptEvent, Sink, StatementResult, emit};
+use crate::event::{MAX_MESSAGES, ScriptEvent, Sink, StatementResult, emit};
 use crate::postgres::port_or;
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
 use crate::ssh::{Forward, SshOptions, TunnelSlot};
@@ -129,7 +129,7 @@ impl MyEngine {
     pub async fn session(self: &Arc<Self>) -> Result<MySession, QueryError> {
         let lease = self.lease().await?;
         let id = lease.conn.id();
-        Ok(MySession { lease, id, engine: self.clone(), in_transaction: false })
+        Ok(MySession { lease, id, engine: self.clone(), in_transaction: false, reporting: false })
     }
 
     pub async fn close(&self) {
@@ -171,6 +171,7 @@ pub struct MySession {
     id: u32,
     engine: Arc<MyEngine>,
     in_transaction: bool,
+    reporting: bool,
 }
 
 impl MySession {
@@ -251,6 +252,10 @@ impl StatementRunner for MySession {
         DriverType::MySql
     }
 
+    fn set_reporting(&mut self, on: bool) {
+        self.reporting = on;
+    }
+
     async fn stream_statement(
         &mut self,
         stmt: &str,
@@ -260,7 +265,7 @@ impl StatementRunner for MySession {
         cancel: &Cancel,
     ) -> StatementRun {
         let _server_cancel = cancel.on_server(self.engine.server_cancel(self.id));
-        let run = stream_query(&mut self.lease.conn, stmt, first_index, batch_rows, sink, cancel).await;
+        let run = stream_query(&mut self.lease.conn, stmt, first_index, batch_rows, self.reporting, sink, cancel).await;
         if run.error.is_none() {
             self.track_transaction(stmt);
         }
@@ -268,16 +273,30 @@ impl StatementRunner for MySession {
     }
 }
 
+// With `reporting`, a result's info line (like "Rows matched: 1  Changed: 1  Warnings: 0") comes before it as a
+// message, and the statement's warnings and notes after its last result.
 async fn stream_query(
     conn: &mut Conn,
     stmt: &str,
     first_index: usize,
     batch_rows: usize,
+    reporting: bool,
     sink: &Sink,
     cancel: &Cancel,
 ) -> StatementRun {
     let started = Instant::now();
     let mut index = first_index;
+    let mut warnings = 0;
+    let info = |result_index: usize, text: &str| {
+        let message = ServerMessage::new(MessageLevel::Info, text);
+        let event = ScriptEvent::Messages { result_index, messages: vec![message], dropped: 0 };
+        let shown = reporting && !text.is_empty();
+        async move {
+            if shown {
+                emit(sink, event).await;
+            }
+        }
+    };
     let fail = |index: usize, error: QueryError| async move {
         emit(
             sink,
@@ -299,9 +318,12 @@ async fn stream_query(
         let columns: Arc<[Column]> = result.columns().unwrap_or_else(|| Arc::from(Vec::new()));
         if columns.is_empty() {
             let affected = result.affected_rows();
+            let line = result.info().into_owned();
+            warnings = result.warnings().saturating_add(warnings);
             if let Err(err) = result.next().await {
                 return fail(index, mark_cancelled(my_error(err), cancel)).await;
             }
+            info(index, &line).await;
             emit(
                 sink,
                 ScriptEvent::Result(Box::new(StatementResult {
@@ -353,6 +375,7 @@ async fn stream_query(
             if !builder.is_empty() {
                 emit(sink, ScriptEvent::Rows { result_index: index, chunk: Arc::new(builder.finish()) }).await;
             }
+            warnings = result.warnings().saturating_add(warnings);
             emit(
                 sink,
                 ScriptEvent::Result(Box::new(StatementResult {
@@ -369,7 +392,27 @@ async fn stream_query(
             break;
         }
     }
+    drop(result);
+    if reporting && warnings > 0 && !cancel.is_cancelled() {
+        let messages = show_warnings(conn).await;
+        let dropped = usize::from(warnings).saturating_sub(messages.len());
+        emit(sink, ScriptEvent::Messages { result_index: index - 1, messages, dropped }).await;
+    }
     StatementRun { sets: index - first_index, error: None }
+}
+
+// The server only counts warnings and notes in the result. SHOW WARNINGS lists them, up to max_error_count.
+async fn show_warnings(conn: &mut Conn) -> Vec<ServerMessage> {
+    let rows: Vec<(String, u32, String)> = conn.query("SHOW WARNINGS").await.unwrap_or_default();
+    rows.into_iter()
+        .take(MAX_MESSAGES)
+        .map(|(level, code, text)| ServerMessage {
+            level: if level.eq_ignore_ascii_case("note") { MessageLevel::Notice } else { MessageLevel::Warning },
+            code: code.to_string(),
+            text,
+            ..Default::default()
+        })
+        .collect()
 }
 
 fn push_text_row(row: &Row, decoders: &[Decoder], builder: &mut ChunkBuilder) {

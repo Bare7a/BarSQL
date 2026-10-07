@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use barsql_app::path_defaults;
+use barsql_core::capabilities::{DatabaseField, DefaultSchema, Location};
 use barsql_core::{ConnectionConfig, DriverType, SshConfig};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -45,16 +46,101 @@ pub fn new_connection() -> ConnectionConfig {
     }
 }
 
-fn network(driver: &DriverType) -> bool {
-    matches!(driver, DriverType::Postgres | DriverType::MySql)
+// Locale keys for the copy that differs by driver.
+struct DriverCopy {
+    label: &'static str,
+    database_placeholder: &'static str,
+    database_hint: &'static str,
+    schema_label: &'static str,
+    schema_hint: Option<&'static str>,
 }
 
-fn database_placeholder(driver: &DriverType) -> &'static str {
-    if *driver == DriverType::MySql { "connection.databasePlaceholderMysql" } else { "connection.databasePlaceholder" }
+const SCHEMA_COPY: DriverCopy = DriverCopy {
+    label: "",
+    database_placeholder: "connection.databasePlaceholder",
+    database_hint: "connection.databaseHint",
+    schema_label: "connection.defaultSchema",
+    schema_hint: None,
+};
+
+// MySQL's schema is its database, so the field picks the database to browse.
+const DATABASE_COPY: DriverCopy = DriverCopy {
+    label: "",
+    database_placeholder: "connection.databasePlaceholderMysql",
+    database_hint: "connection.databaseHintMysql",
+    schema_label: "connection.defaultSchemaMysql",
+    schema_hint: Some("connection.defaultSchemaMysqlHint"),
+};
+
+fn copy(driver: &DriverType) -> DriverCopy {
+    match driver {
+        DriverType::Sqlite => DriverCopy { label: "connection.sqlite", ..SCHEMA_COPY },
+        DriverType::Postgres => DriverCopy { label: "connection.postgres", ..SCHEMA_COPY },
+        DriverType::MySql => DriverCopy { label: "connection.mysql", ..DATABASE_COPY },
+        DriverType::Turso => DriverCopy { label: "connection.turso", ..SCHEMA_COPY },
+        DriverType::ClickHouse => DriverCopy {
+            label: "connection.clickhouse",
+            database_placeholder: "connection.databasePlaceholderClickHouse",
+            database_hint: "connection.databaseHintClickHouse",
+            ..DATABASE_COPY
+        },
+        DriverType::SqlServer => DriverCopy {
+            label: "connection.sqlserver",
+            database_placeholder: "connection.databasePlaceholderSqlServer",
+            database_hint: "connection.databaseHintSqlServer",
+            ..SCHEMA_COPY
+        },
+        DriverType::Other(_) | DriverType::Unset => SCHEMA_COPY,
+    }
 }
 
 fn default_port(driver: &DriverType) -> i64 {
-    if *driver == DriverType::MySql { 3306 } else { 5432 }
+    driver.capabilities().default_port.map_or(5432, i64::from)
+}
+
+// What an empty default schema means for the driver.
+fn default_schema(driver: &DriverType, database: &str) -> String {
+    match driver.capabilities().default_schema {
+        DefaultSchema::Named(name) => name.into(),
+        DefaultSchema::Database => database.into(),
+    }
+}
+
+// The plain and TLS ports of a server that serves them apart, like ClickHouse's 8123 and 8443.
+fn tls_ports(driver: &DriverType) -> Option<(i64, i64)> {
+    match driver {
+        DriverType::ClickHouse => Some((8123, 8443)),
+        DriverType::Sqlite
+        | DriverType::Postgres
+        | DriverType::MySql
+        | DriverType::Turso
+        | DriverType::SqlServer
+        | DriverType::Other(_)
+        | DriverType::Unset => None,
+    }
+}
+
+// SQL Server always has a certificate, a self-made one if no other, so it encrypts from the start.
+fn default_tls(driver: &DriverType) -> &'static str {
+    match driver {
+        DriverType::SqlServer => "require",
+        DriverType::Sqlite
+        | DriverType::Postgres
+        | DriverType::MySql
+        | DriverType::Turso
+        | DriverType::ClickHouse
+        | DriverType::Other(_)
+        | DriverType::Unset => "disable",
+    }
+}
+
+fn ssl_label(mode: &str) -> &'static str {
+    match mode {
+        "disable" => "connection.sslDisable",
+        "verify-full" => "connection.sslVerifyFull",
+        "strict" => "connection.sslStrict",
+        _ => "connection.sslRequire",
+    }
 }
 
 // Leading digits only. Zero or no digits gives the fallback.
@@ -82,6 +168,9 @@ struct Fields {
     username: Entity<InputState>,
     password: Entity<InputState>,
     schema: Entity<InputState>,
+    url: Entity<InputState>,
+    auth_token: Entity<InputState>,
+    instance: Entity<InputState>,
     ssh_host: Entity<InputState>,
     ssh_port: Entity<InputState>,
     ssh_username: Entity<InputState>,
@@ -117,21 +206,10 @@ impl ConnectionForm {
         let file_placeholder =
             if cfg!(windows) { "connection.filePlaceholderWindows" } else { "connection.filePlaceholderUnix" };
         let port = if config.port == 0 { default_port(&config.driver) } else { config.port };
-        let schema = match config.driver {
-            DriverType::MySql => {
-                if config.schema.is_empty() {
-                    config.database.clone()
-                } else {
-                    config.schema.clone()
-                }
-            }
-            _ => {
-                if config.schema.is_empty() {
-                    "public".into()
-                } else {
-                    config.schema.clone()
-                }
-            }
+        let schema = if config.schema.is_empty() {
+            default_schema(&config.driver, &config.database)
+        } else {
+            config.schema.clone()
         };
         let ssh = &config.ssh;
         let ssh_port = if ssh.port == 0 { DEFAULT_SSH_PORT } else { ssh.port };
@@ -140,10 +218,19 @@ impl ConnectionForm {
             file_path: input(config.file_path.clone(), t(cx, file_placeholder), false, window, cx),
             host: input(config.host.clone(), SharedString::default(), false, window, cx),
             port: input(port.to_string(), SharedString::default(), false, window, cx),
-            database: input(config.database.clone(), t(cx, database_placeholder(&config.driver)), false, window, cx),
+            database: input(
+                config.database.clone(),
+                t(cx, copy(&config.driver).database_placeholder),
+                false,
+                window,
+                cx,
+            ),
             username: input(config.username.clone(), SharedString::default(), false, window, cx),
             password: input(config.password.clone(), SharedString::default(), true, window, cx),
             schema: input(schema, SharedString::default(), false, window, cx),
+            url: input(config.url.clone(), t(cx, "connection.urlPlaceholder"), false, window, cx),
+            auth_token: input(config.auth_token.clone(), t(cx, "connection.authTokenPlaceholder"), true, window, cx),
+            instance: input(config.instance.clone(), t(cx, "connection.instancePlaceholder"), false, window, cx),
             ssh_host: input(ssh.host.clone(), t(cx, "connection.sshHostPlaceholder"), false, window, cx),
             ssh_port: input(ssh_port.to_string(), SharedString::default(), false, window, cx),
             ssh_username: input(ssh.username.clone(), SharedString::default(), false, window, cx),
@@ -162,7 +249,11 @@ impl ConnectionForm {
             driver: config.driver.clone(),
             read_only: config.read_only,
             color: if config.color.is_empty() { DEFAULT_COLOR.into() } else { config.color.clone() },
-            ssl_mode: if config.ssl_mode.is_empty() { "disable".into() } else { config.ssl_mode.clone() },
+            ssl_mode: if config.ssl_mode.is_empty() {
+                default_tls(&config.driver).into()
+            } else {
+                config.ssl_mode.clone()
+            },
             ssh_enabled: ssh.enabled,
             ssh_auth: if ssh.auth.is_empty() { "key".into() } else { ssh.auth.clone() },
             ignore_host_key: ssh.ignore_host_key,
@@ -187,18 +278,19 @@ impl ConnectionForm {
     }
 
     fn set_driver(&mut self, driver: DriverType, window: &mut Window, cx: &mut Context<Self>) {
-        let defaults = match driver {
-            DriverType::Postgres => Some(("5432", "postgres", "public")),
-            DriverType::MySql => Some(("3306", "root", "")),
-            _ => None,
-        };
-        if let Some((port, username, schema)) = defaults {
-            Self::set(&self.fields.port, port, window, cx);
-            Self::set(&self.fields.username, username, window, cx);
-            Self::set(&self.fields.schema, schema, window, cx);
-            self.ssl_mode = "disable".into();
+        let caps = driver.capabilities();
+        match caps.location {
+            Location::Network => {
+                Self::set(&self.fields.port, &default_port(&driver).to_string(), window, cx);
+                Self::set(&self.fields.username, caps.default_user, window, cx);
+                Self::set(&self.fields.schema, &default_schema(&driver, ""), window, cx);
+                self.ssl_mode = default_tls(&driver).into();
+            }
+            // A URL server is usually reached over https with a real certificate.
+            Location::Url => self.ssl_mode = "verify-full".into(),
+            Location::LocalFile => {}
         }
-        let placeholder = t(cx, database_placeholder(&driver));
+        let placeholder = t(cx, copy(&driver).database_placeholder);
         self.fields.database.update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
         self.driver = driver;
         cx.notify();
@@ -218,6 +310,10 @@ impl ConnectionForm {
             database: value(&f.database),
             username: value(&f.username),
             password: value(&f.password),
+            url: value(&f.url),
+            auth_token: value(&f.auth_token),
+            // A field only SQL Server shows.
+            instance: if self.driver == DriverType::SqlServer { value(&f.instance) } else { String::new() },
             ssl_mode: self.ssl_mode.clone(),
             schema: value(&f.schema),
             read_only: self.read_only,
@@ -255,7 +351,8 @@ impl ConnectionForm {
     fn pick_database(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         let previous = Self::value(&self.fields.database, cx);
         Self::set(&self.fields.database, name, window, cx);
-        if self.driver == DriverType::MySql && Self::value(&self.fields.schema, cx) == previous {
+        let browses_database = self.driver.capabilities().default_schema == DefaultSchema::Database;
+        if browses_database && Self::value(&self.fields.schema, cx) == previous {
             Self::set(&self.fields.schema, name, window, cx);
         }
         cx.notify();
@@ -303,9 +400,12 @@ impl ConnectionForm {
     fn validate(&self, config: &ConnectionConfig) -> Option<&'static str> {
         if config.name.trim().is_empty() {
             Some("connection.nameRequired")
-        } else if config.driver == DriverType::Sqlite && config.file_path.trim().is_empty() {
+        } else if config.driver.capabilities().location == Location::LocalFile && config.file_path.trim().is_empty() {
             Some("connection.fileRequired")
-        } else if network(&config.driver) && config.database.trim().is_empty() {
+        } else if config.driver.capabilities().location == Location::Url && config.url.trim().is_empty() {
+            Some("connection.urlRequired")
+        } else if config.driver.capabilities().database == DatabaseField::Required && config.database.trim().is_empty()
+        {
             Some("connection.dbRequired")
         } else {
             None
@@ -347,14 +447,11 @@ impl ConnectionForm {
         self.saving = true;
         config.database = config.database.trim().to_string();
         config.host = config.host.trim().to_string();
-        config.schema = match config.driver {
-            DriverType::Postgres => {
-                Some(config.schema.trim()).filter(|s| !s.is_empty()).unwrap_or("public").to_string()
-            }
-            DriverType::MySql => {
-                Some(config.schema.trim()).filter(|s| !s.is_empty()).unwrap_or(config.database.as_str()).to_string()
-            }
-            _ => String::new(),
+        config.schema = match config.driver.capabilities().location {
+            Location::Network => Some(config.schema.trim())
+                .filter(|s| !s.is_empty())
+                .map_or_else(|| default_schema(&config.driver, &config.database), str::to_string),
+            Location::LocalFile | Location::Url => String::new(),
         };
         let bar = state::bar(cx);
         let task = state::spawn(cx, async move { bar.save_connection(config).await });
@@ -514,12 +611,12 @@ impl Render for ConnectionForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let f = &self.fields;
-        let mysql = self.driver == DriverType::MySql;
-        let drivers = vec![
-            ("sqlite".into(), t(cx, "connection.sqlite")),
-            ("postgres".into(), t(cx, "connection.postgres")),
-            ("mysql".into(), t(cx, "connection.mysql")),
-        ];
+        let driver_copy = copy(&self.driver);
+        let drivers = DriverType::KNOWN
+            .iter()
+            .filter(|d| d.is_supported())
+            .map(|d| (d.as_str().to_string().into(), t(cx, copy(d).label)))
+            .collect();
         let driver_select = self.select(
             "conn-driver",
             self.driver.to_string().into(),
@@ -567,33 +664,43 @@ impl Render for ConnectionForm {
             .child(form::group(t(cx, "connection.driver"), driver_select, cx))
             .child(read_only)
             .child(form::group(t(cx, "connection.tabColor"), swatches, cx));
-        if self.driver == DriverType::Sqlite {
+        let location = self.driver.capabilities().location;
+        if location == Location::LocalFile {
             let file_row = self.browse_row(&f.file_path, "browse-sqlite", Browse::Sqlite, window, cx);
             body = body.child(form::group(t(cx, "connection.file"), file_row, cx));
+        } else if location == Location::Url {
+            body = body
+                .child(form::group(t(cx, "connection.url"), labelled("conn-url", form::input(&f.url, window, cx)), cx))
+                .child(
+                    form::group(
+                        t(cx, "connection.authToken"),
+                        labelled("conn-auth-token", form::input(&f.auth_token, window, cx).mask_toggle()),
+                        cx,
+                    )
+                    .child(form::hint(t(cx, "connection.authTokenHint"), cx)),
+                )
+                .child(form::group(t(cx, "connection.sslMode"), self.ssl_select(window, cx), cx))
+                .child(self.ssh_section(window, cx))
+                .child(form::hint(t(cx, "connection.sshUrlHint"), cx));
         } else {
-            let ssl = vec![
-                ("disable".into(), t(cx, "connection.sslDisable")),
-                ("require".into(), t(cx, "connection.sslRequire")),
-                ("verify-full".into(), t(cx, "connection.sslVerifyFull")),
-            ];
-            let ssl_select = self.select(
-                "conn-ssl",
-                self.ssl_mode.clone().into(),
-                ssl,
-                |form, value, _, cx| {
-                    form.ssl_mode = value.to_string();
-                    cx.notify();
-                },
-                window,
-                cx,
-            );
-            let database_hint = if mysql { "connection.databaseHintMysql" } else { "connection.databaseHint" };
-            let schema_label = if mysql { "connection.defaultSchemaMysql" } else { "connection.defaultSchema" };
+            let ssl_select = self.ssl_select(window, cx);
+            let database_hint = driver_copy.database_hint;
+            let schema_label = driver_copy.schema_label;
             body = body
                 .child(form::row(
                     form::group(t(cx, "connection.host"), labelled("conn-host", form::input(&f.host, window, cx)), cx),
                     form::group(t(cx, "connection.port"), labelled("conn-port", form::input(&f.port, window, cx)), cx),
                 ))
+                .when(self.driver == DriverType::SqlServer, |el| {
+                    el.child(
+                        form::group(
+                            t(cx, "connection.instance"),
+                            labelled("conn-instance", form::input(&f.instance, window, cx)),
+                            cx,
+                        )
+                        .child(form::hint(t(cx, "connection.instanceHint"), cx)),
+                    )
+                })
                 .child(
                     form::group(
                         t(cx, "connection.databaseName"),
@@ -620,7 +727,7 @@ impl Render for ConnectionForm {
                 .child(form::row(
                     form::group(t(cx, "connection.sslMode"), ssl_select, cx),
                     form::group(t(cx, schema_label), form::input(&f.schema, window, cx), cx)
-                        .when(mysql, |el| el.child(form::hint(t(cx, "connection.defaultSchemaMysqlHint"), cx))),
+                        .when_some(driver_copy.schema_hint, |el, hint| el.child(form::hint(t(cx, hint), cx))),
                 ))
                 .child(self.ssh_section(window, cx));
         }
@@ -653,6 +760,34 @@ impl Render for ConnectionForm {
 }
 
 impl ConnectionForm {
+    fn ssl_select(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let ssl = self
+            .driver
+            .capabilities()
+            .tls_modes
+            .iter()
+            .map(|mode| (mode.to_string().into(), t(cx, ssl_label(mode))))
+            .collect();
+        self.select(
+            "conn-ssl",
+            self.ssl_mode.clone().into(),
+            ssl,
+            |form, value, window, cx| {
+                form.ssl_mode = value.to_string();
+                // A port left at the default follows TLS on and off.
+                if let Some((plain, tls)) = tls_ports(&form.driver) {
+                    let (from, to) = if form.ssl_mode == "disable" { (tls, plain) } else { (plain, tls) };
+                    if Self::value(&form.fields.port, cx) == from.to_string() {
+                        Self::set(&form.fields.port, &to.to_string(), window, cx);
+                    }
+                }
+                cx.notify();
+            },
+            window,
+            cx,
+        )
+    }
+
     fn ssh_section(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let f = &self.fields;
         let enabled = self.toggle(

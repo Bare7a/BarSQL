@@ -9,7 +9,14 @@ use crate::harness::{E2e, Kind, run, unique_table};
 async fn explain_fixture(e: &E2e) -> String {
     let table = unique_table("explain");
     e.create_temp_table(&e.auto_pk_table(&table), &table).await;
-    e.exec(&format!("CREATE INDEX {table}_name ON {} (name)", e.qualified(&table))).await;
+    let index = match e.is_clickhouse() {
+        // A data-skipping index, since ClickHouse's ordinary index is the sorting key.
+        true => {
+            format!("ALTER TABLE {} ADD INDEX {table}_name name TYPE bloom_filter GRANULARITY 1", e.qualified(&table))
+        }
+        false => format!("CREATE INDEX {table}_name ON {} (name)", e.qualified(&table)),
+    };
+    e.exec(&index).await;
     for name in ["alpha", "beta", "gamma", "delta"] {
         e.exec(&format!("INSERT INTO {} (name) VALUES ('{name}')", e.qualified(&table))).await;
     }
@@ -53,6 +60,7 @@ async fn explain(e: &E2e, sql: &str, analyze: bool) -> QueryPlan {
 }
 
 each_engine!(async fn explain_plan_only(e) {
+    require!(e, plan_metrics);
     let table = explain_fixture(&e).await;
     let plan = explain(&e, &format!("SELECT * FROM {} WHERE name = 'beta'", e.qualified(&table)), false).await;
     assert!(!plan.analyzed, "a plan-only run must not report itself as analyzed");
@@ -69,6 +77,7 @@ each_engine!(async fn explain_plan_only(e) {
 });
 
 each_engine!(async fn explain_analyze_measures(e) {
+    require!(e, explain_analyze);
     let table = explain_fixture(&e).await;
     let plan = explain(&e, &format!("SELECT * FROM {}", e.qualified(&table)), true).await;
     assert!(plan.analyzed);
@@ -79,6 +88,7 @@ each_engine!(async fn explain_analyze_measures(e) {
 });
 
 each_engine!(async fn explain_analyze_row_counts_are_totals(e) {
+    require!(e, explain_analyze);
     let table = explain_fixture(&e).await;
     let plan = explain(&e, &format!("SELECT * FROM {}", e.qualified(&table)), true).await;
     assert!(any_node(&plan.nodes, &|n| n.rows_actual == Some(4.0)), "no node reports the 4 rows:{}", plan_summary(&plan));
@@ -86,11 +96,14 @@ each_engine!(async fn explain_analyze_row_counts_are_totals(e) {
 
 each_engine!(async fn explain_index_is_named(e) {
     let table = explain_fixture(&e).await;
-    let plan = explain(&e, &format!("SELECT * FROM {} WHERE id = 1", e.qualified(&table)), false).await;
+    // SQLite looks an INTEGER PRIMARY KEY up by rowid, which isn't an index.
+    let column = if e.is_lite() { "name = 'beta'" } else { "id = 1" };
+    let plan = explain(&e, &format!("SELECT * FROM {} WHERE {column}", e.qualified(&table)), false).await;
     assert!(any_node(&plan.nodes, &|n| !n.index.is_empty()), "no node names its index:{}", plan_summary(&plan));
 });
 
 each_engine!(async fn explain_analyze_rolls_back_writes(e) {
+    require!(e, explain_analyze);
     let table = explain_fixture(&e).await;
     let plan = explain(&e, &format!("DELETE FROM {}", e.qualified(&table)), true).await;
     assert!(plan.has_note(NOTE_ROLLED_BACK), "{:?}", plan.notes);
@@ -98,12 +111,19 @@ each_engine!(async fn explain_analyze_rolls_back_writes(e) {
 });
 
 each_engine!(async fn explain_write_without_analyze_keeps_rows(e) {
+    // ClickHouse explains SELECT and INSERT only.
+    if e.is_clickhouse() {
+        return;
+    }
     let table = explain_fixture(&e).await;
-    explain(&e, &format!("DELETE FROM {}", e.qualified(&table)), false).await;
+    // SQLite plans a DELETE without a WHERE as nothing at all.
+    explain(&e, &format!("DELETE FROM {} WHERE name = 'beta'", e.qualified(&table)), false).await;
     assert_eq!(e.count(&table).await, 4);
 });
 
+// T-SQL has no EXPLAIN to type.
 each_engine!(async fn explain_of_an_explain(e) {
+    require!(e, typed_explain);
     let table = explain_fixture(&e).await;
     let plan = explain(&e, &format!("EXPLAIN SELECT * FROM {}", e.qualified(&table)), false).await;
     assert!(!plan.nodes.is_empty(), "a plan of the underlying statement");
@@ -130,6 +150,10 @@ async fn explain_postgres_timings() {
 }
 
 each_engine!(async fn explain_tree_has_depth(e) {
+    // SQLite's EXPLAIN QUERY PLAN lists a join's tables side by side.
+    if e.is_lite() {
+        return;
+    }
     let table = explain_fixture(&e).await;
     let t = e.qualified(&table);
     let sql = format!("SELECT a.name FROM {t} a JOIN {t} b ON a.id = b.id JOIN {t} c ON b.id = c.id ORDER BY a.name");

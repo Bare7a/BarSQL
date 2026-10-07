@@ -92,11 +92,7 @@ impl Driver<'_> {
     }
 
     pub fn schema_name(&self) -> String {
-        match self.connection.driver {
-            barsql_core::DriverType::Sqlite => "main".into(),
-            barsql_core::DriverType::Postgres => "public".into(),
-            _ => self.connection.database.clone(),
-        }
+        self.connection.default_browse_schema()
     }
 
     pub fn refresh_schema(&mut self) {
@@ -175,6 +171,20 @@ impl Driver<'_> {
         self.cx.run_until_parked();
         self.cx.update(|window, cx| window.draw(cx).clear(cx));
         self.keys(&format!("{}enter", "down ".repeat(downs + 1)));
+        self.pause();
+    }
+
+    // Opens the submenu at item `downs` and picks its item `pick`. A submenu shows once its item is selected, and
+    // takes the keys after Right focuses it, so each step draws first.
+    #[cfg(feature = "e2e")]
+    pub fn context_submenu(&mut self, selector: &'static str, downs: usize, pick: usize) {
+        let position = self.center(selector);
+        let (button, modifiers) = (MouseButton::Right, Modifiers::none());
+        self.cx.simulate_event(MouseDownEvent { button, position, modifiers, click_count: 1, first_mouse: false });
+        self.cx.run_until_parked();
+        self.keys(&"down ".repeat(downs + 1));
+        self.keys("right");
+        self.keys(&format!("{}enter", "down ".repeat(pick)));
         self.pause();
     }
 

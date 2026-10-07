@@ -27,6 +27,10 @@ impl Grid {
         self.table = table;
     }
 
+    pub fn set_dialect(&mut self, dialect: Option<barsql_core::SqlDialect>) {
+        self.dialect = dialect;
+    }
+
     pub(super) fn staged(&self) -> Option<Staged> {
         self.overlay.as_ref().map(|overlay| overlay.staged.clone())
     }

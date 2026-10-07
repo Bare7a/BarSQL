@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 
-use barsql_core::DriverType;
+use barsql_core::{DriverType, FunctionKind};
 
 use super::catalog::{Catalog, TableBinding};
-use super::context::{CursorSlot, SqlCursor, StatementShape, analyze_cursor};
+use super::context::{Clause, CursorSlot, SqlCursor, StatementShape, analyze_cursor};
+use super::functions::{CallForm, FunctionDoc, KindMask};
 use super::query::{ParsedQuery, QueryTableRef, resolve_dot_completion};
 use super::quoting::{column_cache_key, format_sql_identifier, unquote_ident};
 use super::suggestions::{
@@ -14,6 +15,114 @@ use super::suggestions::{
 };
 
 const MAX_ITEMS: usize = 100;
+// Functions only show once a letter is typed, so this caps a short prefix's flood.
+const MAX_FUNCTIONS: usize = 60;
+
+// What the caret is followed by and what was typed, which shape a function's inserted text.
+struct Typing<'a> {
+    // The partial word as typed, not lowercased.
+    word: &'a str,
+    // A `(` already follows, so only the name goes in.
+    paren_follows: bool,
+}
+
+// Which functions fit where: aggregates and window functions only where the query has groups or rows to work
+// on, table functions only in FROM.
+fn function_kinds(clause: Clause) -> KindMask {
+    match clause {
+        Clause::Select | Clause::OrderBy => KindMask::EXPR,
+        Clause::Having => KindMask::SCALAR.with(KindMask::AGGREGATE),
+        Clause::Where
+        | Clause::On
+        | Clause::Set
+        | Clause::Values
+        | Clause::GroupBy
+        | Clause::Returning
+        | Clause::From
+        | Clause::Other => KindMask::SCALAR,
+        Clause::Target | Clause::Limit => KindMask::NONE,
+    }
+}
+
+// `$`, `\` and `}` are snippet syntax.
+fn snippet_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '$' | '\\' | '}') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+// The kind and the first overload's return type, then the schema of a user function.
+fn function_detail(ctx: &CompletionContext, doc: &FunctionDoc) -> String {
+    let labels = ctx.labels;
+    let kind = match doc.kind {
+        FunctionKind::Scalar if doc.builtin => &labels.function,
+        FunctionKind::Scalar => &labels.user_function,
+        FunctionKind::Aggregate => &labels.aggregate_function,
+        FunctionKind::Window => &labels.window_function,
+        FunctionKind::Table => &labels.table_function,
+    };
+    let mut parts = vec![kind.clone()];
+    if let Some((_, returns)) = doc.signatures.first().filter(|(_, r)| !r.is_empty()) {
+        parts.push(returns.clone());
+    }
+    if !doc.schema.is_empty() {
+        parts.push(doc.schema.clone());
+    }
+    parts.join(" · ")
+}
+
+fn function_item(
+    ctx: &CompletionContext,
+    (tier, score, doc): (u8, u8, FunctionDoc),
+    typing: &Typing,
+) -> CompletionItem {
+    let driver = ctx.driver();
+    let name = if doc.builtin {
+        // Typing in capitals asks for capitals, where the server ignores the case anyway.
+        let shout = typing.word.chars().any(|c| c.is_ascii_alphabetic())
+            && !typing.word.chars().any(|c| c.is_ascii_lowercase())
+            && !ctx.catalog.functions.case_sensitive(&doc.name);
+        if shout { doc.name.to_ascii_uppercase() } else { doc.name.clone() }
+    } else {
+        let name = format_sql_identifier(&doc.name, driver);
+        if doc.qualified_only { format!("{}.{name}", format_sql_identifier(&doc.schema, driver)) } else { name }
+    };
+    let (insert_text, snippet) = match doc.call {
+        _ if typing.paren_follows => (name, false),
+        CallForm::NoParens => (name, false),
+        CallForm::Empty => (format!("{name}()"), false),
+        CallForm::Args => (format!("{}($0)", snippet_escape(&name)), true),
+    };
+    let label_detail = match doc.call {
+        CallForm::NoParens => None,
+        _ => doc.signatures.first().map(|(args, _)| format!("({args})")),
+    };
+    CompletionItem {
+        sort_text: rank(tier, score, &doc.name),
+        detail: Some(function_detail(ctx, &doc)),
+        label: doc.name,
+        kind: ItemKind::Function,
+        label_detail,
+        insert_text,
+        snippet,
+        filter_text: None,
+    }
+}
+
+// Nothing until a letter is typed, so an empty prefix doesn't list a thousand built-ins. Quoted words are
+// identifiers, not calls.
+fn function_items(ctx: &CompletionContext, prefix: &str, kinds: KindMask, typing: &Typing) -> Vec<CompletionItem> {
+    if prefix.is_empty() || kinds.is_empty() || typing.word.starts_with(['"', '`', '[', '\'']) {
+        return Vec::new();
+    }
+    let matches = ctx.catalog.functions.matches(prefix, kinds, MAX_FUNCTIONS);
+    matches.into_iter().map(|m| function_item(ctx, m, typing)).collect()
+}
 
 // Lets the editor load just the columns this completion can show. Without a catalog, a dot qualifier
 // only resolves through the query's own bindings.
@@ -109,6 +218,8 @@ fn fk_join_items(ctx: &CompletionContext, query_tables: &[QueryTableRef]) -> Vec
                 detail: Some(ctx.labels.foreign_key.clone()),
                 insert_text: expr,
                 filter_text: None,
+                label_detail: None,
+                snippet: false,
             });
         }
     }
@@ -156,11 +267,20 @@ fn dot_items(ctx: &CompletionContext, segments: &[String], prefix: &str, parsed:
     Vec::new()
 }
 
-fn table_slot_items(ctx: &CompletionContext, prefix: &str, ctes: &[String]) -> Vec<CompletionItem> {
+fn table_slot_items(
+    ctx: &CompletionContext,
+    prefix: &str,
+    ctes: &[String],
+    shape: &StatementShape,
+    typing: &Typing,
+) -> Vec<CompletionItem> {
     // CTEs go first at tier 0 so they survive the item cap on large schemas.
     let mut items = suggest_cte_items(ctes, prefix, ctx);
     items.extend(suggest_tables(ctx, prefix, None));
     items.extend(suggest_schemas(ctx, prefix));
+    if shape.clause == Clause::From {
+        items.extend(function_items(ctx, prefix, KindMask::TABLE, typing));
+    }
     items
 }
 
@@ -178,6 +298,7 @@ fn general_items(
     expects_expr: bool,
     shape: &StatementShape,
     parsed: &ParsedQuery,
+    typing: &Typing,
 ) -> Vec<CompletionItem> {
     let query_tables = &parsed.query_tables;
     let mut items = Vec::new();
@@ -199,10 +320,18 @@ fn general_items(
     if expects_expr && !shape.has_from && !in_filter {
         items.extend(suggest_schemas(ctx, prefix));
     }
+    if expects_expr && !shape.at_statement_start {
+        items.extend(function_items(ctx, prefix, function_kinds(shape.clause), typing));
+    }
     items
 }
 
-fn completion_items(ctx: &CompletionContext, parsed: &ParsedQuery, cursor: &SqlCursor) -> Vec<CompletionItem> {
+fn completion_items(
+    ctx: &CompletionContext,
+    parsed: &ParsedQuery,
+    cursor: &SqlCursor,
+    typing: &Typing,
+) -> Vec<CompletionItem> {
     let query_tables = &parsed.query_tables;
     let shape = &cursor.shape;
     let spaced =
@@ -211,7 +340,7 @@ fn completion_items(ctx: &CompletionContext, parsed: &ParsedQuery, cursor: &SqlC
         CursorSlot::None => Vec::new(),
         CursorSlot::Dot { segments, prefix, .. } => dot_items(ctx, segments, prefix, parsed),
         CursorSlot::Table { prefix, leading_space, .. } => {
-            spaced(table_slot_items(ctx, prefix, &parsed.ctes), *leading_space)
+            spaced(table_slot_items(ctx, prefix, &parsed.ctes, shape, typing), *leading_space)
         }
         CursorSlot::InsertColumns { used, prefix, .. } => {
             let used: HashSet<&str> = used.iter().map(String::as_str).collect();
@@ -233,6 +362,7 @@ fn completion_items(ctx: &CompletionContext, parsed: &ParsedQuery, cursor: &SqlC
         CursorSlot::Value { prefix, .. } => {
             let mut items = suggest_value_items(ctx, query_tables, prefix);
             items.extend(in_scope_virtual_column_items(ctx, parsed, prefix));
+            items.extend(function_items(ctx, prefix, function_kinds(shape.clause), typing));
             items
         }
         CursorSlot::OrderGroup {
@@ -248,6 +378,7 @@ fn completion_items(ctx: &CompletionContext, parsed: &ParsedQuery, cursor: &SqlC
             items.extend(keyword_items(directions.iter().copied().chain(trailing_keywords.iter().copied()), prefix));
             if *expects_expr {
                 items.extend(in_scope_virtual_column_items(ctx, parsed, prefix));
+                items.extend(function_items(ctx, prefix, function_kinds(shape.clause), typing));
             }
             spaced(items, *leading_space)
         }
@@ -259,7 +390,7 @@ fn completion_items(ctx: &CompletionContext, parsed: &ParsedQuery, cursor: &SqlC
             }
         }
         CursorSlot::General { prefix, in_filter, expects_expr, .. } => {
-            general_items(ctx, prefix, *in_filter, *expects_expr, shape, parsed)
+            general_items(ctx, prefix, *in_filter, *expects_expr, shape, parsed, typing)
         }
     }
 }
@@ -273,7 +404,12 @@ pub fn build_completion_items(
     statement_start: usize,
 ) -> Vec<CompletionItem> {
     let before = &text[statement_start.min(position)..position];
-    let items = completion_items(ctx, parsed, &analyze_cursor(before, Some(ctx.driver())));
+    let cursor = analyze_cursor(before, Some(ctx.driver()));
+    let typing = Typing {
+        word: &before[before.len() - cursor.slot.replace_len().min(before.len())..],
+        paren_follows: text[position..].starts_with('('),
+    };
+    let items = completion_items(ctx, parsed, &cursor, &typing);
     if items.len() <= MAX_ITEMS {
         return items;
     }

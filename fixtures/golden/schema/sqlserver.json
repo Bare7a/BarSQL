@@ -1,0 +1,457 @@
+{
+  "engine": "sqlserver",
+  "schema": "barsql_golden",
+  "setup": [
+    "DROP VIEW IF EXISTS barsql_golden.customer_totals",
+    "DROP TABLE IF EXISTS barsql_golden.orders",
+    "DROP TABLE IF EXISTS barsql_golden.customers",
+    "DROP TABLE IF EXISTS barsql_golden.items",
+    "DROP FUNCTION IF EXISTS barsql_golden.with_tax",
+    "DROP PROCEDURE IF EXISTS barsql_golden.count_orders",
+    "DROP SCHEMA IF EXISTS barsql_golden",
+    "CREATE SCHEMA barsql_golden",
+    "CREATE TABLE barsql_golden.customers (\n    id int IDENTITY(1, 1) CONSTRAINT pk_customers PRIMARY KEY,\n    email nvarchar(255) NOT NULL CONSTRAINT uq_customers_email UNIQUE,\n    name nvarchar(100) NOT NULL CONSTRAINT df_customers_name DEFAULT N'anon',\n    created_at datetime2(3) NOT NULL CONSTRAINT df_customers_created DEFAULT SYSUTCDATETIME(),\n    CONSTRAINT ck_customers_name CHECK (LEN(name) > 0)\n)",
+    "CREATE TABLE barsql_golden.orders (\n    id int NOT NULL CONSTRAINT pk_orders PRIMARY KEY,\n    customer_id int NOT NULL CONSTRAINT fk_orders_customer REFERENCES barsql_golden.customers (id) ON DELETE CASCADE,\n    total decimal(10, 2) NOT NULL CONSTRAINT df_orders_total DEFAULT 0,\n    status varchar(20) NOT NULL CONSTRAINT df_orders_status DEFAULT 'new',\n    total_with_tax AS (total * 1.2) PERSISTED,\n    note nvarchar(max) NULL\n)",
+    "CREATE INDEX ix_orders_customer ON barsql_golden.orders (customer_id) INCLUDE (total)",
+    "CREATE UNIQUE INDEX ux_orders_status ON barsql_golden.orders (customer_id, status) WHERE status <> 'cancelled'",
+    "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email",
+    "CREATE TRIGGER barsql_golden.orders_touch ON barsql_golden.orders AFTER INSERT AS UPDATE o SET status = LOWER(o.status) FROM barsql_golden.orders o JOIN inserted i ON i.id = o.id",
+    "CREATE FUNCTION barsql_golden.with_tax(@total decimal(10, 2)) RETURNS decimal(12, 2) AS BEGIN RETURN @total * 1.2 END",
+    "CREATE PROCEDURE barsql_golden.count_orders @status varchar(20) AS SELECT COUNT(*) AS n FROM barsql_golden.orders WHERE status = @status"
+  ],
+  "schemas": [
+    "barsql_golden"
+  ],
+  "tables": [
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "customer_totals",
+        "type": "view"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "email",
+          "dataType": "nvarchar(255)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "total",
+          "dataType": "decimal(38, 2)",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [],
+      "constraints": [],
+      "triggers": []
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "customers",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false,
+          "isIdentity": true
+        },
+        {
+          "name": "email",
+          "dataType": "nvarchar(255)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false
+        },
+        {
+          "name": "name",
+          "dataType": "nvarchar(100)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "(N'anon')"
+        },
+        {
+          "name": "created_at",
+          "dataType": "datetime2(3)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "(sysutcdatetime())"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pk_customers",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "clustered"
+        },
+        {
+          "name": "uq_customers_email",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "columns": [
+            "email"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "method": "nonclustered"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ck_customers_name",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "type": "CHECK",
+          "columns": [
+            "name"
+          ],
+          "definition": "CHECK (len([name])>(0))"
+        },
+        {
+          "name": "pk_customers",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ],
+          "definition": "PRIMARY KEY CLUSTERED ([id])"
+        },
+        {
+          "name": "uq_customers_email",
+          "schema": "barsql_golden",
+          "table": "customers",
+          "type": "UNIQUE",
+          "columns": [
+            "email"
+          ],
+          "definition": "UNIQUE NONCLUSTERED ([email])"
+        }
+      ],
+      "triggers": []
+    },
+    {
+      "table": {
+        "schema": "barsql_golden",
+        "name": "orders",
+        "type": "table"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": true,
+          "isForeign": false
+        },
+        {
+          "name": "customer_id",
+          "dataType": "int",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": true,
+          "foreignTable": "customers",
+          "foreignColumn": "id"
+        },
+        {
+          "name": "total",
+          "dataType": "decimal(10, 2)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "((0))"
+        },
+        {
+          "name": "status",
+          "dataType": "varchar(20)",
+          "isNullable": false,
+          "isPrimary": false,
+          "isForeign": false,
+          "defaultVal": "('new')"
+        },
+        {
+          "name": "total_with_tax",
+          "dataType": "numeric(13, 3)",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false,
+          "isComputed": true
+        },
+        {
+          "name": "note",
+          "dataType": "nvarchar(max)",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ix_orders_customer",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "customer_id"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "method": "nonclustered"
+        },
+        {
+          "name": "pk_orders",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "method": "clustered"
+        },
+        {
+          "name": "ux_orders_status",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "columns": [
+            "customer_id",
+            "status"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "method": "nonclustered"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "fk_orders_customer",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "type": "FOREIGN KEY",
+          "columns": [
+            "customer_id"
+          ],
+          "refTable": "customers",
+          "refColumns": [
+            "id"
+          ],
+          "definition": "FOREIGN KEY ([customer_id]) REFERENCES [barsql_golden].[customers] ([id]) ON DELETE CASCADE"
+        },
+        {
+          "name": "pk_orders",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "type": "PRIMARY KEY",
+          "columns": [
+            "id"
+          ],
+          "definition": "PRIMARY KEY CLUSTERED ([id])"
+        }
+      ],
+      "triggers": [
+        {
+          "name": "orders_touch",
+          "schema": "barsql_golden",
+          "table": "orders",
+          "timing": "AFTER",
+          "events": "INSERT"
+        }
+      ]
+    }
+  ],
+  "routines": [
+    {
+      "name": "count_orders",
+      "schema": "barsql_golden",
+      "kind": "procedure",
+      "args": "@status varchar"
+    },
+    {
+      "name": "with_tax",
+      "schema": "barsql_golden",
+      "kind": "function",
+      "returnType": "decimal",
+      "args": "@total decimal"
+    }
+  ],
+  "functions": [
+    {
+      "name": "with_tax",
+      "schema": "barsql_golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "@total decimal",
+          "returns": "decimal"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true
+    }
+  ],
+  "ddl": [
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customer_totals",
+        "kind": "view"
+      },
+      "ddl": "CREATE VIEW barsql_golden.customer_totals AS SELECT c.id, c.email, COALESCE(SUM(o.total), 0) AS total FROM barsql_golden.customers c LEFT JOIN barsql_golden.orders o ON o.customer_id = c.id GROUP BY c.id, c.email"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "customers",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE [barsql_golden].[customers] (\n    [id] int IDENTITY(1, 1) NOT NULL,\n    [email] nvarchar(255) NOT NULL,\n    [name] nvarchar(100) DEFAULT (N'anon') NOT NULL,\n    [created_at] datetime2(3) DEFAULT (sysutcdatetime()) NOT NULL,\n    CONSTRAINT [ck_customers_name] CHECK (len([name])>(0)),\n    CONSTRAINT [pk_customers] PRIMARY KEY CLUSTERED ([id]),\n    CONSTRAINT [uq_customers_email] UNIQUE NONCLUSTERED ([email])\n);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "pk_customers",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[customers] ADD CONSTRAINT [pk_customers] PRIMARY KEY CLUSTERED ([id]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "uq_customers_email",
+        "kind": "index",
+        "table": "customers"
+      },
+      "ddl": "CREATE UNIQUE INDEX [uq_customers_email] ON [barsql_golden].[customers] ([email]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "ck_customers_name",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[customers] ADD CONSTRAINT [ck_customers_name] CHECK (len([name])>(0));"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "pk_customers",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[customers] ADD CONSTRAINT [pk_customers] PRIMARY KEY CLUSTERED ([id]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "uq_customers_email",
+        "kind": "constraint",
+        "table": "customers"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[customers] ADD CONSTRAINT [uq_customers_email] UNIQUE NONCLUSTERED ([email]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders",
+        "kind": "table"
+      },
+      "ddl": "CREATE TABLE [barsql_golden].[orders] (\n    [id] int NOT NULL,\n    [customer_id] int NOT NULL,\n    [total] decimal(10, 2) DEFAULT ((0)) NOT NULL,\n    [status] varchar(20) DEFAULT ('new') NOT NULL,\n    [total_with_tax] AS ([total]*(1.2)) PERSISTED,\n    [note] nvarchar(max),\n    CONSTRAINT [fk_orders_customer] FOREIGN KEY ([customer_id]) REFERENCES [barsql_golden].[customers] ([id]) ON DELETE CASCADE,\n    CONSTRAINT [pk_orders] PRIMARY KEY CLUSTERED ([id])\n);\n\nCREATE INDEX [ix_orders_customer] ON [barsql_golden].[orders] ([customer_id]) INCLUDE ([total]);\n\nCREATE UNIQUE INDEX [ux_orders_status] ON [barsql_golden].[orders] ([customer_id], [status]) WHERE ([status]<>'cancelled');"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "ix_orders_customer",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE INDEX [ix_orders_customer] ON [barsql_golden].[orders] ([customer_id]) INCLUDE ([total]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "pk_orders",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[orders] ADD CONSTRAINT [pk_orders] PRIMARY KEY CLUSTERED ([id]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "ux_orders_status",
+        "kind": "index",
+        "table": "orders"
+      },
+      "ddl": "CREATE UNIQUE INDEX [ux_orders_status] ON [barsql_golden].[orders] ([customer_id], [status]) WHERE ([status]<>'cancelled');"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "fk_orders_customer",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[orders] ADD CONSTRAINT [fk_orders_customer] FOREIGN KEY ([customer_id]) REFERENCES [barsql_golden].[customers] ([id]) ON DELETE CASCADE;"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "pk_orders",
+        "kind": "constraint",
+        "table": "orders"
+      },
+      "ddl": "ALTER TABLE [barsql_golden].[orders] ADD CONSTRAINT [pk_orders] PRIMARY KEY CLUSTERED ([id]);"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "orders_touch",
+        "kind": "trigger",
+        "table": "orders"
+      },
+      "ddl": "CREATE TRIGGER barsql_golden.orders_touch ON barsql_golden.orders AFTER INSERT AS UPDATE o SET status = LOWER(o.status) FROM barsql_golden.orders o JOIN inserted i ON i.id = o.id"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "count_orders",
+        "kind": "procedure",
+        "args": "@status varchar"
+      },
+      "ddl": "CREATE PROCEDURE barsql_golden.count_orders @status varchar(20) AS SELECT COUNT(*) AS n FROM barsql_golden.orders WHERE status = @status"
+    },
+    {
+      "ref": {
+        "schema": "barsql_golden",
+        "name": "with_tax",
+        "kind": "function",
+        "args": "@total decimal"
+      },
+      "ddl": "CREATE FUNCTION barsql_golden.with_tax(@total decimal(10, 2)) RETURNS decimal(12, 2) AS BEGIN RETURN @total * 1.2 END"
+    }
+  ]
+}

@@ -8,6 +8,8 @@ pub enum Kind {
     Text,
     Null,
     Empty,
+    // An array, map or tuple shown as JSON. Only offered for a column of such a type, and never edited.
+    Array,
 }
 
 // Null and Empty are only ever detected, never offered in the type menu.
@@ -26,7 +28,11 @@ impl Kind {
 
     // Kind to tick in the type menu.
     pub fn selectable(self) -> Self {
-        if self.structured() { self } else { Self::Text }
+        if self.structured() || self == Self::Array { self } else { Self::Text }
+    }
+
+    pub fn foldable(self) -> bool {
+        self.structured() || self == Self::Array
     }
 
     pub fn label_key(self) -> &'static str {
@@ -37,12 +43,13 @@ impl Kind {
             Self::Xml => "cellViewer.kindXml",
             Self::Html => "cellViewer.kindHtml",
             Self::Text => "cellViewer.kindText",
+            Self::Array => "cellViewer.kindArray",
         }
     }
 
     pub fn language(self) -> &'static str {
         match self {
-            Self::Json => "json",
+            Self::Json | Self::Array => "json",
             Self::Html => "html",
             // GPUI Kit has no XML grammar, but its HTML one colours XML tags, attributes and values too.
             Self::Xml => "html",
@@ -249,6 +256,8 @@ mod tests {
         assert!(!Kind::Text.structured() && !Kind::Null.structured() && !Kind::Empty.structured());
         assert_eq!([Kind::Json, Kind::Html, Kind::Null].map(Kind::language), ["json", "html", "text"]);
         assert_eq!([Kind::Json, Kind::Empty, Kind::Null].map(Kind::selectable), [Kind::Json, Kind::Text, Kind::Text]);
+        assert_eq!((Kind::Array.selectable(), Kind::Array.language()), (Kind::Array, "json"));
+        assert!(!Kind::Array.structured() && Kind::Array.foldable() && !Kind::Text.foldable());
         assert_eq!(Kind::Empty.label_key(), "cellViewer.kindEmpty");
         assert_eq!(SELECTABLE, [Kind::Text, Kind::Json, Kind::Xml, Kind::Html]);
     }

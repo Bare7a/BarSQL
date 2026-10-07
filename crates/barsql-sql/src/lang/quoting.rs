@@ -1,4 +1,4 @@
-use barsql_core::DriverType;
+use barsql_core::{DriverType, SqlDialect};
 
 use crate::quote::quote_ident;
 
@@ -100,10 +100,13 @@ pub fn identifier_needs_quote(name: &str, driver: &DriverType) -> bool {
     if name.as_bytes()[0].is_ascii_digit() || (name.len() <= 10 && name.is_ascii() && keyword()) {
         return true;
     }
-    match driver {
-        DriverType::Postgres => !name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_'),
-        DriverType::MySql => !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$'),
-        _ => !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_'),
+    match driver.dialect() {
+        // Postgres folds unquoted names to lowercase.
+        Some(SqlDialect::Postgres) => !name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_'),
+        Some(SqlDialect::MySql) => !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$'),
+        Some(SqlDialect::Sqlite | SqlDialect::TSql | SqlDialect::ClickHouse) | None => {
+            !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        }
     }
 }
 
@@ -113,7 +116,7 @@ pub fn format_sql_identifier(name: &str, driver: &DriverType) -> String {
 
 // Leaves out an empty schema and SQLite's default `main`.
 pub fn build_qualified_table(driver: &DriverType, schema: &str, table: &str) -> String {
-    if schema.is_empty() || schema == "main" {
+    if schema.is_empty() || (schema == "main" && driver.dialect() == Some(SqlDialect::Sqlite)) {
         return quote_ident(driver, table);
     }
     format!("{}.{}", quote_ident(driver, schema), quote_ident(driver, table))

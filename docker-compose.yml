@@ -3,6 +3,9 @@
 #   PostgreSQL -> 55432
 #   MySQL      -> 33306
 #   MariaDB    -> 33307
+#   libSQL     -> 38080   (sqld, the server Turso runs; HTTP)
+#   ClickHouse -> 38123   (HTTP)
+#   SQL Server -> 31433   (only with the mssql profile: BARSQL_E2E_MSSQL=1 for xtask)
 #
 # The tests use these ports and credentials unless BARSQL_E2E_PG_PORT and friends say otherwise.
 #
@@ -63,3 +66,57 @@ services:
       retries: 30
     tmpfs:
       - /var/lib/mysql
+
+  turso:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    ports:
+      - "38080:8080"
+    healthcheck:
+      # The image has no curl, but bash can open a TCP connection.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/sqld
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8
+    environment:
+      CLICKHOUSE_DB: barsql_test
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "38123:8123"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse", "client", "--password", "clickhouse", "-q", "SELECT 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    tmpfs:
+      - /var/lib/clickhouse
+
+  # amd64 only, and big, so it starts only with the mssql profile. On arm64, xtask swaps in Azure SQL Edge, which runs
+  # the same engine natively. SQL Server can't keep its files on tmpfs.
+  mssql:
+    profiles: [mssql]
+    image: ${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}
+    platform: ${MSSQL_PLATFORM:-linux/amd64}
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: BarSQL-e2e-Passw0rd
+      MSSQL_PID: Developer
+    ports:
+      - "31433:1433"
+    healthcheck:
+      # Azure SQL Edge has no sqlcmd. The suites retry their first login while the server finishes starting.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1433"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 20s

@@ -2,323 +2,77 @@ use std::ops::Range;
 
 use barsql_core::DriverType;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Dialect {
-    pub hash_line_comments: bool,
-    pub backslash_escapes: bool,
-    pub double_quote_strings: bool,
-    pub nested_block_comments: bool,
-    pub dollar_quotes: bool,
-    pub client_delimiters: bool,
-    // SQLite trigger bodies contain `;`. Like sqlite3_complete, a CREATE TRIGGER ends at `; END ;`.
-    pub trigger_bodies: bool,
-}
-
-impl Dialect {
-    pub fn for_driver(driver: &DriverType) -> Self {
-        let mysql = *driver == DriverType::MySql;
-        Self {
-            hash_line_comments: mysql,
-            backslash_escapes: mysql,
-            double_quote_strings: mysql,
-            nested_block_comments: *driver == DriverType::Postgres,
-            dollar_quotes: !mysql,
-            client_delimiters: mysql,
-            trigger_bodies: *driver == DriverType::Sqlite,
-        }
-    }
-}
+use crate::lex::LexRules;
+use crate::lex::boundary::{Boundary, Mode, boundaries};
+use crate::lex::prim::{block_comment_end, dash_comment_at, hash_comment_at, line_comment_end};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Statement<'a> {
     pub text: &'a str,
     pub range: Range<usize>,
+    // `GO 3` runs its batch three times.
+    pub repeat: u32,
 }
 
-// Drops terminators and comment-only chunks. Ranges point at the trimmed statement in `sql`.
+// What goes to the server, one request per statement. Drops terminators and comment-only chunks. Ranges point
+// at the trimmed statement in `sql`. T-SQL splits only at GO lines, since variables live for the whole batch.
 pub fn split_statements<'a>(driver: &DriverType, sql: &'a str) -> Vec<Statement<'a>> {
-    let dialect = Dialect::for_driver(driver);
-    let b = sql.as_bytes();
-    let n = b.len();
+    let rules = LexRules::for_driver(Some(driver));
     let mut out = Vec::new();
-    let mut start = 0;
-    let mut delimiter: &str = ";";
-    let mut state = Complete::Start;
-    let mut i = 0;
-
-    let push = |start: usize, end: usize, out: &mut Vec<Statement<'a>>| {
+    let mut push = |start: usize, end: usize, repeat: u32| {
         let chunk = &sql[start..end];
-        if has_code(chunk.as_bytes(), dialect) {
+        if has_code(chunk.as_bytes(), &rules) {
             let lead = chunk.len() - chunk.trim_start().len();
             let text = chunk.trim();
-            out.push(Statement { text, range: start + lead..start + lead + text.len() });
+            out.push(Statement { text, range: start + lead..start + lead + text.len(), repeat });
         }
     };
-
-    while i < n {
-        let c = b[i];
-        if dialect.client_delimiters
-            && (c == b'd' || c == b'D')
-            && at_line_start(sql, i)
-            && let Some((consumed, next)) = delimiter_line(&sql[i..])
-        {
-            push(start, i, &mut out);
-            delimiter = next;
-            i += consumed;
-            start = i;
-            continue;
-        }
-        match c {
-            b'-' if b.get(i + 1) == Some(&b'-') => i = line_comment_end(b, i + 2),
-            b'#' if dialect.hash_line_comments => i = line_comment_end(b, i + 1),
-            b'/' if b.get(i + 1) == Some(&b'*') => i = block_comment_end(b, i, dialect.nested_block_comments),
-            b'\'' => {
-                i = quote_end(b, i, b'\'', dialect.backslash_escapes || is_escape_string_prefix(b, i));
-                state = state.next(CompleteToken::Other);
+    let mut start = 0;
+    for boundary in boundaries(sql, &rules, Mode::ExecutionUnits) {
+        match boundary {
+            Boundary::Terminator { at, len, .. } => {
+                push(start, at, 1);
+                start = at + len;
             }
-            b'"' => {
-                i = quote_end(b, i, b'"', dialect.backslash_escapes && dialect.double_quote_strings);
-                state = state.next(CompleteToken::Other);
+            Boundary::DelimiterLine { at, end } => {
+                push(start, at, 1);
+                start = end;
             }
-            b'`' => {
-                i = quote_end(b, i, b'`', false);
-                state = state.next(CompleteToken::Other);
+            Boundary::BatchSeparator { at, end, repeat } => {
+                push(start, at, repeat);
+                start = end;
             }
-            b'$' if dialect.dollar_quotes => {
-                i = dollar_quoted_end(b, i);
-                state = state.next(CompleteToken::Other);
-            }
-            _ if c == delimiter.as_bytes()[0] && b[i..].starts_with(delimiter.as_bytes()) => {
-                state = state.next(CompleteToken::Semi);
-                if !dialect.trigger_bodies || state == Complete::Start {
-                    push(start, i, &mut out);
-                    start = i + delimiter.len();
-                    state = Complete::Start;
-                }
-                i += delimiter.len();
-            }
-            _ if dialect.trigger_bodies => (state, i) = state.scan(b, i),
-            _ => i += 1,
         }
     }
-    push(start, n, &mut out);
+    push(start, sql.len(), 1);
     out
 }
 
-// Mirrors sqlite3_complete's states. Whitespace and comments don't change the state.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Complete {
-    Start,
-    Normal,
-    Explain,
-    Create,
-    Trigger,
-    Semi,
-    End,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum CompleteToken {
-    Semi,
-    Other,
-    Explain,
-    Create,
-    Temp,
-    Trigger,
-    End,
-}
-
-impl CompleteToken {
-    pub(crate) fn word(w: &[u8]) -> Self {
-        let is = |k: &[u8]| w.eq_ignore_ascii_case(k);
-        if is(b"END") {
-            Self::End
-        } else if is(b"CREATE") {
-            Self::Create
-        } else if is(b"TEMP") || is(b"TEMPORARY") {
-            Self::Temp
-        } else if is(b"TRIGGER") {
-            Self::Trigger
-        } else if is(b"EXPLAIN") {
-            Self::Explain
-        } else {
-            Self::Other
-        }
-    }
-}
-
-impl Complete {
-    // Start after a Semi means the statement is complete.
-    pub(crate) fn next(self, token: CompleteToken) -> Self {
-        match (self, token) {
-            (Self::Trigger | Self::Semi, CompleteToken::Semi) => Self::Semi,
-            (_, CompleteToken::Semi) => Self::Start,
-            (Self::Semi, CompleteToken::End) => Self::End,
-            (Self::Trigger | Self::Semi | Self::End, _) => Self::Trigger,
-            (Self::Start, CompleteToken::Explain) => Self::Explain,
-            (Self::Explain, CompleteToken::Other) => Self::Explain,
-            (Self::Start | Self::Explain, CompleteToken::Create) => Self::Create,
-            (Self::Create, CompleteToken::Temp) => Self::Create,
-            (Self::Create, CompleteToken::Trigger) => Self::Trigger,
-            _ => Self::Normal,
-        }
-    }
-
-    // Consumes one word or one character at `i`. Returns where scanning resumes.
-    pub(crate) fn scan(self, b: &[u8], i: usize) -> (Self, usize) {
-        let c = b[i];
-        if c.is_ascii_alphabetic() || c == b'_' || c >= 0x80 {
-            let end = i + b[i..]
-                .iter()
-                .position(|&w| !(w.is_ascii_alphanumeric() || matches!(w, b'_' | b'$') || w >= 0x80))
-                .unwrap_or(b.len() - i);
-            return (self.next(CompleteToken::word(&b[i..end])), end);
-        }
-        let state = if c.is_ascii_whitespace() { self } else { self.next(CompleteToken::Other) };
-        (state, i + 1)
-    }
-}
-
+// A batch followed by `GO n` appears n times.
 pub fn split_statement_texts(driver: &DriverType, sql: &str) -> Vec<String> {
-    split_statements(driver, sql).into_iter().map(|s| s.text.to_string()).collect()
+    split_statements(driver, sql)
+        .into_iter()
+        .flat_map(|s| std::iter::repeat_n(s.text.to_string(), s.repeat as usize))
+        .collect()
 }
 
-pub(crate) fn has_code(s: &[u8], dialect: Dialect) -> bool {
+pub(crate) fn has_code(s: &[u8], rules: &LexRules) -> bool {
     let n = s.len();
     let mut i = 0;
     while i < n {
-        match s[i] {
-            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
-            b'-' if s.get(i + 1) == Some(&b'-') => i = line_comment_end(s, i + 2),
-            b'#' if dialect.hash_line_comments => i = line_comment_end(s, i + 1),
-            b'/' if s.get(i + 1) == Some(&b'*') => i = block_comment_end(s, i, dialect.nested_block_comments),
-            _ => return true,
+        if matches!(s[i], b' ' | b'\t' | b'\n' | b'\r') {
+            i += 1;
+        } else if dash_comment_at(s, i, rules.dash_needs_space) {
+            i = line_comment_end(s, i + 2).unwrap_or(n);
+        } else if hash_comment_at(s, i, rules.hash_comments) {
+            i = line_comment_end(s, i + 1).unwrap_or(n);
+        } else if s[i] == b'/' && s.get(i + 1) == Some(&b'*') {
+            i = block_comment_end(s, i, rules.nested_block_comments).unwrap_or(n);
+        } else {
+            return true;
         }
     }
     false
-}
-
-fn at_line_start(sql: &str, i: usize) -> bool {
-    let line_start = sql[..i].rfind('\n').map_or(0, |p| p + 1);
-    sql[line_start..i].trim().is_empty()
-}
-
-// mysql client `DELIMITER xx` line. Switching the terminator lets procedure bodies contain `;`.
-fn delimiter_line(rest: &str) -> Option<(usize, &str)> {
-    let b = rest.as_bytes();
-    if b.len() < 9 || !b[..9].eq_ignore_ascii_case(b"DELIMITER") {
-        return None;
-    }
-    let mut i = 9;
-    let gap = i;
-    while i < b.len() && matches!(b[i], b' ' | b'\t') {
-        i += 1;
-    }
-    if i == gap {
-        return None;
-    }
-    let token_start = i;
-    while i < b.len() && !matches!(b[i], b'\t' | b'\n' | 0x0c | b'\r' | b' ') {
-        i += 1;
-    }
-    if i == token_start {
-        return None;
-    }
-    let token = &rest[token_start..i];
-    while i < b.len() && matches!(b[i], b' ' | b'\t') {
-        i += 1;
-    }
-    if i == b.len() {
-        return Some((i, token));
-    }
-    if b[i] == b'\r' {
-        i += 1;
-    }
-    (b.get(i) == Some(&b'\n')).then_some((i + 1, token))
-}
-
-// Index of the terminating '\n' (left unconsumed), or the end.
-pub(crate) fn line_comment_end(s: &[u8], from: usize) -> usize {
-    match s.get(from..).and_then(|rest| rest.iter().position(|&c| c == b'\n')) {
-        Some(ix) => from + ix,
-        None => s.len(),
-    }
-}
-
-pub(crate) fn block_comment_end(s: &[u8], mut i: usize, nested: bool) -> usize {
-    let n = s.len();
-    i += 2;
-    let mut depth = 1;
-    while i < n {
-        if s[i] == b'*' && s.get(i + 1) == Some(&b'/') {
-            i += 2;
-            depth -= 1;
-            if depth == 0 {
-                return i;
-            }
-        } else if nested && s[i] == b'/' && s.get(i + 1) == Some(&b'*') {
-            depth += 1;
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
-    n
-}
-
-pub(crate) fn quote_end(s: &[u8], mut i: usize, quote: u8, backslash_escapes: bool) -> usize {
-    let n = s.len();
-    i += 1;
-    while i < n {
-        if backslash_escapes && s[i] == b'\\' {
-            i += 2;
-        } else if s[i] == quote {
-            if s.get(i + 1) == Some(&quote) {
-                i += 2;
-                continue;
-            }
-            return i + 1;
-        } else {
-            i += 1;
-        }
-    }
-    i.min(n)
-}
-
-// A standalone E before the quote starts a Postgres escape string. `1e'...'` and `TABLE'...'` don't count.
-fn is_escape_string_prefix(s: &[u8], quote_ix: usize) -> bool {
-    if quote_ix < 1 || !matches!(s[quote_ix - 1], b'e' | b'E') {
-        return false;
-    }
-    if quote_ix < 2 {
-        return true;
-    }
-    let before = s[quote_ix - 2];
-    !(matches!(before, b'_' | b'$' | b'\'' | b'"' | b'`') || before.is_ascii_alphanumeric())
-}
-
-// Tags can't start with a digit, so `$1$` is a placeholder, not a tag.
-pub(crate) fn dollar_tag_len(s: &[u8], i: usize) -> Option<usize> {
-    let mut j = i + 1;
-    if j < s.len() && (s[j].is_ascii_alphabetic() || s[j] == b'_') {
-        j += 1;
-        while j < s.len() && (s[j].is_ascii_alphanumeric() || s[j] == b'_') {
-            j += 1;
-        }
-    }
-    (s.get(j) == Some(&b'$')).then_some(j + 1 - i)
-}
-
-pub(crate) fn dollar_quoted_end(s: &[u8], i: usize) -> usize {
-    let Some(tag_len) = dollar_tag_len(s, i) else {
-        return i + 1;
-    };
-    let tag = &s[i..i + tag_len];
-    let body = i + tag_len;
-    match s[body..].windows(tag_len).position(|w| w == tag) {
-        Some(ix) => body + ix + tag_len,
-        None => s.len(),
-    }
 }
 
 #[cfg(test)]

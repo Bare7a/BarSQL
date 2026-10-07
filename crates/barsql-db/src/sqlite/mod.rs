@@ -1,19 +1,20 @@
 mod schema;
-mod values;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use barsql_core::{ConnectionConfig, DriverType, QueryError, Value};
-use rusqlite::{Connection, InterruptHandle, OpenFlags, params_from_iter};
+use rusqlite::types::{ToSqlOutput, ValueRef};
+use rusqlite::{Connection, InterruptHandle, OpenFlags, ToSql, params_from_iter};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::event::{ScriptEvent, Sink, StatementResult};
+use crate::lite::{LiteRef, LiteRows, LiteSource, LiteValue, values};
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
 use crate::{Cancel, ChunkBuilder, ColumnMeta};
 
-pub use values::parse_time;
+pub use crate::lite::values::parse_time;
 
 #[derive(Debug, Clone)]
 pub struct SqliteConnectOptions {
@@ -283,7 +284,7 @@ fn stream_statement(
             Ok(Some(row)) => {
                 for (i, time) in time_columns.iter().enumerate() {
                     match row.get_ref(i) {
-                        Ok(value) => values::push(value, *time, &mut builder),
+                        Ok(value) => values::push(lite_ref(value), *time, &mut builder),
                         Err(_) => builder.push_null(),
                     }
                 }
@@ -335,6 +336,57 @@ pub(crate) fn lite_value(value: &Value) -> rusqlite::types::Value {
         Value::Int(i) => V::Integer(*i),
         Value::Float(f) => V::Real(*f),
         Value::Text(s) => V::Text(s.clone()),
+    }
+}
+
+fn lite_ref(value: ValueRef<'_>) -> LiteRef<'_> {
+    match value {
+        ValueRef::Null => LiteRef::Null,
+        ValueRef::Integer(i) => LiteRef::Integer(i),
+        ValueRef::Real(f) => LiteRef::Real(f),
+        ValueRef::Text(bytes) => LiteRef::Text(bytes),
+        ValueRef::Blob(bytes) => LiteRef::Blob(bytes),
+    }
+}
+
+fn owned(value: ValueRef<'_>) -> LiteValue {
+    match value {
+        ValueRef::Null => LiteValue::Null,
+        ValueRef::Integer(i) => LiteValue::Integer(i),
+        ValueRef::Real(f) => LiteValue::Real(f),
+        ValueRef::Text(bytes) => LiteValue::Text(String::from_utf8_lossy(bytes).into_owned()),
+        ValueRef::Blob(bytes) => LiteValue::Blob(bytes.to_vec()),
+    }
+}
+
+struct Param<'a>(&'a LiteValue);
+
+impl ToSql for Param<'_> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(match self.0 {
+            LiteValue::Null => ValueRef::Null,
+            LiteValue::Integer(i) => ValueRef::Integer(*i),
+            LiteValue::Real(f) => ValueRef::Real(*f),
+            LiteValue::Text(s) => ValueRef::Text(s.as_bytes()),
+            LiteValue::Blob(b) => ValueRef::Blob(b),
+        }))
+    }
+}
+
+// The file's connection as the catalog's source.
+pub(crate) struct Rusqlite<'c>(pub(crate) &'c Connection);
+
+impl LiteSource for Rusqlite<'_> {
+    fn query(&mut self, sql: &str, params: &[LiteValue]) -> Result<LiteRows, QueryError> {
+        let mut stmt = self.0.prepare(sql).map_err(|e| lite_error(&e))?;
+        let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+        let width = columns.len();
+        let mut rows = stmt.query(params_from_iter(params.iter().map(Param))).map_err(|e| lite_error(&e))?;
+        let mut out = LiteRows { columns, rows: Vec::new() };
+        while let Some(row) = rows.next().map_err(|e| lite_error(&e))? {
+            out.rows.push((0..width).map(|i| row.get_ref(i).map_or(LiteValue::Null, owned)).collect());
+        }
+        Ok(out)
     }
 }
 

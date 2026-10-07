@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use barsql_core::schema::primary_keys;
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, IndexInfo, ObjectKind, ObjectRef, QueryError,
-    RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{
     DdlColumn, compose_create_table, join_ddl, render_constraint, render_create_index, terminate_statement,
@@ -18,6 +18,54 @@ use super::{PgEngine, pg_error};
 use crate::dump::DumpColumn;
 
 const PG: DriverType = DriverType::Postgres;
+
+// Everything callable in an expression or FROM, minus the functions that only back operators, casts, types,
+// aggregates and index methods, and the ones taking or returning pseudo-types no query can supply.
+const FUNCTIONS_SQL: &str = "WITH hidden AS (
+        SELECT oprcode::oid AS oid FROM pg_catalog.pg_operator
+        UNION SELECT castfunc FROM pg_catalog.pg_cast
+        UNION SELECT amproc::oid FROM pg_catalog.pg_amproc
+        UNION SELECT unnest(ARRAY[aggtransfn, aggfinalfn, aggcombinefn, aggserialfn, aggdeserialfn, aggmtransfn,
+            aggminvtransfn, aggmfinalfn]::oid[]) FROM pg_catalog.pg_aggregate
+        UNION SELECT unnest(ARRAY[typinput, typoutput, typreceive, typsend, typmodin, typmodout, typanalyze]::oid[])
+            FROM pg_catalog.pg_type
+    ), pseudo AS (
+        SELECT array_agg(oid) AS oids FROM pg_catalog.pg_type
+        WHERE typname IN ('internal', 'cstring', 'trigger', 'event_trigger', 'language_handler', 'fdw_handler',
+            'index_am_handler', 'tsm_handler', 'table_am_handler')
+    )
+    SELECT n.nspname::text,
+        p.proname::text,
+        p.prokind::text,
+        p.proretset,
+        COALESCE(pg_catalog.pg_get_function_arguments(p.oid), ''),
+        COALESCE(pg_catalog.pg_get_function_result(p.oid), ''),
+        COALESCE(pg_catalog.obj_description(p.oid, 'pg_proc'), ''),
+        COALESCE(x.extname::text, ''),
+        n.nspname = ANY (pg_catalog.current_schemas(true))
+    FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+    CROSS JOIN pseudo
+    LEFT JOIN pg_catalog.pg_depend d
+        ON d.classid = 'pg_catalog.pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+    LEFT JOIN pg_catalog.pg_extension x ON x.oid = d.refobjid
+    WHERE p.prokind IN ('f', 'a', 'w')
+        AND n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_(toast|temp_)'
+        AND p.proname !~ '^(_|binary_upgrade_)'
+        AND NOT (p.prorettype = ANY (pseudo.oids) OR p.proargtypes::oid[] && pseudo.oids)
+        AND p.oid NOT IN (SELECT oid FROM hidden)
+    ORDER BY 1, 2, 5";
+
+// A name's overloads can differ in kind: rank is a window function and a hypothetical-set aggregate.
+fn overload_kind(a: FunctionKind, b: FunctionKind) -> FunctionKind {
+    match (a, b) {
+        (FunctionKind::Window, _) | (_, FunctionKind::Window) => FunctionKind::Window,
+        (FunctionKind::Aggregate, _) | (_, FunctionKind::Aggregate) => FunctionKind::Aggregate,
+        (FunctionKind::Table, FunctionKind::Table) => FunctionKind::Table,
+        _ => FunctionKind::Scalar,
+    }
+}
 
 impl PgEngine {
     async fn rows(self: &Arc<Self>, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>, QueryError> {
@@ -136,7 +184,9 @@ impl PgEngine {
                           AND a.attnum = ANY (con.conkey)
                     ),
                     COALESCE(fk.reftable::text, ''),
-                    COALESCE(fk.refcolumn::text, '')
+                    COALESCE(fk.refcolumn::text, ''),
+                    a.attidentity <> '',
+                    a.attgenerated <> ''
                 FROM pg_catalog.pg_attribute a
                 JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
                 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
@@ -170,6 +220,8 @@ impl PgEngine {
                     is_foreign: !foreign_table.is_empty(),
                     foreign_table,
                     foreign_column: r.get(6),
+                    is_identity: r.get(7),
+                    is_computed: r.get(8),
                 }
             })
             .collect())
@@ -315,6 +367,44 @@ impl PgEngine {
                 }
             })
             .collect())
+    }
+
+    // Overloads fold into one function per schema and name.
+    pub async fn list_functions(self: &Arc<Self>) -> Result<FunctionList, QueryError> {
+        let rows = self.rows(FUNCTIONS_SQL, &[]).await?;
+        let mut functions: Vec<FunctionInfo> = Vec::new();
+        for r in &rows {
+            let (schema, name): (String, String) = (r.get(0), r.get(1));
+            let kind = match r.get::<_, String>(2).as_str() {
+                "a" => FunctionKind::Aggregate,
+                "w" => FunctionKind::Window,
+                _ if r.get::<_, bool>(3) => FunctionKind::Table,
+                _ => FunctionKind::Scalar,
+            };
+            let signature = FunctionSignature { args: r.get(4), returns: r.get(5) };
+            let description: String = r.get(6);
+            match functions.last_mut() {
+                Some(last) if last.schema == schema && last.name == name => {
+                    last.kind = overload_kind(last.kind, kind);
+                    last.signatures.push(signature);
+                    if last.description.is_empty() {
+                        last.description = description;
+                    }
+                }
+                _ => functions.push(FunctionInfo {
+                    builtin: schema == "pg_catalog",
+                    qualified_only: !r.get::<_, bool>(8),
+                    source: r.get(7),
+                    name,
+                    schema,
+                    kind,
+                    signatures: vec![signature],
+                    description,
+                    ..Default::default()
+                }),
+            }
+        }
+        Ok(FunctionList { functions, ..Default::default() })
     }
 
     pub async fn object_ddl(self: &Arc<Self>, object: &ObjectRef) -> Result<String, QueryError> {

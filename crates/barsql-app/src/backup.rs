@@ -67,13 +67,13 @@ struct Inserts<'a> {
     head: &'a str,
     rows: usize,
     bytes: usize,
+    // SQL Server's GO, after each statement.
+    separator: Option<&'a str>,
 }
 
 impl Inserts<'_> {
     fn push(&mut self, cells: impl Iterator<Item = String>, out: &mut String) {
-        out.push_str(if self.rows == 0 { self.head } else { "," });
-        out.push('\n');
-        let start = out.len();
+        let start = self.open(out);
         out.push('(');
         for (ix, cell) in cells.enumerate() {
             if ix > 0 {
@@ -82,6 +82,24 @@ impl Inserts<'_> {
             out.push_str(&cell);
         }
         out.push(')');
+        self.row_done(start, out);
+    }
+
+    // A row the server already wrote as a tuple.
+    fn push_tuple(&mut self, tuple: &str, out: &mut String) {
+        let start = self.open(out);
+        out.push_str(tuple);
+        self.row_done(start, out);
+    }
+
+    // Starts a row, and the statement before its first row. Returns where the row's text starts.
+    fn open(&mut self, out: &mut String) -> usize {
+        out.push_str(if self.rows == 0 { self.head } else { "," });
+        out.push('\n');
+        out.len()
+    }
+
+    fn row_done(&mut self, start: usize, out: &mut String) {
         self.rows += 1;
         self.bytes += out.len() - start;
         if self.rows >= STATEMENT_ROWS || self.bytes >= STATEMENT_BYTES {
@@ -92,6 +110,7 @@ impl Inserts<'_> {
     fn close(&mut self, out: &mut String) {
         if self.rows > 0 {
             out.push_str(";\n");
+            push_separator(out, self.separator);
             self.rows = 0;
             self.bytes = 0;
         }
@@ -156,18 +175,22 @@ impl BarApp {
             let name = table_ref(&engine.driver(), &req.schema, &req.table).replace(['\r', '\n'], " ");
             let now = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S %:z");
             out.text.push_str(&format!("-- BarSQL backup of {name}\n-- {now}\n\n"));
-            push_statements(&mut out.text, &query.prologue);
+            let separator = query.batch_separator;
+            push_statements(&mut out.text, &query.prologue, separator);
             if req.structure {
                 out.text.push_str(&terminate_statement(&ddl));
-                out.text.push_str("\n\n");
+                out.text.push('\n');
+                push_separator(&mut out.text, separator);
+                out.text.push('\n');
             }
             let mut written = 0;
             if req.data {
+                push_statements(&mut out.text, &query.before_rows, separator);
                 written = self.write_rows(&engine, &query, &mut out, cancel, progress).await?;
-                push_statements(&mut out.text, &query.sequences);
+                push_statements(&mut out.text, &query.sequences, separator);
             }
-            push_statements(&mut out.text, &after_rows);
-            push_statements(&mut out.text, &query.epilogue);
+            push_statements(&mut out.text, &after_rows, separator);
+            push_statements(&mut out.text, &query.epilogue, separator);
             out.write().await?;
             Ok::<usize, QueryError>(written)
         }
@@ -207,14 +230,19 @@ impl BarApp {
         };
         let write = async {
             let result = async {
-                let mut inserts = Inserts { head: &query.insert, rows: 0, bytes: 0 };
+                let mut inserts = Inserts { head: &query.insert, rows: 0, bytes: 0, separator: query.batch_separator };
                 let mut rows = 0;
                 while let Ok(event) = rx.recv().await {
                     let ScriptEvent::Rows { chunk, .. } = event else { continue };
                     for row in 0..chunk.rows() {
-                        let cells: Option<Vec<String>> =
-                            (0..chunk.columns()).map(|col| literal(chunk.cell(row, col))).collect();
-                        inserts.push(cells.ok_or_else(too_large)?.into_iter(), &mut out.text);
+                        if query.whole_row {
+                            let cell = literal(chunk.cell(row, 0)).ok_or_else(too_large)?;
+                            inserts.push_tuple(&query.tuple(&cell), &mut out.text);
+                        } else {
+                            let cells: Option<Vec<String>> =
+                                (0..chunk.columns()).map(|col| literal(chunk.cell(row, col))).collect();
+                            inserts.push(cells.ok_or_else(too_large)?.into_iter(), &mut out.text);
+                        }
                         rows += 1;
                     }
                     if out.text.len() >= WRITE_BYTES {
@@ -242,12 +270,20 @@ impl BarApp {
     }
 }
 
-fn push_statements(out: &mut String, statements: &[String]) {
+fn push_statements(out: &mut String, statements: &[String], separator: Option<&str>) {
     for statement in statements {
         out.push_str(&terminate_statement(statement));
         out.push('\n');
+        push_separator(out, separator);
     }
     if !statements.is_empty() {
+        out.push('\n');
+    }
+}
+
+fn push_separator(out: &mut String, separator: Option<&str>) {
+    if let Some(separator) = separator {
+        out.push_str(separator);
         out.push('\n');
     }
 }
@@ -258,7 +294,7 @@ mod tests {
 
     #[test]
     fn rows_gather_into_statements_of_a_hundred() {
-        let mut inserts = Inserts { head: "INSERT INTO t (a) VALUES", rows: 0, bytes: 0 };
+        let mut inserts = Inserts { head: "INSERT INTO t (a) VALUES", rows: 0, bytes: 0, separator: None };
         let mut out = String::new();
         for n in 0..101 {
             inserts.push(std::iter::once(n.to_string()), &mut out);
@@ -273,7 +309,7 @@ mod tests {
 
     #[test]
     fn a_long_row_closes_its_statement_early() {
-        let mut inserts = Inserts { head: "INSERT INTO t (a) VALUES", rows: 0, bytes: 0 };
+        let mut inserts = Inserts { head: "INSERT INTO t (a) VALUES", rows: 0, bytes: 0, separator: None };
         let mut out = String::new();
         inserts.push(std::iter::once(format!("'{}'", "x".repeat(STATEMENT_BYTES))), &mut out);
         inserts.push(std::iter::once("'y'".to_string()), &mut out);

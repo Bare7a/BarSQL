@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use barsql_app::{EditorTab, RunEvent};
-use barsql_core::{ConnectionConfig, DriverType, SavedQuery};
+use barsql_core::{ConnectionConfig, SavedQuery};
 use barsql_sql::lang::{self, TxnControl, detect_transaction_control};
 use barsql_sql::split_statements;
 use gpui_kit::assets::IconName as Lucide;
@@ -141,7 +141,12 @@ impl QueryTab {
         let hover = cx.new(|cx| HoverCard::new(editor.clone(), language.clone(), cx));
         editor.update(cx, |state, _| state.lsp_mut().hover_provider = Some(HoverCard::provider(&hover)));
         let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language), window, cx));
-        let results = cx.new(|_| ResultsPanel::default());
+        let dialect = connection.driver.dialect();
+        let results = cx.new(|_| {
+            let mut results = ResultsPanel::default();
+            results.set_dialect(dialect);
+            results
+        });
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |this, _, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -539,7 +544,7 @@ impl QueryTab {
         }
         self.run_origin = Some(RunOrigin { base, text: sql.clone() });
         // A lone BEGIN, COMMIT or ROLLBACK drives the tab's transaction instead of running raw.
-        if let Some(control) = detect_transaction_control(&sql) {
+        if let Some(control) = detect_transaction_control(&sql, Some(&self.connection.driver)) {
             self.transaction(control, true, window, cx);
             return;
         }
@@ -649,7 +654,7 @@ impl QueryTab {
     }
 
     fn can_analyze(&self) -> bool {
-        self.connection.driver != DriverType::Sqlite
+        self.connection.driver.capabilities().explain_analyze
     }
 
     // Uses the selection, else the statement at the caret, else the whole text.
@@ -764,6 +769,7 @@ impl QueryTab {
         let txn_buttons =
             |el: Div, cx: &mut Context<Self>| match self.txn {
                 TxnState::Idle if self.connection.read_only => el,
+                TxnState::Idle if !self.connection.driver.capabilities().interactive_transactions => el,
                 TxnState::Idle => el.child(
                     Button::new("begin-txn")
                         .debug_selector(|| "begin-txn".into())

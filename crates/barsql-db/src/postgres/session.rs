@@ -25,12 +25,13 @@ pub struct PgSession {
     lease: PgLease,
     in_transaction: bool,
     broken: bool,
+    reporting: bool,
 }
 
 impl PgSession {
     pub(crate) async fn new(lease: PgLease) -> Result<Self, QueryError> {
         let schema = lease.engine().default_schema().to_string();
-        let session = Self { lease, in_transaction: false, broken: false };
+        let session = Self { lease, in_transaction: false, broken: false, reporting: false };
         session.set_search_path(&schema).await?;
         Ok(session)
     }
@@ -127,11 +128,23 @@ impl PgSession {
         let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
         self.lease.client().execute(sql, &refs).await.map_err(|err| pg_error(&err))
     }
+
+    // The statement's notices so far. Dropped when no script is running.
+    async fn send_notices(&self, result_index: usize, sink: &Sink) {
+        let event = self.lease.notices().take(result_index);
+        if let Some(event) = event.filter(|_| self.reporting) {
+            emit(sink, event).await;
+        }
+    }
 }
 
 impl StatementRunner for PgSession {
     fn driver(&self) -> DriverType {
         DriverType::Postgres
+    }
+
+    fn set_reporting(&mut self, on: bool) {
+        self.reporting = on;
     }
 
     async fn stream_statement(
@@ -145,6 +158,8 @@ impl StatementRunner for PgSession {
         let started = Instant::now();
         let _server_cancel = cancel.on_server(self.lease.engine().server_cancel(self.lease.cancel_token()));
         let local = self.lease.engine().options.local.clone();
+        // Ones raised by the session's own setup and probes.
+        self.lease.notices().reset();
         let fail = |error: QueryError| async move {
             emit(
                 sink,
@@ -163,13 +178,17 @@ impl StatementRunner for PgSession {
         let oids: Vec<u32> = match self.lease.client().prepare(stmt).await {
             Ok(prepared) => prepared.columns().iter().map(|c| c.type_().oid()).collect(),
             Err(err) if err.as_db_error().is_some() || self.lease.client().is_closed() => {
+                self.send_notices(first_index, sink).await;
                 return fail(mark_cancelled(pg_error(&err), cancel)).await;
             }
             Err(_) => Vec::new(),
         };
         let stream = match self.lease.client().simple_query_raw(stmt).await {
             Ok(stream) => stream,
-            Err(err) => return fail(mark_cancelled(pg_error(&err), cancel)).await,
+            Err(err) => {
+                self.send_notices(first_index, sink).await;
+                return fail(mark_cancelled(pg_error(&err), cancel)).await;
+            }
         };
         pin_mut!(stream);
 
@@ -184,12 +203,18 @@ impl StatementRunner for PgSession {
                         cancelled_at = Some(Instant::now());
                         continue;
                     }
+                    // Shown while a long statement still runs.
+                    _ = self.lease.notices().arrived(), if self.reporting => {
+                        self.send_notices(first_index, sink).await;
+                        continue;
+                    }
                 },
                 Some(at) => {
                     match tokio::time::timeout(CANCEL_GRACE.saturating_sub(at.elapsed()), stream.next()).await {
                         Ok(message) => message,
                         Err(_) => {
                             self.broken = true;
+                            self.send_notices(first_index, sink).await;
                             return fail(QueryError::cancelled()).await;
                         }
                     }
@@ -239,6 +264,7 @@ impl StatementRunner for PgSession {
                         }
                         None => summary_for_exec(affected, started),
                     };
+                    self.send_notices(first_index, sink).await;
                     emit(
                         sink,
                         ScriptEvent::Result(Box::new(StatementResult {
@@ -255,6 +281,7 @@ impl StatementRunner for PgSession {
                 Some(Err(err)) => {
                     let error = mark_cancelled(pg_error(&err), cancel);
                     let summary = set.map(|(columns, _, _, rows)| summary_for_rows(&columns, rows, started));
+                    self.send_notices(first_index, sink).await;
                     emit(
                         sink,
                         ScriptEvent::Result(Box::new(StatementResult {

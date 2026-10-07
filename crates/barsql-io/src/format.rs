@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use barsql_core::DriverType;
+use barsql_core::{DriverType, SqlDialect};
 use regex::Regex;
 use sqlformat::{Dialect, FormatOptions, QueryParams};
 
@@ -40,7 +40,11 @@ static KEYWORD_BREAK: LazyLock<Regex> =
 
 // Used by the editor's Format query.
 pub fn format_query(sql: &str, driver: &DriverType) -> String {
-    let dialect = if *driver == DriverType::Postgres { Dialect::PostgreSql } else { Dialect::Generic };
+    let dialect = match driver.dialect() {
+        Some(SqlDialect::Postgres) => Dialect::PostgreSql,
+        Some(SqlDialect::TSql) => Dialect::SQLServer,
+        Some(SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::ClickHouse) | None => Dialect::Generic,
+    };
     let options = FormatOptions { uppercase: Some(true), dialect, ..Default::default() };
     sqlformat::format(sql, &QueryParams::None, &options)
 }

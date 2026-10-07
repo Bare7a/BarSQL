@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Once, OnceLock};
 
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -51,6 +51,22 @@ impl TlsMode {
             .with_no_client_auth();
         Some(config)
     }
+}
+
+// For the HTTP clients, which only speak HTTP/1.1.
+pub(crate) fn http_client_config(mode: TlsMode) -> Option<Arc<ClientConfig>> {
+    let mut config = mode.client_config()?;
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Some(Arc::new(config))
+}
+
+// Makes ring the process-wide rustls provider. Some dependencies build their TLS config from the process default,
+// and that panics once a second provider (aws-lc-rs, which tiberius pulls in) is compiled in. Safe to call often.
+pub fn install_default_provider() {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 }
 
 fn provider() -> Arc<CryptoProvider> {

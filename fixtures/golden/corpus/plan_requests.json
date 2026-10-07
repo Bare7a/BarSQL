@@ -2,14 +2,20 @@
   {
     "input": "SELECT 1",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN SELECT 1",
     "output": {
+      "clickhouse": {
+        "analyze": false,
+        "sql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT 1"
+      },
       "mysql": {
         "analyze": false,
         "sql": "EXPLAIN FORMAT=JSON SELECT 1"
@@ -18,12 +24,14 @@
         "analyze": false,
         "sql": "EXPLAIN (FORMAT JSON) SELECT 1"
       },
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "explain analyze select 1",
     "output": {
+      "clickhouse": null,
       "mysql": {
         "analyze": true,
         "sql": "explain analyze select 1"
@@ -32,102 +40,128 @@
         "analyze": true,
         "sql": "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) select 1"
       },
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": {
         "analyze": true,
         "sql": "EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1"
       },
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN (ANALYZE false) SELECT 1",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": {
         "analyze": false,
         "sql": "EXPLAIN (FORMAT JSON) SELECT 1"
       },
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN FORMAT=JSON SELECT 1",
     "output": {
+      "clickhouse": {
+        "analyze": false,
+        "sql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT 1"
+      },
       "mysql": {
         "analyze": false,
         "sql": "EXPLAIN FORMAT=JSON SELECT 1"
       },
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "ANALYZE SELECT 1",
     "output": {
+      "clickhouse": null,
       "mysql": {
         "analyze": true,
         "sql": "ANALYZE FORMAT=JSON SELECT 1"
       },
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "ANALYZE FORMAT=JSON SELECT 1",
     "output": {
+      "clickhouse": null,
       "mysql": {
         "analyze": true,
         "sql": "ANALYZE FORMAT=JSON SELECT 1"
       },
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN QUERY PLAN SELECT 1",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": null,
       "sqlite": {
         "analyze": false,
         "sql": "EXPLAIN QUERY PLAN SELECT 1"
-      }
+      },
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN ANALYZE",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "DESCRIBE t",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "EXPLAIN t",
     "output": {
+      "clickhouse": null,
       "mysql": null,
       "postgres": null,
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   },
   {
     "input": "/* c */ EXPLAIN SELECT 1",
     "output": {
+      "clickhouse": {
+        "analyze": false,
+        "sql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT 1"
+      },
       "mysql": {
         "analyze": false,
         "sql": "EXPLAIN FORMAT=JSON SELECT 1"
@@ -136,7 +170,8 @@
         "analyze": false,
         "sql": "EXPLAIN (FORMAT JSON) SELECT 1"
       },
-      "sqlite": null
+      "sqlite": null,
+      "tsql": null
     }
   }
 ]

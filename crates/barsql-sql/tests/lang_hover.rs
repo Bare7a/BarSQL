@@ -1,4 +1,4 @@
-use barsql_core::{DriverType, SchemaInfo, TableInfo};
+use barsql_core::{DriverType, FunctionKind, SchemaInfo, TableInfo};
 use barsql_sql::lang::{Catalog, ColumnLookup, HoverQuery, HoverSubject, TableBinding, analyze_hover, parse_query};
 
 fn table(name: &str, kind: &str) -> TableInfo {
@@ -123,4 +123,57 @@ fn describes_a_schema_name() {
         subject("SELECT * FROM public.users", "public", 1),
         Some(HoverSubject::Schema { name: "public".into() })
     );
+}
+
+fn function(sql: &str, needle: &str) -> Option<(String, FunctionKind)> {
+    match subject(sql, needle, 1)? {
+        HoverSubject::Function(doc) => Some((doc.name, doc.kind)),
+        _ => None,
+    }
+}
+
+#[test]
+fn describes_a_called_function() {
+    assert_eq!(function("SELECT count(*) FROM users", "count"), Some(("count".into(), FunctionKind::Aggregate)));
+    assert_eq!(function("SELECT LOWER(email) FROM users", "LOWER"), Some(("lower".into(), FunctionKind::Scalar)));
+    assert_eq!(
+        function("SELECT * FROM generate_series(1, 3)", "generate"),
+        Some(("generate_series".into(), FunctionKind::Table))
+    );
+    assert_eq!(
+        function("SELECT current_date", "current_date").map(|f| f.0),
+        Some("current_date".into()),
+        "no parentheses"
+    );
+    let doc = match subject("SELECT jsonb_build_object('a', 1)", "jsonb", 1) {
+        Some(HoverSubject::Function(doc)) => doc,
+        other => panic!("{other:?}"),
+    };
+    assert!(doc.builtin && !doc.summary.is_empty() && !doc.signatures.is_empty(), "{doc:?}");
+}
+
+#[test]
+fn a_name_before_parentheses_isnt_always_a_call() {
+    // Column lists and definitions.
+    for (sql, needle) in [
+        ("INSERT INTO users (id) VALUES (1)", "users"),
+        ("CREATE TABLE lower (id int)", "lower"),
+        ("CREATE INDEX i ON users (lower(email))", "users"),
+        ("ALTER TABLE orders ADD FOREIGN KEY (uid) REFERENCES users (id)", "users (id)"),
+    ] {
+        assert!(!matches!(subject(sql, needle, 1), Some(HoverSubject::Function(_))), "{sql}");
+    }
+    // Keywords that a parenthesis follows.
+    for (sql, needle) in [
+        ("SELECT 1 WHERE 1 IN (1)", "IN"),
+        ("INSERT INTO t VALUES (1)", "VALUES"),
+        ("SELECT row_number() OVER (ORDER BY 1)", "OVER"),
+        ("SELECT 1 WHERE EXISTS (SELECT 1)", "EXISTS"),
+    ] {
+        assert_eq!(subject(sql, needle, 1), None, "{sql}");
+    }
+    // An unknown call describes nothing, rather than a column of the same name.
+    assert_eq!(subject("SELECT nosuchfn(id) FROM users", "nosuchfn", 1), None);
+    // A plain word that happens to name a function isn't a call.
+    assert!(!matches!(subject("SELECT lower FROM users", "lower", 1), Some(HoverSubject::Function(_))));
 }

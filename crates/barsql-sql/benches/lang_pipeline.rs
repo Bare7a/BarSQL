@@ -4,11 +4,16 @@ use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
+use std::sync::Arc;
+
+use barsql_core::{
+    ColumnInfo, DriverType, FunctionInfo, FunctionKind, FunctionList, FunctionSignature, SchemaInfo, TableInfo,
+};
 use barsql_sql::lang::quoting::column_cache_key;
 use barsql_sql::lang::{
-    Catalog, ColumnMap, CompletionContext, SqlLabels, analyze_hover, bindings_needing_columns, build_completion_items,
-    collect_schema_diagnostics, completion_replace_range, current_statement_range, parse_query, parse_statements,
+    Catalog, ColumnMap, CompletionContext, FunctionCatalog, SqlLabels, analyze_hover, bindings_needing_columns,
+    build_completion_items, collect_schema_diagnostics, completion_replace_range, current_statement_range, parse_query,
+    parse_statements,
 };
 use serde_json::{Value, json};
 
@@ -56,6 +61,34 @@ struct Fixture {
     labels: SqlLabels,
 }
 
+// Like a Postgres server's list: built-ins with overloads, then an extension's and the app's own functions.
+fn server_functions() -> FunctionList {
+    let words = ["json", "array", "text", "date", "time", "range", "agg", "path", "build", "object", "set", "to"];
+    let functions = (0..3000)
+        .map(|i| {
+            let name = format!("{}_{}_{i}", words[i % words.len()], words[(i / 7) % words.len()]);
+            let (schema, builtin, source) = match i % 10 {
+                0..=7 => ("pg_catalog", true, ""),
+                8 => ("public", false, "postgis"),
+                _ => ("app", false, ""),
+            };
+            let signature = FunctionSignature { args: "value anyelement, path text[]".into(), returns: "jsonb".into() };
+            FunctionInfo {
+                name,
+                schema: schema.into(),
+                kind: if i % 13 == 0 { FunctionKind::Aggregate } else { FunctionKind::Scalar },
+                signatures: vec![signature; 1 + i % 3],
+                description: "returns a value".into(),
+                builtin,
+                qualified_only: schema == "app",
+                source: source.into(),
+                ..Default::default()
+            }
+        })
+        .collect();
+    FunctionList { functions, ..Default::default() }
+}
+
 fn fixture() -> Fixture {
     let named = ["users", "orders", "order_items", "products", "customers"];
     let mut tables: Vec<TableInfo> = named
@@ -87,7 +120,9 @@ fn fixture() -> Fixture {
     );
     extend(&mut columns, "order_items", vec![foreign("order_id", "orders"), foreign("product_id", "products")]);
     let schemas = ["public", "analytics", "audit"].iter().map(|s| SchemaInfo { name: s.to_string() }).collect();
-    Fixture { catalog: Catalog::new(PG, schemas, tables), columns, labels: SqlLabels::default() }
+    let functions = Arc::new(FunctionCatalog::with_server(&PG, server_functions()));
+    let catalog = Catalog::new(PG, schemas, tables).with_functions(functions);
+    Fixture { catalog, columns, labels: SqlLabels::default() }
 }
 
 impl Fixture {
@@ -247,6 +282,13 @@ fn w4(f: &Fixture, b: &mut Buckets) -> usize {
     checksum
 }
 
+// Calls typed into the select list and WHERE, where every keystroke searches the functions.
+fn w5(f: &Fixture, b: &mut Buckets) -> usize {
+    let typed = "SELECT jsonb_build_object('id', u.id), count(*), json_agg(o.total) FROM users u JOIN orders o \
+                 ON o.user_id = u.id WHERE lower(u.email) = to_char(now(), 'YYYY') AND date_trunc('day', o.created_at)";
+    (0..6).map(|s| typing_session(f, &format!("/*s{s}*/ "), typed, b, 1_000_000)).sum()
+}
+
 fn main() {
     // Only `cargo bench` passes --bench. `cargo test --benches` and test listing get a no-op.
     if !std::env::args().any(|a| a == "--bench") {
@@ -263,6 +305,7 @@ fn main() {
         "typing_bigfile": run_workload(|b| w2(&f, b)),
         "completion_wide": run_workload(|b| w3(&f, b)),
         "hover_sweep": run_workload(|b| w4(&f, b)),
+        "typing_functions": run_workload(|b| w5(&f, b)),
     });
     let (_, _, max_rss_mb) = usage();
     let out = json!({

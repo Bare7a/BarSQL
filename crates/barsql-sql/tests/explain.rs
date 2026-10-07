@@ -1,7 +1,8 @@
 use barsql_core::{DriverType, Value};
 use barsql_sql::plan::NOTE_NO_METRICS;
 use barsql_sql::{
-    PlanField, PlanRows, QueryPlan, ServerVersion, build_explain_sql, detect_plan_request, parse_plan, single_statement,
+    ExplainStrategy, PlanField, PlanRows, QueryPlan, SHOWPLAN_COLUMN, ServerVersion, build_explain, build_explain_sql,
+    detect_plan_request, parse_plan, single_statement,
 };
 
 const PG: DriverType = DriverType::Postgres;
@@ -444,4 +445,28 @@ fn detects_sqlite_plan_requests_and_keeps_writes() {
     assert_eq!(detect(&LITE, "EXPLAIN SELECT 1"), None, "bytecode is not a plan");
     let (sql, analyze) = detect(&PG, "EXPLAIN ANALYZE DELETE FROM t").expect("plan request");
     assert!(analyze && sql.contains("DELETE FROM t"));
+}
+
+#[test]
+fn sql_server_plans_come_from_a_session_option() {
+    let ms = DriverType::SqlServer;
+    let estimated = build_explain(&ms, ServerVersion::default(), "SELECT 1;", false).unwrap();
+    let expected = ExplainStrategy::Session {
+        setup: vec!["SET SHOWPLAN_XML ON".into()],
+        statement: "SELECT 1".into(),
+        teardown: vec!["SET SHOWPLAN_XML OFF".into()],
+        plan_column: SHOWPLAN_COLUMN,
+    };
+    assert_eq!(estimated, expected);
+    assert_eq!(estimated.display_sql(), "SET SHOWPLAN_XML ON\nGO\nSELECT 1\nGO\nSET SHOWPLAN_XML OFF");
+    let measured = build_explain(&ms, ServerVersion::default(), "UPDATE t SET a = 1", true).unwrap();
+    assert!(
+        matches!(&measured, ExplainStrategy::Session { setup, teardown, .. }
+            if setup == &["SET STATISTICS XML ON"] && teardown == &["SET STATISTICS XML OFF"]),
+        "{measured:?}"
+    );
+    assert!(build_explain(&ms, ServerVersion::default(), " ; ", false).is_err());
+    assert!(build_explain_sql(&ms, ServerVersion::default(), "SELECT 1", false).is_err(), "no EXPLAIN to put in front");
+    let sqlite = build_explain(&DriverType::Sqlite, ServerVersion::default(), "SELECT 1", false).unwrap();
+    assert_eq!(sqlite, ExplainStrategy::Query("EXPLAIN QUERY PLAN SELECT 1".into()));
 }

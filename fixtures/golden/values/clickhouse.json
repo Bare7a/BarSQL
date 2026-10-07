@@ -1,0 +1,1062 @@
+{
+  "engine": "clickhouse",
+  "setup": [
+    "DROP TABLE IF EXISTS barsql_test.types",
+    "CREATE TABLE barsql_test.types (\n    id UInt32,\n    c_int8 Int8,\n    c_uint64 UInt64,\n    c_int64 Int64,\n    c_int128 Int128,\n    c_float32 Float32,\n    c_float64 Float64,\n    c_decimal Decimal(18, 3),\n    c_bool Bool,\n    c_string String,\n    c_fixed FixedString(3),\n    c_lc LowCardinality(String),\n    c_nullable Nullable(String),\n    c_date Date,\n    c_date32 Date32,\n    c_datetime DateTime,\n    c_datetime64 DateTime64(3),\n    c_datetime_tokyo DateTime('Asia/Tokyo'),\n    c_uuid UUID,\n    c_ipv4 IPv4,\n    c_ipv6 IPv6,\n    c_enum Enum8('a' = 1, 'b' = 2),\n    c_array Array(Int32),\n    c_map Map(String, UInt8),\n    c_tuple Tuple(Int32, String)\n) ENGINE = MergeTree ORDER BY id",
+    "INSERT INTO barsql_test.types VALUES (1, -128, 18446744073709551615, -9223372036854775808, 170141183460469231731687303715884105727, 1.5, 0.1, 12.5, true, 'héllo 🌍\\ttab\\nline', 'ab', 'lc', NULL, '2024-02-29', '1900-01-01', '2024-02-29 13:45:30', '2024-02-29 13:45:30.123', '2024-02-29 13:45:30', '00000000-0000-0000-0000-000000000001', '1.2.3.4', '::1', 'b', [1, 2, 3], {'k': 1}, (1, 'x'))",
+    "INSERT INTO barsql_test.types VALUES (2, 127, 0, 9007199254740993, 0, nan, inf, -0.001, false, '', 'abc', '', 'set', '1970-01-01', '2299-12-31', '1970-01-01 00:00:00', '1970-01-01 00:00:00.000', '1970-01-01 09:00:00', '00000000-0000-0000-0000-000000000000', '0.0.0.0', '2001:db8::1', 'a', [], {}, (0, ''))"
+  ],
+  "probes": [
+    {
+      "name": "c_int8",
+      "sql": "SELECT c_int8 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_int8 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Int8"
+          ],
+          "rows": [
+            [
+              -128
+            ],
+            [
+              127
+            ]
+          ],
+          "display": [
+            [
+              "-128"
+            ],
+            [
+              "127"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_uint64",
+      "sql": "SELECT c_uint64 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_uint64 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "UInt64"
+          ],
+          "rows": [
+            [
+              "18446744073709551615"
+            ],
+            [
+              0
+            ]
+          ],
+          "display": [
+            [
+              "18446744073709551615"
+            ],
+            [
+              "0"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_int64",
+      "sql": "SELECT c_int64 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_int64 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Int64"
+          ],
+          "rows": [
+            [
+              "-9223372036854775808"
+            ],
+            [
+              "9007199254740993"
+            ]
+          ],
+          "display": [
+            [
+              "-9223372036854775808"
+            ],
+            [
+              "9007199254740993"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_int128",
+      "sql": "SELECT c_int128 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_int128 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Int128"
+          ],
+          "rows": [
+            [
+              "170141183460469231731687303715884105727"
+            ],
+            [
+              0
+            ]
+          ],
+          "display": [
+            [
+              "170141183460469231731687303715884105727"
+            ],
+            [
+              "0"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_float32",
+      "sql": "SELECT c_float32 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_float32 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Float32"
+          ],
+          "rows": [
+            [
+              1.5
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "1.5"
+            ],
+            [
+              "NaN"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_float64",
+      "sql": "SELECT c_float64 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_float64 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Float64"
+          ],
+          "rows": [
+            [
+              0.1
+            ],
+            [
+              null
+            ]
+          ],
+          "display": [
+            [
+              "0.1"
+            ],
+            [
+              "Infinity"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_decimal",
+      "sql": "SELECT c_decimal AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_decimal AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Decimal(18, 3)"
+          ],
+          "rows": [
+            [
+              "12.500"
+            ],
+            [
+              "-0.001"
+            ]
+          ],
+          "display": [
+            [
+              "12.500"
+            ],
+            [
+              "-0.001"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_bool",
+      "sql": "SELECT c_bool AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_bool AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Bool"
+          ],
+          "rows": [
+            [
+              true
+            ],
+            [
+              false
+            ]
+          ],
+          "display": [
+            [
+              "true"
+            ],
+            [
+              "false"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_string",
+      "sql": "SELECT c_string AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_string AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "String"
+          ],
+          "rows": [
+            [
+              "héllo 🌍\ttab\nline"
+            ],
+            [
+              ""
+            ]
+          ],
+          "display": [
+            [
+              "héllo 🌍\ttab\nline"
+            ],
+            [
+              ""
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_fixed",
+      "sql": "SELECT c_fixed AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_fixed AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "FixedString(3)"
+          ],
+          "rows": [
+            [
+              "ab\u0000"
+            ],
+            [
+              "abc"
+            ]
+          ],
+          "display": [
+            [
+              "ab\u0000"
+            ],
+            [
+              "abc"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_lc",
+      "sql": "SELECT c_lc AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_lc AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "LowCardinality(String)"
+          ],
+          "rows": [
+            [
+              "lc"
+            ],
+            [
+              ""
+            ]
+          ],
+          "display": [
+            [
+              "lc"
+            ],
+            [
+              ""
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_nullable",
+      "sql": "SELECT c_nullable AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_nullable AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Nullable(String)"
+          ],
+          "rows": [
+            [
+              null
+            ],
+            [
+              "set"
+            ]
+          ],
+          "display": [
+            [
+              null
+            ],
+            [
+              "set"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_date",
+      "sql": "SELECT c_date AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_date AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Date"
+          ],
+          "rows": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T00:00:00Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_date32",
+      "sql": "SELECT c_date32 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_date32 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Date32"
+          ],
+          "rows": [
+            [
+              "1900-01-01T00:00:00Z"
+            ],
+            [
+              "2299-12-31T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "1900-01-01T00:00:00Z"
+            ],
+            [
+              "2299-12-31T00:00:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime",
+      "sql": "SELECT c_datetime AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DateTime"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime64",
+      "sql": "SELECT c_datetime64 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime64 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DateTime64(3)"
+          ],
+          "rows": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T13:45:30.123Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_datetime_tokyo",
+      "sql": "SELECT c_datetime_tokyo AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_datetime_tokyo AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "DateTime('Asia/Tokyo')"
+          ],
+          "rows": [
+            [
+              "2024-02-29T04:45:30Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "display": [
+            [
+              "2024-02-29T04:45:30Z"
+            ],
+            [
+              "1970-01-01T00:00:00Z"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_uuid",
+      "sql": "SELECT c_uuid AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_uuid AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "UUID"
+          ],
+          "rows": [
+            [
+              "00000000-0000-0000-0000-000000000001"
+            ],
+            [
+              "00000000-0000-0000-0000-000000000000"
+            ]
+          ],
+          "display": [
+            [
+              "00000000-0000-0000-0000-000000000001"
+            ],
+            [
+              "00000000-0000-0000-0000-000000000000"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_ipv4",
+      "sql": "SELECT c_ipv4 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_ipv4 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "IPv4"
+          ],
+          "rows": [
+            [
+              "1.2.3.4"
+            ],
+            [
+              "0.0.0.0"
+            ]
+          ],
+          "display": [
+            [
+              "1.2.3.4"
+            ],
+            [
+              "0.0.0.0"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_ipv6",
+      "sql": "SELECT c_ipv6 AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_ipv6 AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "IPv6"
+          ],
+          "rows": [
+            [
+              "::1"
+            ],
+            [
+              "2001:db8::1"
+            ]
+          ],
+          "display": [
+            [
+              "::1"
+            ],
+            [
+              "2001:db8::1"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_enum",
+      "sql": "SELECT c_enum AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_enum AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Enum8('a' = 1, 'b' = 2)"
+          ],
+          "rows": [
+            [
+              "b"
+            ],
+            [
+              "a"
+            ]
+          ],
+          "display": [
+            [
+              "b"
+            ],
+            [
+              "a"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_array",
+      "sql": "SELECT c_array AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_array AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Array(Int32)"
+          ],
+          "rows": [
+            [
+              "[1,2,3]"
+            ],
+            [
+              "[]"
+            ]
+          ],
+          "display": [
+            [
+              "[1,2,3]"
+            ],
+            [
+              "[]"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_map",
+      "sql": "SELECT c_map AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_map AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Map(String, UInt8)"
+          ],
+          "rows": [
+            [
+              "{'k':1}"
+            ],
+            [
+              "{}"
+            ]
+          ],
+          "display": [
+            [
+              "{'k':1}"
+            ],
+            [
+              "{}"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "c_tuple",
+      "sql": "SELECT c_tuple AS v FROM barsql_test.types ORDER BY id",
+      "results": [
+        {
+          "statement": "SELECT c_tuple AS v FROM barsql_test.types ORDER BY id",
+          "columns": [
+            "v"
+          ],
+          "columnTypes": [
+            "Tuple(Int32, String)"
+          ],
+          "rows": [
+            [
+              "(1,'x')"
+            ],
+            [
+              "(0,'')"
+            ]
+          ],
+          "display": [
+            [
+              "(1,'x')"
+            ],
+            [
+              "(0,'')"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "literals",
+      "sql": "SELECT 1 AS a, 'x' AS b, NULL AS c, 0.1 + 0.2 AS d, toDecimal64(1.5, 3) AS e, now64() > '2000-01-01' AS f",
+      "results": [
+        {
+          "statement": "SELECT 1 AS a, 'x' AS b, NULL AS c, 0.1 + 0.2 AS d, toDecimal64(1.5, 3) AS e, now64() > '2000-01-01' AS f",
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "columnTypes": [
+            "UInt8",
+            "String",
+            "Nullable(Nothing)",
+            "Float64",
+            "Decimal(18, 3)",
+            "UInt8"
+          ],
+          "rows": [
+            [
+              1,
+              "x",
+              null,
+              0.30000000000000004,
+              "1.500",
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "x",
+              null,
+              "0.30000000000000004",
+              "1.500",
+              "1"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "numbers",
+      "sql": "SELECT number FROM numbers(3)",
+      "results": [
+        {
+          "statement": "SELECT number FROM numbers(3)",
+          "columns": [
+            "number"
+          ],
+          "columnTypes": [
+            "UInt64"
+          ],
+          "rows": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ]
+          ],
+          "display": [
+            [
+              "0"
+            ],
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ],
+          "rowCount": 3,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "sql": "SELECT number FROM numbers(0)",
+      "results": [
+        {
+          "statement": "SELECT number FROM numbers(0)",
+          "columns": [
+            "number"
+          ],
+          "columnTypes": [
+            "UInt64"
+          ],
+          "rowCount": 0,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "raw_format",
+      "sql": "SELECT number, toString(number) AS s FROM numbers(2) FORMAT JSONEachRow",
+      "results": [
+        {
+          "statement": "SELECT number, toString(number) AS s FROM numbers(2) FORMAT JSONEachRow",
+          "columns": [
+            "JSONEachRow"
+          ],
+          "columnTypes": [
+            "String"
+          ],
+          "rows": [
+            [
+              "{\"number\":0,\"s\":\"0\"}"
+            ],
+            [
+              "{\"number\":1,\"s\":\"1\"}"
+            ]
+          ],
+          "display": [
+            [
+              "{\"number\":0,\"s\":\"0\"}"
+            ],
+            [
+              "{\"number\":1,\"s\":\"1\"}"
+            ]
+          ],
+          "rowCount": 2,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "insert_select",
+      "sql": "INSERT INTO barsql_test.types (id) SELECT 100 + number FROM numbers(3)",
+      "results": [
+        {
+          "statement": "INSERT INTO barsql_test.types (id) SELECT 100 + number FROM numbers(3)",
+          "rowCount": 0,
+          "affectedRows": 3,
+          "message": "3 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "ddl",
+      "sql": "CREATE TABLE IF NOT EXISTS barsql_test.scratch (x UInt8) ENGINE = Memory",
+      "results": [
+        {
+          "statement": "CREATE TABLE IF NOT EXISTS barsql_test.scratch (x UInt8) ENGINE = Memory",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    },
+    {
+      "name": "show_tables",
+      "sql": "SHOW TABLES FROM barsql_test LIKE 'types'",
+      "results": [
+        {
+          "statement": "SHOW TABLES FROM barsql_test LIKE 'types'",
+          "columns": [
+            "name"
+          ],
+          "columnTypes": [
+            "String"
+          ],
+          "rows": [
+            [
+              "types"
+            ]
+          ],
+          "display": [
+            [
+              "types"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "settings_persist",
+      "sql": "SET max_threads = 3; SELECT getSetting('max_threads') AS t",
+      "results": [
+        {
+          "statement": "SET max_threads = 3",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        },
+        {
+          "statement": "SELECT getSetting('max_threads') AS t",
+          "columns": [
+            "t"
+          ],
+          "columnTypes": [
+            "UInt8"
+          ],
+          "rows": [
+            [
+              3
+            ]
+          ],
+          "display": [
+            [
+              "3"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
+      "name": "use_persists",
+      "sql": "USE system; SELECT currentDatabase() AS db; USE barsql_test",
+      "results": [
+        {
+          "statement": "USE system",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        },
+        {
+          "statement": "SELECT currentDatabase() AS db",
+          "columns": [
+            "db"
+          ],
+          "columnTypes": [
+            "String"
+          ],
+          "rows": [
+            [
+              "system"
+            ]
+          ],
+          "display": [
+            [
+              "system"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        },
+        {
+          "statement": "USE barsql_test",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "message": "0 row(s) affected"
+        }
+      ]
+    }
+  ]
+}

@@ -75,7 +75,12 @@ impl TableTab {
                 .default_value(view.filter.clone())
         });
         let completion = cx.new(|cx| Completion::new(filter.clone(), None, window, cx).sized(TEXT_SM, rems(1.385)));
-        let grid = cx.new(|cx| Grid::new(Arc::from(Vec::new()), cx));
+        let dialect = connection.driver.dialect();
+        let grid = cx.new(|cx| {
+            let mut grid = Grid::new(Arc::from(Vec::new()), cx);
+            grid.set_dialect(dialect);
+            grid
+        });
         let subscriptions = vec![
             cx.subscribe_in(&filter, window, |this, filter, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.apply_filter(window, cx),
@@ -324,6 +329,8 @@ impl TableTab {
                     }
                 }
             },
+            // Pages are the app's own SQL, which says nothing worth showing.
+            RunEvent::Messages { .. } => {}
             RunEvent::Done { error: Some(error), .. } => self.error = Some(ShownError::new(error, cx)),
             RunEvent::Done { .. } => {}
         }
@@ -458,19 +465,21 @@ impl TableTab {
             GridEvent::OpenForeignKey { row, column } => self.open_foreign_key(*row, *column, window, cx),
             GridEvent::ViewCell { row, column } => {
                 let state = grid.read(cx);
-                let name = state.set().columns[*column].name.clone();
+                let meta = &state.set().columns[*column];
+                let (name, type_name) = (meta.name.clone(), meta.type_name.clone());
                 let value = state.shown(*row, *column).display().map(str::to_string);
-                cell_viewer::open(name, value, window, cx);
+                cell_viewer::open(name, type_name, value, window, cx);
             }
             GridEvent::EditInViewer { row, column } if editable => {
                 let state = grid.read(cx);
-                let name = state.set().columns[*column].name.clone();
+                let meta = &state.set().columns[*column];
+                let (name, type_name) = (meta.name.clone(), meta.type_name.clone());
                 let value = state.shown(*row, *column).display().map(str::to_string);
                 let (grid, row, column) = (grid.downgrade(), *row, *column);
                 let on_save: cell_viewer::OnSave = Rc::new(move |value, _, cx| {
                     grid.update(cx, |_, cx| cx.emit(GridEvent::EditCell { row, column, value })).ok();
                 });
-                cell_viewer::open_editor(name, value, on_save, window, cx);
+                cell_viewer::open_editor(name, type_name, value, on_save, window, cx);
             }
             GridEvent::Export => crate::export_dialog::open(grid.read(cx).export_source(), window, cx),
             GridEvent::FocusedRowChanged => cx.emit(TableTabEvent::FocusedRowChanged),

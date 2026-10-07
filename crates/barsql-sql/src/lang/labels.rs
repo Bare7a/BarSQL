@@ -20,9 +20,14 @@ pub struct SqlLabels {
     pub unknown_table: String,
     pub column_of: String,
     pub alias_for: String,
+    pub function: String,
+    pub user_function: String,
+    pub aggregate_function: String,
+    pub window_function: String,
+    pub table_function: String,
 }
 
-const KEYS: [&str; 17] = [
+const KEYS: [&str; 22] = [
     "pk",
     "fk",
     "notNull",
@@ -40,9 +45,14 @@ const KEYS: [&str; 17] = [
     "unknownTable",
     "columnOf",
     "aliasFor",
+    "function",
+    "userFunction",
+    "aggregateFunction",
+    "windowFunction",
+    "tableFunction",
 ];
 
-const ENGLISH: [&str; 17] = [
+const ENGLISH: [&str; 22] = [
     "PK",
     "FK",
     "not null",
@@ -60,6 +70,11 @@ const ENGLISH: [&str; 17] = [
     "Unknown table \"{{table}}\"",
     "column of {{target}}",
     "alias for {{table}}",
+    "function",
+    "user function",
+    "aggregate",
+    "window function",
+    "table function",
 ];
 
 impl Default for SqlLabels {
@@ -94,6 +109,11 @@ impl SqlLabels {
             unknown_table: value(14),
             column_of: value(15),
             alias_for: value(16),
+            function: value(17),
+            user_function: value(18),
+            aggregate_function: value(19),
+            window_function: value(20),
+            table_function: value(21),
         }
     }
 }

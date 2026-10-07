@@ -34,7 +34,88 @@
       "columnsCount_other": "{{count}} columns",
       "tablesCount_one": "{{count}} table",
       "tablesCount_other": "{{count}} tables",
-      "defaultValue": "default {{value}}"
+      "defaultValue": "default {{value}}",
+      "function": "function",
+      "userFunction": "user function",
+      "aggregateFunction": "aggregate",
+      "windowFunction": "window function",
+      "tableFunction": "table function",
+      "signaturesCount_one": "{{count}} signature",
+      "signaturesCount_other": "{{count}} signatures",
+      "moreSignatures_one": "+{{count}} more signature",
+      "moreSignatures_other": "+{{count}} more signatures",
+      "since": "Since {{version}}",
+      "source": "From {{name}}",
+      "combinatorOf": "Combinator form of {{base}}",
+      "deprecated": "deprecated"
     }
+  },
+  "connection": {
+    "turso": "Turso / libSQL",
+    "clickhouse": "ClickHouse",
+    "sqlserver": "SQL Server",
+    "url": "Database URL",
+    "urlPlaceholder": "libsql://your-database-your-org.turso.io",
+    "urlRequired": "Database URL is required",
+    "authToken": "Auth token",
+    "authTokenPlaceholder": "Not needed for a local sqld",
+    "authTokenHint": "From the Turso dashboard or turso db tokens create. A read-only token keeps the server read-only too.",
+    "sshUrlHint": "The SSH tunnel is for a self-hosted sqld. Turso Cloud needs none.",
+    "databasePlaceholderClickHouse": "default",
+    "databaseHintClickHouse": "ClickHouse database to connect to. Leave it empty for default.",
+    "instance": "Instance",
+    "instancePlaceholder": "SQLEXPRESS",
+    "instanceHint": "A named instance, found through the SQL Server Browser in place of the port. Not over an SSH tunnel.",
+    "databasePlaceholderSqlServer": "master",
+    "databaseHintSqlServer": "Database to connect to. Leave it empty for the login's default.",
+    "sslStrict": "Strict (TDS 8.0)"
+  },
+  "results": {
+    "messages": "Messages",
+    "messagesCount": "{{count}} message",
+    "messagesCount_other": "{{count}} messages",
+    "copyMessages": "Copy all messages",
+    "outcomeRows": "{{count}} row",
+    "outcomeRows_other": "{{count}} rows",
+    "outcomeAffected": "{{count}} row affected",
+    "outcomeAffected_other": "{{count}} rows affected",
+    "outcomePlan": "Plan",
+    "outcomeError": "Failed",
+    "outcomeRunning": "Running…",
+    "messagesDropped": "{{count}} more message wasn't kept",
+    "messagesDropped_other": "{{count}} more messages weren't kept",
+    "level": {
+      "info": "Info",
+      "notice": "Notice",
+      "warning": "Warning"
+    }
+  },
+  "sidebar": {
+    "serverViews": "Server views",
+    "systemViews": "System views"
+  },
+  "systemViews": {
+    "tableTabTitle": "{{view}}: {{name}}",
+    "activity": "Activity",
+    "blocking": "Blocked queries",
+    "longRunning": "Long-running queries",
+    "processList": "Process list",
+    "transactions": "Open transactions",
+    "requests": "Running requests",
+    "sessions": "Sessions",
+    "processes": "Running queries",
+    "tableStats": "Table statistics",
+    "indexUsage": "Index usage",
+    "tableStatus": "Table status",
+    "parts": "Parts",
+    "mutations": "Mutations",
+    "merges": "Merges"
+  },
+  "cellViewer": {
+    "kindArray": "Array",
+    "kindMap": "Map",
+    "kindTuple": "Tuple",
+    "arrayReadOnly": "Shown as JSON, so it can't be edited here. Switch to Text to edit the value itself.",
+    "arrayError": "This doesn't read as an array any more."
   }
 }

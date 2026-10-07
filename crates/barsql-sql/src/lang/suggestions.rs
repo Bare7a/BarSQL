@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use barsql_core::{ColumnInfo, DriverType, TableInfo};
+use barsql_core::{ColumnInfo, DriverType, SqlDialect, TableInfo};
 
 use super::catalog::{Catalog, ColumnMap, TableBinding};
 use super::context::StatementShape;
@@ -34,6 +34,7 @@ pub enum ItemKind {
     Field,
     Class,
     Module,
+    Function,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +42,11 @@ pub struct CompletionItem {
     pub label: String,
     pub kind: ItemKind,
     pub detail: Option<String>,
+    // Shown dimmed right after the label, like a function's arguments.
+    pub label_detail: Option<String>,
     pub insert_text: String,
+    // `insert_text` is a snippet: `$0` marks where the caret goes, and `\$` is a literal dollar sign.
+    pub snippet: bool,
     // Falls back to the label. Identifiers that need quotes carry the quoted form so typing the opening
     // quote still matches.
     pub filter_text: Option<String>,
@@ -52,18 +57,49 @@ pub struct CompletionItem {
 // `where_ok` means the keyword is still offered inside WHERE.
 struct KeywordRule {
     kw: &'static str,
-    drivers: &'static [DriverType],
+    dialects: DialectSet,
     where_ok: bool,
     gate: fn(&StatementShape) -> bool,
 }
 
-const ANY: &[DriverType] = &[];
-const PG: &[DriverType] = &[DriverType::Postgres];
-const MY: &[DriverType] = &[DriverType::MySql];
-const LITE: &[DriverType] = &[DriverType::Sqlite];
-const PG_MY: &[DriverType] = &[DriverType::Postgres, DriverType::MySql];
-const MY_LITE: &[DriverType] = &[DriverType::MySql, DriverType::Sqlite];
-const PG_LITE: &[DriverType] = &[DriverType::Postgres, DriverType::Sqlite];
+// The dialects a keyword belongs to. Turso offers SQLite's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DialectSet(u8);
+
+impl DialectSet {
+    const fn of(dialects: &[SqlDialect]) -> Self {
+        let mut bits = 0;
+        let mut i = 0;
+        while i < dialects.len() {
+            bits |= Self::bit(dialects[i]);
+            i += 1;
+        }
+        Self(bits)
+    }
+
+    const fn bit(dialect: SqlDialect) -> u8 {
+        match dialect {
+            SqlDialect::Postgres => 1,
+            SqlDialect::MySql => 2,
+            SqlDialect::Sqlite => 4,
+            SqlDialect::TSql => 8,
+            SqlDialect::ClickHouse => 16,
+        }
+    }
+
+    // A dialect-specific keyword needs a known dialect.
+    fn allows(self, dialect: Option<SqlDialect>) -> bool {
+        self == ANY || dialect.is_some_and(|d| self.0 & Self::bit(d) != 0)
+    }
+}
+
+const ANY: DialectSet = DialectSet(0);
+const PG: DialectSet = DialectSet::of(&[SqlDialect::Postgres]);
+const MY: DialectSet = DialectSet::of(&[SqlDialect::MySql]);
+const LITE: DialectSet = DialectSet::of(&[SqlDialect::Sqlite]);
+const PG_MY: DialectSet = DialectSet::of(&[SqlDialect::Postgres, SqlDialect::MySql]);
+const MY_LITE: DialectSet = DialectSet::of(&[SqlDialect::MySql, SqlDialect::Sqlite]);
+const PG_LITE: DialectSet = DialectSet::of(&[SqlDialect::Postgres, SqlDialect::Sqlite]);
 
 fn always(_: &StatementShape) -> bool {
     true
@@ -71,11 +107,11 @@ fn always(_: &StatementShape) -> bool {
 
 const fn rule(
     kw: &'static str,
-    drivers: &'static [DriverType],
+    dialects: DialectSet,
     where_ok: bool,
     gate: fn(&StatementShape) -> bool,
 ) -> KeywordRule {
-    KeywordRule { kw, drivers, where_ok, gate }
+    KeywordRule { kw, dialects, where_ok, gate }
 }
 
 const KEYWORD_RULES: &[KeywordRule] = &[
@@ -123,7 +159,6 @@ const KEYWORD_RULES: &[KeywordRule] = &[
     rule("NULL", ANY, true, always),
     rule("AS", ANY, false, always),
     rule("DISTINCT", ANY, false, always),
-    rule("CAST", ANY, false, always),
     rule("CASE", ANY, false, always),
     rule("WHEN", ANY, false, |s| s.has_case),
     rule("THEN", ANY, false, |s| s.has_case),
@@ -150,7 +185,7 @@ const KEYWORD_RULES: &[KeywordRule] = &[
 pub fn keywords_for_shape(shape: &StatementShape, driver: Option<&DriverType>) -> Vec<&'static str> {
     KEYWORD_RULES
         .iter()
-        .filter(|r| r.drivers.is_empty() || driver.is_some_and(|d| r.drivers.contains(d)))
+        .filter(|r| r.dialects.allows(driver.and_then(DriverType::dialect)))
         .filter(|r| !shape.in_where || r.where_ok)
         .filter(|r| (r.gate)(shape))
         .map(|r| r.kw)
@@ -182,8 +217,8 @@ pub fn match_score(label: &str, lc_prefix: &str) -> Option<u8> {
     }
 }
 
-// Tiers: 0 in-query columns/aliases, 1 all tables/columns, 2 context snippets, 3 schemas, 4 keywords,
-// 5 aggregates.
+// Tiers: 0 in-query columns/aliases, 1 all tables/columns, 2 user functions, 3 schemas, 4 keywords,
+// 5 built-in functions, 6 other server functions.
 pub fn rank(tier: u8, score: u8, label: &str) -> String {
     let mut out = String::with_capacity(label.len() + 3);
     out.push(char::from(b'0' + tier));
@@ -233,6 +268,8 @@ pub fn keyword_item(kw: &str, lc_prefix: &str) -> Option<CompletionItem> {
         detail: None,
         insert_text: kw.to_string(),
         filter_text: None,
+        label_detail: None,
+        snippet: false,
         sort_text: rank(4, score, kw),
     })
 }
@@ -260,6 +297,8 @@ fn push_column_items(
             detail: Some(column_detail(c, ctx.labels)),
             insert_text: format_sql_identifier(&c.name, ctx.driver()),
             filter_text: None,
+            label_detail: None,
+            snippet: false,
             sort_text: rank(tier, score, &c.name),
         });
     }
@@ -287,6 +326,8 @@ pub fn suggest_virtual_columns(
             detail: Some(detail.to_string()),
             insert_text: format_sql_identifier(name, driver),
             filter_text: None,
+            label_detail: None,
+            snippet: false,
             sort_text: rank(0, score, name),
         });
     }
@@ -310,6 +351,8 @@ pub fn suggest_cte_items(ctes: &[String], lc_prefix: &str, ctx: &CompletionConte
             detail: Some(ctx.labels.cte.clone()),
             insert_text: insert.clone(),
             filter_text: Some(insert),
+            label_detail: None,
+            snippet: false,
             // Query-local, so it ranks above the table list and survives the 100-item cap.
             sort_text: rank(0, score, name),
         });
@@ -333,6 +376,8 @@ pub fn suggest_tables(ctx: &CompletionContext, lc_prefix: &str, schema_filter: O
             detail: Some(relation_type_label(kind, ctx.labels)),
             insert_text: insert.clone(),
             filter_text: Some(insert),
+            label_detail: None,
+            snippet: false,
             sort_text: rank(1, score, &t.name),
         });
     }
@@ -349,6 +394,8 @@ pub fn suggest_schemas(ctx: &CompletionContext, lc_prefix: &str) -> Vec<Completi
             detail: Some(ctx.labels.schema.clone()),
             insert_text: format_sql_identifier(&s.name, ctx.driver()),
             filter_text: None,
+            label_detail: None,
+            snippet: false,
             sort_text: rank(3, score, &s.name),
         });
     }
@@ -381,6 +428,8 @@ pub fn suggest_query_table_refs(
                 detail: Some(detail),
                 insert_text: insert.clone(),
                 filter_text: Some(insert),
+                label_detail: None,
+                snippet: false,
                 sort_text: rank(0, score, &r.table),
             });
         }
@@ -397,6 +446,8 @@ pub fn suggest_query_table_refs(
                     detail: Some(fill(&ctx.labels.alias_arrow, &[("table", &r.table)])),
                     insert_text: insert.clone(),
                     filter_text: Some(insert),
+                    label_detail: None,
+                    snippet: false,
                     sort_text: rank(0, score, alias),
                 });
             }
@@ -460,6 +511,8 @@ pub fn suggest_columns_in_scope(
                         format_sql_identifier(&c.name, ctx.driver())
                     ),
                     filter_text: None,
+                    label_detail: None,
+                    snippet: false,
                 });
             } else {
                 if seen.as_ref().is_some_and(|s| s.contains(&key)) {
@@ -474,6 +527,8 @@ pub fn suggest_columns_in_scope(
                     detail: Some(column_detail(c, ctx.labels)),
                     insert_text: format_sql_identifier(&c.name, ctx.driver()),
                     filter_text: None,
+                    label_detail: None,
+                    snippet: false,
                     sort_text: rank(0, score, &c.name),
                 });
             }
@@ -494,7 +549,7 @@ pub fn suggest_value_items(
     let mut items = suggest_query_table_refs(ctx, query_tables, lc_prefix);
     for lit in VALUE_LITERALS {
         // SQLite has no DEFAULT expression.
-        if lit == "DEFAULT" && *ctx.driver() == DriverType::Sqlite {
+        if lit == "DEFAULT" && ctx.driver().dialect() == Some(SqlDialect::Sqlite) {
             continue;
         }
         items.extend(keyword_item(lit, lc_prefix));

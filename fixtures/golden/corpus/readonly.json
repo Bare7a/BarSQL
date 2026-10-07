@@ -2,6 +2,9 @@
   {
     "input": "SELECT 1",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -9,6 +12,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -16,6 +22,9 @@
   {
     "input": "select * from t",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -23,6 +32,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -30,6 +42,9 @@
   {
     "input": "  -- c\nSELECT 1",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -37,6 +52,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -44,6 +62,9 @@
   {
     "input": "/* c */ SELECT 1",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -51,6 +72,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -58,6 +82,9 @@
   {
     "input": "WITH a AS (SELECT 1) SELECT * FROM a",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -65,6 +92,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -72,6 +102,10 @@
   {
     "input": "WITH a AS (DELETE FROM t RETURNING *) SELECT * FROM a",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -81,6 +115,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -89,6 +127,9 @@
   {
     "input": "EXPLAIN SELECT 1",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -97,12 +138,19 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "EXPLAIN ANALYZE SELECT 1",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -111,12 +159,20 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "EXPLAIN ANALYZE DELETE FROM t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -126,6 +182,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -134,6 +194,9 @@
   {
     "input": "SHOW TABLES",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -142,12 +205,19 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "SHOW search_path",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -156,12 +226,19 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "DESCRIBE t",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -170,12 +247,19 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "DESC t",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -184,12 +268,20 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "VALUES (1)",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -199,6 +291,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -207,6 +303,10 @@
   {
     "input": "TABLE t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "readOnly": true
       },
@@ -215,12 +315,20 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "PRAGMA table_info(t)",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "readOnly": true
       },
@@ -229,12 +337,20 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "PRAGMA journal_mode = WAL",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -244,6 +360,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -252,6 +372,10 @@
   {
     "input": "PRAGMA foreign_keys",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "readOnly": true
       },
@@ -260,12 +384,20 @@
       },
       "sqlite": {
         "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
       }
     }
   },
   {
     "input": "INSERT INTO t VALUES (1)",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -275,6 +407,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -283,6 +419,10 @@
   {
     "input": "UPDATE t SET a = 1",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -292,6 +432,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -300,6 +444,10 @@
   {
     "input": "DELETE FROM t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -309,6 +457,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -317,6 +469,10 @@
   {
     "input": "DROP TABLE t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -326,6 +482,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -334,6 +494,10 @@
   {
     "input": "CREATE TABLE t (a int)",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -343,6 +507,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -351,6 +519,10 @@
   {
     "input": "ALTER TABLE t ADD c int",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -360,6 +532,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -368,6 +544,10 @@
   {
     "input": "TRUNCATE t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -377,6 +557,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -385,6 +569,10 @@
   {
     "input": "GRANT SELECT ON t TO u",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -394,6 +582,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -402,6 +594,9 @@
   {
     "input": "SET search_path = x",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -413,12 +608,19 @@
       "sqlite": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
+      },
+      "tsql": {
+        "readOnly": true
       }
     }
   },
   {
     "input": "BEGIN",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "readOnly": true
       },
@@ -426,6 +628,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -433,6 +638,10 @@
   {
     "input": "COMMIT",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "readOnly": true
       },
@@ -440,6 +649,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -447,6 +659,10 @@
   {
     "input": "SELECT 1; DELETE FROM t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -456,6 +672,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -464,6 +684,9 @@
   {
     "input": "SELECT 'DELETE FROM t'",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -471,6 +694,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -478,6 +704,9 @@
   {
     "input": "SELECT * FROM t FOR UPDATE",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -485,6 +714,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -492,6 +724,9 @@
   {
     "input": "SELECT nextval('s')",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -499,6 +734,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -506,6 +744,10 @@
   {
     "input": "SELECT * INTO new_t FROM t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -515,6 +757,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -523,6 +769,10 @@
   {
     "input": "COPY t TO STDOUT",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -532,6 +782,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -540,6 +794,10 @@
   {
     "input": "CALL p()",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -549,6 +807,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -557,6 +819,10 @@
   {
     "input": "DO $$ BEGIN END $$",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -566,6 +832,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -574,6 +844,10 @@
   {
     "input": "LOCK TABLE t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -583,6 +857,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -591,6 +869,9 @@
   {
     "input": "select 1 # comment",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -598,6 +879,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -605,6 +889,9 @@
   {
     "input": "SELECT $$DELETE$$",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -612,6 +899,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -619,6 +909,10 @@
   {
     "input": "USE db",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -628,6 +922,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -636,6 +934,10 @@
   {
     "input": "ANALYZE t",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -645,6 +947,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -653,6 +959,10 @@
   {
     "input": "VACUUM",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -662,6 +972,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -670,6 +984,10 @@
   {
     "input": "REFRESH MATERIALIZED VIEW mv",
     "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
       "mysql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
@@ -679,6 +997,10 @@
         "readOnly": false
       },
       "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
         "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
         "readOnly": false
       }
@@ -687,6 +1009,9 @@
   {
     "input": "SELECT pg_sleep(1)",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -694,6 +1019,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -701,6 +1029,9 @@
   {
     "input": "SELECT * FROM t; ",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -708,6 +1039,9 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }
@@ -715,6 +1049,9 @@
   {
     "input": "",
     "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
       "mysql": {
         "readOnly": true
       },
@@ -722,6 +1059,602 @@
         "readOnly": true
       },
       "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "EXPLAIN ANALYZE DELETE/**/FROM t",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "WITH d AS (DELETE/**/FROM t RETURNING 1) SELECT 1",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT 1--1; DELETE FROM t",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 -- c; DELETE FROM t",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 AS [a'b]; DELETE FROM t WHERE x='y'",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT [DELETE] FROM t",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1\nGO\nDELETE FROM t",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT * FROM #temp",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 EXEC sp_who",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "DECLARE @x int = 1; SELECT @x",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 'a\\'; DROP TABLE t; --'",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "OPTIMIZE TABLE t FINAL",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SYSTEM FLUSH LOGS",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "ALTER TABLE t DELETE WHERE 1",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 FORMAT JSON",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 /* a /* b */ DELETE FROM t */",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "IF 1 = 1 SELECT 1",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1\nGO\nsp_configure 'x', 1",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "WITH x AS (SELECT E'\\'') DELETE FROM t WHERE 'a'='a'",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "WITH d AS (SELECT 1 AS a$x$) DELETE FROM t RETURNING 1 AS b$x$",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT 'a\\'' , 1 INTO OUTFILE '/tmp/x' -- '",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT E'\\'; DELETE FROM t; -- '",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT \"a\\\"; CALL p(); -- \"",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 /*!; DELETE FROM t */",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "postgres": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "sqlite": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT name FROM system.tables",
+    "output": {
+      "clickhouse": {
+        "readOnly": true
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
+        "readOnly": true
+      }
+    }
+  },
+  {
+    "input": "SELECT 1 FROM t SYSTEM FLUSH LOGS",
+    "output": {
+      "clickhouse": {
+        "error": "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed",
+        "readOnly": false
+      },
+      "mysql": {
+        "readOnly": true
+      },
+      "postgres": {
+        "readOnly": true
+      },
+      "sqlite": {
+        "readOnly": true
+      },
+      "tsql": {
         "readOnly": true
       }
     }

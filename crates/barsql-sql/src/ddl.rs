@@ -1,5 +1,6 @@
-use barsql_core::{ConstraintInfo, DriverType, IndexInfo, ObjectKind};
+use barsql_core::{ConstraintInfo, DriverType, IndexInfo, ObjectKind, SqlDialect};
 
+use crate::dialect::Dialect;
 use crate::quote::{qualified_table, quote_ident, quote_ident_list};
 use crate::sql_text::to_upper;
 
@@ -12,13 +13,16 @@ pub struct DdlColumn {
     pub not_null: bool,
     pub default: String,
     pub collation: String,
-    // "ALWAYS" or "BY DEFAULT" on an identity column.
+    // "ALWAYS" or "BY DEFAULT" on an identity column, or SQL Server's "seed, increment".
     pub identity: String,
-    // Overrides `default`, since a generated column can't have one.
+    // Overrides `default`, since a generated column can't have one. SQL Server's includes PERSISTED.
     pub generated: String,
 }
 
 pub fn render_column(driver: &DriverType, col: &DdlColumn) -> String {
+    if driver.dialect() == Some(SqlDialect::TSql) {
+        return render_tsql_column(driver, col);
+    }
     let mut out = quote_ident(driver, &col.name);
     if !col.data_type.is_empty() {
         out.push(' ');
@@ -42,6 +46,29 @@ pub fn render_column(driver: &DriverType, col: &DdlColumn) -> String {
     out
 }
 
+// A computed column has no type of its own, and a collation is named bare.
+fn render_tsql_column(driver: &DriverType, col: &DdlColumn) -> String {
+    let mut out = quote_ident(driver, &col.name);
+    if !col.generated.is_empty() {
+        out.push_str(&format!(" AS {}", col.generated));
+        return out;
+    }
+    out.push(' ');
+    out.push_str(&col.data_type);
+    if !col.collation.is_empty() {
+        out.push_str(&format!(" COLLATE {}", col.collation));
+    }
+    if !col.identity.is_empty() {
+        out.push_str(&format!(" IDENTITY({})", col.identity));
+    } else if !col.default.is_empty() {
+        out.push_str(&format!(" DEFAULT {}", col.default));
+    }
+    if col.not_null {
+        out.push_str(" NOT NULL");
+    }
+    out
+}
+
 pub fn compose_create_table(
     driver: &DriverType,
     schema: &str,
@@ -55,10 +82,11 @@ pub fn compose_create_table(
         .chain(constraints.iter().map(|c| format!("{INDENT}{c}")))
         .collect();
     let head = format!("CREATE TABLE {}", qualified_table(driver, schema, table));
+    let suffix = Dialect::for_driver(driver).create_table_suffix;
     if lines.is_empty() {
-        return format!("{head} ();");
+        return format!("{head} (){suffix};");
     }
-    format!("{head} (\n{}\n);", lines.join(",\n"))
+    format!("{head} (\n{}\n){suffix};", lines.join(",\n"))
 }
 
 // Prefers the engine's definition over a synthesized one. Empty when neither is usable.
@@ -96,7 +124,7 @@ pub fn render_create_index(driver: &DriverType, idx: &IndexInfo) -> String {
     }
     let unique = if idx.is_unique { "UNIQUE " } else { "" };
     // USING is Postgres-only syntax, though MySQL reports a method too.
-    let using = if !idx.method.is_empty() && *driver == DriverType::Postgres {
+    let using = if !idx.method.is_empty() && Dialect::for_driver(driver).index_using {
         format!(" USING {}", idx.method)
     } else {
         String::new()
@@ -163,6 +191,25 @@ mod tests {
         for (col, want) in cases {
             assert_eq!(render_column(&pg, &col), want);
         }
+    }
+
+    #[test]
+    fn sql_server_columns_use_its_own_syntax() {
+        let ms = DriverType::SqlServer;
+        let id = DdlColumn { identity: "1, 1".into(), not_null: true, ..col("id", "int") };
+        assert_eq!(render_column(&ms, &id), "[id] int IDENTITY(1, 1) NOT NULL");
+        let doubled = DdlColumn { generated: "([price]*(2)) PERSISTED".into(), ..col("doubled", "decimal(12, 2)") };
+        assert_eq!(render_column(&ms, &doubled), "[doubled] AS ([price]*(2)) PERSISTED");
+        let name = DdlColumn {
+            default: "(N'anon')".into(),
+            collation: "Latin1_General_BIN2".into(),
+            not_null: true,
+            ..col("name", "nvarchar(50)")
+        };
+        assert_eq!(
+            render_column(&ms, &name),
+            "[name] nvarchar(50) COLLATE Latin1_General_BIN2 DEFAULT (N'anon') NOT NULL"
+        );
     }
 
     #[test]

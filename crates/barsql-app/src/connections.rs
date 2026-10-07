@@ -3,11 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use barsql_core::{
-    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, IndexInfo, ObjectRef, QueryError,
+    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,
     RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TriggerInfo,
 };
 use barsql_db::Engine;
-use barsql_sql::table_ref;
 use barsql_storage::ConnectionFolder;
 
 use crate::events::AppEvent;
@@ -112,7 +111,8 @@ impl BarApp {
         Ok(status)
     }
 
-    // Postgres also preloads "public" so the browser isn't empty when the default schema is a custom one.
+    // Postgres also preloads "public" (SQL Server "dbo") so the browser isn't empty when the default schema is a
+    // custom one.
     pub async fn load_schema_data(&self, id: &str) -> Result<SchemaBundle, QueryError> {
         let cfg = self.config(id)?;
         let engine = self.engine(id).await?;
@@ -121,9 +121,7 @@ impl BarApp {
         let schemas = engine.list_schemas().await?;
         let browse = cfg.default_browse_schema();
         let mut preload: HashSet<String> = HashSet::from([browse.clone()]);
-        if cfg.driver == DriverType::Postgres && browse != "public" {
-            preload.insert("public".into());
-        }
+        preload.extend(cfg.driver.capabilities().preload_schemas.iter().map(|s| s.to_string()));
         let mut loaded_tables = Vec::new();
         for schema in schemas.iter().filter(|s| preload.contains(&s.name)) {
             let tables = engine.list_tables(&schema.name).await?;
@@ -170,6 +168,11 @@ impl BarApp {
         within(SCHEMA_TIMEOUT, engine.list_routines(schema)).await
     }
 
+    pub async fn list_functions(&self, id: &str) -> Result<FunctionList, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.list_functions()).await
+    }
+
     // Reads the catalog only, so it stays available on read-only connections.
     pub async fn object_ddl(&self, id: &str, object: &ObjectRef) -> Result<String, QueryError> {
         if object.name.is_empty() {
@@ -185,7 +188,7 @@ impl BarApp {
         let (job, cancel) = self.inner.jobs.start(&key, id);
         let result = async {
             let engine = self.engine(id).await?;
-            let sql = format!("SELECT COUNT(*) FROM {}", table_ref(&engine.driver(), schema, table));
+            let sql = barsql_sql::dml::build_count(&engine.driver(), schema, table);
             let mut session = engine.session().await?;
             let result = session.buffered(&sql, &cancel).await?;
             result.text(0, 0).and_then(|count| count.parse().ok()).ok_or_else(|| QueryError::message("no row count"))

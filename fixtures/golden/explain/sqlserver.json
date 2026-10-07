@@ -1,0 +1,430 @@
+{
+  "engine": "sqlserver",
+  "driver": "sqlserver",
+  "plans": [
+    {
+      "statement": "SELECT * FROM barsql_golden.customers WHERE id = 1",
+      "analyze": false,
+      "explainSql": "SET SHOWPLAN_XML ON\nGO\nSELECT * FROM barsql_golden.customers WHERE id = 1\nGO\nSET SHOWPLAN_XML OFF",
+      "raw": {
+        "columns": [
+          "Microsoft SQL Server 2005 XML Showplan"
+        ],
+        "rows": [
+          [
+            "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT * FROM barsql_golden.customers WHERE id = 1\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"false\" StatementSubTreeCost=\"0.0032831\" StatementEstRows=\"1\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"TRIVIAL\" QueryHash=\"0x3E4AFDBC43CE08FA\" QueryPlanHash=\"0xE7C400EEBC67C794\" CardinalityEstimationModelVersion=\"150\" ParameterizedText=\"(@1 tinyint)SELECT * FROM [barsql_golden].[customers] WHERE [id]=@1\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan CachedPlanSize=\"24\" CompileTime=\"0\" CompileCPU=\"0\" CompileMemory=\"128\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><RelOp NodeId=\"0\" PhysicalOp=\"Clustered Index Seek\" LogicalOp=\"Clustered Index Seek\" EstimateRows=\"1\" EstimatedRowsRead=\"1\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001581\" AvgRowSize=\"379\" EstimatedTotalSubtreeCost=\"0.0032831\" TableCardinality=\"500\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"email\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"name\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"created_at\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"email\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"name\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"created_at\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Index=\"[pk_customers]\" IndexKind=\"Clustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><Prefix ScanType=\"EQ\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"CONVERT_IMPLICIT(int,[@1],0)\"><Convert DataType=\"int\" Style=\"0\" Implicit=\"1\"><ScalarOperator><Identifier><ColumnReference Column=\"@1\"></ColumnReference></Identifier></ScalarOperator></Convert></ScalarOperator></RangeExpressions></Prefix></SeekKeys></SeekPredicateNew></SeekPredicates></IndexScan></RelOp><ParameterList><ColumnReference Column=\"@1\" ParameterDataType=\"tinyint\" ParameterCompiledValue=\"(1)\"></ColumnReference></ParameterList></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlserver",
+        "statement": "SELECT * FROM barsql_golden.customers WHERE id = 1",
+        "explainSql": "SET SHOWPLAN_XML ON\nGO\nSELECT * FROM barsql_golden.customers WHERE id = 1\nGO\nSET SHOWPLAN_XML OFF",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Clustered Index Seek",
+            "detail": "Seek: id = CONVERT_IMPLICIT(int,[@1],0)",
+            "relation": "customers",
+            "index": "pk_customers",
+            "costTotal": 0.0032831,
+            "costSelf": 0.0032831,
+            "rowsPlanned": 1.0,
+            "fields": [
+              {
+                "key": "Estimated I/O",
+                "value": "0.003125"
+              },
+              {
+                "key": "Estimated CPU",
+                "value": "0.0001581"
+              },
+              {
+                "key": "Row size",
+                "value": "379"
+              },
+              {
+                "key": "Table rows",
+                "value": "500"
+              },
+              {
+                "key": "Rows read (estimated)",
+                "value": "1"
+              },
+              {
+                "key": "Execution mode",
+                "value": "Row"
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.0032831,
+        "planningMs": 0.0,
+        "durationMs": 0,
+        "raw": "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT * FROM barsql_golden.customers WHERE id = 1\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"false\" StatementSubTreeCost=\"0.0032831\" StatementEstRows=\"1\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"TRIVIAL\" QueryHash=\"0x3E4AFDBC43CE08FA\" QueryPlanHash=\"0xE7C400EEBC67C794\" CardinalityEstimationModelVersion=\"150\" ParameterizedText=\"(@1 tinyint)SELECT * FROM [barsql_golden].[customers] WHERE [id]=@1\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan CachedPlanSize=\"24\" CompileTime=\"0\" CompileCPU=\"0\" CompileMemory=\"128\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><RelOp NodeId=\"0\" PhysicalOp=\"Clustered Index Seek\" LogicalOp=\"Clustered Index Seek\" EstimateRows=\"1\" EstimatedRowsRead=\"1\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001581\" AvgRowSize=\"379\" EstimatedTotalSubtreeCost=\"0.0032831\" TableCardinality=\"500\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"email\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"name\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"created_at\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"email\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"name\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"created_at\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Index=\"[pk_customers]\" IndexKind=\"Clustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><Prefix ScanType=\"EQ\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Column=\"id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"CONVERT_IMPLICIT(int,[@1],0)\"><Convert DataType=\"int\" Style=\"0\" Implicit=\"1\"><ScalarOperator><Identifier><ColumnReference Column=\"@1\"></ColumnReference></Identifier></ScalarOperator></Convert></ScalarOperator></RangeExpressions></Prefix></SeekKeys></SeekPredicateNew></SeekPredicates></IndexScan></RelOp><ParameterList><ColumnReference Column=\"@1\" ParameterDataType=\"tinyint\" ParameterCompiledValue=\"(1)\"></ColumnReference></ParameterList></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+      }
+    },
+    {
+      "statement": "SELECT customer_id, SUM(total) AS total FROM barsql_golden.orders GROUP BY customer_id ORDER BY customer_id",
+      "analyze": false,
+      "explainSql": "SET SHOWPLAN_XML ON\nGO\nSELECT customer_id, SUM(total) AS total FROM barsql_golden.orders GROUP BY customer_id ORDER BY customer_id\nGO\nSET SHOWPLAN_XML OFF",
+      "raw": {
+        "columns": [
+          "Microsoft SQL Server 2005 XML Showplan"
+        ],
+        "rows": [
+          [
+            "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT customer_id, SUM(total) AS total FROM barsql_golden.orders GROUP BY customer_id ORDER BY customer_id\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"false\" StatementSubTreeCost=\"0.0135987\" StatementEstRows=\"500\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"FULL\" QueryHash=\"0xACC3F17775F69C65\" QueryPlanHash=\"0xF6D7CD90A7F6A6A1\" StatementOptmEarlyAbortReason=\"GoodEnoughPlanFound\" CardinalityEstimationModelVersion=\"150\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan CachedPlanSize=\"24\" CompileTime=\"1\" CompileCPU=\"1\" CompileMemory=\"216\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><OptimizerStatsUsage><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.66\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[ix_orders_customer]\" Table=\"[orders]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo></OptimizerStatsUsage><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><RelOp NodeId=\"0\" PhysicalOp=\"Stream Aggregate\" LogicalOp=\"Aggregate\" EstimateRows=\"500\" EstimateIO=\"0\" EstimateCPU=\"0.00145\" AvgRowSize=\"28\" EstimatedTotalSubtreeCost=\"0.0135987\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference><ColumnReference Column=\"Expr1002\"></ColumnReference></OutputList><StreamAggregate><DefinedValues><DefinedValue><ColumnReference Column=\"Expr1002\"></ColumnReference><ScalarOperator ScalarString=\"SUM([barsql_test].[barsql_golden].[orders].[total])\"><Aggregate Distinct=\"0\" AggType=\"SUM\"><ScalarOperator><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"total\"></ColumnReference></Identifier></ScalarOperator></Aggregate></ScalarOperator></DefinedValue></DefinedValues><GroupBy><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference></GroupBy><RelOp NodeId=\"1\" PhysicalOp=\"Index Scan\" LogicalOp=\"Index Scan\" EstimateRows=\"2000\" EstimatedRowsRead=\"2000\" EstimateIO=\"0.00979167\" EstimateCPU=\"0.002357\" AvgRowSize=\"20\" EstimatedTotalSubtreeCost=\"0.0121487\" TableCardinality=\"2000\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"total\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"total\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Index=\"[ix_orders_customer]\" IndexKind=\"NonClustered\" Storage=\"RowStore\"></Object></IndexScan></RelOp></StreamAggregate></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlserver",
+        "statement": "SELECT customer_id, SUM(total) AS total FROM barsql_golden.orders GROUP BY customer_id ORDER BY customer_id",
+        "explainSql": "SET SHOWPLAN_XML ON\nGO\nSELECT customer_id, SUM(total) AS total FROM barsql_golden.orders GROUP BY customer_id ORDER BY customer_id\nGO\nSET SHOWPLAN_XML OFF",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Stream Aggregate (Aggregate)",
+            "costTotal": 0.0135987,
+            "costSelf": 0.00145,
+            "rowsPlanned": 500.0,
+            "fields": [
+              {
+                "key": "Estimated I/O",
+                "value": "0"
+              },
+              {
+                "key": "Estimated CPU",
+                "value": "0.00145"
+              },
+              {
+                "key": "Row size",
+                "value": "28"
+              },
+              {
+                "key": "Execution mode",
+                "value": "Row"
+              }
+            ],
+            "children": [
+              {
+                "label": "Index Scan",
+                "relation": "orders",
+                "index": "ix_orders_customer",
+                "costTotal": 0.0121487,
+                "costSelf": 0.0121487,
+                "rowsPlanned": 2000.0,
+                "fields": [
+                  {
+                    "key": "Estimated I/O",
+                    "value": "0.00979167"
+                  },
+                  {
+                    "key": "Estimated CPU",
+                    "value": "0.002357"
+                  },
+                  {
+                    "key": "Row size",
+                    "value": "20"
+                  },
+                  {
+                    "key": "Table rows",
+                    "value": "2000"
+                  },
+                  {
+                    "key": "Rows read (estimated)",
+                    "value": "2000"
+                  },
+                  {
+                    "key": "Execution mode",
+                    "value": "Row"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.0135987,
+        "planningMs": 1.0,
+        "durationMs": 0,
+        "raw": "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT customer_id, SUM(total) AS total FROM barsql_golden.orders GROUP BY customer_id ORDER BY customer_id\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"false\" StatementSubTreeCost=\"0.0135987\" StatementEstRows=\"500\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"FULL\" QueryHash=\"0xACC3F17775F69C65\" QueryPlanHash=\"0xF6D7CD90A7F6A6A1\" StatementOptmEarlyAbortReason=\"GoodEnoughPlanFound\" CardinalityEstimationModelVersion=\"150\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan CachedPlanSize=\"24\" CompileTime=\"1\" CompileCPU=\"1\" CompileMemory=\"216\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><OptimizerStatsUsage><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.66\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[ix_orders_customer]\" Table=\"[orders]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo></OptimizerStatsUsage><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><RelOp NodeId=\"0\" PhysicalOp=\"Stream Aggregate\" LogicalOp=\"Aggregate\" EstimateRows=\"500\" EstimateIO=\"0\" EstimateCPU=\"0.00145\" AvgRowSize=\"28\" EstimatedTotalSubtreeCost=\"0.0135987\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference><ColumnReference Column=\"Expr1002\"></ColumnReference></OutputList><StreamAggregate><DefinedValues><DefinedValue><ColumnReference Column=\"Expr1002\"></ColumnReference><ScalarOperator ScalarString=\"SUM([barsql_test].[barsql_golden].[orders].[total])\"><Aggregate Distinct=\"0\" AggType=\"SUM\"><ScalarOperator><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"total\"></ColumnReference></Identifier></ScalarOperator></Aggregate></ScalarOperator></DefinedValue></DefinedValues><GroupBy><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference></GroupBy><RelOp NodeId=\"1\" PhysicalOp=\"Index Scan\" LogicalOp=\"Index Scan\" EstimateRows=\"2000\" EstimatedRowsRead=\"2000\" EstimateIO=\"0.00979167\" EstimateCPU=\"0.002357\" AvgRowSize=\"20\" EstimatedTotalSubtreeCost=\"0.0121487\" TableCardinality=\"2000\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"total\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"customer_id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Column=\"total\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Index=\"[ix_orders_customer]\" IndexKind=\"NonClustered\" Storage=\"RowStore\"></Object></IndexScan></RelOp></StreamAggregate></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+      }
+    },
+    {
+      "statement": "SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10",
+      "analyze": false,
+      "explainSql": "SET SHOWPLAN_XML ON\nGO\nSELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10\nGO\nSET SHOWPLAN_XML OFF",
+      "raw": {
+        "columns": [
+          "Microsoft SQL Server 2005 XML Showplan"
+        ],
+        "rows": [
+          [
+            "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id &lt; 10\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"false\" StatementSubTreeCost=\"0.00803726\" StatementEstRows=\"36\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"FULL\" QueryHash=\"0x30CE499EFA9B2128\" QueryPlanHash=\"0x78B8DD368E7C9E39\" StatementOptmEarlyAbortReason=\"GoodEnoughPlanFound\" CardinalityEstimationModelVersion=\"150\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan CachedPlanSize=\"24\" CompileTime=\"1\" CompileCPU=\"1\" CompileMemory=\"328\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><OptimizerStatsUsage><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.68\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[pk_customers]\" Table=\"[customers]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.66\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[ix_orders_customer]\" Table=\"[orders]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo></OptimizerStatsUsage><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><RelOp NodeId=\"0\" PhysicalOp=\"Nested Loops\" LogicalOp=\"Inner Join\" EstimateRows=\"36\" EstimateIO=\"0\" EstimateCPU=\"0.00015048\" AvgRowSize=\"275\" EstimatedTotalSubtreeCost=\"0.00803726\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><NestedLoops Optimized=\"0\"><OuterReferences><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></OuterReferences><RelOp NodeId=\"1\" PhysicalOp=\"Clustered Index Seek\" LogicalOp=\"Clustered Index Seek\" EstimateRows=\"9\" EstimatedRowsRead=\"9\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001669\" AvgRowSize=\"270\" EstimatedTotalSubtreeCost=\"0.0032919\" TableCardinality=\"500\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Index=\"[pk_customers]\" Alias=\"[c]\" IndexKind=\"Clustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><EndRange ScanType=\"LT\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"(10)\"><Const ConstValue=\"(10)\"></Const></ScalarOperator></RangeExpressions></EndRange></SeekKeys></SeekPredicateNew></SeekPredicates></IndexScan></RelOp><RelOp NodeId=\"2\" PhysicalOp=\"Index Seek\" LogicalOp=\"Index Seek\" EstimateRows=\"4\" EstimatedRowsRead=\"4\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001614\" AvgRowSize=\"20\" EstimatedTotalSubtreeCost=\"0.0045776\" TableCardinality=\"2000\" Parallel=\"0\" EstimateRebinds=\"8\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Index=\"[ix_orders_customer]\" Alias=\"[o]\" IndexKind=\"NonClustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><Prefix ScanType=\"EQ\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[customers].[id] as [c].[id]\"><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></Identifier></ScalarOperator></RangeExpressions></Prefix></SeekKeys></SeekPredicateNew></SeekPredicates><Predicate><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[orders].[customer_id] as [o].[customer_id]&lt;(10)\"><Compare CompareOp=\"LT\"><ScalarOperator><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></Identifier></ScalarOperator><ScalarOperator><Const ConstValue=\"(10)\"></Const></ScalarOperator></Compare></ScalarOperator></Predicate></IndexScan></RelOp></NestedLoops></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlserver",
+        "statement": "SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10",
+        "explainSql": "SET SHOWPLAN_XML ON\nGO\nSELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10\nGO\nSET SHOWPLAN_XML OFF",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Nested Loops (Inner Join)",
+            "costTotal": 0.00803726,
+            "costSelf": 0.00016775999999999944,
+            "rowsPlanned": 36.0,
+            "fields": [
+              {
+                "key": "Estimated I/O",
+                "value": "0"
+              },
+              {
+                "key": "Estimated CPU",
+                "value": "0.00015048"
+              },
+              {
+                "key": "Row size",
+                "value": "275"
+              },
+              {
+                "key": "Execution mode",
+                "value": "Row"
+              }
+            ],
+            "children": [
+              {
+                "label": "Clustered Index Seek",
+                "detail": "Seek: id < (10)",
+                "relation": "customers c",
+                "index": "pk_customers",
+                "costTotal": 0.0032919,
+                "costSelf": 0.0032919,
+                "rowsPlanned": 9.0,
+                "fields": [
+                  {
+                    "key": "Estimated I/O",
+                    "value": "0.003125"
+                  },
+                  {
+                    "key": "Estimated CPU",
+                    "value": "0.0001669"
+                  },
+                  {
+                    "key": "Row size",
+                    "value": "270"
+                  },
+                  {
+                    "key": "Table rows",
+                    "value": "500"
+                  },
+                  {
+                    "key": "Rows read (estimated)",
+                    "value": "9"
+                  },
+                  {
+                    "key": "Execution mode",
+                    "value": "Row"
+                  }
+                ]
+              },
+              {
+                "label": "Index Seek",
+                "detail": "Seek: customer_id = [barsql_test].[barsql_golden].[customers].[id] as [c].[id]; [barsql_test].[barsql_golden].[orders].[customer_id] as [o].[customer_id]<(10)",
+                "relation": "orders o",
+                "index": "ix_orders_customer",
+                "costTotal": 0.0045776,
+                "costSelf": 0.0045776,
+                "rowsPlanned": 4.0,
+                "fields": [
+                  {
+                    "key": "Estimated I/O",
+                    "value": "0.003125"
+                  },
+                  {
+                    "key": "Estimated CPU",
+                    "value": "0.0001614"
+                  },
+                  {
+                    "key": "Row size",
+                    "value": "20"
+                  },
+                  {
+                    "key": "Table rows",
+                    "value": "2000"
+                  },
+                  {
+                    "key": "Rows read (estimated)",
+                    "value": "4"
+                  },
+                  {
+                    "key": "Execution mode",
+                    "value": "Row"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.00803726,
+        "planningMs": 1.0,
+        "durationMs": 0,
+        "raw": "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id &lt; 10\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"false\" StatementSubTreeCost=\"0.00803726\" StatementEstRows=\"36\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"FULL\" QueryHash=\"0x30CE499EFA9B2128\" QueryPlanHash=\"0x78B8DD368E7C9E39\" StatementOptmEarlyAbortReason=\"GoodEnoughPlanFound\" CardinalityEstimationModelVersion=\"150\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan CachedPlanSize=\"24\" CompileTime=\"1\" CompileCPU=\"1\" CompileMemory=\"328\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><OptimizerStatsUsage><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.68\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[pk_customers]\" Table=\"[customers]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.66\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[ix_orders_customer]\" Table=\"[orders]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo></OptimizerStatsUsage><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><RelOp NodeId=\"0\" PhysicalOp=\"Nested Loops\" LogicalOp=\"Inner Join\" EstimateRows=\"36\" EstimateIO=\"0\" EstimateCPU=\"0.00015048\" AvgRowSize=\"275\" EstimatedTotalSubtreeCost=\"0.00803726\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><NestedLoops Optimized=\"0\"><OuterReferences><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></OuterReferences><RelOp NodeId=\"1\" PhysicalOp=\"Clustered Index Seek\" LogicalOp=\"Clustered Index Seek\" EstimateRows=\"9\" EstimatedRowsRead=\"9\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001669\" AvgRowSize=\"270\" EstimatedTotalSubtreeCost=\"0.0032919\" TableCardinality=\"500\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Index=\"[pk_customers]\" Alias=\"[c]\" IndexKind=\"Clustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><EndRange ScanType=\"LT\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"(10)\"><Const ConstValue=\"(10)\"></Const></ScalarOperator></RangeExpressions></EndRange></SeekKeys></SeekPredicateNew></SeekPredicates></IndexScan></RelOp><RelOp NodeId=\"2\" PhysicalOp=\"Index Seek\" LogicalOp=\"Index Seek\" EstimateRows=\"4\" EstimatedRowsRead=\"4\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001614\" AvgRowSize=\"20\" EstimatedTotalSubtreeCost=\"0.0045776\" TableCardinality=\"2000\" Parallel=\"0\" EstimateRebinds=\"8\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Index=\"[ix_orders_customer]\" Alias=\"[o]\" IndexKind=\"NonClustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><Prefix ScanType=\"EQ\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[customers].[id] as [c].[id]\"><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></Identifier></ScalarOperator></RangeExpressions></Prefix></SeekKeys></SeekPredicateNew></SeekPredicates><Predicate><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[orders].[customer_id] as [o].[customer_id]&lt;(10)\"><Compare CompareOp=\"LT\"><ScalarOperator><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></Identifier></ScalarOperator><ScalarOperator><Const ConstValue=\"(10)\"></Const></ScalarOperator></Compare></ScalarOperator></Predicate></IndexScan></RelOp></NestedLoops></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+      }
+    },
+    {
+      "statement": "SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10",
+      "analyze": true,
+      "explainSql": "SET STATISTICS XML ON\nGO\nSELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10\nGO\nSET STATISTICS XML OFF",
+      "raw": {
+        "columns": [
+          "Microsoft SQL Server 2005 XML Showplan"
+        ],
+        "rows": [
+          [
+            "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id &lt; 10\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"true\" StatementSubTreeCost=\"0.00803726\" StatementEstRows=\"36\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"FULL\" QueryHash=\"0x30CE499EFA9B2128\" QueryPlanHash=\"0x78B8DD368E7C9E39\" StatementOptmEarlyAbortReason=\"GoodEnoughPlanFound\" CardinalityEstimationModelVersion=\"150\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan DegreeOfParallelism=\"1\" CachedPlanSize=\"24\" CompileTime=\"1\" CompileCPU=\"1\" CompileMemory=\"328\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><OptimizerStatsUsage><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.68\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[pk_customers]\" Table=\"[customers]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.66\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[ix_orders_customer]\" Table=\"[orders]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo></OptimizerStatsUsage><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><TraceFlags IsCompileTime=\"0\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><QueryTimeStats ElapsedTime=\"0\" CpuTime=\"0\"></QueryTimeStats><RelOp NodeId=\"0\" PhysicalOp=\"Nested Loops\" LogicalOp=\"Inner Join\" EstimateRows=\"36\" EstimateIO=\"0\" EstimateCPU=\"0.00015048\" AvgRowSize=\"275\" EstimatedTotalSubtreeCost=\"0.00803726\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><RunTimeInformation><RunTimeCountersPerThread Thread=\"0\" ActualRows=\"36\" Batches=\"0\" ActualElapsedms=\"0\" ActualCPUms=\"0\" ActualEndOfScans=\"1\" ActualExecutions=\"1\" ActualExecutionMode=\"Row\"></RunTimeCountersPerThread></RunTimeInformation><NestedLoops Optimized=\"0\"><OuterReferences><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></OuterReferences><RelOp NodeId=\"1\" PhysicalOp=\"Clustered Index Seek\" LogicalOp=\"Clustered Index Seek\" EstimateRows=\"9\" EstimatedRowsRead=\"9\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001669\" AvgRowSize=\"270\" EstimatedTotalSubtreeCost=\"0.0032919\" TableCardinality=\"500\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></OutputList><RunTimeInformation><RunTimeCountersPerThread Thread=\"0\" ActualRows=\"9\" Batches=\"0\" ActualElapsedms=\"0\" ActualCPUms=\"0\" ActualScans=\"1\" ActualLogicalReads=\"2\" ActualPhysicalReads=\"0\" ActualReadAheads=\"0\" ActualLobLogicalReads=\"0\" ActualLobPhysicalReads=\"0\" ActualLobReadAheads=\"0\" ActualRowsRead=\"9\" ActualEndOfScans=\"1\" ActualExecutions=\"1\" ActualExecutionMode=\"Row\"></RunTimeCountersPerThread></RunTimeInformation><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Index=\"[pk_customers]\" Alias=\"[c]\" IndexKind=\"Clustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><EndRange ScanType=\"LT\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"(10)\"><Const ConstValue=\"(10)\"></Const></ScalarOperator></RangeExpressions></EndRange></SeekKeys></SeekPredicateNew></SeekPredicates></IndexScan></RelOp><RelOp NodeId=\"2\" PhysicalOp=\"Index Seek\" LogicalOp=\"Index Seek\" EstimateRows=\"4\" EstimatedRowsRead=\"4\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001614\" AvgRowSize=\"20\" EstimatedTotalSubtreeCost=\"0.0045776\" TableCardinality=\"2000\" Parallel=\"0\" EstimateRebinds=\"8\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><RunTimeInformation><RunTimeCountersPerThread Thread=\"0\" ActualRows=\"36\" Batches=\"0\" ActualElapsedms=\"0\" ActualCPUms=\"0\" ActualScans=\"9\" ActualLogicalReads=\"18\" ActualPhysicalReads=\"0\" ActualReadAheads=\"0\" ActualLobLogicalReads=\"0\" ActualLobPhysicalReads=\"0\" ActualLobReadAheads=\"0\" ActualRowsRead=\"36\" ActualEndOfScans=\"9\" ActualExecutions=\"9\" ActualExecutionMode=\"Row\"></RunTimeCountersPerThread></RunTimeInformation><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Index=\"[ix_orders_customer]\" Alias=\"[o]\" IndexKind=\"NonClustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><Prefix ScanType=\"EQ\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[customers].[id] as [c].[id]\"><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></Identifier></ScalarOperator></RangeExpressions></Prefix></SeekKeys></SeekPredicateNew></SeekPredicates><Predicate><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[orders].[customer_id] as [o].[customer_id]&lt;(10)\"><Compare CompareOp=\"LT\"><ScalarOperator><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></Identifier></ScalarOperator><ScalarOperator><Const ConstValue=\"(10)\"></Const></ScalarOperator></Compare></ScalarOperator></Predicate></IndexScan></RelOp></NestedLoops></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "sqlserver",
+        "statement": "SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10",
+        "explainSql": "SET STATISTICS XML ON\nGO\nSELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id < 10\nGO\nSET STATISTICS XML OFF",
+        "analyzed": true,
+        "nodes": [
+          {
+            "label": "Nested Loops (Inner Join)",
+            "costTotal": 0.00803726,
+            "costSelf": 0.00016775999999999944,
+            "rowsPlanned": 36.0,
+            "rowsActual": 36.0,
+            "loops": 1.0,
+            "timeMs": 0.0,
+            "selfTimeMs": 0.0,
+            "fields": [
+              {
+                "key": "Estimated I/O",
+                "value": "0"
+              },
+              {
+                "key": "Estimated CPU",
+                "value": "0.00015048"
+              },
+              {
+                "key": "Row size",
+                "value": "275"
+              },
+              {
+                "key": "Execution mode",
+                "value": "Row"
+              }
+            ],
+            "children": [
+              {
+                "label": "Clustered Index Seek",
+                "detail": "Seek: id < (10)",
+                "relation": "customers c",
+                "index": "pk_customers",
+                "costTotal": 0.0032919,
+                "costSelf": 0.0032919,
+                "rowsPlanned": 9.0,
+                "rowsActual": 9.0,
+                "loops": 1.0,
+                "timeMs": 0.0,
+                "selfTimeMs": 0.0,
+                "fields": [
+                  {
+                    "key": "Estimated I/O",
+                    "value": "0.003125"
+                  },
+                  {
+                    "key": "Estimated CPU",
+                    "value": "0.0001669"
+                  },
+                  {
+                    "key": "Row size",
+                    "value": "270"
+                  },
+                  {
+                    "key": "Table rows",
+                    "value": "500"
+                  },
+                  {
+                    "key": "Rows read (estimated)",
+                    "value": "9"
+                  },
+                  {
+                    "key": "Execution mode",
+                    "value": "Row"
+                  },
+                  {
+                    "key": "Logical reads",
+                    "value": "2"
+                  },
+                  {
+                    "key": "Physical reads",
+                    "value": "0"
+                  }
+                ]
+              },
+              {
+                "label": "Index Seek",
+                "detail": "Seek: customer_id = [barsql_test].[barsql_golden].[customers].[id] as [c].[id]; [barsql_test].[barsql_golden].[orders].[customer_id] as [o].[customer_id]<(10)",
+                "relation": "orders o",
+                "index": "ix_orders_customer",
+                "costTotal": 0.0045776,
+                "costSelf": 0.0045776,
+                "rowsPlanned": 4.0,
+                "rowsActual": 36.0,
+                "loops": 9.0,
+                "timeMs": 0.0,
+                "selfTimeMs": 0.0,
+                "fields": [
+                  {
+                    "key": "Estimated I/O",
+                    "value": "0.003125"
+                  },
+                  {
+                    "key": "Estimated CPU",
+                    "value": "0.0001614"
+                  },
+                  {
+                    "key": "Row size",
+                    "value": "20"
+                  },
+                  {
+                    "key": "Table rows",
+                    "value": "2000"
+                  },
+                  {
+                    "key": "Rows read (estimated)",
+                    "value": "4"
+                  },
+                  {
+                    "key": "Execution mode",
+                    "value": "Row"
+                  },
+                  {
+                    "key": "Logical reads",
+                    "value": "18"
+                  },
+                  {
+                    "key": "Physical reads",
+                    "value": "0"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "totalCost": 0.00803726,
+        "planningMs": 1.0,
+        "executionMs": 0.0,
+        "durationMs": 0,
+        "raw": "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\" Version=\"1.557\" Build=\"15.0.2000.1574\"><BatchSequence><Batch><Statements><StmtSimple StatementText=\"SELECT c.email, o.total FROM barsql_golden.customers c JOIN barsql_golden.orders o ON o.customer_id = c.id WHERE c.id &lt; 10\" StatementId=\"1\" StatementCompId=\"1\" StatementType=\"SELECT\" RetrievedFromCache=\"true\" StatementSubTreeCost=\"0.00803726\" StatementEstRows=\"36\" SecurityPolicyApplied=\"false\" StatementOptmLevel=\"FULL\" QueryHash=\"0x30CE499EFA9B2128\" QueryPlanHash=\"0x78B8DD368E7C9E39\" StatementOptmEarlyAbortReason=\"GoodEnoughPlanFound\" CardinalityEstimationModelVersion=\"150\"><StatementSetOptions QUOTED_IDENTIFIER=\"true\" ARITHABORT=\"true\" CONCAT_NULL_YIELDS_NULL=\"true\" ANSI_NULLS=\"true\" ANSI_PADDING=\"true\" ANSI_WARNINGS=\"true\" NUMERIC_ROUNDABORT=\"false\"></StatementSetOptions><QueryPlan DegreeOfParallelism=\"1\" CachedPlanSize=\"24\" CompileTime=\"1\" CompileCPU=\"1\" CompileMemory=\"328\"><MemoryGrantInfo SerialRequiredMemory=\"0\" SerialDesiredMemory=\"0\" GrantedMemory=\"0\" MaxUsedMemory=\"0\"></MemoryGrantInfo><OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant=\"150553\" EstimatedPagesCached=\"37638\" EstimatedAvailableDegreeOfParallelism=\"2\" MaxCompileMemory=\"2992832\"></OptimizerHardwareDependentProperties><OptimizerStatsUsage><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.68\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[pk_customers]\" Table=\"[customers]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo><StatisticsInfo LastUpdate=\"2026-10-06T22:55:01.66\" ModificationCount=\"0\" SamplingPercent=\"100\" Statistics=\"[ix_orders_customer]\" Table=\"[orders]\" Schema=\"[barsql_golden]\" Database=\"[barsql_test]\"></StatisticsInfo></OptimizerStatsUsage><TraceFlags IsCompileTime=\"1\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><TraceFlags IsCompileTime=\"0\"><TraceFlag Value=\"822\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"833\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"835\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"851\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"3425\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"5504\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8052\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8076\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"8904\" Scope=\"Global\"></TraceFlag><TraceFlag Value=\"9038\" Scope=\"Global\"></TraceFlag></TraceFlags><QueryTimeStats ElapsedTime=\"0\" CpuTime=\"0\"></QueryTimeStats><RelOp NodeId=\"0\" PhysicalOp=\"Nested Loops\" LogicalOp=\"Inner Join\" EstimateRows=\"36\" EstimateIO=\"0\" EstimateCPU=\"0.00015048\" AvgRowSize=\"275\" EstimatedTotalSubtreeCost=\"0.00803726\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><RunTimeInformation><RunTimeCountersPerThread Thread=\"0\" ActualRows=\"36\" Batches=\"0\" ActualElapsedms=\"0\" ActualCPUms=\"0\" ActualEndOfScans=\"1\" ActualExecutions=\"1\" ActualExecutionMode=\"Row\"></RunTimeCountersPerThread></RunTimeInformation><NestedLoops Optimized=\"0\"><OuterReferences><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></OuterReferences><RelOp NodeId=\"1\" PhysicalOp=\"Clustered Index Seek\" LogicalOp=\"Clustered Index Seek\" EstimateRows=\"9\" EstimatedRowsRead=\"9\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001669\" AvgRowSize=\"270\" EstimatedTotalSubtreeCost=\"0.0032919\" TableCardinality=\"500\" Parallel=\"0\" EstimateRebinds=\"0\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></OutputList><RunTimeInformation><RunTimeCountersPerThread Thread=\"0\" ActualRows=\"9\" Batches=\"0\" ActualElapsedms=\"0\" ActualCPUms=\"0\" ActualScans=\"1\" ActualLogicalReads=\"2\" ActualPhysicalReads=\"0\" ActualReadAheads=\"0\" ActualLobLogicalReads=\"0\" ActualLobPhysicalReads=\"0\" ActualLobReadAheads=\"0\" ActualRowsRead=\"9\" ActualEndOfScans=\"1\" ActualExecutions=\"1\" ActualExecutionMode=\"Row\"></RunTimeCountersPerThread></RunTimeInformation><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></DefinedValue><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"email\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Index=\"[pk_customers]\" Alias=\"[c]\" IndexKind=\"Clustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><EndRange ScanType=\"LT\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"(10)\"><Const ConstValue=\"(10)\"></Const></ScalarOperator></RangeExpressions></EndRange></SeekKeys></SeekPredicateNew></SeekPredicates></IndexScan></RelOp><RelOp NodeId=\"2\" PhysicalOp=\"Index Seek\" LogicalOp=\"Index Seek\" EstimateRows=\"4\" EstimatedRowsRead=\"4\" EstimateIO=\"0.003125\" EstimateCPU=\"0.0001614\" AvgRowSize=\"20\" EstimatedTotalSubtreeCost=\"0.0045776\" TableCardinality=\"2000\" Parallel=\"0\" EstimateRebinds=\"8\" EstimateRewinds=\"0\" EstimatedExecutionMode=\"Row\"><OutputList><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></OutputList><RunTimeInformation><RunTimeCountersPerThread Thread=\"0\" ActualRows=\"36\" Batches=\"0\" ActualElapsedms=\"0\" ActualCPUms=\"0\" ActualScans=\"9\" ActualLogicalReads=\"18\" ActualPhysicalReads=\"0\" ActualReadAheads=\"0\" ActualLobLogicalReads=\"0\" ActualLobPhysicalReads=\"0\" ActualLobReadAheads=\"0\" ActualRowsRead=\"36\" ActualEndOfScans=\"9\" ActualExecutions=\"9\" ActualExecutionMode=\"Row\"></RunTimeCountersPerThread></RunTimeInformation><IndexScan Ordered=\"1\" ScanDirection=\"FORWARD\" ForcedIndex=\"0\" ForceSeek=\"0\" ForceScan=\"0\" NoExpandHint=\"0\" Storage=\"RowStore\"><DefinedValues><DefinedValue><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"total\"></ColumnReference></DefinedValue></DefinedValues><Object Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Index=\"[ix_orders_customer]\" Alias=\"[o]\" IndexKind=\"NonClustered\" Storage=\"RowStore\"></Object><SeekPredicates><SeekPredicateNew><SeekKeys><Prefix ScanType=\"EQ\"><RangeColumns><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></RangeColumns><RangeExpressions><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[customers].[id] as [c].[id]\"><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[customers]\" Alias=\"[c]\" Column=\"id\"></ColumnReference></Identifier></ScalarOperator></RangeExpressions></Prefix></SeekKeys></SeekPredicateNew></SeekPredicates><Predicate><ScalarOperator ScalarString=\"[barsql_test].[barsql_golden].[orders].[customer_id] as [o].[customer_id]&lt;(10)\"><Compare CompareOp=\"LT\"><ScalarOperator><Identifier><ColumnReference Database=\"[barsql_test]\" Schema=\"[barsql_golden]\" Table=\"[orders]\" Alias=\"[o]\" Column=\"customer_id\"></ColumnReference></Identifier></ScalarOperator><ScalarOperator><Const ConstValue=\"(10)\"></Const></ScalarOperator></Compare></ScalarOperator></Predicate></IndexScan></RelOp></NestedLoops></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"
+      }
+    }
+  ]
+}

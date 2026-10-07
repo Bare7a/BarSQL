@@ -16,6 +16,16 @@ pub struct ColumnInfo {
     pub foreign_column: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_val: String,
+    // Filled in by the server: identity, auto_increment, rowid alias.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_identity: bool,
+    // Generated, computed, MATERIALIZED or ALIAS. It takes no value on insert.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_computed: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +161,65 @@ pub struct RoutineInfo {
     pub return_type: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub args: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FunctionKind {
+    #[default]
+    Scalar,
+    Aggregate,
+    Window,
+    // Returns rows, so it belongs in FROM.
+    Table,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionSignature {
+    // Without the parentheses: "target jsonb, path text[]".
+    pub args: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub returns: String,
+}
+
+// A function as the server lists it. Built-ins and user functions alike.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub schema: String,
+    pub kind: FunctionKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signatures: Vec<FunctionSignature>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    pub builtin: bool,
+    // ClickHouse names are case-sensitive unless the server marks them otherwise.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub case_sensitive: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub alias_to: String,
+    // Needs its schema to be called: a T-SQL scalar function, or a Postgres one off the search path.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub qualified_only: bool,
+    // The extension or origin that provides it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+}
+
+// What a server says it can call, for completion and hover.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionList {
+    pub functions: Vec<FunctionInfo>,
+    // ClickHouse aggregate combinator suffixes, like If and State.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub combinators: Vec<String>,
+    // A MySQL-protocol server that is MariaDB, which lacks some MySQL functions and has its own.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mariadb: bool,
 }
 
 // `table` is only set for indexes, constraints and triggers.

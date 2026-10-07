@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::LazyLock;
 
-use barsql_core::DriverType;
+use barsql_core::{DriverType, SqlDialect};
 use regex::Regex;
 
 use crate::split::split_statements;
@@ -67,14 +67,22 @@ static MYSQL_EXPLAIN_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
 });
 static SQLITE_EXPLAIN_PREFIX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)^explain[\t\n\f\r ]+(?:query[\t\n\f\r ]+plan[\t\n\f\r ]+)?").unwrap());
+// EXPLAIN [kind] [setting = value, ...]. The kinds other than PLAN show something other than a plan.
+static CLICKHOUSE_EXPLAIN_HEAD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?is)^explain[\t\n\f\r ]+(?:(plan|ast|syntax|query[\t\n\f\r ]+tree|pipeline|estimate|table[\t\n\f\r ]+override)[\t\n\f\r ]+)?(?:[0-9A-Za-z_]+[\t\n\f\r ]*=[\t\n\f\r ]*[0-9A-Za-z_']+[\t\n\f\r ]*,?[\t\n\f\r ]*)*",
+    )
+    .unwrap()
+});
 
 // Explaining an EXPLAIN plans the inner statement instead of nesting a second EXPLAIN.
 fn strip_explain_prefix<'a>(driver: &DriverType, stmt: &'a str) -> &'a str {
-    let re = match driver {
-        DriverType::Postgres => &*PG_EXPLAIN_PREFIX,
-        DriverType::MySql => &*MYSQL_EXPLAIN_PREFIX,
-        DriverType::Sqlite => &*SQLITE_EXPLAIN_PREFIX,
-        _ => return stmt,
+    let re = match driver.dialect() {
+        Some(SqlDialect::Postgres) => &*PG_EXPLAIN_PREFIX,
+        Some(SqlDialect::MySql) => &*MYSQL_EXPLAIN_PREFIX,
+        Some(SqlDialect::Sqlite) => &*SQLITE_EXPLAIN_PREFIX,
+        Some(SqlDialect::ClickHouse) => &*CLICKHOUSE_EXPLAIN_HEAD,
+        Some(SqlDialect::TSql) | None => return stmt,
     };
     let Some(prefix) = re.find(stmt).map(|m| m.as_str()).filter(|p| !p.is_empty()) else {
         return stmt;
@@ -134,8 +142,8 @@ fn is_falsey(word: &str) -> bool {
 }
 
 fn parse_explain_intent(driver: &DriverType, stmt: &str) -> Option<ExplainIntent> {
-    match driver {
-        DriverType::Postgres => {
+    match driver.dialect() {
+        Some(SqlDialect::Postgres) => {
             let caps = PG_EXPLAIN_HEAD.captures(stmt)?;
             let mut intent =
                 ExplainIntent { inner: stmt[caps.get(0)?.end()..].trim().to_string(), ..Default::default() };
@@ -153,7 +161,7 @@ fn parse_explain_intent(driver: &DriverType, stmt: &str) -> Option<ExplainIntent
             }
             Some(intent)
         }
-        DriverType::MySql => {
+        Some(SqlDialect::MySql) => {
             let caps = MYSQL_EXPLAIN_HEAD.captures(stmt)?;
             Some(ExplainIntent {
                 analyze: caps[1].eq_ignore_ascii_case("analyze") || caps.get(2).is_some(),
@@ -162,7 +170,7 @@ fn parse_explain_intent(driver: &DriverType, stmt: &str) -> Option<ExplainIntent
                 query_plan: false,
             })
         }
-        DriverType::Sqlite => {
+        Some(SqlDialect::Sqlite) => {
             let caps = SQLITE_EXPLAIN_HEAD.captures(stmt)?;
             Some(ExplainIntent {
                 inner: stmt[caps.get(0)?.end()..].trim().to_string(),
@@ -170,7 +178,15 @@ fn parse_explain_intent(driver: &DriverType, stmt: &str) -> Option<ExplainIntent
                 ..Default::default()
             })
         }
-        _ => None,
+        Some(SqlDialect::ClickHouse) => {
+            let caps = CLICKHOUSE_EXPLAIN_HEAD.captures(stmt)?;
+            Some(ExplainIntent {
+                inner: stmt[caps.get(0)?.end()..].trim().to_string(),
+                query_plan: caps.get(1).is_none_or(|kind| kind.as_str().eq_ignore_ascii_case("plan")),
+                ..Default::default()
+            })
+        }
+        Some(SqlDialect::TSql) | None => None,
     }
 }
 
@@ -179,22 +195,23 @@ fn parse_explain_intent(driver: &DriverType, stmt: &str) -> Option<ExplainIntent
 pub fn detect_plan_request(driver: &DriverType, stmt: &str) -> Option<PlanRequest> {
     let stmt = strip_leading_comments(stmt).trim();
     let first = first_keyword(stmt);
-    if first != "EXPLAIN" && !(*driver == DriverType::MySql && first == "ANALYZE") {
+    let dialect = driver.dialect();
+    if first != "EXPLAIN" && !(dialect == Some(SqlDialect::MySql) && first == "ANALYZE") {
         return None;
     }
     let intent = parse_explain_intent(driver, stmt)?;
     if !explains_a_statement(&first, &intent.inner) {
         return None;
     }
-    match driver {
-        DriverType::Postgres => match intent.format.as_str() {
+    match dialect {
+        Some(SqlDialect::Postgres) => match intent.format.as_str() {
             "json" => Some(PlanRequest { sql: stmt.to_string(), analyze: intent.analyze }),
             "" => build_explain_sql(driver, ServerVersion::default(), &intent.inner, intent.analyze)
                 .ok()
                 .map(|sql| PlanRequest { sql, analyze: intent.analyze }),
             _ => None,
         },
-        DriverType::MySql => match intent.format.as_str() {
+        Some(SqlDialect::MySql) => match intent.format.as_str() {
             "json" | "tree" => Some(PlanRequest { sql: stmt.to_string(), analyze: intent.analyze }),
             // EXPLAIN ANALYZE already returns the tree. Other bare forms return the traditional table.
             "" if intent.analyze && first == "EXPLAIN" => Some(PlanRequest { sql: stmt.to_string(), analyze: true }),
@@ -204,12 +221,66 @@ pub fn detect_plan_request(driver: &DriverType, stmt: &str) -> Option<PlanReques
             "" => Some(PlanRequest { sql: format!("EXPLAIN FORMAT=JSON {}", intent.inner), analyze: false }),
             _ => None,
         },
-        DriverType::Sqlite => intent.query_plan.then(|| PlanRequest { sql: stmt.to_string(), analyze: false }),
-        _ => None,
+        Some(SqlDialect::Sqlite) => intent.query_plan.then(|| PlanRequest { sql: stmt.to_string(), analyze: false }),
+        // A typed EXPLAIN [PLAN] runs as JSON, whatever settings it named. AST, PIPELINE and the rest stay a grid.
+        Some(SqlDialect::ClickHouse) => intent
+            .query_plan
+            .then(|| PlanRequest { sql: format!("{CLICKHOUSE_PLAN} {}", intent.inner), analyze: false }),
+        Some(SqlDialect::TSql) | None => None,
+    }
+}
+
+const CLICKHOUSE_PLAN: &str = "EXPLAIN PLAN json = 1, indexes = 1";
+// The column SQL Server's XML plans come in, whichever SET option asked for them.
+pub const SHOWPLAN_COLUMN: &str = "Microsoft SQL Server 2005 XML Showplan";
+
+// How to ask for a statement's plan. Most engines put an EXPLAIN in front of it. SQL Server turns a session option
+// on, sends the statement (which then only gets planned, or runs and reports its plan too), and turns it off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplainStrategy {
+    Query(String),
+    // The plan comes in a result set with `plan_column`. Each of `setup` and `teardown` goes as its own batch.
+    Session { setup: Vec<String>, statement: String, teardown: Vec<String>, plan_column: &'static str },
+}
+
+impl ExplainStrategy {
+    // The SQL the plan view shows as what it ran.
+    pub fn display_sql(&self) -> String {
+        match self {
+            Self::Query(sql) => sql.clone(),
+            Self::Session { setup, statement, teardown, .. } => {
+                setup.iter().chain([statement]).chain(teardown).map(String::as_str).collect::<Vec<_>>().join("\nGO\n")
+            }
+        }
     }
 }
 
 // `analyze` means the statement actually runs, so callers must isolate a write themselves.
+pub fn build_explain(
+    driver: &DriverType,
+    version: ServerVersion,
+    stmt: &str,
+    analyze: bool,
+) -> Result<ExplainStrategy, String> {
+    if driver.dialect() != Some(SqlDialect::TSql) {
+        return build_explain_sql(driver, version, stmt, analyze).map(ExplainStrategy::Query);
+    }
+    let stmt = stmt.trim();
+    let stmt = stmt.strip_suffix(';').unwrap_or(stmt).trim();
+    if stmt.is_empty() {
+        return Err("no statement to explain".into());
+    }
+    // SHOWPLAN_XML only plans. STATISTICS XML runs the statement and adds its plan, with the actual counts and times.
+    let option = if analyze { "STATISTICS XML" } else { "SHOWPLAN_XML" };
+    Ok(ExplainStrategy::Session {
+        setup: vec![format!("SET {option} ON")],
+        statement: stmt.to_string(),
+        teardown: vec![format!("SET {option} OFF")],
+        plan_column: SHOWPLAN_COLUMN,
+    })
+}
+
+// The EXPLAIN in front of the statement, for every engine but SQL Server.
 pub fn build_explain_sql(
     driver: &DriverType,
     version: ServerVersion,
@@ -222,18 +293,25 @@ pub fn build_explain_sql(
         return Err("no statement to explain".into());
     }
     let stmt = strip_explain_prefix(driver, stmt);
-    match driver {
-        DriverType::Postgres if analyze => Ok(format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {stmt}")),
-        DriverType::Postgres => Ok(format!("EXPLAIN (FORMAT JSON) {stmt}")),
-        DriverType::MySql if !analyze => Ok(format!("EXPLAIN FORMAT=JSON {stmt}")),
-        DriverType::MySql if version.mariadb => Ok(format!("ANALYZE FORMAT=JSON {stmt}")),
+    match driver.dialect() {
+        Some(SqlDialect::Postgres) if analyze => Ok(format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {stmt}")),
+        Some(SqlDialect::Postgres) => Ok(format!("EXPLAIN (FORMAT JSON) {stmt}")),
+        Some(SqlDialect::MySql) if !analyze => Ok(format!("EXPLAIN FORMAT=JSON {stmt}")),
+        Some(SqlDialect::MySql) if version.mariadb => Ok(format!("ANALYZE FORMAT=JSON {stmt}")),
         // MySQL takes FORMAT=JSON on EXPLAIN ANALYZE only from 8.3, but TREE works from 8.0.18.
-        DriverType::MySql if version.at_least(8, 0, 18) => Ok(format!("EXPLAIN ANALYZE {stmt}")),
-        DriverType::MySql => Err(format!("EXPLAIN ANALYZE needs MySQL 8.0.18 or newer (server reports {version})")),
-        DriverType::Sqlite if analyze => {
+        Some(SqlDialect::MySql) if version.at_least(8, 0, 18) => Ok(format!("EXPLAIN ANALYZE {stmt}")),
+        Some(SqlDialect::MySql) => {
+            Err(format!("EXPLAIN ANALYZE needs MySQL 8.0.18 or newer (server reports {version})"))
+        }
+        Some(SqlDialect::Sqlite) if analyze => {
             Err("SQLite has no EXPLAIN ANALYZE; explain without it for the plan shape".into())
         }
-        DriverType::Sqlite => Ok(format!("EXPLAIN QUERY PLAN {stmt}")),
-        _ => Err(format!("unsupported driver: {driver}")),
+        Some(SqlDialect::Sqlite) => Ok(format!("EXPLAIN QUERY PLAN {stmt}")),
+        Some(SqlDialect::ClickHouse) if analyze => {
+            Err("ClickHouse has no EXPLAIN ANALYZE; explain without it for the plan shape".into())
+        }
+        Some(SqlDialect::ClickHouse) => Ok(format!("{CLICKHOUSE_PLAN} {stmt}")),
+        Some(SqlDialect::TSql) => Err("SQL Server plans come from a session option; see build_explain".into()),
+        None => Err(format!("unsupported driver: {driver}")),
     }
 }

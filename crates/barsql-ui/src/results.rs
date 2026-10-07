@@ -1,5 +1,5 @@
 use barsql_app::RunEvent;
-use barsql_core::{QueryError, ResultSummary};
+use barsql_core::{QueryError, ResultSummary, SqlDialect};
 use barsql_sql::QueryPlan;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -11,7 +11,9 @@ use gpui_kit::*;
 
 use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef};
-use crate::i18n::{I18n, format_number, t, t_with};
+use crate::i18n::{I18n, format_number, t, t_count, t_with};
+use crate::list_nav::LIST_INSET;
+use crate::message_log::{self, Heading, Line, MessageLog};
 use crate::plan_view::PlanView;
 use crate::scrollbars::{HoverScrollbar as _, system_bar};
 use crate::toast;
@@ -125,6 +127,11 @@ impl ResultSetView {
         self.grid.as_ref().map_or(0, |grid| grid.read(cx).set().rows())
     }
 
+    // Nothing to look at but the summary line.
+    fn is_plain(&self) -> bool {
+        self.grid.is_none() && self.plan.is_none() && self.error.is_none()
+    }
+
     // Row count for a grid, affected rows otherwise, and no badge for errors or plans.
     fn count(&self, cx: &App) -> Option<i64> {
         if self.error.is_some() || self.plan.is_some() {
@@ -176,13 +183,23 @@ pub enum ResultStatus {
 pub struct ResultsPanel {
     sets: Vec<ResultSetView>,
     active: usize,
+    // The tab's connection's, for the grids' SQL copies and exports.
+    dialect: Option<SqlDialect>,
+    // The Messages tab is showing, in place of the active result.
+    messages_open: bool,
+    messages: MessageLog,
     tab_scroll: ScrollHandle,
 }
 
 impl ResultsPanel {
+    pub fn set_dialect(&mut self, dialect: Option<SqlDialect>) {
+        self.dialect = dialect;
+    }
+
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.sets.clear();
         self.active = 0;
+        self.forget_messages();
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
@@ -190,22 +207,40 @@ impl ResultsPanel {
     fn show(&mut self, set: ResultSetView, cx: &mut Context<Self>) {
         self.sets = vec![set];
         self.active = 0;
+        self.forget_messages();
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
 
+    fn forget_messages(&mut self) {
+        self.messages = MessageLog::default();
+        self.messages_open = false;
+    }
+
     pub(crate) fn select_result(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.active = ix;
+        self.messages_open = false;
+        cx.emit(ResultsEvent::FocusedRowChanged);
+        cx.notify();
+    }
+
+    pub(crate) fn open_messages(&mut self, cx: &mut Context<Self>) {
+        self.messages_open = true;
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
 
     pub fn focused_row(&self, cx: &App) -> Option<RowRef> {
-        self.sets.get(self.active)?.grid.as_ref()?.read(cx).focused_row()
+        self.shown_grid()?.read(cx).focused_row()
+    }
+
+    // The active result's grid, unless the Messages tab covers it.
+    fn shown_grid(&self) -> Option<&Entity<Grid>> {
+        self.sets.get(self.active).filter(|_| !self.messages_open)?.grid.as_ref()
     }
 
     fn is_active(&self, grid: &Entity<Grid>) -> bool {
-        self.sets.get(self.active).and_then(|set| set.grid.as_ref()) == Some(grid)
+        self.shown_grid() == Some(grid)
     }
 
     pub fn show_message(&mut self, message: SharedString, cx: &mut Context<Self>) {
@@ -234,10 +269,15 @@ impl ResultsPanel {
     // statement or any other event.
     pub fn apply(&mut self, event: RunEvent, window: &mut Window, cx: &mut Context<Self>) -> Option<bool> {
         let mut failed = None;
-        let before = self.sets.get(self.active).and_then(|set| set.grid.clone());
+        let before = self.shown_grid().cloned();
         match event {
             RunEvent::Meta { result_index, columns, .. } => {
-                let grid = cx.new(|cx| Grid::new(columns, cx));
+                let dialect = self.dialect;
+                let grid = cx.new(|cx| {
+                    let mut grid = Grid::new(columns, cx);
+                    grid.set_dialect(dialect);
+                    grid
+                });
                 let subscriptions =
                     vec![cx.observe(&grid, |_, _, cx| cx.notify()), cx.subscribe_in(&grid, window, Self::grid_event)];
                 *self.slot(result_index) = ResultSetView {
@@ -251,6 +291,9 @@ impl ResultsPanel {
                 if let Some(grid) = self.sets.get(result_index).filter(|s| s.streaming).and_then(|s| s.grid.clone()) {
                     grid.update(cx, |grid, cx| grid.push(chunk, cx));
                 }
+            }
+            RunEvent::Messages { result_index, messages, dropped } => {
+                self.messages.add(result_index, messages, dropped)
             }
             RunEvent::Result(result) => {
                 let result = *result;
@@ -286,9 +329,14 @@ impl ResultsPanel {
                 self.sets = vec![ResultSetView { error: Some(error), ..Default::default() }];
                 self.active = 0;
             }
-            RunEvent::Done { .. } => {}
+            // A run that only said something opens on what it said, like a DO block's notices.
+            RunEvent::Done { .. } => {
+                if self.messages.has_raised() && self.sets.iter().all(ResultSetView::is_plain) {
+                    self.messages_open = true;
+                }
+            }
         }
-        if self.sets.get(self.active).and_then(|set| set.grid.clone()) != before {
+        if self.shown_grid().cloned() != before {
             cx.emit(ResultsEvent::FocusedRowChanged);
         }
         cx.notify();
@@ -298,6 +346,24 @@ impl ResultsPanel {
     #[cfg(any(test, feature = "snapshot"))]
     pub fn result_count(&self) -> usize {
         self.sets.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn messages_shown(&self) -> bool {
+        self.messages_open
+    }
+
+    // Each kept message as (level, code, text), for tests.
+    #[cfg(test)]
+    pub(crate) fn message_texts(&self) -> Vec<(barsql_core::MessageLevel, String, String)> {
+        (0..self.messages.rows())
+            .filter_map(|ix| match self.messages.row(ix) {
+                Some(Line::Text { level: Some(level), code, text }) => {
+                    Some((level, code.to_string(), text.to_string()))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn status(&self, cx: &App) -> ResultStatus {
@@ -341,13 +407,13 @@ impl ResultsPanel {
         let theme = cx.theme().clone();
         let lang = cx.global::<I18n>().lang().to_string();
         let ordinals = ordinals(self.sets.iter().map(|set| set.plan.is_some()));
-        let tabs: Vec<Stateful<Div>> = self
+        let mut tabs: Vec<Stateful<Div>> = self
             .sets
             .iter()
             .zip(ordinals)
             .enumerate()
             .map(|(ix, (set, n))| {
-                let active = ix == self.active;
+                let active = ix == self.active && !self.messages_open;
                 let failed = set.error.is_some();
                 let key = if set.plan.is_some() { "results.planLabel" } else { "results.resultLabel" };
                 let color = match (failed, active) {
@@ -395,6 +461,9 @@ impl ResultsPanel {
                     .on_click(cx.listener(move |this, _, _, cx| this.select_result(ix, cx)))
             })
             .collect();
+        if !self.messages.is_empty() {
+            tabs.push(self.messages_tab(&lang, cx));
+        }
         div()
             .relative()
             .flex_none()
@@ -412,6 +481,134 @@ impl ResultsPanel {
             // Not on hover: its track would take clicks on the tabs' lower half. The mode is set here, so it stays the
             // system's even inside an area that shows its bars on hover.
             .child(div().absolute().inset_0().child(system_bar(Scrollbar::horizontal(&self.tab_scroll), cx)))
+    }
+
+    fn messages_tab(&self, lang: &str, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = cx.theme();
+        let active = self.messages_open;
+        let color = if active { theme.foreground } else { theme.muted_foreground };
+        let badge_color = match (self.messages.has_warnings(), active) {
+            (true, _) => theme.warning,
+            (false, true) => theme.primary,
+            (false, false) => theme.muted_foreground,
+        };
+        let hover = theme.foreground;
+        let underline = theme.primary;
+        h_flex()
+            .id("result-tab-messages")
+            .debug_selector(|| "result-tab-messages".into())
+            .relative()
+            .flex_none()
+            .gap(rems(0.462))
+            .pt(rems(0.462))
+            .pb(rems(0.615))
+            .px(rems(0.769))
+            .border_r_1()
+            .border_color(theme.border)
+            .whitespace_nowrap()
+            .text_size(TEXT_SM)
+            .text_color(color)
+            .cursor_pointer()
+            .hover(move |style| style.text_color(hover))
+            .child(Icon::new(Lucide::MessageSquareText).size(ICON_XS).opacity(0.75))
+            .child(t(cx, "results.messages"))
+            .child(form::badge(format_number(self.messages.total() as f64, 0, lang), badge_color))
+            .when(active, |el| el.child(div().absolute().left_0().right_0().bottom_0().h(rems(0.154)).bg(underline)))
+            .on_click(cx.listener(|this, _, _, cx| this.open_messages(cx)))
+    }
+
+    // The statement and outcome a result's messages are listed under.
+    fn heading(&self, index: usize, cx: &App) -> Heading {
+        let set = self.sets.get(index);
+        let n = ordinals(self.sets.iter().map(|set| set.plan.is_some())).get(index).copied().unwrap_or(index + 1);
+        let key = if set.is_some_and(|set| set.plan.is_some()) { "results.planLabel" } else { "results.resultLabel" };
+        let outcome = match set {
+            None => SharedString::default(),
+            Some(set) if set.error.is_some() => t(cx, "results.outcomeError"),
+            Some(set) if set.plan.is_some() => t(cx, "results.outcomePlan"),
+            Some(set) if set.streaming => t(cx, "results.outcomeRunning"),
+            Some(set) => match (set.grid.is_some(), set.count(cx)) {
+                (true, Some(count)) => t_count(cx, "results.outcomeRows", count, &[]),
+                (false, Some(count)) => t_count(cx, "results.outcomeAffected", count, &[]),
+                (_, None) => SharedString::default(),
+            },
+        };
+        Heading {
+            label: t_with(cx, key, &[("n", &n.to_string())]),
+            statement: set.and_then(|set| set.statement.as_deref()).map(statement_tooltip).unwrap_or_default(),
+            outcome,
+            failed: set.is_some_and(|set| set.error.is_some()),
+        }
+    }
+
+    fn render_message_rows(
+        &mut self,
+        range: std::ops::Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        range
+            .filter_map(|ix| {
+                let line = self.messages.row(ix)?;
+                let heading = match line {
+                    Line::Result(index) => Some(self.heading(index, cx)),
+                    _ => None,
+                };
+                Some(message_log::render_row(ix, line, heading, self.messages.has_codes(), cx))
+            })
+            .collect()
+    }
+
+    fn messages_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let lang = cx.global::<I18n>().lang().to_string();
+        let count = t_count(cx, "results.messagesCount", self.messages.total() as i64, &[]);
+        let count =
+            count.replace(&self.messages.total().to_string(), &format_number(self.messages.total() as f64, 0, &lang));
+        let copy = cx.listener(|this, _, _, cx| {
+            let text = this.messages.copy_text(
+                |index| {
+                    let heading = this.heading(index, cx);
+                    match heading.statement.is_empty() {
+                        true => heading.label.to_string(),
+                        false => format!("{}: {}", heading.label, heading.statement),
+                    }
+                },
+                cx,
+            );
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            toast::success(t(cx, "toast.copiedClipboard"), cx);
+        });
+        let toolbar = h_flex()
+            .flex_none()
+            .px(rems(0.769))
+            .py(rems(0.462))
+            .gap(rems(0.615))
+            .justify_between()
+            .border_b_1()
+            .border_color(theme.border)
+            .text_size(TEXT_SM)
+            .text_color(theme.muted_foreground)
+            .child(div().flex_1().min_w_0().truncate().child(count))
+            .child(
+                Button::new("copy-messages")
+                    .debug_selector(|| "copy-messages".into())
+                    .tool(Icon::new(Lucide::Copy), ICON_XS, t(cx, "common.copy"))
+                    .tooltip(t(cx, "results.copyMessages"))
+                    .on_click(copy),
+            );
+        let scroll = self.messages.scroll.clone();
+        let list = uniform_list("messages", self.messages.rows(), cx.processor(Self::render_message_rows))
+            .debug_selector(|| "messages".into())
+            .track_scroll(&scroll)
+            .size_full()
+            .px(LIST_INSET)
+            .pb(LIST_INSET);
+        v_flex()
+            .size_full()
+            .child(toolbar)
+            .child(div().relative().flex_1().min_h_0().child(list).hover_scrollbar(&scroll, ScrollbarAxis::Vertical))
+            .into_any_element()
     }
 
     fn header(&self, left: SharedString, right: Option<SharedString>, cx: &App) -> impl IntoElement {
@@ -483,9 +680,10 @@ impl ResultsPanel {
         match event {
             GridEvent::ViewCell { row, column } => {
                 let grid = grid.read(cx);
-                let name = grid.set().columns[*column].name.clone();
+                let meta = &grid.set().columns[*column];
+                let (name, type_name) = (meta.name.clone(), meta.type_name.clone());
                 let value = grid.set().display(*row, *column).map(str::to_string);
-                crate::cell_viewer::open(name, value, window, cx);
+                crate::cell_viewer::open(name, type_name, value, window, cx);
             }
             GridEvent::Export => crate::export_dialog::open(grid.read(cx).export_source(), window, cx),
             GridEvent::FocusedRowChanged if self.is_active(grid) => cx.emit(ResultsEvent::FocusedRowChanged),
@@ -511,6 +709,7 @@ impl EventEmitter<ResultsEvent> for ResultsPanel {}
 impl Render for ResultsPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match self.sets.get(self.active) {
+            _ if self.messages_open => self.messages_view(cx),
             None => self.empty(None, cx),
             Some(set) => match (&set.error, &set.plan, &set.grid) {
                 (Some(error), ..) => self.error(error, set.statement.as_deref(), cx),
@@ -523,7 +722,7 @@ impl Render for ResultsPanel {
         v_flex()
             .size_full()
             .bg(cx.theme().sidebar)
-            .when(self.sets.len() > 1, |el| el.child(self.tabs(cx)))
+            .when(self.sets.len() > 1 || !self.messages.is_empty(), |el| el.child(self.tabs(cx)))
             .child(div().flex_1().min_h_0().child(body))
     }
 }
@@ -537,5 +736,138 @@ mod label_tests {
         assert_eq!(ordinals([false, true, false, true]), [1, 1, 2, 2]);
         assert_eq!(ordinals([true, false]), [1, 1]);
         assert!(ordinals([]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod messages_tests {
+    use std::sync::Arc;
+
+    use barsql_app::{RunEvent, RunResult};
+    use barsql_core::{MessageLevel, ResultSummary, ServerMessage};
+    use barsql_db::{ChunkBuilder, ColumnMeta};
+    use gpui_kit::component::Root;
+    use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
+
+    use super::ResultsPanel;
+    use crate::test_support::Env;
+
+    fn panel(cx: &mut TestAppContext) -> (Entity<ResultsPanel>, &mut VisualTestContext) {
+        let mut panel = None;
+        let window = cx.add_window(|window, cx| {
+            let view = cx.new(|_| ResultsPanel::default());
+            panel = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+        (panel.unwrap(), cx)
+    }
+
+    fn apply(panel: &Entity<ResultsPanel>, events: Vec<RunEvent>, cx: &mut VisualTestContext) {
+        for event in events {
+            panel.update_in(cx, |panel, window, cx| panel.apply(event, window, cx));
+        }
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn messages(index: usize, messages: Vec<ServerMessage>) -> RunEvent {
+        RunEvent::Messages { result_index: index, messages, dropped: 0 }
+    }
+
+    fn done(index: usize, statement: &str, rows: i64) -> RunEvent {
+        let summary = ResultSummary { row_count: rows, ..Default::default() };
+        let result = RunResult {
+            result_index: index,
+            statement: statement.into(),
+            summary: Some(summary),
+            ..Default::default()
+        };
+        RunEvent::Result(Box::new(result))
+    }
+
+    fn click(selector: &'static str, cx: &mut VisualTestContext) {
+        let at = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is not drawn")).center();
+        cx.simulate_click(at, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    #[gpui_kit::test]
+    fn a_run_that_only_said_something_opens_on_its_messages(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let warning = ServerMessage {
+            level: MessageLevel::Warning,
+            code: "01000".into(),
+            text: "careful".into(),
+            hint: "look closer".into(),
+            ..Default::default()
+        };
+        let events = vec![
+            messages(0, vec![ServerMessage::new(MessageLevel::Notice, "hi"), warning]),
+            done(0, "DO $$ BEGIN RAISE NOTICE 'hi'; END $$", 0),
+            RunEvent::Done { result_count: 1, error: None },
+        ];
+        apply(&panel, events, cx);
+        assert!(panel.read_with(cx, |panel, _| panel.messages_shown()));
+        assert!(cx.debug_bounds("result-tab-messages").is_some(), "one result still gets the tab strip");
+        let texts = panel.read_with(cx, |panel, _| panel.message_texts());
+        assert_eq!(
+            texts,
+            [
+                (MessageLevel::Notice, String::new(), "hi".into()),
+                (MessageLevel::Warning, "01000".into(), "careful".into())
+            ]
+        );
+        click("copy-messages", cx);
+        let copied = cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default();
+        assert_eq!(
+            copied,
+            "-- Result 1: DO $$ BEGIN RAISE NOTICE 'hi'; END $$\nNotice: hi\nWarning 01000: careful\nHint: look closer"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn messages_wait_behind_rows_until_their_tab_is_picked(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let columns: Arc<[ColumnMeta]> = vec![ColumnMeta { name: "n".into(), type_name: "int4".into() }].into();
+        let mut rows = ChunkBuilder::new(1, 1);
+        rows.push_number(|s| s.push('1'));
+        rows.end_row();
+        let events = vec![
+            RunEvent::Meta { result_index: 0, columns, schema_name: String::new(), table_name: String::new() },
+            RunEvent::Rows { result_index: 0, chunk: Arc::new(rows.finish()) },
+            done(0, "SELECT 1", 1),
+            messages(0, vec![ServerMessage::new(MessageLevel::Warning, "1292: truncated")]),
+            RunEvent::Done { result_count: 1, error: None },
+        ];
+        apply(&panel, events, cx);
+        assert!(!panel.read_with(cx, |panel, _| panel.messages_shown()), "the rows come first");
+        click("result-tab-messages", cx);
+        assert!(panel.read_with(cx, |panel, _| panel.messages_shown()));
+        assert!(cx.debug_bounds("messages").is_some());
+        click("result-tab-0", cx);
+        assert!(!panel.read_with(cx, |panel, _| panel.messages_shown()));
+
+        // MySQL's info line only reports how an UPDATE went, so its run stays on the result.
+        panel.update(cx, |panel, cx| panel.clear(cx));
+        let info = ServerMessage::new(MessageLevel::Info, "Rows matched: 3  Changed: 1  Warnings: 0");
+        apply(
+            &panel,
+            vec![
+                messages(0, vec![info]),
+                done(0, "UPDATE t SET a = 1", 0),
+                RunEvent::Done { result_count: 1, error: None },
+            ],
+            cx,
+        );
+        assert!(!panel.read_with(cx, |panel, _| panel.messages_shown()));
+        assert!(cx.debug_bounds("result-tab-messages").is_some());
+        panel.update(cx, |panel, cx| panel.clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("result-tab-messages").is_none(), "a new run starts without them");
     }
 }

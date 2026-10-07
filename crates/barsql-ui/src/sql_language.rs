@@ -12,8 +12,8 @@ use gpui_kit::component::input::CompletionProvider;
 use gpui_kit::component::{Rope, RopeExt};
 use gpui_kit::{App, Task, Window};
 use lsp_types::{
-    CompletionContext as TriggerContext, CompletionItemKind, CompletionResponse, CompletionTextEdit, Range as LspRange,
-    TextEdit,
+    CompletionContext as TriggerContext, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
+    CompletionTextEdit, InsertTextFormat, Range as LspRange, TextEdit,
 };
 
 use crate::i18n::I18n;
@@ -188,11 +188,16 @@ fn lsp_completion(item: lang::CompletionItem, range: LspRange) -> lsp_types::Com
         ItemKind::Field => CompletionItemKind::FIELD,
         ItemKind::Class => CompletionItemKind::CLASS,
         ItemKind::Module => CompletionItemKind::MODULE,
+        ItemKind::Function => CompletionItemKind::FUNCTION,
     };
     lsp_types::CompletionItem {
         kind: Some(kind),
         detail: item.detail,
+        label_details: item
+            .label_detail
+            .map(|detail| CompletionItemLabelDetails { detail: Some(detail), description: None }),
         sort_text: Some(item.sort_text),
+        insert_text_format: item.snippet.then_some(InsertTextFormat::SNIPPET),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text: item.insert_text })),
         label: item.label,
         ..Default::default()

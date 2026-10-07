@@ -29,12 +29,8 @@ pub struct JsonPanel {
 impl JsonPanel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder(t(cx, "jsonViewer.filterPlaceholder")));
-        let editor = cx.new(|cx| {
-            let mut state =
-                EditorState::new(window, cx).language("json").line_number(false).soft_wrap(true).folding(true);
-            state.set_readonly(true, cx);
-            state
-        });
+        let editor =
+            cx.new(|cx| EditorState::new(window, cx).language("json").line_number(false).soft_wrap(true).folding(true));
         let subscriptions = vec![
             cx.subscribe_in(&filter, window, |this, _, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -138,6 +134,7 @@ impl Render for JsonPanel {
                 .child(
                     div().flex_1().min_h_0().child(
                         Editor::new(&self.editor)
+                            .readonly(true)
                             .context_menu(crate::context_menu::editor(&self.editor))
                             .size_full()
                             .bordered(false)
@@ -201,5 +198,20 @@ mod tests {
         assert_eq!(text(cx).as_deref(), Some("// No keys match filter"));
         panel.update_in(cx, |panel, window, cx| panel.show(None, window, cx));
         assert_eq!(text(cx), None);
+    }
+
+    // The editor element sets read-only on its state as it draws, so the element has to ask for it.
+    #[gpui_kit::test]
+    fn the_json_cannot_be_typed_into(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = cx.add_window_view(JsonPanel::new);
+        panel.update_in(cx, |panel, window, cx| panel.show(Some(row()), window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let editor = panel.read_with(cx, |panel, _| panel.editor.clone());
+        editor.update_in(cx, |state, window, cx| state.focus(window, cx));
+        let value = |cx: &mut VisualTestContext| editor.read_with(cx, |state, _| state.value().to_string());
+        let before = value(cx);
+        cx.simulate_input("x");
+        assert_eq!(value(cx), before);
     }
 }

@@ -4,22 +4,35 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::capabilities::{self, Capabilities, DatabaseField, DefaultSchema, Location};
+use crate::dialect::SqlDialect;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub enum DriverType {
     Sqlite,
     Postgres,
     MySql,
+    Turso,
+    ClickHouse,
+    SqlServer,
     Other(String),
     #[default]
     Unset,
 }
 
 impl DriverType {
+    // In the order the connection dialog lists them.
+    pub const KNOWN: [DriverType; 6] =
+        [Self::Sqlite, Self::Postgres, Self::MySql, Self::SqlServer, Self::ClickHouse, Self::Turso];
+
     pub fn as_str(&self) -> &str {
         match self {
             Self::Sqlite => "sqlite",
             Self::Postgres => "postgres",
             Self::MySql => "mysql",
+            Self::Turso => "turso",
+            Self::ClickHouse => "clickhouse",
+            Self::SqlServer => "sqlserver",
             Self::Other(name) => name,
             Self::Unset => "",
         }
@@ -30,13 +43,39 @@ impl DriverType {
             "sqlite" => Self::Sqlite,
             "postgres" => Self::Postgres,
             "mysql" => Self::MySql,
+            "turso" => Self::Turso,
+            "clickhouse" => Self::ClickHouse,
+            "sqlserver" | "mssql" => Self::SqlServer,
             "" => Self::Unset,
             other => Self::Other(other.to_string()),
         }
     }
 
+    pub fn dialect(&self) -> Option<SqlDialect> {
+        match self {
+            Self::Sqlite | Self::Turso => Some(SqlDialect::Sqlite),
+            Self::Postgres => Some(SqlDialect::Postgres),
+            Self::MySql => Some(SqlDialect::MySql),
+            Self::SqlServer => Some(SqlDialect::TSql),
+            Self::ClickHouse => Some(SqlDialect::ClickHouse),
+            Self::Other(_) | Self::Unset => None,
+        }
+    }
+
+    pub fn capabilities(&self) -> &'static Capabilities {
+        match self {
+            Self::Sqlite => &capabilities::SQLITE,
+            Self::Postgres => &capabilities::POSTGRES,
+            Self::MySql => &capabilities::MYSQL,
+            Self::Turso => &capabilities::TURSO,
+            Self::ClickHouse => &capabilities::CLICKHOUSE,
+            Self::SqlServer => &capabilities::SQL_SERVER,
+            Self::Other(_) | Self::Unset => &capabilities::UNSUPPORTED,
+        }
+    }
+
     pub fn is_supported(&self) -> bool {
-        matches!(self, Self::Sqlite | Self::Postgres | Self::MySql)
+        self.capabilities().supported
     }
 }
 
@@ -87,8 +126,16 @@ pub struct ConnectionConfig {
     pub username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub password: String,
+    // A database reached by URL, like Turso's libsql://name-org.turso.io.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub auth_token: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ssl_mode: String,
+    // A SQL Server named instance, found through the SQL Browser service instead of a port.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub instance: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub schema: String,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -135,42 +182,97 @@ impl ConnectionConfig {
         trim_in_place(&mut self.username);
         trim_in_place(&mut self.ssl_mode);
         trim_in_place(&mut self.schema);
+        trim_in_place(&mut self.url);
+        trim_in_place(&mut self.auth_token);
+        trim_in_place(&mut self.instance);
+        self.take_url_token();
         self.ssh.normalize();
     }
 
+    // Turso's dashboard hands out URLs with `?authToken=…`. The token goes in its own field, so the URL can be
+    // shown without it.
+    fn take_url_token(&mut self) {
+        let Some((base, query)) = self.url.split_once('?') else { return };
+        let mut token = None;
+        let rest: Vec<&str> = query
+            .split('&')
+            .filter(|pair| match pair.strip_prefix("authToken=") {
+                Some(value) => {
+                    token = Some(value.to_string());
+                    false
+                }
+                None => !pair.is_empty(),
+            })
+            .collect();
+        let Some(token) = token else { return };
+        if self.auth_token.is_empty() {
+            self.auth_token = token;
+        }
+        self.url = if rest.is_empty() { base.to_string() } else { format!("{base}?{}", rest.join("&")) };
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        match self.driver {
-            DriverType::Sqlite => {
-                if self.file_path.is_empty() {
-                    return Err("SQLite database file path is required".into());
+        let caps = self.driver.capabilities();
+        if !caps.supported {
+            return Err(match self.driver {
+                DriverType::Other(_) | DriverType::Unset => format!("unsupported driver: {}", self.driver),
+                DriverType::Sqlite
+                | DriverType::Postgres
+                | DriverType::MySql
+                | DriverType::Turso
+                | DriverType::ClickHouse
+                | DriverType::SqlServer => format!("{} is not available in this build", self.driver),
+            });
+        }
+        match caps.location {
+            Location::LocalFile => require(&self.file_path, "SQLite database file path is required")?,
+            Location::Url => {
+                require(&self.url, "database URL is required")?;
+                let lower = self.url.to_ascii_lowercase();
+                if !URL_SCHEMES.iter().any(|scheme| lower.len() > scheme.len() && lower.starts_with(scheme)) {
+                    return Err("database URL must start with libsql://, https://, http://, wss:// or ws://".into());
                 }
             }
-            DriverType::Postgres => {
+            Location::Network => {
                 require(&self.host, "host is required")?;
-                require(&self.database, "database name is required (e.g. blog - not the username \"postgres\")")?;
+                if caps.database == DatabaseField::Required {
+                    require(&self.database, self.database_required_message())?;
+                }
                 require(&self.username, "username is required")?;
             }
-            DriverType::MySql => {
-                require(&self.host, "host is required")?;
-                require(&self.database, "database name is required")?;
-                require(&self.username, "username is required")?;
-            }
-            _ => return Err(format!("unsupported driver: {}", self.driver)),
         }
-        if self.driver != DriverType::Sqlite {
+        if caps.ssh_tunnel {
             return self.ssh.validate();
         }
         Ok(())
+    }
+
+    fn database_required_message(&self) -> &'static str {
+        match self.driver {
+            DriverType::Postgres => "database name is required (e.g. blog - not the username \"postgres\")",
+            DriverType::Sqlite
+            | DriverType::MySql
+            | DriverType::Turso
+            | DriverType::ClickHouse
+            | DriverType::SqlServer
+            | DriverType::Other(_)
+            | DriverType::Unset => "database name is required",
+        }
+    }
+
+    pub fn dialect(&self) -> Result<SqlDialect, String> {
+        self.driver.dialect().ok_or_else(|| format!("unsupported driver: {}", self.driver))
     }
 
     pub fn default_browse_schema(&self) -> String {
         if !self.schema.is_empty() {
             return self.schema.clone();
         }
-        match self.driver {
-            DriverType::Sqlite => "main".into(),
-            DriverType::MySql => self.database.clone(),
-            _ => "public".into(),
+        let caps = self.driver.capabilities();
+        match caps.default_schema {
+            DefaultSchema::Named(name) => name.into(),
+            DefaultSchema::Database if self.database.is_empty() => caps.default_database.into(),
+            DefaultSchema::Database => self.database.clone(),
         }
     }
 
@@ -200,6 +302,13 @@ impl ConnectionConfig {
             ssh.known_hosts,
             ssh.ignore_host_key,
         );
+        // Appended only when set, so connections from before these fields keep their fingerprints.
+        let mut raw = raw;
+        for (label, value) in [("url", &self.url), ("authToken", &self.auth_token), ("instance", &self.instance)] {
+            if !value.is_empty() {
+                raw.push_str(&format!("|{label}={value}"));
+            }
+        }
         hex::encode(Sha256::digest(raw.as_bytes()))
     }
 }
@@ -238,6 +347,8 @@ impl SshConfig {
         }
     }
 }
+
+const URL_SCHEMES: [&str; 5] = ["libsql://", "https://", "http://", "wss://", "ws://"];
 
 fn require(value: &str, message: &str) -> Result<(), String> {
     if value.is_empty() { Err(message.to_string()) } else { Ok(()) }
@@ -326,6 +437,7 @@ mod tests {
             ("mysql ok", cfg(DriverType::MySql, "", "h", "d", "u"), ""),
             ("mysql missing host", cfg(DriverType::MySql, "", "", "d", "u"), "host"),
             ("unknown driver", cfg(DriverType::parse("oracle"), "", "", "", ""), "unsupported"),
+            ("unset driver", cfg(DriverType::Unset, "", "h", "d", "u"), "unsupported"),
         ];
         for (name, cfg, want) in cases {
             match (cfg.validate(), want) {
@@ -360,7 +472,9 @@ mod tests {
         assert_eq!(cosmetic.fingerprint(), base_fp, "cosmetic fields must not force a reconnect");
 
         type Mutation = (&'static str, fn(&mut ConnectionConfig));
-        let mutations: [Mutation; 10] = [
+        let mutations: [Mutation; 12] = [
+            ("url", |c| c.url = "libsql://db.turso.io".into()),
+            ("authToken", |c| c.auth_token = "t".into()),
             ("driver", |c| c.driver = DriverType::MySql),
             ("host", |c| c.host = "h2".into()),
             ("port", |c| c.port = 5433),
@@ -494,10 +608,51 @@ mod tests {
     }
 
     #[test]
+    fn drivers_round_trip_their_ids() {
+        for driver in DriverType::KNOWN {
+            assert_eq!(DriverType::parse(driver.as_str()), driver);
+            assert!(driver.dialect().is_some(), "{driver}");
+        }
+        assert_eq!(DriverType::parse("mssql"), DriverType::SqlServer);
+        assert_eq!(DriverType::Turso.dialect(), Some(SqlDialect::Sqlite));
+        assert_eq!(DriverType::Unset.dialect(), None);
+        assert!(!DriverType::parse("oracle").is_supported());
+    }
+
+    #[test]
+    fn drivers_this_build_lacks_are_rejected() {
+        for driver in DriverType::KNOWN.into_iter().filter(|d| !d.is_supported()) {
+            let cfg = ConnectionConfig { driver: driver.clone(), ..pg() };
+            assert_eq!(cfg.validate(), Err(format!("{driver} is not available in this build")));
+        }
+    }
+
+    #[test]
     fn driver_round_trips_unknown_names() {
         let cfg: ConnectionConfig = serde_json::from_str(r#"{"driver":"oracle","ssh":{}}"#).unwrap();
         assert_eq!(cfg.driver, DriverType::Other("oracle".into()));
         assert_eq!(serde_json::to_value(&cfg).unwrap()["driver"], "oracle");
         assert_eq!(cfg.validate(), Err("unsupported driver: oracle".into()));
+    }
+
+    #[test]
+    fn a_url_token_moves_to_its_own_field() {
+        let mut cfg = ConnectionConfig {
+            driver: DriverType::Turso,
+            url: " libsql://db-org.turso.io?authToken=abc.def&tls=1 ".into(),
+            ..Default::default()
+        };
+        cfg.normalize();
+        assert_eq!((cfg.url.as_str(), cfg.auth_token.as_str()), ("libsql://db-org.turso.io?tls=1", "abc.def"));
+        let mut kept = ConnectionConfig { url: "https://x?authToken=new".into(), auth_token: "old".into(), ..cfg };
+        kept.normalize();
+        assert_eq!((kept.url.as_str(), kept.auth_token.as_str()), ("https://x", "old"), "a typed token wins");
+    }
+
+    #[test]
+    fn fingerprints_without_urls_are_unchanged() {
+        let cfg = ConnectionConfig { driver: DriverType::Postgres, host: "h".into(), ..Default::default() };
+        // The fingerprint before url and authToken existed.
+        assert_eq!(cfg.fingerprint(), hex::encode(Sha256::digest(b"postgres|h|0|||||||false|false||0|||||||false")));
     }
 }

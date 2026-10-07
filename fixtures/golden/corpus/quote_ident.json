@@ -2,6 +2,10 @@
   {
     "input": "name",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`name`",
+        "quoted": "`name`"
+      },
       "mysql": {
         "qualified": "`s`.`name`",
         "quoted": "`name`"
@@ -13,12 +17,20 @@
       "sqlite": {
         "qualified": "\"s\".\"name\"",
         "quoted": "\"name\""
+      },
+      "tsql": {
+        "qualified": "[s].[name]",
+        "quoted": "[name]"
       }
     }
   },
   {
     "input": "Mixed",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`Mixed`",
+        "quoted": "`Mixed`"
+      },
       "mysql": {
         "qualified": "`s`.`Mixed`",
         "quoted": "`Mixed`"
@@ -30,12 +42,20 @@
       "sqlite": {
         "qualified": "\"s\".\"Mixed\"",
         "quoted": "\"Mixed\""
+      },
+      "tsql": {
+        "qualified": "[s].[Mixed]",
+        "quoted": "[Mixed]"
       }
     }
   },
   {
     "input": "with space",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`with space`",
+        "quoted": "`with space`"
+      },
       "mysql": {
         "qualified": "`s`.`with space`",
         "quoted": "`with space`"
@@ -47,12 +67,20 @@
       "sqlite": {
         "qualified": "\"s\".\"with space\"",
         "quoted": "\"with space\""
+      },
+      "tsql": {
+        "qualified": "[s].[with space]",
+        "quoted": "[with space]"
       }
     }
   },
   {
     "input": "a\"b",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`a\"b`",
+        "quoted": "`a\"b`"
+      },
       "mysql": {
         "qualified": "`s`.`a\"b`",
         "quoted": "`a\"b`"
@@ -64,12 +92,20 @@
       "sqlite": {
         "qualified": "\"s\".\"a\"\"b\"",
         "quoted": "\"a\"\"b\""
+      },
+      "tsql": {
+        "qualified": "[s].[a\"b]",
+        "quoted": "[a\"b]"
       }
     }
   },
   {
     "input": "a`b",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`a\\`b`",
+        "quoted": "`a\\`b`"
+      },
       "mysql": {
         "qualified": "`s`.`a``b`",
         "quoted": "`a``b`"
@@ -81,12 +117,20 @@
       "sqlite": {
         "qualified": "\"s\".\"a`b\"",
         "quoted": "\"a`b\""
+      },
+      "tsql": {
+        "qualified": "[s].[a`b]",
+        "quoted": "[a`b]"
       }
     }
   },
   {
     "input": "select",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`select`",
+        "quoted": "`select`"
+      },
       "mysql": {
         "qualified": "`s`.`select`",
         "quoted": "`select`"
@@ -98,12 +142,20 @@
       "sqlite": {
         "qualified": "\"s\".\"select\"",
         "quoted": "\"select\""
+      },
+      "tsql": {
+        "qualified": "[s].[select]",
+        "quoted": "[select]"
       }
     }
   },
   {
     "input": "",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.``",
+        "quoted": "``"
+      },
       "mysql": {
         "qualified": "`s`.``",
         "quoted": "``"
@@ -115,12 +167,20 @@
       "sqlite": {
         "qualified": "\"s\".\"\"",
         "quoted": "\"\""
+      },
+      "tsql": {
+        "qualified": "[s].[]",
+        "quoted": "[]"
       }
     }
   },
   {
     "input": "ünï",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`ünï`",
+        "quoted": "`ünï`"
+      },
       "mysql": {
         "qualified": "`s`.`ünï`",
         "quoted": "`ünï`"
@@ -132,12 +192,20 @@
       "sqlite": {
         "qualified": "\"s\".\"ünï\"",
         "quoted": "\"ünï\""
+      },
+      "tsql": {
+        "qualified": "[s].[ünï]",
+        "quoted": "[ünï]"
       }
     }
   },
   {
     "input": "a.b",
     "output": {
+      "clickhouse": {
+        "qualified": "`s`.`a.b`",
+        "quoted": "`a.b`"
+      },
       "mysql": {
         "qualified": "`s`.`a.b`",
         "quoted": "`a.b`"
@@ -149,6 +217,10 @@
       "sqlite": {
         "qualified": "\"s\".\"a.b\"",
         "quoted": "\"a.b\""
+      },
+      "tsql": {
+        "qualified": "[s].[a.b]",
+        "quoted": "[a.b]"
       }
     }
   }

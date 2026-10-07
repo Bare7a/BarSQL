@@ -3,15 +3,15 @@ use std::fs::File;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use barsql_core::{DriverType, QueryError, Value};
+use barsql_core::{DriverType, QueryError, SqlDialect, Value};
 use barsql_db::{Cancel, ScriptEvent, Session};
 use barsql_io::csv_import::open_error;
 use barsql_io::{CsvField, CsvOptions, ImportPreview, count_rows, new_reader, preview_file};
 use barsql_sql::dml::{
-    IMPORT_BOOL, IMPORT_DATE, IMPORT_TEXT, IMPORT_TIMESTAMP, accepts_empty_string, build_batch_insert,
+    IMPORT_BOOL, IMPORT_DATE, IMPORT_TEXT, IMPORT_TIMESTAMP, accepts_empty_string, build_batch_insert_with,
     build_import_create_table, build_truncate,
 };
-use barsql_sql::{READ_ONLY_ERROR, split_statement_texts};
+use barsql_sql::{Dialect, READ_ONLY_ERROR, split_statement_texts};
 use serde::{Deserialize, Serialize};
 
 use crate::BarApp;
@@ -21,8 +21,6 @@ use crate::events::{ImportDone, ImportEvent, ImportHandle, ImportProgress};
 const MAX_REPORTED_ERRORS: usize = 20;
 const DEFAULT_BATCH_SIZE: usize = 500;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
-// Postgres rejects a statement with more bind parameters than this.
-const POSTGRES_MAX_PARAMS: usize = 65_535;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -234,8 +232,11 @@ impl BarApp {
         let mut session = engine.session().await?;
         let schema = req.schema.as_str();
         let mut batch_size = if req.batch_size == 0 { DEFAULT_BATCH_SIZE } else { req.batch_size };
-        if driver == DriverType::Postgres {
-            batch_size = batch_size.min((POSTGRES_MAX_PARAMS / targets.len()).max(1));
+        if let Some(max_params) = Dialect::for_driver(&driver).max_bind_params {
+            batch_size = batch_size.min((max_params / targets.len()).max(1));
+        }
+        if let Some(max_rows) = driver.capabilities().max_rows_per_insert {
+            batch_size = batch_size.min(max_rows);
         }
 
         // Read the header before any DDL, so an unreadable file fails before a table exists.
@@ -263,6 +264,7 @@ impl BarApp {
         }
 
         let conv = self.value_converter(&engine, schema, req, targets, sources).await;
+        let wraps = conv.wraps(targets.len());
         let mut result = ImportResult::default();
         let mut batch: Vec<Vec<Value>> = Vec::with_capacity(batch_size);
         let mut processed = 0i64;
@@ -292,6 +294,7 @@ impl BarApp {
                     schema,
                     &req.table,
                     targets,
+                    &wraps,
                     &mut batch,
                     req.stop_on_error,
                     cancel,
@@ -309,6 +312,7 @@ impl BarApp {
                 schema,
                 &req.table,
                 targets,
+                &wraps,
                 &mut batch,
                 req.stop_on_error,
                 cancel,
@@ -333,11 +337,21 @@ impl BarApp {
         let mut conv = ValueConverter {
             null_literal: req.options.null_literal.clone(),
             trim: req.options.trim_space,
-            // Postgres booleans need real bools. MySQL and SQLite take 1/0.
-            bool_as_bool: driver == DriverType::Postgres,
+            // Postgres booleans need real bools. MySQL, SQLite and SQL Server take 1/0.
+            bool_as_bool: match driver.dialect() {
+                Some(SqlDialect::Postgres | SqlDialect::ClickHouse) => true,
+                Some(SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::TSql) | None => false,
+            },
             ..Default::default()
         };
-        let mysql = driver == DriverType::MySql;
+        // MySQL rejects ISO timestamps with a zone, so dates are rewritten for it. ClickHouse reads a Date only as
+        // YYYY-MM-DD.
+        let (mysql, clickhouse) = match driver.dialect() {
+            Some(SqlDialect::MySql) => (true, false),
+            Some(SqlDialect::ClickHouse) => (false, true),
+            Some(SqlDialect::Postgres | SqlDialect::Sqlite | SqlDialect::TSql) | None => (false, false),
+        };
+        let tsql = driver.dialect() == Some(SqlDialect::TSql);
         let requested_bool: HashSet<usize> = sources
             .iter()
             .enumerate()
@@ -353,6 +367,9 @@ impl BarApp {
                 }
                 if mysql && (t == IMPORT_DATE || t == IMPORT_TIMESTAMP) {
                     conv.date_cols.insert(i);
+                }
+                if clickhouse && t == IMPORT_DATE {
+                    conv.day_cols.insert(i);
                 }
             }
             return conv;
@@ -378,6 +395,13 @@ impl BarApp {
             }
             if mysql && matches!(upper.as_str(), "DATE" | "DATETIME" | "TIMESTAMP") {
                 conv.date_cols.insert(i);
+            }
+            let base = upper.trim_start_matches("NULLABLE(").trim_end_matches(')');
+            if clickhouse && matches!(base, "DATE" | "DATE32") {
+                conv.day_cols.insert(i);
+            }
+            if tsql && matches!(upper.split('(').next(), Some("BINARY" | "VARBINARY" | "IMAGE")) {
+                conv.hex_cols.insert(i);
             }
         }
         conv
@@ -452,6 +476,7 @@ async fn flush(
     schema: &str,
     table: &str,
     targets: &[String],
+    wraps: &[Option<&str>],
     batch: &mut Vec<Vec<Value>>,
     stop_on_error: bool,
     cancel: &Cancel,
@@ -461,13 +486,13 @@ async fn flush(
         return Ok(());
     }
     let rows = std::mem::take(batch);
-    let (inserted, skipped, errors) = match insert(session, driver, schema, table, targets, &rows).await {
+    let (inserted, skipped, errors) = match insert(session, driver, schema, table, targets, wraps, &rows).await {
         Ok(()) => (rows.len() as i64, 0, Vec::new()),
         Err(err) if stop_on_error || cancel.is_cancelled() => (0, rows.len() as i64, vec![err.message]),
         Err(_) => {
             let mut outcome = (0, 0, Vec::new());
             for row in &rows {
-                match insert(session, driver, schema, table, targets, std::slice::from_ref(row)).await {
+                match insert(session, driver, schema, table, targets, wraps, std::slice::from_ref(row)).await {
                     Ok(()) => outcome.0 += 1,
                     Err(err) => {
                         outcome.1 += 1;
@@ -494,9 +519,11 @@ async fn insert(
     schema: &str,
     table: &str,
     targets: &[String],
+    wraps: &[Option<&str>],
     rows: &[Vec<Value>],
 ) -> Result<(), QueryError> {
-    let (sql, args) = build_batch_insert(driver, schema, table, targets, rows).map_err(QueryError::message)?;
+    let (sql, args) =
+        build_batch_insert_with(driver, schema, table, targets, rows, wraps).map_err(QueryError::message)?;
     session.execute_params(&sql, &args).await.map(|_| ())
 }
 
@@ -514,6 +541,10 @@ struct ValueConverter {
     bool_int_cols: HashSet<usize>,
     // MySQL needs its own datetime literal rather than RFC 3339.
     date_cols: HashSet<usize>,
+    // ClickHouse Date columns, which take the day alone.
+    day_cols: HashSet<usize>,
+    // SQL Server binary columns. Text won't convert to binary there, so these go as 0x hex through CONVERT.
+    hex_cols: HashSet<usize>,
     // Columns that accept ''. Elsewhere a quoted empty field is still NULL.
     text_cols: HashSet<usize>,
     null_literal: String,
@@ -547,11 +578,29 @@ impl ValueConverter {
                     normalize_bool(v, false)
                 } else if self.date_cols.contains(&i) {
                     Value::Text(mysql_datetime(v))
+                } else if self.day_cols.contains(&i) {
+                    Value::Text(day_part(v).to_string())
+                } else if self.hex_cols.contains(&i) {
+                    Value::Text(hex_literal(v))
                 } else {
                     Value::Text(v.to_string())
                 }
             })
             .collect()
+    }
+}
+
+impl ValueConverter {
+    fn wraps(&self, columns: usize) -> Vec<Option<&'static str>> {
+        (0..columns).map(|i| self.hex_cols.contains(&i).then_some("CONVERT(varbinary(max), {}, 1)")).collect()
+    }
+}
+
+// The grid shows bytes as text when they're UTF-8 and as \x hex otherwise, so a value reads back either way.
+fn hex_literal(v: &str) -> String {
+    match v.strip_prefix("\\x").filter(|hex| hex.len() % 2 == 0 && hex.bytes().all(|b| b.is_ascii_hexdigit())) {
+        Some(hex) => format!("0x{}", hex.to_uppercase()),
+        None => format!("0x{}", hex::encode_upper(v.as_bytes())),
     }
 }
 
@@ -580,6 +629,16 @@ pub(crate) fn normalize_bool(v: &str, as_bool: bool) -> Value {
         }
         _ => Value::Text(v.to_string()),
     }
+}
+
+// The YYYY-MM-DD a timestamp starts with, or the value as written.
+fn day_part(v: &str) -> &str {
+    let b = v.as_bytes();
+    let shaped = b.len() >= 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && [0..4, 5..7, 8..10].iter().all(|r| b[r.clone()].iter().all(u8::is_ascii_digit));
+    if shaped { &v[..10] } else { v }
 }
 
 // Rewrites RFC 3339 as a MySQL literal, keeping the wall time as written and dropping the offset.
@@ -667,6 +726,9 @@ mod tests {
         assert_eq!(mysql_datetime("2024-02-29T13:45:30.500Z"), "2024-02-29 13:45:30.5");
         assert_eq!(mysql_datetime("2024-02-29 13:45:30"), "2024-02-29 13:45:30");
         assert_eq!(mysql_datetime("nope"), "nope");
+        assert_eq!(day_part("2026-08-09T00:00:00Z"), "2026-08-09");
+        assert_eq!(day_part("2026-08-09"), "2026-08-09");
+        assert_eq!(day_part("09/08/2026"), "09/08/2026");
         assert_eq!(undefuse_formula("'=1+1"), "=1+1");
         assert_eq!(undefuse_formula("'plain"), "'plain");
         assert_eq!(undefuse_formula("'"), "'");

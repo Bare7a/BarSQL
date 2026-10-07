@@ -4,11 +4,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use barsql_core::DriverType;
 
-use super::text::{
-    LexOptions, block_comment_end, char_at, is_escape_string_prefix, is_space, line_comment_end, quote_end,
-    skip_dollar_quoted,
-};
-use crate::split::{Complete, CompleteToken};
+use super::text::{block_comment_end, char_at, is_space, line_comment_end};
+use crate::lex::LexRules;
+use crate::lex::boundary::{Boundary, Mode, boundaries};
+use crate::lex::prim::{dash_comment_at, hash_comment_at};
 
 // Used for run glyphs, run-at-cursor and completion scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,13 +19,15 @@ pub struct EditorStatement<'a> {
     // Contiguous with the previous statement's end.
     pub start: usize,
     pub end: usize,
+    // Ends with `;` or a GO line, so the text after it starts a new region.
+    pub terminated: bool,
 }
 
 pub(crate) fn trim_spaces(s: &str) -> &str {
     s.trim_matches(is_space)
 }
 
-fn first_code_offset(text: &str, from: usize, to: usize, opts: LexOptions) -> Option<usize> {
+fn first_code_offset(text: &str, from: usize, to: usize, rules: &LexRules) -> Option<usize> {
     let b = text.as_bytes();
     let mut i = from;
     while i < to && i < b.len() {
@@ -35,8 +36,9 @@ fn first_code_offset(text: &str, from: usize, to: usize, opts: LexOptions) -> Op
             i += c.len_utf8();
             continue;
         }
-        if (c == '-' && b.get(i + 1) == Some(&b'-')) || (c == '#' && opts.hash_line_comments) {
-            let nl = line_comment_end(text, i + if c == '#' { 1 } else { 2 })?;
+        let dash = dash_comment_at(b, i, rules.dash_needs_space);
+        if dash || hash_comment_at(b, i, rules.hash_comments) {
+            let nl = line_comment_end(text, i + if dash { 2 } else { 1 })?;
             if nl >= to {
                 return None;
             }
@@ -44,45 +46,12 @@ fn first_code_offset(text: &str, from: usize, to: usize, opts: LexOptions) -> Op
             continue;
         }
         if c == '/' && b.get(i + 1) == Some(&b'*') {
-            i = block_comment_end(text, i, opts.nested_block_comments)?;
+            i = block_comment_end(text, i, rules.nested_block_comments)?;
             continue;
         }
         return Some(i);
     }
     None
-}
-
-// mysql client `DELIMITER xx` line. Returns the new terminator and the length of the line.
-fn delimiter_line(rest: &str) -> Option<(&str, usize)> {
-    let b = rest.as_bytes();
-    if b.len() < 9 || !b[..9].eq_ignore_ascii_case(b"DELIMITER") {
-        return None;
-    }
-    let mut i = 9;
-    while i < b.len() && matches!(b[i], b' ' | b'\t') {
-        i += 1;
-    }
-    if i == 9 {
-        return None;
-    }
-    let token_start = i;
-    while let Some(c) = char_at(rest, i).filter(|&c| !is_space(c)) {
-        i += c.len_utf8();
-    }
-    if i == token_start {
-        return None;
-    }
-    let token = &rest[token_start..i];
-    while i < b.len() && matches!(b[i], b' ' | b'\t') {
-        i += 1;
-    }
-    if i == b.len() {
-        return Some((token, i));
-    }
-    if b[i] == b'\r' {
-        i += 1;
-    }
-    (b.get(i) == Some(&b'\n')).then_some((token, i + 1))
 }
 
 #[derive(Clone)]
@@ -91,6 +60,7 @@ struct Span {
     run_line: usize,
     start: usize,
     end: usize,
+    terminated: bool,
 }
 
 type Recent = VecDeque<(Option<DriverType>, String, Arc<[Span]>)>;
@@ -107,7 +77,13 @@ pub fn parse_statements<'a>(sql: &'a str, driver: Option<&DriverType>) -> Vec<Ed
             .into_iter()
             .map(|s| {
                 let at = s.text.as_ptr() as usize - sql.as_ptr() as usize;
-                Span { text: at..at + s.text.len(), run_line: s.run_line, start: s.start, end: s.end }
+                Span {
+                    text: at..at + s.text.len(),
+                    run_line: s.run_line,
+                    start: s.start,
+                    end: s.end,
+                    terminated: s.terminated,
+                }
             })
             .collect();
         let mut recent = lock();
@@ -117,21 +93,22 @@ pub fn parse_statements<'a>(sql: &'a str, driver: Option<&DriverType>) -> Vec<Ed
     });
     spans
         .iter()
-        .map(|s| EditorStatement { text: &sql[s.text.clone()], run_line: s.run_line, start: s.start, end: s.end })
+        .map(|s| EditorStatement {
+            text: &sql[s.text.clone()],
+            run_line: s.run_line,
+            start: s.start,
+            end: s.end,
+            terminated: s.terminated,
+        })
         .collect()
 }
 
 fn split<'a>(sql: &'a str, driver: Option<&DriverType>) -> Vec<EditorStatement<'a>> {
-    let opts = LexOptions::for_driver(driver);
-    let client_delimiters = driver == Some(&DriverType::MySql);
-    let trigger_bodies = driver == Some(&DriverType::Sqlite);
+    let rules = LexRules::for_driver(driver);
     let b = sql.as_bytes();
     let len = b.len();
     let mut statements = Vec::new();
     let mut stmt_start = 0;
-    let mut delimiter = ";";
-    let mut state = Complete::Start;
-    let mut i = 0;
 
     // Statements come in source order, so line numbers are counted incrementally.
     let (mut line_pos, mut line) = (0, 1);
@@ -142,82 +119,48 @@ fn split<'a>(sql: &'a str, driver: Option<&DriverType>) -> Vec<EditorStatement<'
     };
 
     // Text is stmt_start..content_end, but the statement's region runs to slice_end.
-    let mut push = |content_end: usize, slice_end: usize, stmt_start: &mut usize| {
+    let mut push = |content_end: usize, slice_end: usize, stmt_start: &mut usize, batch_end: bool| {
         let start = *stmt_start;
         *stmt_start = slice_end;
         let text = trim_spaces(&sql[start..content_end]);
         if text.is_empty() {
             return;
         }
-        if let Some(code_at) = first_code_offset(sql, start, content_end, opts) {
-            statements.push(EditorStatement { text, run_line: line_at(code_at), start, end: slice_end });
+        if let Some(code_at) = first_code_offset(sql, start, content_end, &rules) {
+            let terminated = batch_end || text.ends_with(';');
+            statements.push(EditorStatement { text, run_line: line_at(code_at), start, end: slice_end, terminated });
         }
     };
 
-    while i < len {
-        let c = b[i];
-        let next = b.get(i + 1).copied();
-        if client_delimiters
-            && (c == b'd' || c == b'D')
-            && trim_spaces(&sql[sql[..i].rfind('\n').map_or(0, |p| p + 1)..i]).is_empty()
-            && let Some((token, consumed)) = delimiter_line(&sql[i..])
-        {
-            push(i, i, &mut stmt_start);
-            delimiter = token;
-            i += consumed;
-            stmt_start = i;
-            continue;
-        }
-        if (c == b'-' && next == Some(b'-')) || (c == b'#' && opts.hash_line_comments) {
-            i = line_comment_end(sql, i + if c == b'#' { 1 } else { 2 }).unwrap_or(len);
-            continue;
-        }
-        if c == b'/' && next == Some(b'*') {
-            i = block_comment_end(sql, i, opts.nested_block_comments).unwrap_or(len);
-            continue;
-        }
-        let quoted = match c {
-            b'\'' => Some(quote_end(sql, i, c, true, opts.backslash_escapes || is_escape_string_prefix(sql, i))),
-            b'"' => Some(quote_end(sql, i, c, true, opts.backslash_escapes && opts.double_quote_strings)),
-            b'`' => Some(quote_end(sql, i, c, true, false)),
-            b'$' if opts.dollar_quotes => Some(Some(skip_dollar_quoted(sql, i, len))),
-            _ => None,
-        };
-        if let Some(end) = quoted {
-            i = end.unwrap_or(len).min(len);
-            state = state.next(CompleteToken::Other);
-            continue;
-        }
-        let at_delimiter = if delimiter == ";" { c == b';' } else { sql[i..].starts_with(delimiter) };
-        if at_delimiter {
-            state = state.next(CompleteToken::Semi);
-            if trigger_bodies && state != Complete::Start {
-                i += 1;
-                continue;
+    for boundary in boundaries(sql, &rules, Mode::Statements) {
+        match boundary {
+            Boundary::Terminator { at, custom: false, .. } => push(at + 1, at + 1, &mut stmt_start, false),
+            // A custom DELIMITER isn't part of the statement's text, but its region covers it.
+            Boundary::Terminator { at, len, custom: true } => push(at, at + len, &mut stmt_start, false),
+            // DELIMITER and GO lines belong to no statement.
+            Boundary::DelimiterLine { at, end } => {
+                push(at, at, &mut stmt_start, false);
+                stmt_start = end;
             }
-            state = Complete::Start;
-            if delimiter == ";" {
-                push(i + 1, i + 1, &mut stmt_start);
-            } else {
-                push(i, i + delimiter.len(), &mut stmt_start);
+            Boundary::BatchSeparator { at, end, .. } => {
+                push(at, at, &mut stmt_start, true);
+                stmt_start = end;
             }
-            i += delimiter.len();
-            continue;
-        }
-        if trigger_bodies {
-            (state, i) = state.scan(b, i);
-        } else if c < 0x80 {
-            i += 1;
-        } else {
-            i += char_at(sql, i).map_or(1, char::len_utf8);
         }
     }
 
     let trailing = trim_spaces(&sql[stmt_start..]);
     if !trailing.is_empty()
-        && let Some(code_at) = first_code_offset(sql, stmt_start, len, opts)
+        && let Some(code_at) = first_code_offset(sql, stmt_start, len, &rules)
     {
-        statements.push(EditorStatement { text: trailing, run_line: line_at(code_at), start: stmt_start, end: len });
+        let terminated = trailing.ends_with(';');
+        statements.push(EditorStatement {
+            text: trailing,
+            run_line: line_at(code_at),
+            start: stmt_start,
+            end: len,
+            terminated,
+        });
     }
     statements
 }
@@ -246,7 +189,7 @@ pub fn current_statement_start(statements: &[EditorStatement], offset: usize) ->
         }
         start = if offset < s.end {
             s.start
-        } else if s.text.ends_with(';') {
+        } else if s.terminated {
             // Right after a `;` a new region starts, but an unterminated trailing statement is still
             // being edited.
             s.end

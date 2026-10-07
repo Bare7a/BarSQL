@@ -107,6 +107,36 @@ impl From<bool> for Value {
 
 pub type Row = BTreeMap<String, Value>;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageLevel {
+    #[default]
+    Info,
+    Notice,
+    Warning,
+}
+
+// What a server says about a statement besides its result: Postgres notices, MySQL warnings and notes, and
+// BarSQL's own notes about how it ran the statement.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerMessage {
+    pub level: MessageLevel,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub code: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hint: String,
+}
+
+impl ServerMessage {
+    pub fn new(level: MessageLevel, text: impl Into<String>) -> Self {
+        Self { level, text: text.into(), ..Default::default() }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResultSummary {

@@ -370,3 +370,35 @@ fn hovering_a_column_or_alias_describes_it_and_typing_closes_the_card(cx: &mut T
     cx.simulate_input("x");
     assert!(hover_lines(&tab, cx).is_empty(), "an edit closes the card");
 }
+
+#[gpui_kit::test]
+fn accepting_a_function_leaves_the_caret_between_its_parentheses(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    let connection_id = env.connection.id.clone();
+    settle(cx, |cx| cx.update(|_, cx| schema::catalog(cx, &connection_id).is_some()));
+    let labels = |cx: &mut VisualTestContext| cx.update(|_, cx| tab.read(cx).completion.read(cx).labels(cx));
+    cx.simulate_input("SELECT unixep");
+    settle(cx, |cx| labels(cx) == ["unixepoch"]);
+    cx.simulate_keystrokes("tab");
+    assert_eq!(text(&tab, cx), "SELECT unixepoch()");
+    cx.simulate_input("1");
+    assert_eq!(text(&tab, cx), "SELECT unixepoch(1)");
+}
+
+#[gpui_kit::test]
+fn hovering_a_function_shows_its_calls_and_docs(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "SELECT group_concat(name) FROM things;");
+    wait_for_table(&env, "things", cx);
+    rest_on(&tab, "group_concat", cx);
+    assert_eq!(
+        hover_lines(&tab, cx),
+        [
+            "group_concat aggregate",
+            "group_concat(value [, separator]) → text",
+            "",
+            "Non-null values of the group joined as text, by commas or the separator.",
+        ]
+    );
+}

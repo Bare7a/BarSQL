@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use barsql_core::{QueryError, ResultSummary};
+use barsql_core::{QueryError, ResultSummary, ServerMessage};
 use barsql_db::{ColumnMeta, ResultChunk};
 use barsql_sql::QueryPlan;
 use serde::Serialize;
@@ -12,6 +12,8 @@ use crate::import::ImportResult;
 pub enum RunEvent {
     Meta { result_index: usize, columns: Arc<[ColumnMeta]>, schema_name: String, table_name: String },
     Rows { result_index: usize, chunk: Arc<ResultChunk> },
+    // Before or after the statement's Result. `dropped` counts the ones not kept.
+    Messages { result_index: usize, messages: Vec<ServerMessage>, dropped: usize },
     Result(Box<RunResult>),
     // Ends the run. `error` is a run-level failure, per-statement errors come in Result.
     Done { result_count: usize, error: Option<QueryError> },

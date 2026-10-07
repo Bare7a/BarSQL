@@ -212,7 +212,8 @@
           "dataType": "bigint",
           "isNullable": false,
           "isPrimary": true,
-          "isForeign": false
+          "isForeign": false,
+          "isIdentity": true
         },
         {
           "name": "customer_id",
@@ -245,7 +246,8 @@
           "isNullable": true,
           "isPrimary": false,
           "isForeign": false,
-          "defaultVal": "(total * 1.2)"
+          "defaultVal": "(total * 1.2)",
+          "isComputed": true
         }
       ],
       "indexes": [
@@ -1075,6 +1077,399 @@
       "kind": "function",
       "returnType": "text",
       "args": "golden.citext, golden.citext, text"
+    }
+  ],
+  "functions": [
+    {
+      "name": "add",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "a integer, b integer DEFAULT 1",
+          "returns": "integer"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true
+    },
+    {
+      "name": "akeys",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "text[]"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "avals",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "text[]"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "defined",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore, text",
+          "returns": "boolean"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "each",
+      "schema": "golden",
+      "kind": "table",
+      "signatures": [
+        {
+          "args": "hs golden.hstore, OUT key text, OUT value text",
+          "returns": "SETOF record"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "hstore",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "record",
+          "returns": "golden.hstore"
+        },
+        {
+          "args": "text, text",
+          "returns": "golden.hstore"
+        },
+        {
+          "args": "text[], text[]",
+          "returns": "golden.hstore"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "hstore_to_json_loose",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "json"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "hstore_to_jsonb_loose",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "jsonb"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "hstore_version_diag",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "integer"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "isdefined",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore, text",
+          "returns": "boolean"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "isexists",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore, text",
+          "returns": "boolean"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "max",
+      "schema": "golden",
+      "kind": "aggregate",
+      "signatures": [
+        {
+          "args": "golden.citext",
+          "returns": "golden.citext"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "min",
+      "schema": "golden",
+      "kind": "aggregate",
+      "signatures": [
+        {
+          "args": "golden.citext",
+          "returns": "golden.citext"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "regexp_match",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext",
+          "returns": "text[]"
+        },
+        {
+          "args": "golden.citext, golden.citext, text",
+          "returns": "text[]"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "regexp_matches",
+      "schema": "golden",
+      "kind": "table",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext",
+          "returns": "SETOF text[]"
+        },
+        {
+          "args": "golden.citext, golden.citext, text",
+          "returns": "SETOF text[]"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "regexp_replace",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext, text",
+          "returns": "text"
+        },
+        {
+          "args": "golden.citext, golden.citext, text, text",
+          "returns": "text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "regexp_split_to_array",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext",
+          "returns": "text[]"
+        },
+        {
+          "args": "golden.citext, golden.citext, text",
+          "returns": "text[]"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "regexp_split_to_table",
+      "schema": "golden",
+      "kind": "table",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext",
+          "returns": "SETOF text"
+        },
+        {
+          "args": "golden.citext, golden.citext, text",
+          "returns": "SETOF text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "replace",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext, golden.citext",
+          "returns": "text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "skeys",
+      "schema": "golden",
+      "kind": "table",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "SETOF text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "slice",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.hstore, text[]",
+          "returns": "golden.hstore"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "split_part",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext, integer",
+          "returns": "text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "strpos",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext",
+          "returns": "integer"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
+    },
+    {
+      "name": "svals",
+      "schema": "golden",
+      "kind": "table",
+      "signatures": [
+        {
+          "args": "golden.hstore",
+          "returns": "SETOF text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "tconvert",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "text, text",
+          "returns": "golden.hstore"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "hstore"
+    },
+    {
+      "name": "translate",
+      "schema": "golden",
+      "kind": "scalar",
+      "signatures": [
+        {
+          "args": "golden.citext, golden.citext, text",
+          "returns": "text"
+        }
+      ],
+      "builtin": false,
+      "qualifiedOnly": true,
+      "source": "citext"
     }
   ],
   "ddl": [

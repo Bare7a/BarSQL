@@ -2,6 +2,30 @@ use barsql_core::DriverType;
 
 use super::tokens::{Token, TokenKind, is_ident_like, is_keyword, is_punct, tokenize};
 
+// The clause the caret sits in, at its own nesting level: inside `(SELECT ...` it's the subquery's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Clause {
+    Select,
+    Where,
+    Having,
+    // A join condition.
+    On,
+    // UPDATE's SET list.
+    Set,
+    Values,
+    GroupBy,
+    OrderBy,
+    Returning,
+    // FROM or JOIN.
+    From,
+    // INSERT INTO or UPDATE's target.
+    Target,
+    Limit,
+    // No clause keyword yet, like a CHECK constraint, a CALL or a T-SQL PRINT.
+    #[default]
+    Other,
+}
+
 // Computed from the text before the cursor only.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StatementShape {
@@ -27,6 +51,7 @@ pub struct StatementShape {
     pub joinable: bool,
     // Caret is right after a JOIN's ON.
     pub after_on_keyword: bool,
+    pub clause: Clause,
 }
 
 // `prefix` is the partial word, lowercased. `replace_len` is how many bytes it covers.
@@ -151,6 +176,45 @@ struct Markers {
     delete_seen: bool,
 }
 
+// Walks back from the caret. Groups that close before it are skipped, and an open paren it sits inside is
+// stepped over, so a function's arguments belong to the clause around the call.
+fn innermost_clause(code: &[&Token], partial: Option<usize>) -> Clause {
+    let end = partial.unwrap_or(code.len()).min(code.len());
+    let mut depth = 0usize;
+    for i in (0..end).rev() {
+        let t = code[i];
+        if t.is_punct(")") {
+            depth += 1;
+            continue;
+        }
+        if t.is_punct("(") {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        if depth > 0 || t.kind != TokenKind::Ident {
+            continue;
+        }
+        let after = |word: &str| i > 0 && code[i - 1].is_keyword(word);
+        return match t.lower.as_str() {
+            "select" => Clause::Select,
+            "where" => Clause::Where,
+            "having" => Clause::Having,
+            "on" => Clause::On,
+            "set" => Clause::Set,
+            "values" => Clause::Values,
+            "returning" => Clause::Returning,
+            "limit" | "offset" | "fetch" => Clause::Limit,
+            "by" if after("group") => Clause::GroupBy,
+            "by" if after("order") => Clause::OrderBy,
+            "from" if !after("distinct") => Clause::From,
+            "join" => Clause::From,
+            "into" | "update" => Clause::Target,
+            _ => continue,
+        };
+    }
+    Clause::Other
+}
+
 fn compute_shape(code: &[&Token], partial: Option<usize>) -> (StatementShape, Markers) {
     let mut m = Markers::default();
     let mut s = StatementShape::default();
@@ -225,6 +289,7 @@ fn compute_shape(code: &[&Token], partial: Option<usize>) -> (StatementShape, Ma
         }
     }
     s.at_statement_start = code.is_empty() || (code.len() == 1 && partial == Some(0));
+    s.clause = innermost_clause(code, partial);
     s.in_select_list = m.select_seen && !s.has_from;
     s.returning_slot = s.insert_body || m.delete_seen || (s.has_update && m.set.is_some());
     s.joinable = s.has_from && !s.in_where;

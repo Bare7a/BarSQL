@@ -54,7 +54,7 @@ cargo run -p barsql
 
 ## ⚡ SQL tools are usually overkill. BarSQL isn’t.
 
-Work with **SQLite**, **PostgreSQL** and **MySQL / MariaDB** in a single fast desktop app that runs entirely on your machine.
+Work with **SQLite**, **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **ClickHouse** and **Turso / libSQL** in a single fast desktop app that runs entirely on your machine.
 
 🧳 Portable  
 ⚡ Fast startup  
@@ -66,7 +66,9 @@ Work with **SQLite**, **PostgreSQL** and **MySQL / MariaDB** in a single fast de
 
 ### 👉 Everything you need. Nothing you don’t.
 
-- Query faster with smart, schema-aware autocomplete
+- Query faster with smart, schema-aware autocomplete - functions included, with their signatures on hover
+- See what the server said - notices, warnings and `PRINT` output in a Messages tab
+- Check what a server is doing in one click - activity, blocking, sessions, table statistics
 - Reach databases behind a bastion over an SSH tunnel
 - Stream results - rows arrive as the driver yields them
 - Run multi-statement scripts and get a result tab per output
@@ -116,7 +118,7 @@ It combines:
 - 🦀 Rust from the database drivers up to the window
 - 🖥️ [GPUI](https://www.gpui.rs/), the GPU-accelerated UI framework behind the Zed editor
 - 🧩 [GPUI Kit](https://gpui-kit.com/) components, including a code editor with tree-sitter highlighting
-- 🔌 Native drivers for each engine: `tokio-postgres`, `mysql_async` and a bundled SQLite
+- 🔌 Native drivers for each engine: `tokio-postgres`, `mysql_async`, a bundled SQLite, `tiberius` for SQL Server, and BarSQL's own HTTP clients for ClickHouse and Turso
 
 ---
 
@@ -145,6 +147,15 @@ BarSQL focuses on one thing:
 | **MySQL**      |      ✅      |       ✅       | TLS                                         |     ✅     |
 | **MariaDB**    |      ✅      |       ✅       | TLS                                         |     ✅     |
 | **SQLite**     |      ✅      |       ✅       | local file                                  |    n/a     |
+| **SQL Server** |      ✅      |       ✅       | TLS - `disable` / `require` / `verify-full` / `strict` (TDS 8.0) | ✅ |
+| **ClickHouse** |      ✅      |       ✅       | HTTP or HTTPS - `disable` / `require` / `verify-full` | ✅ |
+| **Turso / libSQL** |  ✅      |       ✅       | HTTPS, or HTTP for a local `sqld`           | self-hosted `sqld` |
+
+### Engine notes
+
+- **SQL Server** - 2017 or newer, with SQL logins. Named instances (`host\INSTANCE`) are found through SQL Browser, though not over SSH. Read-only connections are guarded in the app and also ask the server for read intent. Stopping a running batch closes the tab's connection, so its temp tables, `SET` options and open transaction go with it; the next run opens a new one, and BarSQL says so
+- **ClickHouse** - no transactions, and table views are read-only, since ClickHouse has no primary keys to edit rows by. Read-only connections also run with `readonly=2` on the server. Each tab keeps its own session, so `SET`, `USE` and temporary tables last between runs
+- **Turso / libSQL** - spoken to over HTTP (Hrana). Streams expire when idle: BarSQL opens a new one by itself, and tells you when a `PRAGMA` or an attached database was lost with it. There's no server-side cancel (Stop drops the request) and no transaction held between runs, though a script's own `BEGIN … COMMIT` works. Give read-only connections a read-only token
 
 ---
 
@@ -155,7 +166,8 @@ BarSQL focuses on one thing:
 - Per-connection **tab colors**
 - **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session
 - **Pick the database from a list** - the button beside the database field asks the server for its databases with the credentials you've entered, so you don't have to remember the name
-- PostgreSQL SSL (`disable` / `require` / `verify-full`) and MySQL TLS
+- PostgreSQL SSL (`disable` / `require` / `verify-full`), MySQL TLS, SQL Server TLS including TDS 8.0 `strict`, ClickHouse over HTTPS, and Turso URLs with an auth token
+- SQL Server **named instances** - type `host\INSTANCE`, or fill in the Instance field
 - **SSH tunnel** to reach databases behind a bastion (see below)
 - SQLite file picker, or drop a database file on the window
 
@@ -177,13 +189,15 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 - A native code editor with tree-sitter highlighting, code folding, find & replace and dark/light themes
 - **Smart autocomplete** - fuzzy matching, context-aware (`SELECT` / `FROM` / `JOIN` / `WHERE` / `UPDATE` / `DELETE` / `INSERT`), `schema.table.column` dot completion, quoted identifiers, aliases and CTEs
 - Built-in **`JOIN` snippets** where a join fits
-- Driver-correct identifier quoting (PostgreSQL, MySQL, SQLite)
+- **Function completion and hover** for every engine - each dialect's built-in functions (from about 150 on SQLite to over 400 on ClickHouse) plus the server's own (user functions, extensions, ClickHouse combinators like `sumIf`), each with its signatures, return type and a short description
+- Driver-correct identifier quoting (PostgreSQL, MySQL, SQLite, SQL Server `[brackets]`, ClickHouse)
 - **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, select the next occurrence, toggle comments
 - **Run selection** (`Ctrl+Enter`) / **run all** (`Ctrl+Shift+Enter`) / **stop** long-running queries
 - **Streaming results** - rows render as the driver yields them
-- **Multi-statement scripts** - run several `;`-separated statements at once; they execute in order on one connection, so temp tables, `SET` and scripted `BEGIN` / `COMMIT` hold
+- **Multi-statement scripts** - run several `;`-separated statements at once; they execute in order on one connection, so temp tables, `SET` and scripted `BEGIN` / `COMMIT` hold. SQL Server scripts run batch by batch, split on `GO` (`GO 3` runs a batch three times)
+- **Messages tab** - PostgreSQL notices, MySQL warnings, SQL Server `PRINT` and `RAISERROR` output, grouped under the statement that raised them, with levels and codes; it opens by itself when a run returns nothing else
 - **Multiple result outputs** - a script or stored procedure that returns several result sets shows each in its own switchable result tab, query plans included; a failing statement reports its error and stops the run
-- **Pinned transactions** per tab - run `BEGIN` / `COMMIT` / `ROLLBACK` as SQL or from the toolbar; queries run inside the open transaction until you commit or roll back
+- **Pinned transactions** per tab - run `BEGIN` / `COMMIT` / `ROLLBACK` as SQL or from the toolbar; queries run inside the open transaction until you commit or roll back (on every engine that holds one: not ClickHouse or Turso)
 - **Query plan viewer** (`Ctrl+Shift+E`) - see below
 - `UPDATE` / `DELETE` / `INSERT` with **`RETURNING`** flow back to the Results Grid
 - Gutter icons to run individual statements
@@ -203,7 +217,7 @@ Plans are outputs like any other, so a script can mix them freely - `SELECT …;
 - **Bad row estimates flagged** - when the measured count is 10x off the planner's guess, the node is marked with the factor: usually where a missing index or stale statistics hides
 - **Relations and indexes** called out per node, plus the filter or join condition behind it
 - **Node details** - every field the engine reported (sort method, buffer hits, rows removed by filter, …), and the untouched engine output on a raw tab
-- Per engine: PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, MySQL `EXPLAIN FORMAT=JSON` and `EXPLAIN ANALYZE`, MariaDB `ANALYZE FORMAT=JSON`, SQLite `EXPLAIN QUERY PLAN` (plan shape only - SQLite reports no cost or timings)
+- Per engine: PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, MySQL `EXPLAIN FORMAT=JSON` and `EXPLAIN ANALYZE`, MariaDB `ANALYZE FORMAT=JSON`, SQL Server's Showplan XML (`SET SHOWPLAN_XML` for an estimate, `SET STATISTICS XML` for actuals), SQLite and libSQL `EXPLAIN QUERY PLAN`, ClickHouse `EXPLAIN PLAN json = 1, indexes = 1` (plan shape and index use only - SQLite and ClickHouse report no cost or timings)
 - **Analyzing a write never leaves data behind** - `EXPLAIN ANALYZE` executes the statement, so a write runs inside a transaction that is always rolled back (and says so). On a tab with an open transaction it runs there, exactly where a plain **Run** would have
 
 ---
@@ -216,6 +230,7 @@ Plans are outputs like any other, so a script can mix them freely - `SELECT …;
 - **Click** a column to insert its name at the cursor
 - The 👁 button on a table (or **Browse data**) opens its rows in the grid, editable when it has a primary key
 - **Count rows** answers straight away, without opening a tab
+- **System views** - see what the server is doing (PostgreSQL activity, blocking and long-running queries; MySQL processes and open transactions; SQL Server requests, sessions and blocking; ClickHouse running queries) from the activity button above the tree or a connection's menu, and how a table is doing (statistics, index usage, ClickHouse parts, mutations and merges) from its menu. Each opens as an ordinary SQL tab and runs, so you can tweak it and run it again
 - Refresh the whole schema, or one schema from its right-click menu
 
 Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.
@@ -226,7 +241,8 @@ Each group row carries what you actually want at a glance: an index's columns an
 
 Right-click any object - table, view, index, constraint, trigger, function - for **Copy DDL** and **Open DDL in new tab**. The second opens an ordinary SQL tab, so the statement arrives with syntax highlighting, search and editing, ready to run or tweak.
 
-- **SQLite** and **MySQL / MariaDB** hand back the engine's own text (`sqlite_master`, `SHOW CREATE …`), so what you copy is what the server stored
+- **SQLite**, **libSQL**, **MySQL / MariaDB** and **ClickHouse** hand back the engine's own text (`sqlite_master`, `SHOW CREATE …`), so what you copy is what the server stored
+- **SQL Server** tables are composed from the catalog as well: identity and computed columns, keys with their clustering, foreign keys with their actions, checks, and indexes with `INCLUDE` and filters. Views, procedures, functions and triggers come from `OBJECT_DEFINITION`
 - **PostgreSQL** has no `SHOW CREATE TABLE`, so the statement is composed from the catalog: columns with their types, defaults, identity and generated expressions, collations, every table constraint, the indexes no constraint already implies, and `COMMENT ON` for anything documented
 - A table's DDL includes its standalone indexes, so pasting it elsewhere rebuilds the table whole
 
@@ -249,9 +265,9 @@ Every change opens a dialog that shows the **exact SQL** it will run, written fo
 
 **Back up to file…** writes a table to a `.sql` file - its structure, its rows, or both - that recreates it when you run the file or load it with **Import → SQL script**.
 
-- **Values come back exactly** - the server writes every value as an SQL literal itself (PostgreSQL `quote_nullable`, MySQL `QUOTE` and hex for binary, SQLite `quote`), so dates, JSON, arrays, binary data and floating-point values survive the round trip
-- **Rows restore in any order** - PostgreSQL adds foreign keys after the data, MySQL and SQLite pause foreign-key checks, so a table that references itself restores cleanly
-- **Sequences follow** - restored PostgreSQL identity and serial columns carry on after the highest id; MySQL `TIMESTAMP`s are written in UTC, so they restore correctly in any time zone
+- **Values come back exactly** - the server writes every value as an SQL literal itself (PostgreSQL `quote_nullable`, MySQL `QUOTE` and hex for binary, SQLite `quote`, ClickHouse `formatRowNoNewline('Values', …)`, and per-type conversions on SQL Server: `N''` strings, exact money and float styles, ISO dates, `0x` binary), so dates, JSON, arrays, binary data and floating-point values survive the round trip
+- **Rows restore in any order** - PostgreSQL and SQL Server add foreign keys after the data, MySQL and SQLite pause foreign-key checks, so a table that references itself restores cleanly
+- **Sequences follow** - restored PostgreSQL identity and serial columns carry on after the highest id, and SQL Server identities are written with `SET IDENTITY_INSERT`; MySQL `TIMESTAMP`s are written in UTC, so they restore correctly in any time zone
 - Generated columns are left for the database to compute
 - Rows are grouped into multi-row `INSERT`s, with live progress and a **Stop** button
 - The file only replaces an older one once the backup has finished, so a failed or stopped backup leaves the older file untouched
@@ -267,6 +283,7 @@ Every change opens a dialog that shows the **exact SQL** it will run, written fo
 - Column/row selection with Ctrl+click and Shift+click; `Ctrl+C` copies in the format you pick
 - **Cell viewer** for large values - JSON, XML, HTML, or plain text; beautify/minify; editable in table view
 - **JSON / JSONB** auto-parsed in cell and side viewer
+- **Arrays, maps and tuples** - PostgreSQL arrays and ClickHouse `Array`, `Map` and `Tuple` values read as JSON in both viewers; switch the cell viewer to Text for the literal itself
 - Side **JSON row viewer** with filter / regex search, synced to focused row
 
 ---
@@ -280,7 +297,7 @@ View and modify table data directly in the grid - no hand-written `UPDATE` / `DE
 - **Undo / redo** staged changes, **paste** blocks of cells, **set NULL** (`Ctrl+Backspace`)
 - **Insert** new rows and **bulk-delete** selected ones
 - **Jump through foreign keys** - a referencing cell opens the row it points at
-- Safe by design: edits require a primary key and **read-only** connections are blocked in the app and inside the driver
+- Safe by design: edits require a primary key and **read-only** connections are blocked in the app and inside the driver. ClickHouse tables are browse-only
 - `INSERT` / `UPDATE` / `DELETE … RETURNING` results flow straight back into the grid
 
 ---
@@ -320,7 +337,7 @@ A `.sql` file runs statement by statement on one connection, so `SET`, temp tabl
 
 ## 📤 Export
 
-- **Text** / **CSV** / **JSON** / **Markdown** / **SQL INSERT**
+- **Text** / **CSV** / **JSON** / **Markdown** / **SQL INSERT** - SQL is written for the connection's own engine: its identifier quoting, `N''` strings and `1`/`0` booleans on SQL Server, and literals that read the same whatever the server's string settings
 - Export all or **selected** rows and columns
 - Copy to clipboard or **save to file**
 - Remembers your last export format
@@ -416,7 +433,7 @@ BarSQL's interface is drawn with **[GPUI](https://www.gpui.rs/)**, the UI framew
 
 - [Rust](https://rustup.rs/) - rustup installs the toolchain pinned in `rust-toolchain.toml` on first use
 - **Linux** also needs GPUI's libraries: `clang libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`
-- Docker or Podman, only for the PostgreSQL / MySQL / MariaDB test databases
+- Docker or Podman, only for the test databases (PostgreSQL, MySQL, MariaDB, ClickHouse, libSQL and, optionally, SQL Server)
 
 ## Run
 
@@ -435,7 +452,7 @@ cargo build -p barsql --release   # or: cargo xtask package  (this OS's packages
 ```bash
 cargo test --workspace   # unit, SQLite and whole-window UI tests
 cargo xtask lint         # rustfmt and clippy, as CI runs them
-cargo xtask e2e up       # PostgreSQL, MySQL and MariaDB from docker-compose.yml
+cargo xtask e2e up       # PostgreSQL, MySQL, MariaDB, ClickHouse and libSQL from docker-compose.yml
 cargo xtask e2e          # the suites that need them
 cargo xtask e2e down
 cargo xtask screenshots  # the README screenshots, against the PostgreSQL above
@@ -444,14 +461,16 @@ cargo xtask docs-images  # the landing page's images, from those screenshots
 
 `cargo xtask` is this repository's task runner (the `xtask/` crate); run it alone to list its commands. `COMPOSE="podman compose"` makes it use Podman.
 
-- The UI tests in `crates/barsql-ui` run on GPUI's `TestAppContext` against a SQLite database, with real keystrokes, clicks, file drops and window resizes. `src/scenarios` drives the whole window.
-- `--features e2e` adds the per-engine scenarios and the fixtures in `fixtures/golden`, which pin down value display, DDL, EXPLAIN plans and errors for each engine.
+The databases listen on 55432 (PostgreSQL), 33306 (MySQL), 33307 (MariaDB), 38123 (ClickHouse) and 38080 (libSQL's `sqld`). SQL Server is opt-in: `BARSQL_E2E_MSSQL=1` with `cargo xtask e2e up` adds it on 31433 (Azure SQL Edge on Apple silicon, where SQL Server itself doesn't run), and the same variable turns its tests on.
 
-CI (`.github/workflows/test.yml`) runs the Linux checks and the E2E suites on every pull request and push to master. macOS and Windows run before a release and when you start the workflow by hand (Actions → Tests → Run workflow).
+- The UI tests in `crates/barsql-ui` run on GPUI's `TestAppContext` against a SQLite database, with real keystrokes, clicks, file drops and window resizes. `src/scenarios` drives the whole window.
+- `--features e2e` adds the per-engine scenarios and the fixtures in `fixtures/golden`, which pin down value display, DDL, EXPLAIN plans and errors for each engine. `BARSQL_GOLDEN_WRITE=1` rewrites them when an engine's output changes on purpose; review the diff before keeping it.
+
+CI (`.github/workflows/test.yml`) runs the Linux checks and the E2E suites, SQL Server 2022 included, on every pull request and push to master. macOS and Windows run before a release and when you start the workflow by hand (Actions → Tests → Run workflow). Starting it by hand with **regenerate goldens** ticked rewrites the SQL Server fixtures on the real server and uploads them as an artifact to review.
 
 ## Screenshots
 
-`cargo xtask screenshots` takes the pictures above again, at 2048 × 1152 points (4096 × 2304 pixels on a Retina display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in `crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run. It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size lossless WebP plus a 640px thumbnail for the landing page.
+`cargo xtask screenshots` takes the pictures above again, at 2048 × 1152 points (4096 × 2304 pixels on a Retina display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in `crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run. It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size lossless WebP plus 640, 800 and 1280px copies, which the landing page picks from to fit the screen.
 
 For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png` at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE` sets the window's size in points (`2048x1152`), `BARSQL_SNAPSHOT_RUN=1` runs the active tab first, and `BARSQL_SNAPSHOT_PANEL` chooses what the screenshot shows:
 

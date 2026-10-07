@@ -15,7 +15,12 @@ pub struct Env {
 
 impl Env {
     pub fn new(cx: &mut TestAppContext) -> Self {
-        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_stack_size(barsql_app::WORKER_STACK)
+            .enable_all()
+            .build()
+            .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         std::fs::create_dir_all(&data).unwrap();

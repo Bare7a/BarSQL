@@ -34,7 +34,88 @@
       "columnsCount_other": "{{count}} колони",
       "tablesCount_one": "{{count}} таблица",
       "tablesCount_other": "{{count}} таблици",
-      "defaultValue": "по подразбиране {{value}}"
+      "defaultValue": "по подразбиране {{value}}",
+      "function": "функция",
+      "userFunction": "потребителска функция",
+      "aggregateFunction": "агрегатна функция",
+      "windowFunction": "прозоречна функция",
+      "tableFunction": "таблична функция",
+      "signaturesCount_one": "{{count}} сигнатура",
+      "signaturesCount_other": "{{count}} сигнатури",
+      "moreSignatures_one": "+{{count}} още сигнатура",
+      "moreSignatures_other": "+{{count}} още сигнатури",
+      "since": "От {{version}}",
+      "source": "Източник: {{name}}",
+      "combinatorOf": "Комбинаторна форма на {{base}}",
+      "deprecated": "остаряла"
     }
+  },
+  "connection": {
+    "turso": "Turso / libSQL",
+    "clickhouse": "ClickHouse",
+    "sqlserver": "SQL Server",
+    "url": "URL на базата данни",
+    "urlPlaceholder": "libsql://vashata-baza-vashata-org.turso.io",
+    "urlRequired": "Нужен е URL на базата данни",
+    "authToken": "Токен за достъп",
+    "authTokenPlaceholder": "Не е нужен за локален sqld",
+    "authTokenHint": "От таблото на Turso или с turso db tokens create. Токен само за четене пази и сървъра само за четене.",
+    "sshUrlHint": "SSH тунелът е за собствен sqld сървър. Turso Cloud не се нуждае от него.",
+    "databasePlaceholderClickHouse": "default",
+    "databaseHintClickHouse": "База данни в ClickHouse за връзката. Оставете празно за default.",
+    "instance": "Инстанция",
+    "instancePlaceholder": "SQLEXPRESS",
+    "instanceHint": "Именувана инстанция, която SQL Server Browser намира вместо порта. Не през SSH тунел.",
+    "databasePlaceholderSqlServer": "master",
+    "databaseHintSqlServer": "База данни за свързване. Оставете празно за базата по подразбиране на акаунта.",
+    "sslStrict": "Стриктно (TDS 8.0)"
+  },
+  "results": {
+    "messages": "Съобщения",
+    "messagesCount": "{{count}} съобщение",
+    "messagesCount_other": "{{count}} съобщения",
+    "copyMessages": "Копиране на всички съобщения",
+    "outcomeRows": "{{count}} ред",
+    "outcomeRows_other": "{{count}} реда",
+    "outcomeAffected": "{{count}} засегнат ред",
+    "outcomeAffected_other": "{{count}} засегнати реда",
+    "outcomePlan": "План",
+    "outcomeError": "Неуспешно",
+    "outcomeRunning": "Изпълнява се…",
+    "messagesDropped": "Още {{count}} съобщение не беше запазено",
+    "messagesDropped_other": "Още {{count}} съобщения не бяха запазени",
+    "level": {
+      "info": "Инфо",
+      "notice": "Известие",
+      "warning": "Внимание"
+    }
+  },
+  "sidebar": {
+    "serverViews": "Изгледи на сървъра",
+    "systemViews": "Системни изгледи"
+  },
+  "systemViews": {
+    "tableTabTitle": "{{view}}: {{name}}",
+    "activity": "Активност",
+    "blocking": "Блокирани заявки",
+    "longRunning": "Дълго изпълнявани заявки",
+    "processList": "Списък с процеси",
+    "transactions": "Отворени транзакции",
+    "requests": "Текущи заявки",
+    "sessions": "Сесии",
+    "processes": "Изпълнявани заявки",
+    "tableStats": "Статистика на таблицата",
+    "indexUsage": "Използване на индексите",
+    "tableStatus": "Състояние на таблицата",
+    "parts": "Части",
+    "mutations": "Мутации",
+    "merges": "Сливания"
+  },
+  "cellViewer": {
+    "kindArray": "Масив",
+    "kindMap": "Речник",
+    "kindTuple": "Кортеж",
+    "arrayReadOnly": "Показва се като JSON, затова не може да се редактира тук. Превключете на Текст, за да редактирате самата стойност.",
+    "arrayError": "Това вече не може да се прочете като масив."
   }
 }

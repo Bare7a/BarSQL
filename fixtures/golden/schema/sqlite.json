@@ -65,7 +65,8 @@
           "dataType": "INTEGER",
           "isNullable": true,
           "isPrimary": true,
-          "isForeign": false
+          "isForeign": false,
+          "isIdentity": true
         },
         {
           "name": "email",
@@ -137,7 +138,8 @@
           "dataType": "INTEGER",
           "isNullable": true,
           "isPrimary": true,
-          "isForeign": false
+          "isForeign": false,
+          "isIdentity": true
         },
         {
           "name": "customer_id",
@@ -163,6 +165,14 @@
           "isPrimary": false,
           "isForeign": false,
           "defaultVal": "'new'"
+        },
+        {
+          "name": "total_with_tax",
+          "dataType": "NUMERIC",
+          "isNullable": true,
+          "isPrimary": false,
+          "isForeign": false,
+          "isComputed": true
         }
       ],
       "indexes": [
@@ -234,7 +244,8 @@
           "dataType": "INTEGER",
           "isNullable": true,
           "isPrimary": true,
-          "isForeign": false
+          "isForeign": false,
+          "isIdentity": true
         },
         {
           "name": "c_integer",

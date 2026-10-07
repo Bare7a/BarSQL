@@ -144,7 +144,14 @@
             ]
           ],
           "rowCount": 1,
-          "affectedRows": 0
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "warning",
+              "code": "1365",
+              "text": "Division by 0"
+            }
+          ]
         }
       ]
     },
@@ -171,7 +178,14 @@
             ]
           ],
           "rowCount": 1,
-          "affectedRows": 0
+          "affectedRows": 0,
+          "messages": [
+            {
+              "level": "warning",
+              "code": "1292",
+              "text": "Truncated incorrect INTEGER value: 'abc'"
+            }
+          ]
         }
       ]
     },

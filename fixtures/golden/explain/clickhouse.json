@@ -1,0 +1,194 @@
+{
+  "engine": "clickhouse",
+  "driver": "clickhouse",
+  "plans": [
+    {
+      "statement": "SELECT * FROM barsql_golden.customers WHERE id = 1",
+      "analyze": false,
+      "explainSql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT * FROM barsql_golden.customers WHERE id = 1",
+      "raw": {
+        "columns": [
+          "explain"
+        ],
+        "rows": [
+          [
+            "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Expression\",\n      \"Node Id\": \"Expression_6\",\n      \"Description\": \"(Project names + Projection)\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Expression\",\n          \"Node Id\": \"Expression_7\",\n          \"Description\": \"(WHERE + Change column names to column identifiers)\",\n          \"Plans\": [\n            {\n              \"Node Type\": \"ReadFromMergeTree\",\n              \"Node Id\": \"ReadFromMergeTree_0\",\n              \"Description\": \"barsql_golden.customers\",\n              \"Indexes\": [\n                {\n                  \"Type\": \"PrimaryKey\",\n                  \"Keys\": [\"id\"],\n                  \"Condition\": \"(id in [1, 1])\",\n                  \"Search Algorithm\": \"binary search\",\n                  \"Initial Parts\": 1,\n                  \"Selected Parts\": 1,\n                  \"Initial Granules\": 1,\n                  \"Selected Granules\": 1\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  }\n]"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "clickhouse",
+        "statement": "SELECT * FROM barsql_golden.customers WHERE id = 1",
+        "explainSql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT * FROM barsql_golden.customers WHERE id = 1",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Expression",
+            "detail": "(Project names + Projection)",
+            "children": [
+              {
+                "label": "Expression",
+                "detail": "(WHERE + Change column names to column identifiers)",
+                "children": [
+                  {
+                    "label": "ReadFromMergeTree",
+                    "relation": "barsql_golden.customers",
+                    "index": "PrimaryKey",
+                    "fields": [
+                      {
+                        "key": "PrimaryKey",
+                        "value": "id · (id in [1, 1]) · 1 of 1 parts · 1 of 1 granules"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Expression\",\n      \"Node Id\": \"Expression_6\",\n      \"Description\": \"(Project names + Projection)\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Expression\",\n          \"Node Id\": \"Expression_7\",\n          \"Description\": \"(WHERE + Change column names to column identifiers)\",\n          \"Plans\": [\n            {\n              \"Node Type\": \"ReadFromMergeTree\",\n              \"Node Id\": \"ReadFromMergeTree_0\",\n              \"Description\": \"barsql_golden.customers\",\n              \"Indexes\": [\n                {\n                  \"Type\": \"PrimaryKey\",\n                  \"Keys\": [\"id\"],\n                  \"Condition\": \"(id in [1, 1])\",\n                  \"Search Algorithm\": \"binary search\",\n                  \"Initial Parts\": 1,\n                  \"Selected Parts\": 1,\n                  \"Initial Granules\": 1,\n                  \"Selected Granules\": 1\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  }\n]"
+      }
+    },
+    {
+      "statement": "SELECT customer_id, sum(total) FROM barsql_golden.orders WHERE day >= '2024-01-01' GROUP BY customer_id ORDER BY customer_id",
+      "analyze": false,
+      "explainSql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT customer_id, sum(total) FROM barsql_golden.orders WHERE day >= '2024-01-01' GROUP BY customer_id ORDER BY customer_id",
+      "raw": {
+        "columns": [
+          "explain"
+        ],
+        "rows": [
+          [
+            "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Expression\",\n      \"Node Id\": \"Expression_8\",\n      \"Description\": \"Project names\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Sorting\",\n          \"Node Id\": \"Sorting_7\",\n          \"Description\": \"Sorting for ORDER BY\",\n          \"Plans\": [\n            {\n              \"Node Type\": \"Expression\",\n              \"Node Id\": \"Expression_10\",\n              \"Description\": \"(Before ORDER BY + Projection)\",\n              \"Plans\": [\n                {\n                  \"Node Type\": \"Aggregating\",\n                  \"Node Id\": \"Aggregating_4\",\n                  \"Plans\": [\n                    {\n                      \"Node Type\": \"Expression\",\n                      \"Node Id\": \"Expression_3\",\n                      \"Description\": \"Before GROUP BY\",\n                      \"Plans\": [\n                        {\n                          \"Node Type\": \"Expression\",\n                          \"Node Id\": \"Expression_11\",\n                          \"Description\": \"(WHERE + Change column names to column identifiers)\",\n                          \"Plans\": [\n                            {\n                              \"Node Type\": \"ReadFromMergeTree\",\n                              \"Node Id\": \"ReadFromMergeTree_0\",\n                              \"Description\": \"barsql_golden.orders\",\n                              \"Indexes\": [\n                                {\n                                  \"Type\": \"Min-Max\",\n                                  \"Keys\": [\"day\"],\n                                  \"Condition\": \"(day in [19723, +Inf))\",\n                                  \"Initial Parts\": 2,\n                                  \"Selected Parts\": 2,\n                                  \"Initial Granules\": 2,\n                                  \"Selected Granules\": 2\n                                },\n                                {\n                                  \"Type\": \"Partition\",\n                                  \"Keys\": [\"toYYYYMM(day)\"],\n                                  \"Condition\": \"(toYYYYMM(day) in [202401, +Inf))\",\n                                  \"Initial Parts\": 2,\n                                  \"Selected Parts\": 2,\n                                  \"Initial Granules\": 2,\n                                  \"Selected Granules\": 2\n                                },\n                                {\n                                  \"Type\": \"PrimaryKey\",\n                                  \"Keys\": [\"day\"],\n                                  \"Condition\": \"(day in [19723, +Inf))\",\n                                  \"Search Algorithm\": \"generic exclusion search\",\n                                  \"Initial Parts\": 2,\n                                  \"Selected Parts\": 2,\n                                  \"Initial Granules\": 2,\n                                  \"Selected Granules\": 2\n                                }\n                              ]\n                            }\n                          ]\n                        }\n                      ]\n                    }\n                  ]\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  }\n]"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "clickhouse",
+        "statement": "SELECT customer_id, sum(total) FROM barsql_golden.orders WHERE day >= '2024-01-01' GROUP BY customer_id ORDER BY customer_id",
+        "explainSql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT customer_id, sum(total) FROM barsql_golden.orders WHERE day >= '2024-01-01' GROUP BY customer_id ORDER BY customer_id",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Expression",
+            "detail": "Project names",
+            "children": [
+              {
+                "label": "Sorting",
+                "detail": "Sorting for ORDER BY",
+                "children": [
+                  {
+                    "label": "Expression",
+                    "detail": "(Before ORDER BY + Projection)",
+                    "children": [
+                      {
+                        "label": "Aggregating",
+                        "children": [
+                          {
+                            "label": "Expression",
+                            "detail": "Before GROUP BY",
+                            "children": [
+                              {
+                                "label": "Expression",
+                                "detail": "(WHERE + Change column names to column identifiers)",
+                                "children": [
+                                  {
+                                    "label": "ReadFromMergeTree",
+                                    "relation": "barsql_golden.orders",
+                                    "index": "Min-Max, Partition, PrimaryKey",
+                                    "fields": [
+                                      {
+                                        "key": "Min-Max",
+                                        "value": "day · (day in [19723, +Inf)) · 2 of 2 parts · 2 of 2 granules"
+                                      },
+                                      {
+                                        "key": "Partition",
+                                        "value": "toYYYYMM(day) · (toYYYYMM(day) in [202401, +Inf)) · 2 of 2 parts · 2 of 2 granules"
+                                      },
+                                      {
+                                        "key": "PrimaryKey",
+                                        "value": "day · (day in [19723, +Inf)) · 2 of 2 parts · 2 of 2 granules"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Expression\",\n      \"Node Id\": \"Expression_8\",\n      \"Description\": \"Project names\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Sorting\",\n          \"Node Id\": \"Sorting_7\",\n          \"Description\": \"Sorting for ORDER BY\",\n          \"Plans\": [\n            {\n              \"Node Type\": \"Expression\",\n              \"Node Id\": \"Expression_10\",\n              \"Description\": \"(Before ORDER BY + Projection)\",\n              \"Plans\": [\n                {\n                  \"Node Type\": \"Aggregating\",\n                  \"Node Id\": \"Aggregating_4\",\n                  \"Plans\": [\n                    {\n                      \"Node Type\": \"Expression\",\n                      \"Node Id\": \"Expression_3\",\n                      \"Description\": \"Before GROUP BY\",\n                      \"Plans\": [\n                        {\n                          \"Node Type\": \"Expression\",\n                          \"Node Id\": \"Expression_11\",\n                          \"Description\": \"(WHERE + Change column names to column identifiers)\",\n                          \"Plans\": [\n                            {\n                              \"Node Type\": \"ReadFromMergeTree\",\n                              \"Node Id\": \"ReadFromMergeTree_0\",\n                              \"Description\": \"barsql_golden.orders\",\n                              \"Indexes\": [\n                                {\n                                  \"Type\": \"Min-Max\",\n                                  \"Keys\": [\"day\"],\n                                  \"Condition\": \"(day in [19723, +Inf))\",\n                                  \"Initial Parts\": 2,\n                                  \"Selected Parts\": 2,\n                                  \"Initial Granules\": 2,\n                                  \"Selected Granules\": 2\n                                },\n                                {\n                                  \"Type\": \"Partition\",\n                                  \"Keys\": [\"toYYYYMM(day)\"],\n                                  \"Condition\": \"(toYYYYMM(day) in [202401, +Inf))\",\n                                  \"Initial Parts\": 2,\n                                  \"Selected Parts\": 2,\n                                  \"Initial Granules\": 2,\n                                  \"Selected Granules\": 2\n                                },\n                                {\n                                  \"Type\": \"PrimaryKey\",\n                                  \"Keys\": [\"day\"],\n                                  \"Condition\": \"(day in [19723, +Inf))\",\n                                  \"Search Algorithm\": \"generic exclusion search\",\n                                  \"Initial Parts\": 2,\n                                  \"Selected Parts\": 2,\n                                  \"Initial Granules\": 2,\n                                  \"Selected Granules\": 2\n                                }\n                              ]\n                            }\n                          ]\n                        }\n                      ]\n                    }\n                  ]\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  }\n]"
+      }
+    },
+    {
+      "statement": "SELECT email FROM barsql_golden.customers WHERE email = 'a@x.io'",
+      "analyze": false,
+      "explainSql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT email FROM barsql_golden.customers WHERE email = 'a@x.io'",
+      "raw": {
+        "columns": [
+          "explain"
+        ],
+        "rows": [
+          [
+            "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Expression\",\n      \"Node Id\": \"Expression_6\",\n      \"Description\": \"(Project names + Projection)\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Filter\",\n          \"Node Id\": \"Filter_5\",\n          \"Description\": \"(WHERE + Change column names to column identifiers)\",\n          \"Plans\": [\n            {\n              \"Node Type\": \"ReadFromMergeTree\",\n              \"Node Id\": \"ReadFromMergeTree_0\",\n              \"Description\": \"barsql_golden.customers\",\n              \"Indexes\": [\n                {\n                  \"Type\": \"PrimaryKey\",\n                  \"Condition\": \"true\",\n                  \"Initial Parts\": 1,\n                  \"Selected Parts\": 1,\n                  \"Initial Granules\": 1,\n                  \"Selected Granules\": 1\n                },\n                {\n                  \"Type\": \"Skip\",\n                  \"Name\": \"email_idx\",\n                  \"Description\": \"bloom_filter GRANULARITY 1\",\n                  \"Initial Parts\": 1,\n                  \"Selected Parts\": 0,\n                  \"Initial Granules\": 1,\n                  \"Selected Granules\": 0\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  }\n]"
+          ]
+        ]
+      },
+      "plan": {
+        "driver": "clickhouse",
+        "statement": "SELECT email FROM barsql_golden.customers WHERE email = 'a@x.io'",
+        "explainSql": "EXPLAIN PLAN json = 1, indexes = 1 SELECT email FROM barsql_golden.customers WHERE email = 'a@x.io'",
+        "analyzed": false,
+        "nodes": [
+          {
+            "label": "Expression",
+            "detail": "(Project names + Projection)",
+            "children": [
+              {
+                "label": "Filter",
+                "detail": "(WHERE + Change column names to column identifiers)",
+                "children": [
+                  {
+                    "label": "ReadFromMergeTree",
+                    "relation": "barsql_golden.customers",
+                    "index": "PrimaryKey, email_idx",
+                    "fields": [
+                      {
+                        "key": "PrimaryKey",
+                        "value": "true · 1 of 1 parts · 1 of 1 granules"
+                      },
+                      {
+                        "key": "email_idx",
+                        "value": "bloom_filter GRANULARITY 1 · 0 of 1 parts · 0 of 1 granules"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "durationMs": 0,
+        "notes": [
+          "noMetrics"
+        ],
+        "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Expression\",\n      \"Node Id\": \"Expression_6\",\n      \"Description\": \"(Project names + Projection)\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Filter\",\n          \"Node Id\": \"Filter_5\",\n          \"Description\": \"(WHERE + Change column names to column identifiers)\",\n          \"Plans\": [\n            {\n              \"Node Type\": \"ReadFromMergeTree\",\n              \"Node Id\": \"ReadFromMergeTree_0\",\n              \"Description\": \"barsql_golden.customers\",\n              \"Indexes\": [\n                {\n                  \"Type\": \"PrimaryKey\",\n                  \"Condition\": \"true\",\n                  \"Initial Parts\": 1,\n                  \"Selected Parts\": 1,\n                  \"Initial Granules\": 1,\n                  \"Selected Granules\": 1\n                },\n                {\n                  \"Type\": \"Skip\",\n                  \"Name\": \"email_idx\",\n                  \"Description\": \"bloom_filter GRANULARITY 1\",\n                  \"Initial Parts\": 1,\n                  \"Selected Parts\": 0,\n                  \"Initial Granules\": 1,\n                  \"Selected Granules\": 0\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  }\n]"
+      }
+    }
+  ]
+}

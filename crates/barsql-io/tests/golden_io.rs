@@ -131,8 +131,14 @@ fn export_formats_match_the_fixtures() {
         let names: Vec<String> = cols.iter().map(|&c| columns[c].clone()).collect();
         let col_types: Vec<String> = cols.iter().map(|&c| types[c].clone()).collect();
         for format in EXPORT_FORMATS {
-            let got =
-                export_to_string(format, &names, &col_types, table, row_indices.iter().map(|&ri| to_cells(ri, &cols)));
+            let got = export_to_string(
+                format,
+                &names,
+                &col_types,
+                table,
+                None,
+                row_indices.iter().map(|&ri| to_cells(ri, &cols)),
+            );
             let want = case["outputs"][format.id()].as_str().unwrap();
             if got != want {
                 failures.push(format!("{name}/{}\n  want: {want:?}\n  got:  {got:?}", format.id()));

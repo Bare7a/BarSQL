@@ -2188,7 +2188,14 @@
           "statement": "UPDATE barsql_golden.orders SET status = status",
           "rowCount": 0,
           "affectedRows": 0,
-          "message": "0 row(s) affected"
+          "message": "0 row(s) affected",
+          "messages": [
+            {
+              "level": "info",
+              "code": "",
+              "text": "Rows matched: 3  Changed: 0  Warnings: 0"
+            }
+          ]
         }
       ]
     },
@@ -2200,7 +2207,14 @@
           "statement": "UPDATE barsql_golden.orders SET total = total + 1 WHERE customer_id = 1",
           "rowCount": 0,
           "affectedRows": 2,
-          "message": "2 row(s) affected"
+          "message": "2 row(s) affected",
+          "messages": [
+            {
+              "level": "info",
+              "code": "",
+              "text": "Rows matched: 2  Changed: 2  Warnings: 0"
+            }
+          ]
         }
       ]
     },

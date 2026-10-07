@@ -1,9 +1,17 @@
-use barsql_core::DriverType;
+use barsql_core::{DriverType, SqlDialect};
+
+use crate::dialect::{Dialect, IdentQuote, Placeholder};
 
 pub fn quote_ident(driver: &DriverType, ident: &str) -> String {
-    match driver {
-        DriverType::MySql => format!("`{}`", ident.replace('`', "``")),
-        _ => format!("\"{}\"", ident.replace('"', "\"\"")),
+    quote_ident_in(Dialect::for_driver(driver), ident)
+}
+
+pub fn quote_ident_in(dialect: &Dialect, ident: &str) -> String {
+    match dialect.ident_quote {
+        IdentQuote::Double => format!("\"{}\"", ident.replace('"', "\"\"")),
+        IdentQuote::Backtick => format!("`{}`", ident.replace('`', "``")),
+        IdentQuote::BacktickBackslash => format!("`{}`", ident.replace('\\', "\\\\").replace('`', "\\`")),
+        IdentQuote::Bracket => format!("[{}]", ident.replace(']', "]]")),
     }
 }
 
@@ -16,14 +24,18 @@ pub fn qualified_table(driver: &DriverType, schema: &str, table: &str) -> String
 
 // SQLite tables are never schema-qualified.
 pub fn table_ref(driver: &DriverType, schema: &str, table: &str) -> String {
-    if *driver == DriverType::Sqlite {
+    if !Dialect::for_driver(driver).qualify_tables {
         return quote_ident(driver, table);
     }
     qualified_table(driver, schema, table)
 }
 
 pub fn placeholder(driver: &DriverType, index: usize) -> String {
-    if *driver == DriverType::Postgres { format!("${index}") } else { "?".into() }
+    match Dialect::for_driver(driver).placeholder {
+        Placeholder::Dollar => format!("${index}"),
+        Placeholder::Question => "?".into(),
+        Placeholder::AtP => format!("@P{index}"),
+    }
 }
 
 pub fn quote_ident_list(driver: &DriverType, idents: &[String]) -> String {
@@ -32,6 +44,26 @@ pub fn quote_ident_list(driver: &DriverType, idents: &[String]) -> String {
 
 pub fn quote_literal(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
+}
+
+// A string literal that reads the same whatever the server's settings, for text that may hold quotes and
+// backslashes.
+pub fn quote_literal_in(dialect: SqlDialect, text: &str) -> String {
+    match dialect {
+        // E'' escapes the same way whether standard_conforming_strings is on or off.
+        SqlDialect::Postgres if text.contains('\\') => {
+            format!("E'{}'", text.replace('\\', "\\\\").replace('\'', "''"))
+        }
+        // A backslash escapes unless NO_BACKSLASH_ESCAPES is set, and a hex string means the same either way.
+        SqlDialect::MySql if text.contains('\\') => {
+            let hex: String = text.bytes().map(|b| format!("{b:02X}")).collect();
+            format!("CONVERT(X'{hex}' USING utf8mb4)")
+        }
+        SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite => quote_literal(text),
+        // Without the N, text outside the database's code page is lost.
+        SqlDialect::TSql => format!("N{}", quote_literal(text)),
+        SqlDialect::ClickHouse => format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'")),
+    }
 }
 
 #[cfg(test)]
@@ -47,6 +79,22 @@ mod tests {
     }
 
     #[test]
+    fn dialect_literals_read_the_same_under_any_setting() {
+        let cases = [
+            (SqlDialect::Postgres, "it's", "'it''s'"),
+            (SqlDialect::Postgres, r"a\b'", r"E'a\\b'''"),
+            (SqlDialect::MySql, "it's", "'it''s'"),
+            (SqlDialect::MySql, r"a\b", "CONVERT(X'615C62' USING utf8mb4)"),
+            (SqlDialect::Sqlite, r"a\b'", r"'a\b'''"),
+            (SqlDialect::TSql, r"a\b'ü", r"N'a\b''ü'"),
+            (SqlDialect::ClickHouse, r"a\b'", r"'a\\b\''"),
+        ];
+        for (dialect, text, literal) in cases {
+            assert_eq!(quote_literal_in(dialect, text), literal, "{dialect:?} {text}");
+        }
+    }
+
+    #[test]
     fn quotes_per_driver() {
         let cases = [
             (DriverType::Postgres, "users", "\"users\""),
@@ -54,6 +102,9 @@ mod tests {
             (DriverType::MySql, "users", "`users`"),
             (DriverType::MySql, "a`b", "`a``b`"),
             (DriverType::Sqlite, "users", "\"users\""),
+            (DriverType::Turso, "users", "\"users\""),
+            (DriverType::SqlServer, "a]b", "[a]]b]"),
+            (DriverType::ClickHouse, "a`b\\c", "`a\\`b\\\\c`"),
         ];
         for (driver, ident, want) in cases {
             assert_eq!(quote_ident(&driver, ident), want);
@@ -71,5 +122,8 @@ mod tests {
         assert_eq!(placeholder(&DriverType::Postgres, 42), "$42");
         assert_eq!(placeholder(&DriverType::MySql, 5), "?");
         assert_eq!(placeholder(&DriverType::Sqlite, 3), "?");
+        assert_eq!(placeholder(&DriverType::SqlServer, 2), "@P2");
+        assert_eq!(table_ref(&DriverType::Turso, "main", "t"), "\"t\"");
+        assert_eq!(table_ref(&DriverType::SqlServer, "dbo", "t"), "[dbo].[t]");
     }
 }
