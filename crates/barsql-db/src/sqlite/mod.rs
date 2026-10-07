@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use barsql_core::{ConnectionConfig, DriverType, QueryError, Value};
+use barsql_sql::{ExplainStrategy, PlanRows};
 use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::{Connection, InterruptHandle, OpenFlags, ToSql, params_from_iter};
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -150,6 +151,13 @@ impl SqliteSession {
     pub async fn buffered(&mut self, sql: &str, cancel: &Cancel) -> Result<Buffered, QueryError> {
         self.hold().await;
         let result = script::buffered(self, sql, cancel).await;
+        self.release();
+        result
+    }
+
+    pub async fn plan_rows(&mut self, strategy: &ExplainStrategy, cancel: &Cancel) -> Result<PlanRows, QueryError> {
+        self.hold().await;
+        let result = script::plan_rows(self, strategy, cancel).await;
         self.release();
         result
     }
