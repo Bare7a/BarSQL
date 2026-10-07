@@ -23,6 +23,9 @@
   --accent: #3b82f6;
   --accent-hover: #2563eb;
   --accent-text: #60a5fa;
+  /* White text needs 4.5:1, which --accent's blue doesn't reach */
+  --button: #2563eb;
+  --button-hover: #1d4ed8;
   --accent-soft: rgba(59, 130, 246, 0.14);
   --code-bg: #161b22;
   --header-bg: rgba(15, 17, 23, 0.8);
@@ -45,6 +48,8 @@
   --accent: #0969da;
   --accent-hover: #0550ae;
   --accent-text: #0969da;
+  --button: #0969da;
+  --button-hover: #0550ae;
   --accent-soft: rgba(9, 105, 218, 0.1);
   --code-bg: #f6f8fa;
   --header-bg: rgba(255, 255, 255, 0.82);
@@ -77,6 +82,9 @@ img { display: block; max-width: 100%; height: auto; }
 
 a { color: var(--accent-text); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* In running text, color alone doesn't set a link apart */
+p a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+p a:hover { text-decoration-thickness: 2px; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 
@@ -113,6 +121,9 @@ p, li, figcaption, dd { text-wrap: pretty; }
   stroke-linejoin: round;
 }
 
+/* Engine logos are filled shapes, unlike the stroked icons. */
+.logo { width: 1.15em; height: 1.15em; flex: none; fill: currentColor; }
+
 .skip-link {
   position: absolute;
   left: 12px;
@@ -120,7 +131,7 @@ p, li, figcaption, dd { text-wrap: pretty; }
   z-index: 100;
   padding: 8px 14px;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--button);
   color: #fff;
   font-weight: 600;
 }
@@ -214,8 +225,8 @@ p, li, figcaption, dd { text-wrap: pretty; }
 .btn:hover { text-decoration: none; transform: translateY(-1px); }
 .btn .icon { width: 18px; height: 18px; }
 
-.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 6px 20px var(--glow); }
-.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary { background: var(--button); color: #fff; box-shadow: 0 6px 20px var(--glow); }
+.btn-primary:hover { background: var(--button-hover); }
 
 .btn-secondary { background: var(--card); border-color: var(--border); color: var(--text); }
 .btn-secondary:hover { border-color: var(--accent); }
@@ -269,6 +280,38 @@ p, li, figcaption, dd { text-wrap: pretty; }
 
 .hero-note { margin: 16px 0 0; color: var(--muted); font-size: 0.9rem; }
 
+.hero-sub-tight { margin-bottom: 18px; }
+
+/* A grid rather than wrapping, so the six always split evenly: three a row, two on phones. */
+.engines {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-content: center;
+  gap: 10px;
+  margin: 0 auto 34px;
+  padding: 0;
+  list-style: none;
+}
+.engines li { display: flex; }
+
+.engines a {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.engines a:hover { border-color: var(--accent); transform: translateY(-1px); text-decoration: none; }
+.engines .logo { width: 18px; height: 18px; color: var(--accent-text); }
+
 .hero-shot { position: relative; margin-top: 60px; padding-bottom: 0; }
 
 .hero-shot::before {
@@ -315,15 +358,15 @@ p, li, figcaption, dd { text-wrap: pretty; }
 .strip { border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); background: var(--bg-alt); }
 
 .strip-inner {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(6, auto);
   justify-content: center;
-  gap: 14px 44px;
+  gap: 14px 40px;
   padding-top: 22px;
   padding-bottom: 22px;
 }
 
-.strip-inner span { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-weight: 600; }
+.strip-inner span { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-weight: 600; white-space: nowrap; }
 .strip-inner .icon { color: var(--accent-text); }
 
 /* Cards */
@@ -354,14 +397,87 @@ p, li, figcaption, dd { text-wrap: pretty; }
   color: var(--accent-text);
 }
 .chip .icon { width: 20px; height: 20px; }
+.chip .logo { width: 22px; height: 22px; }
 
 .features .card { padding: 22px; }
+
+/* In the intro and feature cards the chip and the title share a line, with the text below. */
+.card-grid-4 > .card,
+.features > .card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  align-items: center;
+  column-gap: 14px;
+}
+.card-grid-4 > .card h3,
+.features > .card h3 { margin: 0; }
+.card-grid-4 > .card p,
+.features > .card p { grid-column: 1 / -1; margin-top: 14px; }
 
 .db-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .db-head h3 { margin: 0; font-size: 1.15rem; }
 
 .db-card ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 0.94rem; }
 .db-card li + li { margin-top: 6px; }
+
+.db-name { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.db-name h3 { margin: 0; }
+
+.db-tag {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Engine matrix */
+
+.matrix-title { margin: 72px 0 20px; text-align: center; font-size: clamp(1.25rem, 2.4vw, 1.5rem); font-weight: 800; letter-spacing: -0.01em; }
+
+.matrix-wrap {
+  /* Positioned, so the cells' screen-reader text scrolls inside it instead of widening the page */
+  position: relative;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.matrix { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 0.92rem; }
+.matrix th, .matrix td { padding: 11px 14px; border-bottom: 1px solid var(--border-soft); text-align: center; white-space: nowrap; }
+.matrix thead th { background: var(--bg-alt); color: var(--text); font-size: 0.84rem; font-weight: 700; }
+.matrix tbody th { text-align: left; font-weight: 600; }
+.engine-head { display: inline-flex; flex-direction: column; align-items: center; gap: 7px; }
+.engine-head .logo { width: 20px; height: 20px; color: var(--accent-text); }
+.matrix tbody tr:last-child > * { border-bottom: 0; }
+.matrix tbody tr:hover > * { background: var(--card-hover); }
+.matrix .yes .icon { width: 18px; height: 18px; vertical-align: -4px; color: var(--accent-text); stroke-width: 2.6; }
+.matrix .no { color: var(--muted); }
+.matrix sup { margin-left: 2px; color: var(--accent-text); font-size: 0.7rem; font-weight: 700; }
+
+/* The feature column stays in view while the table scrolls sideways */
+.matrix tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
+.matrix thead tr > :first-child { background: var(--bg-alt); }
+
+.matrix-notes { max-width: 780px; margin: 16px auto 0; text-align: center; color: var(--muted); font-size: 0.86rem; text-wrap: balance; }
+.matrix-notes sup { color: var(--accent-text); font-weight: 700; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* Spotlights */
 
@@ -530,7 +646,7 @@ kbd {
 
 /* Stack */
 
-.stack { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.stack { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
 
 .stack a {
   display: flex;
@@ -547,12 +663,13 @@ kbd {
 }
 .stack a:hover { border-color: var(--accent); transform: translateY(-2px); text-decoration: none; }
 .stack strong { font-size: 0.98rem; }
-.stack span { color: var(--muted); font-size: 0.8rem; }
+.stack span { color: var(--muted); font-size: 0.8rem; text-wrap: balance; }
 
 /* Final CTA and footer */
 
 .cta-final { text-align: center; }
-.cta-icon { margin: 0 auto 22px; border-radius: 18px; box-shadow: 0 14px 40px var(--glow); }
+/* The icon draws its own rounded corners, so the glow follows its shape instead of clipping it. */
+.cta-icon { margin: 0 auto 22px; filter: drop-shadow(0 12px 22px var(--glow)); }
 
 .site-footer { padding: 28px 0; border-top: 1px solid var(--border-soft); background: var(--bg-alt); }
 .footer-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
@@ -611,6 +728,10 @@ kbd {
 
 /* Responsive */
 
+@media (max-width: 1100px) {
+  .strip-inner { grid-template-columns: repeat(3, auto); }
+}
+
 @media (max-width: 1000px) {
   .card-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .card-grid-3, .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -623,6 +744,26 @@ kbd {
 
 @media (max-width: 720px) {
   .nav-section { display: none; }
+}
+
+@media (max-width: 560px) {
+  .engines { grid-template-columns: repeat(2, auto); gap: 8px; }
+  .engines a { gap: 7px; padding: 6px 12px; font-size: 0.86rem; }
+  .engines .logo { width: 16px; height: 16px; }
+  .strip-inner { grid-template-columns: repeat(2, auto); gap: 12px 26px; font-size: 0.92rem; }
+  /* The three short badges share a row and the platforms take the next, rather than one badge alone */
+  .hero-badges .badge-platforms { order: 1; }
+}
+
+@media (max-width: 400px) {
+  .engines a { gap: 6px; padding: 5px 10px; font-size: 0.8rem; }
+  .engines .logo { width: 16px; height: 16px; }
+  .strip-inner { gap: 11px 18px; font-size: 0.86rem; }
+  .footer-links { display: grid; grid-template-columns: repeat(2, auto); gap: 8px 24px; }
+}
+
+@media (max-width: 340px) {
+  .engines { grid-template-columns: minmax(0, 220px); }
 }
 
 @media (max-width: 640px) {
@@ -646,5 +787,5 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; }
-  .btn:hover, .card:hover, .stack a:hover, .gallery .shot:hover img { transform: none; }
+  .btn:hover, .card:hover, .stack a:hover, .engines a:hover, .gallery .shot:hover img { transform: none; }
 }

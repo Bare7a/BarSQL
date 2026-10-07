@@ -22,8 +22,8 @@ screenshots
            stack's PostgreSQL, then plays the scenes in a snapshot build on a copy of
            fixtures/screenshots/data, and makes the landing page's images from them (docs-images).
 docs-images
-           The landing page's images in docs/: each README screenshot as a full-size lossless WebP plus a 640px
-           thumbnail, a 1200 × 630 link preview, and the app icon.
+           The landing page's images in docs/: each README screenshot as a full-size lossless WebP plus 640, 800
+           and 1280px copies, a 1200 × 630 link preview, and the app icon.
 package    This OS's release packages, in target/package/dist.
 
 The version lives in [workspace.package] in Cargo.toml; Cargo.lock repeats it for every workspace
