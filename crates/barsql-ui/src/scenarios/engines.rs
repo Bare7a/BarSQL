@@ -109,26 +109,31 @@ impl Engine {
         if std::env::var("BARSQL_E2E_MSSQL").as_deref() != Ok("1") {
             return false;
         }
-        let config = self.config();
-        let master = ConnectionConfig { database: "master".into(), ..config.clone() };
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        runtime.block_on(async {
-            let engine = barsql_db::Engine::connect(&master).await.expect("SQL Server is reachable");
-            let mut session = engine.session().await.unwrap();
-            let cancel = barsql_db::Cancel::new();
-            let create = format!("IF DB_ID(N'{0}') IS NULL CREATE DATABASE [{0}]", config.database);
-            session.buffered(&create, &cancel).await.unwrap();
-            // Only when off: switching ends every other connection to the database, a parallel test's included.
-            let snapshot = format!(
-                "IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{0}' AND is_read_committed_snapshot_on = 0)
-                ALTER DATABASE [{0}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE",
-                config.database
-            );
-            session.buffered(&snapshot, &cancel).await.unwrap();
-            engine.close().await;
-        });
+        // Once, with the other tests waiting: switching the snapshot on restarts the database, failing their logins.
+        static PREPARED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        PREPARED.get_or_init(|| prepare_mssql(&self.config()));
         true
     }
+}
+
+fn prepare_mssql(config: &ConnectionConfig) {
+    let master = ConnectionConfig { database: "master".into(), ..config.clone() };
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let engine = barsql_db::Engine::connect(&master).await.expect("SQL Server is reachable");
+        let mut session = engine.session().await.unwrap();
+        let cancel = barsql_db::Cancel::new();
+        let create = format!("IF DB_ID(N'{0}') IS NULL CREATE DATABASE [{0}]", config.database);
+        session.buffered(&create, &cancel).await.unwrap();
+        // Only when off: switching ends every other connection to the database, a parallel test's included.
+        let snapshot = format!(
+            "IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{0}' AND is_read_committed_snapshot_on = 0)
+            ALTER DATABASE [{0}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE",
+            config.database
+        );
+        session.buffered(&snapshot, &cancel).await.unwrap();
+        engine.close().await;
+    });
 }
 
 // Tables outlive a run on a server, so each gets a fresh name.

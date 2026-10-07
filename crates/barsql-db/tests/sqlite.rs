@@ -227,3 +227,16 @@ async fn read_only_sessions_refuse_writes_themselves() {
     assert_eq!(streamed.map_err(|e| e.message), Err(barsql_sql::READ_ONLY_ERROR.to_string()));
     assert!(session.run_script(&["SELECT count(*) FROM t".into()], &tx, &Cancel::new()).await.is_ok());
 }
+
+// A tab keeps its session between runs, so a plan must not keep the file's one connection with it.
+#[tokio::test]
+async fn a_plan_gives_the_connection_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("plan.db"), false).await;
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)").await;
+    let mut tab = engine.session().await.unwrap();
+    let strategy = barsql_sql::ExplainStrategy::Query("EXPLAIN QUERY PLAN SELECT * FROM t".into());
+    assert!(!tab.plan_rows(&strategy, &Cancel::new()).await.unwrap().rows.is_empty());
+    let next = tokio::time::timeout(std::time::Duration::from_secs(5), exec(&engine, "SELECT 1")).await;
+    assert!(next.is_ok(), "the plan kept the connection");
+}

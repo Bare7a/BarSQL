@@ -510,6 +510,10 @@ impl Session {
     }
 
     pub async fn plan_rows(&mut self, strategy: &ExplainStrategy, cancel: &Cancel) -> Result<PlanRows, QueryError> {
+        // SQLite's session gives the file's one connection back afterwards, as its `buffered` does.
+        if let Self::Sqlite(s) = self {
+            return s.plan_rows(strategy, cancel).await;
+        }
         dispatch_session!(self, s => crate::script::plan_rows(s, strategy, cancel).await)
     }
 

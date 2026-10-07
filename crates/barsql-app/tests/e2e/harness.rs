@@ -95,13 +95,20 @@ impl Kind {
     }
 }
 
-// The stack's SQL Server starts without barsql_test, and refuses logins for a few seconds after it reports healthy.
 // False when the profile is off.
 async fn mssql_ready() -> bool {
     if std::env::var("BARSQL_E2E_MSSQL").as_deref() != Ok("1") {
         eprintln!("skipped: set BARSQL_E2E_MSSQL=1 and start the mssql profile");
         return false;
     }
+    // Once, with the other tests waiting: switching the snapshot on restarts the database, failing their logins.
+    static PREPARED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    PREPARED.get_or_init(prepare_mssql).await;
+    true
+}
+
+// The stack's SQL Server starts without barsql_test, and refuses logins for a few seconds after it reports healthy.
+async fn prepare_mssql() {
     let cfg = Kind::SqlServer.config();
     let master = ConnectionConfig { database: "master".into(), ..cfg.clone() };
     for _ in 0..30 {
@@ -118,7 +125,7 @@ async fn mssql_ready() -> bool {
                 session.buffered(&sql, &Cancel::new()).await.unwrap();
             }
             engine.close().await;
-            return true;
+            return;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }

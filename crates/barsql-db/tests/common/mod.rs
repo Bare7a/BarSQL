@@ -113,9 +113,16 @@ pub fn mssql_setup(database: &str) -> [String; 2] {
     ]
 }
 
+pub async fn mssql_engine(cfg: &ConnectionConfig) -> barsql_db::Engine {
+    // Once, with the other tests waiting: switching the snapshot on restarts the database, failing their logins.
+    static PREPARED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    PREPARED.get_or_init(|| prepare_mssql(cfg)).await;
+    barsql_db::Engine::connect(cfg).await.expect("SQL Server is reachable")
+}
+
 // The stack's SQL Server has no barsql_test until the first run makes it. Logins fail for a few seconds after the
 // container reports healthy, so this retries.
-pub async fn mssql_engine(cfg: &ConnectionConfig) -> barsql_db::Engine {
+async fn prepare_mssql(cfg: &ConnectionConfig) {
     let master = ConnectionConfig { database: "master".into(), ..cfg.clone() };
     let mut last = None;
     for _ in 0..30 {
@@ -126,7 +133,7 @@ pub async fn mssql_engine(cfg: &ConnectionConfig) -> barsql_db::Engine {
                     session.buffered(&sql, &Cancel::new()).await.unwrap();
                 }
                 engine.close().await;
-                return barsql_db::Engine::connect(cfg).await.expect("SQL Server is reachable");
+                return;
             }
             Err(error) => last = Some(error),
         }
