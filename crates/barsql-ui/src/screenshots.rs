@@ -647,7 +647,7 @@ RETURNING *;
         robot.draw(cx).await;
         // File is at (44, 17), past the bar's padding, logo and gap. The keys then open View > Theme.
         robot.click(cx, point(px(44.), px(17.)), Modifiers::none(), 1).await;
-        robot.keys(cx, "right right down right").await?;
+        robot.keys(cx, "right right down down right").await?;
         robot.capture(cx, &shot(12)).await?;
         Ok(())
     }
