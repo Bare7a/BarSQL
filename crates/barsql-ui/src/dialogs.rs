@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme, Disableable, StyledExt, WindowExt, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable, StyledExt, WindowExt, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -61,11 +61,13 @@ impl Render for PromptForm {
                 modal::footer(cx)
                     .child(
                         Button::new("prompt-cancel")
+                            .large()
                             .label(t(cx, "common.cancel"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("prompt-confirm")
+                            .large()
                             .primary()
                             .label(self.confirm.clone())
                             .disabled(empty)
@@ -114,7 +116,7 @@ pub fn prompt(
     window.defer(cx, move |window, cx| input.update(cx, |state, cx| state.focus(window, cx)));
 }
 
-// Enter confirms.
+// Enter confirms, except a danger confirmation, which takes a click so a stray Enter can't delete anything.
 pub struct Confirm {
     pub title: SharedString,
     pub description: SharedString,
@@ -140,11 +142,14 @@ pub fn confirm(
                 modal::footer(cx)
                     .child(
                         Button::new("confirm-cancel")
+                            .large()
                             .label(t(cx, "common.cancel"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("confirm-ok")
+                            .large()
+                            .debug_selector(|| "confirm-ok".into())
                             .map(|button| if confirm.danger { button.danger().outline() } else { button.primary() })
                             .label(confirm.confirm.clone())
                             .on_click(move |_, window, cx| {
@@ -153,16 +158,19 @@ pub fn confirm(
                             }),
                     ),
             );
-        Modal::new("confirm", confirm.title.clone())
+        let dialog = Modal::new("confirm", confirm.title.clone())
             .size(modal::Size::Sm)
             .danger(confirm.danger)
             .build(dialog, content, window, cx)
-            .overlay_closable(false)
-            .on_ok(move |_, window, cx| {
-                window.close_dialog(cx);
-                on_ok(window, cx);
-                false
-            })
+            .overlay_closable(false);
+        if confirm.danger {
+            return dialog;
+        }
+        dialog.on_ok(move |_, window, cx| {
+            window.close_dialog(cx);
+            on_ok(window, cx);
+            false
+        })
     });
 }
 
@@ -171,6 +179,7 @@ pub fn alert(title: SharedString, message: SharedString, window: &mut Window, cx
         let content = v_flex().child(modal::body().child(modal::description(message.clone(), cx))).child(
             modal::footer(cx).child(
                 Button::new("alert-ok")
+                    .large()
                     .primary()
                     .label(t(cx, "common.ok"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
@@ -211,11 +220,13 @@ pub fn unsaved(
                     .flex_wrap()
                     .child(
                         Button::new("unsaved-cancel")
+                            .large()
                             .label(t(cx, "dialog.unsavedCancel"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("unsaved-discard")
+                            .large()
                             .danger()
                             .outline()
                             .label(t(cx, "dialog.unsavedDiscard"))
@@ -224,7 +235,7 @@ pub fn unsaved(
                                 discard(window, cx);
                             }),
                     )
-                    .child(Button::new("unsaved-save").primary().label(t(cx, "dialog.unsavedSave")).on_click(
+                    .child(Button::new("unsaved-save").large().primary().label(t(cx, "dialog.unsavedSave")).on_click(
                         move |_, window, cx| {
                             window.close_dialog(cx);
                             save(window, cx);

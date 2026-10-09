@@ -4,12 +4,13 @@ use barsql_sql::QueryPlan;
 use barsql_sql::plan::PlanNode;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::form;
+use crate::form::{self, ToolButton as _};
 use crate::i18n::{I18n, t, t_with};
 use crate::plan_tree::{
     Metric, PlanRow, available_metrics, collect_parent_keys, default_metric, flatten, format_cost, format_factor,
@@ -17,13 +18,15 @@ use crate::plan_tree::{
 };
 use crate::scrollbars::HoverScrollbar as _;
 use crate::toast;
-use crate::tokens::{ICON_2XS, ICON_SM, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_SM, TEXT_XS, TINT, TINT_BORDER};
+use crate::tokens::{ICON_2XS, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_SM, TEXT_XS, TINT, TINT_BORDER};
 
 const CONTEXT: &str = "PlanTree";
 const INDENT_REM: f32 = 1.077;
 const METRIC_REM: f32 = 10.;
 
 actions!(plan, [SelectPrevious, SelectNext, Collapse, Expand, SelectFirst, SelectLast]);
+
+type ViewAction = Box<dyn Fn(&mut PlanView, &mut Context<PlanView>)>;
 
 pub fn init(cx: &mut App) {
     let context = Some(CONTEXT);
@@ -83,6 +86,14 @@ impl PlanView {
         cx.notify();
     }
 
+    fn collapse_all(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        self.collapsed = match collapsed {
+            true => collect_parent_keys(&self.plan.nodes, "").into_iter().collect(),
+            false => Default::default(),
+        };
+        cx.notify();
+    }
+
     fn select(&mut self, key: String, cx: &mut Context<Self>) {
         self.selected = Some(key);
         cx.notify();
@@ -125,7 +136,7 @@ impl PlanView {
         }
     }
 
-    fn copy_raw(&self, cx: &mut App) {
+    pub(crate) fn copy_raw(&self, cx: &mut App) {
         cx.write_to_clipboard(ClipboardItem::new_string(self.plan.raw.clone()));
         toast::success(t(cx, "toast.copiedClipboard"), cx);
     }
@@ -166,6 +177,7 @@ impl PlanView {
                     let name = t(cx, &format!("results.planMetric.{}", metric.key()));
                     Button::new(SharedString::from(format!("plan-metric-{}", metric.key())))
                         .debug_selector(move || format!("plan-metric-{}", metric.key()))
+                        .h(rems(1.692))
                         .label(name.clone())
                         .selected(current == Some(metric))
                         .tooltip(t_with(cx, "results.planHeatByMetric", &[("metric", &name)]))
@@ -207,25 +219,17 @@ impl PlanView {
             .when(!self.raw && !parents.is_empty(), |el| {
                 el.child(
                     Button::new("plan-toggle-all")
-                        .small()
                         .ghost()
-                        .w(rems(2.154))
-                        .h(rems(1.846))
-                        .p_0()
-                        .child(Icon::new(Lucide::ListTree).size(ICON_SM))
+                        .tool_icon(Icon::new(Lucide::ListTree), ICON_XS)
                         .tooltip(expand_label)
                         .on_click(cx.listener(|view, _, _, cx| view.toggle_all(cx))),
                 )
             })
             .child(
                 Button::new("plan-raw")
-                    .small()
                     .ghost()
                     .debug_selector(|| "plan-raw".into())
-                    .w(rems(2.154))
-                    .h(rems(1.846))
-                    .p_0()
-                    .child(Icon::new(Lucide::CodeXml).size(ICON_SM))
+                    .tool_icon(Icon::new(Lucide::CodeXml), ICON_XS)
                     .selected(self.raw)
                     .tooltip(t(cx, "results.planRaw"))
                     .on_click(cx.listener(|view, _, _, cx| {
@@ -235,12 +239,8 @@ impl PlanView {
             )
             .child(
                 Button::new("plan-copy")
-                    .small()
                     .ghost()
-                    .w(rems(2.154))
-                    .h(rems(1.846))
-                    .p_0()
-                    .child(Icon::new(Lucide::Copy).size(ICON_SM))
+                    .tool_icon(Icon::new(Lucide::Copy), ICON_XS)
                     .tooltip(t(cx, "results.planCopy"))
                     .on_click(cx.listener(|view, _, _, cx| view.copy_raw(cx))),
             )
@@ -368,11 +368,58 @@ impl PlanView {
             .when(shown(Metric::Rows), |el| el.child(cell(format_rows(rows, lang), rows_sub)))
             .when(shown(Metric::Time), |el| el.child(cell(format_ms(node.self_time_ms, lang), time_sub)))
             .when(shown(Metric::Cost), |el| el.child(cell(format_cost(node.cost_self, lang), cost_sub)))
-            .on_click(cx.listener(move |view, _, window, cx| {
-                window.focus(&view.focus, cx);
-                view.select(key.clone(), cx);
+            .on_click(cx.listener({
+                let key = key.clone();
+                move |view, _, window, cx| {
+                    window.focus(&view.focus, cx);
+                    view.select(key.clone(), cx);
+                }
             }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let key = key.clone();
+                    move |view, _, _, cx| view.select(key.clone(), cx)
+                }),
+            )
+            .context_menu({
+                let view = cx.entity().downgrade();
+                let has_children = row.has_children;
+                move |menu, _, cx| Self::row_menu(&view, key.clone(), has_children, menu, cx)
+            })
             .into_any_element()
+    }
+
+    // On a node: opening and closing the tree, and the engine's own output.
+    fn row_menu(
+        view: &WeakEntity<Self>,
+        key: String,
+        has_children: bool,
+        menu: PopupMenu,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let Some(view) = view.upgrade() else { return menu };
+        let collapsed = view.read(cx).collapsed.contains(&key);
+        let run = |f: ViewAction| {
+            let view = view.clone();
+            move |_: &ClickEvent, _: &mut Window, cx: &mut App| view.update(cx, |view, cx| f(view, cx))
+        };
+        let node = if collapsed { "results.planExpandNode" } else { "results.planCollapseNode" };
+        menu.item(
+            PopupMenuItem::new(t(cx, node))
+                .disabled(!has_children)
+                .on_click(run(Box::new(move |view, cx| view.toggle(&key, cx)))),
+        )
+        .item(
+            PopupMenuItem::new(t(cx, "results.planExpandAll"))
+                .on_click(run(Box::new(|view, cx| view.collapse_all(false, cx)))),
+        )
+        .item(
+            PopupMenuItem::new(t(cx, "results.planCollapseAll"))
+                .on_click(run(Box::new(|view, cx| view.collapse_all(true, cx)))),
+        )
+        .separator()
+        .item(PopupMenuItem::new(t(cx, "results.planCopy")).on_click(run(Box::new(|view, cx| view.copy_raw(cx)))))
     }
 
     fn details(&self, node: &PlanNode, cx: &App) -> AnyElement {

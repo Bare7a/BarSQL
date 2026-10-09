@@ -203,6 +203,7 @@ pub fn scroll_content() -> Div {
     v_flex().flex_auto().min_h_0()
 }
 
+// Its buttons are Large: as tall as Medium (32px) but with 13px labels, where Medium's are 11.4px.
 pub fn footer(cx: &App) -> Div {
     h_flex()
         .flex_none()

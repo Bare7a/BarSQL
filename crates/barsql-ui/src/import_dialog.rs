@@ -10,7 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -638,12 +638,14 @@ impl ImportDialog {
         modal::footer(cx)
             .child(
                 Button::new("import-dismiss")
+                    .large()
                     .debug_selector(|| "import-dismiss".into())
                     .label(t(cx, if running { "import.stop" } else { "common.close" }))
                     .on_click(cx.listener(|this, _, window, cx| this.dismiss(window, cx))),
             )
             .child(
                 Button::new("import-run")
+                    .large()
                     .debug_selector(|| "import-run".into())
                     .primary()
                     .label(t(cx, if running { "import.running" } else { "import.run" }))

@@ -203,6 +203,31 @@ impl Staging {
         Outcome::Changed
     }
 
+    // Marks every row, or unmarks them all when each is marked already. One undo step, and ambiguous rows are
+    // skipped and reported.
+    pub fn toggle_deletes(&mut self, keys: &Keys, rows: &[usize]) -> Outcome {
+        let mut ambiguous = false;
+        let mut picked: Vec<PkKey> = Vec::new();
+        for &row in rows {
+            match keys.usable(row) {
+                Ok(key) if !picked.contains(key) => picked.push(key.clone()),
+                Ok(_) => {}
+                Err(outcome) => ambiguous |= outcome == Outcome::Ambiguous,
+            }
+        }
+        if picked.is_empty() {
+            return if ambiguous { Outcome::Ambiguous } else { Outcome::Unchanged };
+        }
+        let mut deletes = self.pending.deletes.clone();
+        if picked.iter().all(|key| deletes.contains(key)) {
+            deletes.retain(|key| !picked.contains(key));
+        } else {
+            deletes.extend(picked.into_iter().filter(|key| !self.pending.deletes.contains(key)));
+        }
+        self.commit(Pending { edits: self.pending.edits.clone(), deletes });
+        if ambiguous { Outcome::Ambiguous } else { Outcome::Changed }
+    }
+
     #[cfg(test)]
     fn is_deleted(&self, keys: &Keys, row: usize) -> bool {
         keys.key(row).is_some_and(|key| self.pending.deletes.contains(key))
@@ -416,6 +441,21 @@ mod tests {
         assert!(!staging.redo(), "a new change drops the redo branch");
         staging.clear();
         assert!(!staging.has_pending() && !staging.undo());
+    }
+
+    #[test]
+    fn several_rows_are_marked_for_delete_in_one_step() {
+        let set = set(&[("1", "ann"), ("2", "bob"), ("3", "cy")]);
+        let keys = Keys::new(&set, &["id".into()]);
+        let mut staging = Staging::default();
+        staging.toggle_delete(&keys, 1);
+        assert_eq!(staging.toggle_deletes(&keys, &[0, 1]), Outcome::Changed, "marks the rest");
+        assert!(staging.is_deleted(&keys, 0) && staging.is_deleted(&keys, 1) && !staging.is_deleted(&keys, 2));
+        assert_eq!(staging.toggle_deletes(&keys, &[0, 1]), Outcome::Changed, "all marked, so all unmarked");
+        assert_eq!(staging.delete_count(), 0);
+        assert!(staging.undo());
+        assert_eq!(staging.delete_count(), 2, "one undo step");
+        assert_eq!(staging.toggle_deletes(&keys, &[]), Outcome::Unchanged);
     }
 
     #[test]

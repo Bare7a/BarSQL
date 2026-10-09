@@ -17,6 +17,7 @@ use crate::relative_time::one_line_preview;
 use crate::saved_queries::{self, SORT_KEY, SavedQueries, SavedSort};
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state::{self, set_setting, setting};
+use crate::toast;
 use crate::tokens::{ICON_2XS, RADIUS, TEXT_2XS, TEXT_SM, TEXT_XS};
 
 pub enum SavedEvent {
@@ -129,7 +130,12 @@ impl SavedPanel {
         };
         dialogs::confirm(confirm, window, cx, move |window, cx| {
             if !state::bar(cx).delete_saved_query(&query.id) {
-                saved_queries::failed("delete failed".into(), "errors.generic", window, cx);
+                saved_queries::failed(
+                    t(cx, "errors.deleteQueryFailedDetail").into(),
+                    "errors.deleteQueryFailed",
+                    window,
+                    cx,
+                );
             }
             saved_queries::refresh(cx);
         });
@@ -223,17 +229,17 @@ impl SavedPanel {
                 PopupMenuItem::new(t(cx, if pinned { "sidebar.unpin" } else { "sidebar.pin" }))
                     .on_click(move |_, _, cx| saved_queries::toggle_pin(&pin_id, cx)),
             )
-            .item(PopupMenuItem::new(t(cx, "common.rename")).on_click(with(Self::rename)))
+            .item(PopupMenuItem::new(t(cx, "sidebar.rename")).on_click(with(Self::rename)))
             .item(
                 PopupMenuItem::new(t(cx, "sidebar.duplicate"))
                     .on_click(move |_, window, cx| Self::duplicate(&duplicate, window, cx)),
             )
-            .item(
-                PopupMenuItem::new(t(cx, "sidebar.copySql"))
-                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_sql.clone()))),
-            )
+            .item(PopupMenuItem::new(t(cx, "sidebar.copySql")).on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_sql.clone()));
+                toast::success(t(cx, "toast.copiedClipboard"), cx);
+            }))
             .separator()
-            .item(PopupMenuItem::new(t(cx, "common.delete")).on_click(with(Self::delete)))
+            .item(PopupMenuItem::new(t(cx, "sidebar.deleteEllipsis")).on_click(with(Self::delete)))
         }
     }
 
@@ -363,6 +369,16 @@ impl SavedPanel {
                 cx.listener({
                     let id = query.id.clone();
                     move |this, _, window, cx| this.nav.pick(&id, window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let id = query.id.clone();
+                    move |this, _, window, cx| {
+                        this.nav.point_at(&id, window, cx);
+                        cx.notify();
+                    }
                 }),
             )
             .when(ring, |el| list_nav::ring(el, cx))

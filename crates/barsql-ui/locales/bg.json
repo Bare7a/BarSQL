@@ -48,7 +48,20 @@
       "source": "Източник: {{name}}",
       "combinatorOf": "Комбинаторна форма на {{base}}",
       "deprecated": "остаряла"
-    }
+    },
+    "contextRunStatement": "Изпълни заявката",
+    "contextRunSelection": "Изпълни избраното",
+    "contextRunAll": "Изпълни всичко",
+    "contextChangeAll": "Промени всички срещания",
+    "contextToggleComment": "Коментирай / разкоментирай",
+    "contextSelectAll": "Избери всичко",
+    "contextFindReplace": "Замени",
+    "contextFormat": "Форматирай SQL",
+    "more": "Още действия",
+    "renameSaved": "Преименувай запазената заявка…",
+    "beginTxn": "Нова транзакция",
+    "beginTxnHint": "Заявките в този раздел се изпълняват в нея, докато не я потвърдите или отмените",
+    "contextGoToDefinition": "Към дефиницията"
   },
   "connection": {
     "turso": "Turso / libSQL",
@@ -68,7 +81,9 @@
     "instanceHint": "Именувана инстанция, която SQL Server Browser намира вместо порта. Не през SSH тунел.",
     "databasePlaceholderSqlServer": "master",
     "databaseHintSqlServer": "База данни за свързване. Оставете празно за базата по подразбиране на акаунта.",
-    "sslStrict": "Стриктно (TDS 8.0)"
+    "sslStrict": "Стриктно (TDS 8.0)",
+    "confirmChanges": "Питай преди промени",
+    "confirmChangesHint": "За продукционни бази: потвърждава INSERT, UPDATE, DELETE, DDL и записи от таблицата, преди да се изпълнят."
   },
   "results": {
     "messages": "Съобщения",
@@ -88,11 +103,23 @@
       "info": "Инфо",
       "notice": "Известие",
       "warning": "Внимание"
-    }
+    },
+    "contextExportAs": "Експортирай…",
+    "copyAllRows": "Копирай всички редове",
+    "copyError": "Копирай грешката",
+    "copyStatement": "Копирай заявката",
+    "copyMessage": "Копирай съобщението"
   },
   "sidebar": {
     "serverViews": "Изгледи на сървъра",
-    "systemViews": "Системни изгледи"
+    "systemViews": "Системни изгледи",
+    "editConnection": "Редактирай…",
+    "duplicateConnection": "Дублирай…",
+    "moveTo": "Премести в папка",
+    "deleteEllipsis": "Изтрий…",
+    "renameFolder": "Преименувай папка…",
+    "saveAsQuery": "Запази като заявка…",
+    "clearHistory": "Изчисти историята…"
   },
   "systemViews": {
     "tableTabTitle": "{{view}}: {{name}}",
@@ -117,5 +144,154 @@
     "kindTuple": "Кортеж",
     "arrayReadOnly": "Показва се като JSON, затова не може да се редактира тук. Превключете на Текст, за да редактирате самата стойност.",
     "arrayError": "Това вече не може да се прочете като масив."
+  },
+  "tips": {
+    "cursorsTitle": "Няколко курсора",
+    "cursorsNext": "Избери думата при курсора, после добави курсор при следващото ѝ срещане",
+    "cursorsAll": "Добави курсор при всяко срещане на думата или избраното",
+    "cursorsSkip": "Прескочи последно добавеното срещане и вземи следващото",
+    "cursorsUndo": "Премахни последно добавеното срещане",
+    "cursorsEscape": "Обратно към един курсор. {{alt}}+клик добавя курсор навсякъде",
+    "editorRunSelection": "Изпълни избраното, а без избор – заявката при курсора",
+    "editorContext": "Десен бутон за изпълнение, обяснение, форматиране, коментиране и промяна на всички срещания",
+    "editorDefinition": "Към дефиницията: псевдоним или CTE отива до декларацията си, таблица се отваря. Работи и Cmd/Ctrl-клик.",
+    "editorParams": "Пишете :name за стойност, която се попълва при изпълнение. BarSQL я пита и запомня.",
+    "editorPalette": "Палитра с команди: всяка команда с клавишната си комбинация.",
+    "resultsChart": "Графика в лентата на резултатите показва резултата като стълбове или линия.",
+    "schemaDiagram": "Десен клик върху схема за ER диаграмата ѝ или сравнение с друга."
+  },
+  "grid": {
+    "copyAs": "Копирай като",
+    "selectAll": "Избери всичко",
+    "filterByValue": "Филтрирай по тази стойност",
+    "sortAscending": "Сортирай възходящо",
+    "sortDescending": "Сортирай низходящо",
+    "clearSort": "Премахни сортирането",
+    "copyColumnName": "Копирай името на колоната",
+    "hideColumn": "Скрий колоната",
+    "showAllColumns": "Покажи всички колони"
+  },
+  "tableView": {
+    "markRows": "Маркирай {{count}} ред за изтриване",
+    "markRows_other": "Маркирай {{count}} реда за изтриване",
+    "unmarkRows": "Премахни маркировката за изтриване от {{count}} ред",
+    "unmarkRows_other": "Премахни маркировката за изтриване от {{count}} реда"
+  },
+  "shortcuts": {
+    "items": {
+      "runSelection": "Изпълни избраното или заявката",
+      "commandPalette": "Палитра с команди"
+    }
+  },
+  "tabs": {
+    "close": "Затвори",
+    "closeOthers": "Затвори останалите",
+    "closeRight": "Затвори разделите вдясно",
+    "closeAll": "Затвори всички",
+    "reopenClosed": "Отвори отново затворения раздел",
+    "pin": "Закачи раздела",
+    "unpin": "Откачи раздела",
+    "duplicate": "Дублирай",
+    "rename": "Преименувай…",
+    "renameTitle": "Преименувай раздела",
+    "copySql": "Копирай SQL"
+  },
+  "common": {
+    "undo": "Отмени"
+  },
+  "toast": {
+    "historyDeleted": "Записът от историята е изтрит"
+  },
+  "menu": {
+    "undo": "Отмени",
+    "redo": "Повтори",
+    "cut": "Изрежи",
+    "copy": "Копирай",
+    "paste": "Постави",
+    "selectAll": "Избери всичко",
+    "services": "Услуги",
+    "hideApp": "Скрий BarSQL",
+    "hideOthers": "Скрий другите",
+    "showAll": "Покажи всички",
+    "quitApp": "Изход от BarSQL",
+    "window": "Прозорец",
+    "minimize": "Минимизирай",
+    "zoom": "Мащабирай",
+    "bringAllToFront": "Изнеси всички отпред",
+    "stripedRows": "Редове на ивици",
+    "commandPalette": "Палитра с команди…"
+  },
+  "errors": {
+    "deleteQueryFailed": "Заявката не можа да бъде изтрита",
+    "deleteQueryFailedDetail": "Запазената заявка вече не е в библиотеката."
+  },
+  "status": {
+    "caret": "Ред {{line}}, колона {{column}}",
+    "selected": "{{count}} избран",
+    "selected_other": "{{count}} избрани",
+    "selections": "{{count}} селекция",
+    "selections_other": "{{count}} селекции",
+    "count": "Брой {{count}}",
+    "sum": "Сума {{sum}}",
+    "average": "Средно {{avg}}",
+    "protected": "Пита преди промени"
+  },
+  "theme": {
+    "system": "Като системата"
+  },
+  "commandPalette": {
+    "placeholder": "Въведете команда…",
+    "commitTxn": "Потвърди транзакцията",
+    "rollbackTxn": "Отмени транзакцията"
+  },
+  "params": {
+    "title": "Параметри на заявката",
+    "description": "Всяка стойност влиза в заявката като SQL, затова поставете текста в кавички: 'Ann'. Празна стойност се изпълнява като NULL."
+  },
+  "safety": {
+    "everyRowTitle": "Промяна на всеки ред?",
+    "everyRowDelete": "Този DELETE няма клауза WHERE, затова премахва всеки ред от таблицата си.",
+    "everyRowUpdate": "Този UPDATE няма клауза WHERE, затова променя всеки ред от таблицата си.",
+    "everyRowMany": "{{count}} заявки нямат клауза WHERE, затова променят всеки ред от таблиците си.",
+    "changesTitle": "Изпълнение на промени в {{name}}?",
+    "changesDescription": "{{name}} пита, преди да изпълни заявки, които променят данни или схема.",
+    "saveRows_one": "Записва {{count}} променен ред в {{name}}.",
+    "saveRows_other": "Записва {{count}} променени реда в {{name}}."
+  },
+  "chart": {
+    "title": "Графика",
+    "tooltip": "Покажи резултата като графика",
+    "bar": "Стълбове",
+    "line": "Линия",
+    "labels": "Етикети",
+    "values": "Стойности",
+    "truncated": "Първите {{count}} точки",
+    "noNumbers": "Резултатът няма числова колона за графика.",
+    "noValues": "Нито един ред няма стойност в тази колона."
+  },
+  "erDiagram": {
+    "menu": "ER диаграма",
+    "title": "ER диаграма · {{schema}}",
+    "loading": "Зареждане на таблиците…",
+    "empty": "Тази схема няма таблици.",
+    "more": "+{{count}} още",
+    "truncated": "Показани са първите {{shown}} от {{total}} таблици."
+  },
+  "schemaDiff": {
+    "menu": "Сравни схемата…",
+    "title": "Сравняване на схеми",
+    "with": "с",
+    "pickSchema": "Схема",
+    "compare": "Сравни",
+    "hint": "Изберете схемата за обновяване, после Сравни.",
+    "loading": "Сравняване…",
+    "same": "Схемите имат еднакви таблици и колони.",
+    "missingTable": "липсва в {{schema}} · {{count}} колони",
+    "extraTable": "само в {{schema}}",
+    "changedTable_one": "{{count}} колона се различава",
+    "changedTable_other": "{{count}} колони се различават",
+    "copyScript": "Копирай скрипта",
+    "openScript": "Отвори скрипта",
+    "scriptTitle": "Скрипт за синхронизация"
   }
 }

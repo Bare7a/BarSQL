@@ -1,6 +1,6 @@
 use barsql_app::app_info;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -56,13 +56,14 @@ pub fn open(window: &mut Window, cx: &mut App) {
             )
             .child(
                 modal::footer(cx)
-                    .child(Button::new("about-check-updates").label(t(cx, "about.checkUpdates")).on_click(
+                    .child(Button::new("about-check-updates").large().label(t(cx, "about.checkUpdates")).on_click(
                         |_, window, cx| {
                             update_dialog::open(window, cx);
                         },
                     ))
                     .child(
                         Button::new("about-close")
+                            .large()
                             .primary()
                             .label(t(cx, "common.close"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),

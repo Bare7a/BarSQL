@@ -90,7 +90,9 @@ impl Render for JsonPanel {
         let theme = cx.theme();
         let shortcut = shortcut_label(&ToggleJsonPanel, window).unwrap_or_default();
         let close = t_with(cx, "tooltip.closeJsonViewer", &[("shortcut", &shortcut)]);
+        // Its lines continue the editor's: the header ends with the tab bar and the filter row with the toolbar.
         let header = h_flex()
+            .debug_selector(|| "json-panel-header".into())
             .h(rems(2.769))
             .flex_none()
             .px(rems(0.769))

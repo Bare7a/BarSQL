@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use barsql_io::{EXPORT_FORMATS, ExportFormat, WriteOutcome, write_chunks};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, WindowExt, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable, WindowExt, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -193,6 +193,7 @@ impl ExportDialog {
         modal::footer(cx)
             .child(
                 Button::new("export-dismiss")
+                    .large()
                     .debug_selector(|| "export-dismiss".into())
                     .label(t(cx, if writing { "export.stop" } else { "common.cancel" }))
                     .disabled(self.busy && !writing)
@@ -200,6 +201,7 @@ impl ExportDialog {
             )
             .child(
                 Button::new("export-copy")
+                    .large()
                     .debug_selector(|| "export-copy".into())
                     .label(t(cx, "export.copyToClipboard"))
                     .disabled(self.busy)
@@ -207,6 +209,7 @@ impl ExportDialog {
             )
             .child(
                 Button::new("export-save")
+                    .large()
                     .primary()
                     .label(t(cx, "export.saveToFile"))
                     .disabled(self.busy)

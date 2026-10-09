@@ -80,7 +80,7 @@ fn select_in_new_tab_opens_the_tables_rows(cx: &mut TestAppContext) {
     );
     app.context_menu("tree:t:main.e2e_sel", SELECT_IN_NEW_TAB);
     assert_eq!(app.titles().last().map(String::as_str), Some("e2e_sel"));
-    app.click("run-all");
+    app.dispatch(crate::actions::RunAll);
     app.wait_idle();
     assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
 }
@@ -337,4 +337,59 @@ fn a_long_tree_shows_its_bar_on_hover(cx: &mut TestAppContext) {
     let mut app = prepared(cx, &seed.join(";"));
     app.overlay_scrollbars();
     app.shows_its_bar_on_hover("schema-tree", "tree:s:main");
+}
+
+// The schema menu's ER diagram draws its tables, and clicking one opens it.
+#[gpui_kit::test]
+fn the_er_diagram_shows_the_schema_and_opens_a_table(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        "CREATE TABLE e2e_users (id INTEGER PRIMARY KEY); \
+         CREATE TABLE e2e_posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES e2e_users(id))",
+    );
+    app.context_menu("tree:s:main", 0);
+    app.settle(|cx| {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.debug_bounds("er-table-0").is_some()
+    });
+    let (posts, users) = (app.bounds("er-table-0").unwrap(), app.bounds("er-table-1").unwrap());
+    assert!(users.right() < posts.left(), "the referenced table stands left of the one referencing it");
+    app.click("er-table-0");
+    assert!(!app.dialog_open());
+    assert_eq!(app.titles().last().map(String::as_str), Some("e2e_posts"));
+}
+
+// Comparing with another database lists what differs, and its sync script opens in a tab of that database.
+#[gpui_kit::test]
+fn a_schema_compares_with_another_database_and_opens_the_sync_script(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_cmp (id INTEGER PRIMARY KEY, name TEXT)");
+    let path = std::path::Path::new(&app.connection.file_path).with_file_name("other.db");
+    let config = barsql_core::ConnectionConfig {
+        name: "Other".into(),
+        driver: barsql_core::DriverType::Sqlite,
+        file_path: path.display().to_string(),
+        ..Default::default()
+    };
+    let other = app.env.runtime.block_on(app.env.bar.save_connection(config)).unwrap();
+    for sql in ["CREATE TABLE e2e_cmp (id INTEGER PRIMARY KEY)", "CREATE TABLE e2e_extra (x TEXT)"] {
+        app.env.runtime.block_on(app.env.bar.execute_query(&other.id, sql)).unwrap();
+    }
+    app.context_menu("tree:s:main", 1);
+    assert!(app.dialog_open());
+    app.menu_pick("diff-target-connection", 1);
+    app.settle(|cx| {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.debug_bounds("diff-compare").is_some()
+    });
+    app.click("diff-compare");
+    app.settle(|cx| {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.debug_bounds("diff-row-0").is_some()
+    });
+    app.click("diff-open-script");
+    assert!(!app.dialog_open());
+    let sql = app.sql();
+    assert!(sql.contains(r#"ALTER TABLE "e2e_cmp" ADD COLUMN "name" TEXT;"#), "{sql}");
+    assert!(sql.contains(r#"-- Only in the target: DROP TABLE "e2e_extra";"#), "{sql}");
+    assert!(sql.contains(r#"CREATE TABLE "main"."things""#), "{sql}");
 }

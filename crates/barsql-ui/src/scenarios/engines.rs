@@ -589,7 +589,7 @@ mod postgres_only {
     fn explain_analyze_measures_rows_and_timings(cx: &mut TestAppContext) {
         let (mut app, name) = seeded(cx);
         app.set_sql(&format!("SELECT * FROM {name};"));
-        app.click("explain-analyze");
+        app.dispatch(crate::actions::ExplainAnalyze);
         app.wait_idle();
         assert!(analyzed(&mut app));
         assert!(metrics(&mut app).contains(&"time"));
@@ -693,7 +693,7 @@ mod sqlserver_only {
         app.context_menu(selector(format!("tree:{row}")), 1);
         let sql = app.sql();
         assert!(sql.starts_with("SELECT TOP (100) "), "{sql}");
-        app.click("run-all");
+        app.dispatch(crate::actions::RunAll);
         app.wait_idle();
         assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
     }

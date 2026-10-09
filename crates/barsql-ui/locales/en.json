@@ -48,7 +48,20 @@
       "source": "From {{name}}",
       "combinatorOf": "Combinator form of {{base}}",
       "deprecated": "deprecated"
-    }
+    },
+    "contextRunStatement": "Run statement",
+    "contextRunSelection": "Run selection",
+    "contextRunAll": "Run all",
+    "contextChangeAll": "Change all occurrences",
+    "contextToggleComment": "Toggle comment",
+    "contextSelectAll": "Select all",
+    "contextFindReplace": "Replace",
+    "contextFormat": "Format SQL",
+    "more": "More actions",
+    "renameSaved": "Rename saved query…",
+    "beginTxn": "Begin transaction",
+    "beginTxnHint": "Queries on this tab run in it until you commit or roll back",
+    "contextGoToDefinition": "Go to definition"
   },
   "connection": {
     "turso": "Turso / libSQL",
@@ -68,7 +81,9 @@
     "instanceHint": "A named instance, found through the SQL Server Browser in place of the port. Not over an SSH tunnel.",
     "databasePlaceholderSqlServer": "master",
     "databaseHintSqlServer": "Database to connect to. Leave it empty for the login's default.",
-    "sslStrict": "Strict (TDS 8.0)"
+    "sslStrict": "Strict (TDS 8.0)",
+    "confirmChanges": "Ask before running changes",
+    "confirmChangesHint": "For production databases: confirms INSERT, UPDATE, DELETE, DDL and grid saves before they run."
   },
   "results": {
     "messages": "Messages",
@@ -88,11 +103,23 @@
       "info": "Info",
       "notice": "Notice",
       "warning": "Warning"
-    }
+    },
+    "contextExportAs": "Export…",
+    "copyAllRows": "Copy all rows",
+    "copyError": "Copy error",
+    "copyStatement": "Copy statement",
+    "copyMessage": "Copy message"
   },
   "sidebar": {
     "serverViews": "Server views",
-    "systemViews": "System views"
+    "systemViews": "System views",
+    "editConnection": "Edit…",
+    "duplicateConnection": "Duplicate…",
+    "moveTo": "Move to folder",
+    "deleteEllipsis": "Delete…",
+    "renameFolder": "Rename folder…",
+    "saveAsQuery": "Save as query…",
+    "clearHistory": "Clear history…"
   },
   "systemViews": {
     "tableTabTitle": "{{view}}: {{name}}",
@@ -117,5 +144,154 @@
     "kindTuple": "Tuple",
     "arrayReadOnly": "Shown as JSON, so it can't be edited here. Switch to Text to edit the value itself.",
     "arrayError": "This doesn't read as an array any more."
+  },
+  "tips": {
+    "cursorsTitle": "Multiple cursors",
+    "cursorsNext": "Select the word at the caret, then add a cursor at its next occurrence",
+    "cursorsAll": "Add a cursor at every occurrence of the word or selection",
+    "cursorsSkip": "Skip the last occurrence added and take the next one",
+    "cursorsUndo": "Take back the last occurrence added",
+    "cursorsEscape": "Go back to one cursor. {{alt}}+click adds a cursor anywhere",
+    "editorRunSelection": "Run the selection, or the statement at the caret when nothing is selected",
+    "editorContext": "Right-click to run, explain, format, comment and change every occurrence",
+    "editorDefinition": "Go to definition: an alias or CTE jumps to its declaration, a table opens. Cmd/Ctrl-click works too.",
+    "editorParams": "Write :name for a value to fill in at run time. BarSQL asks for it and remembers it.",
+    "editorPalette": "Command palette: every command with its shortcut.",
+    "resultsChart": "Chart in the results toolbar shows the result as bars or a line.",
+    "schemaDiagram": "Right-click a schema for its ER diagram, or to compare it with another."
+  },
+  "grid": {
+    "copyAs": "Copy as",
+    "selectAll": "Select all",
+    "filterByValue": "Filter by this value",
+    "sortAscending": "Sort ascending",
+    "sortDescending": "Sort descending",
+    "clearSort": "Clear sort",
+    "copyColumnName": "Copy column name",
+    "hideColumn": "Hide column",
+    "showAllColumns": "Show all columns"
+  },
+  "tableView": {
+    "markRows": "Mark {{count}} row for delete",
+    "markRows_other": "Mark {{count}} rows for delete",
+    "unmarkRows": "Unmark {{count}} row for delete",
+    "unmarkRows_other": "Unmark {{count}} rows for delete"
+  },
+  "shortcuts": {
+    "items": {
+      "runSelection": "Run selection or statement",
+      "commandPalette": "Command palette"
+    }
+  },
+  "tabs": {
+    "close": "Close",
+    "closeOthers": "Close others",
+    "closeRight": "Close to the right",
+    "closeAll": "Close all",
+    "reopenClosed": "Reopen closed tab",
+    "pin": "Pin tab",
+    "unpin": "Unpin tab",
+    "duplicate": "Duplicate",
+    "rename": "Rename…",
+    "renameTitle": "Rename tab",
+    "copySql": "Copy SQL"
+  },
+  "common": {
+    "undo": "Undo"
+  },
+  "toast": {
+    "historyDeleted": "History entry deleted"
+  },
+  "menu": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select All",
+    "services": "Services",
+    "hideApp": "Hide BarSQL",
+    "hideOthers": "Hide Others",
+    "showAll": "Show All",
+    "quitApp": "Quit BarSQL",
+    "window": "Window",
+    "minimize": "Minimize",
+    "zoom": "Zoom",
+    "bringAllToFront": "Bring All to Front",
+    "stripedRows": "Striped rows",
+    "commandPalette": "Command Palette…"
+  },
+  "errors": {
+    "deleteQueryFailed": "Could not delete query",
+    "deleteQueryFailedDetail": "The saved query is no longer in the library."
+  },
+  "status": {
+    "caret": "Ln {{line}}, Col {{column}}",
+    "selected": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "selections": "{{count}} selection",
+    "selections_other": "{{count}} selections",
+    "count": "Count {{count}}",
+    "sum": "Sum {{sum}}",
+    "average": "Avg {{avg}}",
+    "protected": "Asks before changes"
+  },
+  "theme": {
+    "system": "Match system"
+  },
+  "commandPalette": {
+    "placeholder": "Type a command…",
+    "commitTxn": "Commit transaction",
+    "rollbackTxn": "Roll back transaction"
+  },
+  "params": {
+    "title": "Query parameters",
+    "description": "Each value goes into the query as SQL, so put text in quotes: 'Ann'. An empty value runs as NULL."
+  },
+  "safety": {
+    "everyRowTitle": "Change every row?",
+    "everyRowDelete": "This DELETE has no WHERE clause, so it removes every row of its table.",
+    "everyRowUpdate": "This UPDATE has no WHERE clause, so it changes every row of its table.",
+    "everyRowMany": "{{count}} statements have no WHERE clause, so they change every row of their tables.",
+    "changesTitle": "Run changes on {{name}}?",
+    "changesDescription": "{{name}} asks before running statements that change data or schema.",
+    "saveRows_one": "Saves {{count}} changed row to {{name}}.",
+    "saveRows_other": "Saves {{count}} changed rows to {{name}}."
+  },
+  "chart": {
+    "title": "Chart",
+    "tooltip": "Show this result as a chart",
+    "bar": "Bars",
+    "line": "Line",
+    "labels": "Labels",
+    "values": "Values",
+    "truncated": "First {{count}} points",
+    "noNumbers": "This result has no numeric column to chart.",
+    "noValues": "No rows have a value in this column."
+  },
+  "erDiagram": {
+    "menu": "ER diagram",
+    "title": "ER diagram · {{schema}}",
+    "loading": "Loading tables…",
+    "empty": "This schema has no tables.",
+    "more": "+{{count}} more",
+    "truncated": "Showing the first {{shown}} of {{total}} tables."
+  },
+  "schemaDiff": {
+    "menu": "Compare schema…",
+    "title": "Compare schemas",
+    "with": "with",
+    "pickSchema": "Schema",
+    "compare": "Compare",
+    "hint": "Pick the schema to bring up to date, then Compare.",
+    "loading": "Comparing…",
+    "same": "The schemas have the same tables and columns.",
+    "missingTable": "missing in {{schema}} · {{count}} columns",
+    "extraTable": "only in {{schema}}",
+    "changedTable_one": "{{count}} column differs",
+    "changedTable_other": "{{count}} columns differ",
+    "copyScript": "Copy script",
+    "openScript": "Open script",
+    "scriptTitle": "Sync script"
   }
 }

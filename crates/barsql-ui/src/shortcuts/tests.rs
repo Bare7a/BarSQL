@@ -26,7 +26,7 @@ fn default_bindings_are_distinct_and_never_ctrl_alt() {
         let default = def.default_binding();
         assert!(!(default.ctrl && default.alt), "{} defaults to a Ctrl+Alt chord (AltGr on Windows)", def.id);
     }
-    assert_eq!(SHORTCUTS.len(), 20);
+    assert_eq!(SHORTCUTS.len(), 21);
 }
 
 #[test]

@@ -1,16 +1,12 @@
 use std::sync::Arc;
 
 use barsql_db::{Cell, ColumnMeta, ResultSet};
-use gpui_kit::component::WindowExt;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 
 use super::super::copy::{self, Staged};
 use super::super::sort::RowOrder;
-use super::{Editing, Grid, GridEvent, SortState, TableOverlay, Target, Width};
-use crate::i18n::{t, t_with};
+use super::{Editing, Grid, GridEvent, SortState, TableOverlay, Width};
 use crate::table_edits::{paste_cells, text_cells};
 
 // Rows this close to the bottom ask for the next page.
@@ -194,7 +190,9 @@ impl Grid {
     pub(super) fn start_edit(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
         let value = self.shown(row, column).display().unwrap_or_default().to_string();
         let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
-        let subscription = cx.subscribe_in(&input, window, |grid, _, event: &InputEvent, window, cx| match event {
+        let subscription = cx.subscribe_in(&input, window, |grid, input, event: &InputEvent, window, cx| match event {
+            // Its own right-click menu took the focus, and the edit carries on once that closes.
+            InputEvent::Blur if input.read(cx).has_selection_focus(window, cx) => {}
             InputEvent::PressEnter { .. } | InputEvent::Blur => grid.commit_edit(window, cx),
             _ => {}
         });
@@ -226,88 +224,6 @@ impl Grid {
             window.focus(&self.focus_handle, cx);
             cx.notify();
         }
-    }
-
-    // A right-click focuses the cell its menu is about.
-    pub(super) fn right_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.overlay.is_none() {
-            return;
-        }
-        window.focus(&self.focus_handle, cx);
-        if let Some(Target::Cell { row, col } | Target::Jump { row, col }) = self.hit(event.position)
-            && let Some(global) = self.order.global_at(row)
-        {
-            self.selection.focus(global, col as isize);
-            self.publish(cx);
-            cx.notify();
-        }
-    }
-
-    pub(super) fn table_menu(grid: Entity<Self>, menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {
-        let (row, column, editable, null, staged, deleted, jump) = {
-            let this = grid.read(cx);
-            let Some((_, row, column)) = this.focused_data_cell() else { return menu };
-            let overlay = this.overlay.as_ref();
-            (
-                row,
-                column,
-                this.editable(),
-                this.shown(row, column).is_null(),
-                overlay.is_some_and(|overlay| overlay.staged.contains_key(&(row, column))),
-                this.is_deleted(row),
-                overlay.and_then(|overlay| overlay.foreign.get(&column).cloned()),
-            )
-        };
-        let emit = |event: fn(usize, usize) -> GridEvent| {
-            let grid = grid.clone();
-            move |_: &ClickEvent, _: &mut Window, cx: &mut App| grid.update(cx, |_, cx| cx.emit(event(row, column)))
-        };
-        let mut menu = menu
-            .item(PopupMenuItem::new(t(cx, "common.copy")).on_click({
-                let grid = grid.clone();
-                move |_, window, cx| {
-                    let text = grid.read(cx).shown(row, column).display().unwrap_or_default().to_string();
-                    cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    window.push_notification(Notification::success(t(cx, "toast.copiedClipboard")), cx);
-                }
-            }))
-            .item(
-                PopupMenuItem::new(t(cx, "tableView.contextEdit"))
-                    .disabled(!editable)
-                    .on_click(emit(|row, column| GridEvent::EditInViewer { row, column })),
-            );
-        if let Some(table) = jump {
-            menu = menu.item(
-                PopupMenuItem::new(t_with(cx, "tableView.viewForeignKey", &[("table", &table)]))
-                    .disabled(null)
-                    .on_click(emit(|row, column| GridEvent::OpenForeignKey { row, column })),
-            );
-        }
-        let restore = {
-            let grid = grid.clone();
-            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                grid.update(cx, |grid, cx| {
-                    let value = grid.set.display(row, column).map(str::to_string);
-                    cx.emit(GridEvent::EditCell { row, column, value });
-                })
-            }
-        };
-        let delete_key = if deleted { "tableView.undeleteRow" } else { "tableView.deleteRow" };
-        menu.separator()
-            .item(
-                PopupMenuItem::new(t(cx, "tableView.contextSetNull"))
-                    .disabled(!editable || null)
-                    .on_click(emit(|row, column| GridEvent::EditCell { row, column, value: None })),
-            )
-            .item(
-                PopupMenuItem::new(t(cx, "tableView.contextRestore")).disabled(!editable || !staged).on_click(restore),
-            )
-            .separator()
-            .item(
-                PopupMenuItem::new(t(cx, delete_key))
-                    .disabled(!editable)
-                    .on_click(emit(|row, _| GridEvent::ToggleDelete(row))),
-            )
     }
 
     // Relative to the grid, not the window.

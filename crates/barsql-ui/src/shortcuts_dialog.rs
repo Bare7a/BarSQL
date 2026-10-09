@@ -171,7 +171,7 @@ pub fn open(window: &mut Window, cx: &mut App) -> Entity<ShortcutsDialog> {
         let reset = dialog.downgrade();
         let content = modal::scroll_content().child(dialog.clone()).child(
             modal::footer(cx)
-                .child(Button::new("shortcuts-reset-all").label(t(cx, "shortcuts.resetAll")).on_click(
+                .child(Button::new("shortcuts-reset-all").large().label(t(cx, "shortcuts.resetAll")).on_click(
                     move |_, _, cx| {
                         shortcuts::reset_all(cx);
                         let _ = reset.update(cx, |dialog, cx| {
@@ -182,6 +182,7 @@ pub fn open(window: &mut Window, cx: &mut App) -> Entity<ShortcutsDialog> {
                 ))
                 .child(
                     Button::new("shortcuts-close")
+                        .large()
                         .primary()
                         .label(t(cx, "common.close"))
                         .on_click(|_, window, cx| window.close_dialog(cx)),

@@ -64,6 +64,7 @@ impl ShortcutDef {
     fn action(&self) -> Box<dyn Action> {
         match self.id {
             "quickSearch" => Box::new(QuickSearch),
+            "commandPalette" => Box::new(CommandPalette),
             "runSelection" => Box::new(RunSelection),
             "runAll" => Box::new(RunAll),
             "explainQuery" => Box::new(ExplainQuery),
@@ -111,8 +112,9 @@ const VIEW: Category = Category::View;
 const GLOBAL: Scope = Scope::Global;
 const EDITOR: Scope = Scope::Editor;
 
-pub const SHORTCUTS: [ShortcutDef; 20] = [
+pub const SHORTCUTS: [ShortcutDef; 21] = [
     def("quickSearch", TABS, GLOBAL, "p", CTRL),
+    def("commandPalette", VIEW, GLOBAL, "p", CTRL_SHIFT),
     def("runSelection", QUERY, EDITOR, "Enter", CTRL),
     def("runAll", QUERY, EDITOR, "Enter", CTRL_SHIFT),
     def("explainQuery", QUERY, EDITOR, "e", CTRL_SHIFT),

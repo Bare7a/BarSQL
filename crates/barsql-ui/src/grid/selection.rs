@@ -67,6 +67,25 @@ impl Selection {
         self.drag.is_some()
     }
 
+    // A right-click keeps a selection that holds the cell, as in a spreadsheet. `row` and `col` are display
+    // positions.
+    pub fn covers(&self, row: usize, col: usize, view: &View) -> bool {
+        if let Some(range) = &self.range {
+            return range.contains(row, col);
+        }
+        view.order.global_at(row).is_some_and(|global| self.covers_row(global))
+            || view.columns.get(col).is_some_and(|&column| self.covers_column(column))
+    }
+
+    // Whole selected rows, not a cell range that crosses them.
+    pub fn covers_row(&self, global: usize) -> bool {
+        self.columns.is_empty() && self.rows.contains(&global)
+    }
+
+    pub fn covers_column(&self, column: usize) -> bool {
+        self.rows.is_empty() && self.columns.contains(&column)
+    }
+
     fn apply_range(&mut self, anchor: CellCoord, current: CellCoord, view: &View) {
         let range = CellRange::between(anchor, current);
         self.range = Some(range);

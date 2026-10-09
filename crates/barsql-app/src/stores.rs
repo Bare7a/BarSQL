@@ -22,6 +22,10 @@ impl BarApp {
         self.inner.stores.history.delete(id).unwrap_or(false)
     }
 
+    pub fn restore_query_history_entry(&self, entry: HistoryEntry) -> Result<(), QueryError> {
+        self.inner.stores.history.restore(entry).map_err(storage_error)
+    }
+
     pub fn list_saved_queries(&self, connection_id: &str) -> Vec<SavedQuery> {
         self.inner.stores.saved_queries.list(connection_id)
     }

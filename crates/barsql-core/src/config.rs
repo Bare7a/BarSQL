@@ -140,6 +140,9 @@ pub struct ConnectionConfig {
     pub schema: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_only: bool,
+    // Asks before the editor runs a statement that changes data or schema, as for a production database.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub confirm_changes: bool,
     #[serde(default)]
     pub ssh: SshConfig,
     #[serde(flatten)]

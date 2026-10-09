@@ -58,7 +58,7 @@ mod script {
 
     use barsql_core::{ConnectionConfig, DriverType};
     use barsql_sql::lang::TxnControl;
-    use gpui_kit::component::{ActiveTheme, Root, WindowExt};
+    use gpui_kit::component::{Root, WindowExt};
     use gpui_kit::*;
     use image::DynamicImage;
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
@@ -643,11 +643,7 @@ RETURNING *;
         robot.close_dialog(cx).await?;
 
         // 12: light theme with the View menu open.
-        robot.act(cx, |_, window, cx| {
-            if cx.theme().mode.is_dark() {
-                theme::toggle(window, cx);
-            }
-        })?;
+        robot.act(cx, |_, window, cx| theme::set_choice(theme::ThemeChoice::Light, window, cx))?;
         robot.draw(cx).await;
         // File is at (44, 17), past the bar's padding, logo and gap. The keys then open View > Theme.
         robot.click(cx, point(px(44.), px(17.)), Modifiers::none(), 1).await;

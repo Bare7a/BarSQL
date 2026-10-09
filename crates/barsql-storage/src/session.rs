@@ -42,6 +42,9 @@ pub struct EditorTab {
     pub saved_sql_baseline: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub table_view: Option<TableViewRef>,
+    // Pinned tabs sit first and stay open through Close Others, To the Right and All.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +108,7 @@ mod tests {
                     title: "Query 1".into(),
                     sql: "SELECT 1".into(),
                     color: "#3b82f6".into(),
+                    pinned: true,
                     ..Default::default()
                 },
                 EditorTab {

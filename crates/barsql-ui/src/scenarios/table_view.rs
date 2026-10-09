@@ -394,3 +394,78 @@ fn a_foreign_key_cell_jumps_to_the_referenced_row(cx: &mut TestAppContext) {
     assert!(filter.contains("id") && filter.contains('2'), "{filter}");
     assert_eq!(column(&mut app, 1), [Some("Bob".into())]);
 }
+
+#[gpui_kit::test]
+fn the_row_menu_marks_every_selected_row_for_delete(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        &format!("CREATE TABLE e2e_tvrows {PEOPLE}; INSERT INTO e2e_tvrows VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Cy')"),
+    );
+    browse(&mut app, "e2e_tvrows");
+    let grid = grid(&mut app);
+    let first = app.grid_point(&grid, |grid| grid.gutter_point(0));
+    app.click_at(first, Modifiers::none());
+    let second = app.grid_point(&grid, |grid| grid.gutter_point(1));
+    app.click_at(second, Modifiers::shift());
+    // Copy, Copy as, Export…, then Mark 2 rows for delete.
+    app.context_menu_at(second, 3);
+    assert_eq!(pending(&mut app), (0, 2));
+    // A row outside the selection is selected alone first.
+    let third = app.grid_point(&grid, |grid| grid.gutter_point(2));
+    app.context_menu_at(third, 3);
+    assert_eq!(pending(&mut app), (0, 3));
+    app.context_menu_at(third, 3);
+    assert_eq!(pending(&mut app), (0, 2), "a marked row unmarks");
+}
+
+#[gpui_kit::test]
+fn a_cell_menu_filters_the_table_to_its_value(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        &format!(
+            "CREATE TABLE e2e_tvfilter {PEOPLE}; INSERT INTO e2e_tvfilter VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Bob')"
+        ),
+    );
+    browse(&mut app, "e2e_tvfilter");
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.cell_point(1, 1));
+    // Copy, Copy as, Export…, Edit…, then Filter by this value.
+    app.context_menu_at(at, 4);
+    wait(&mut app);
+    assert_eq!(column(&mut app, 0), [Some("2".into()), Some("3".into())]);
+    let at = app.grid_point(&grid, |grid| grid.cell_point(1, 0));
+    app.context_menu_at(at, 4);
+    wait(&mut app);
+    assert_eq!(column(&mut app, 0), [Some("3".into())], "a second value narrows the first filter");
+}
+
+#[gpui_kit::test]
+fn a_right_click_in_the_cell_editor_leaves_the_edit_open(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, &format!("CREATE TABLE e2e_tveditmenu {PEOPLE}; INSERT INTO e2e_tveditmenu VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_tveditmenu");
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.cell_point(0, 1));
+    app.double_click_at(at);
+    app.keys("mod-a");
+    app.type_text("Zed");
+    app.input_menu_at(at, 0);
+    assert!(app.cx.update(|_, cx| grid.read(cx).is_editing()), "still editing");
+    assert_eq!(pending(&mut app), (0, 0), "nothing committed");
+}
+
+// GPUI Kit asks for a text field's menu while it updates the field, so the menu reads the field afterwards.
+#[gpui_kit::test]
+fn a_text_fields_menu_copies_its_selection(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, &format!("CREATE TABLE e2e_tvtext {PEOPLE}; INSERT INTO e2e_tvtext VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_tvtext");
+    app.click("table-filter");
+    app.type_text("1 = 1");
+    app.keys("mod-a");
+    // On the text: a right-click past its end would move the caret there and drop the selection. Cut, then Copy.
+    let field = app.bounds("table-filter").expect("the filter");
+    app.input_menu_at(point(field.left() + px(16.), field.center().y), 1);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied.as_deref(), Some("1 = 1"));
+}

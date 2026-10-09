@@ -11,9 +11,9 @@ use gpui_kit::*;
 use super::view::Grid;
 use super::{copy_format, set_copy_format};
 use crate::form::ToolButton;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::scrollbars::HoverScrollbar as _;
-use crate::tokens::{ICON_2XS, ICON_XS, RADIUS_SM, TEXT_SM, TINT_BORDER};
+use crate::tokens::{ICON_2XS, ICON_XS, RADIUS_SM, TEXT_SM, TEXT_XS, TINT_BORDER};
 
 pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
     let key = match format {
@@ -26,13 +26,16 @@ pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
     t(cx, key)
 }
 
-pub fn toolbar(grid: &Entity<Grid>, meta: SharedString, cx: &mut App) -> impl IntoElement {
+// `extra` goes first among the buttons, like the results' chart toggle.
+pub fn toolbar(grid: &Entity<Grid>, meta: SharedString, extra: Option<AnyElement>, cx: &mut App) -> impl IntoElement {
     let theme = cx.theme();
     let (muted, accent, border) = (theme.muted_foreground, theme.primary, theme.border);
     let state = grid.read(cx);
     let (selected_rows, selected_cols) = state.selection_counts();
-    let count = (selected_rows > 0 && selected_cols > 0 && (selected_rows > 1 || selected_cols > 1))
-        .then(|| format!(" · {selected_rows} × {selected_cols} selected"));
+    let count = (selected_rows > 0 && selected_cols > 0 && (selected_rows > 1 || selected_cols > 1)).then(|| {
+        let (rows, cols) = (selected_rows.to_string(), selected_cols.to_string());
+        format!(" · {}", t_with(cx, "tableView.selectionCells", &[("rows", &rows), ("cols", &cols)]))
+    });
     let format = copy_format(cx);
     let fit = grid.clone();
     let copy = grid.clone();
@@ -61,6 +64,7 @@ pub fn toolbar(grid: &Entity<Grid>, meta: SharedString, cx: &mut App) -> impl In
             h_flex()
                 .flex_none()
                 .gap(rems(0.462))
+                .children(extra)
                 .child(
                     Button::new("fit-columns")
                         .tool(Icon::new(Lucide::Columns3), ICON_XS, t(cx, "results.fitColumns"))
@@ -141,18 +145,22 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
         })
         .content(move |_, window, cx| {
             let state = grid.read(cx);
-            let names: Vec<(usize, String, bool)> = state
-                .column_names()
+            let names: Vec<(usize, String, String, bool)> = state
+                .set()
+                .columns
+                .iter()
                 .enumerate()
-                .map(|(ix, name)| (ix, name.to_string(), !state.is_hidden(ix)))
+                .map(|(ix, meta)| (ix, meta.name.clone(), meta.type_name.to_lowercase(), !state.is_hidden(ix)))
                 .collect();
             let (hidden, total, scroll) = (state.hidden_count(), names.len(), state.picker_scroll.clone());
             // About 13 rows, or half the window when that is shorter.
             let list_height = (window.viewport_size().height * 0.5).min(window.rem_size() * 24.615);
             let (show, hide) = (grid.clone(), grid.clone());
             let border = cx.theme().border;
-            let rows: Vec<Stateful<Div>> =
-                names.into_iter().map(|(ix, name, visible)| column_row(&grid, ix, name, visible, cx)).collect();
+            let rows: Vec<Stateful<Div>> = names
+                .into_iter()
+                .map(|(ix, name, type_name, visible)| column_row(&grid, ix, name, type_name, visible, cx))
+                .collect();
             v_flex()
                 .min_w(rems(15.385))
                 .max_w(rems(24.615))
@@ -200,8 +208,15 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
         })
 }
 
-// A whole row toggles its column. Hidden columns keep an empty box and a dimmed name.
-fn column_row(grid: &Entity<Grid>, ix: usize, name: String, visible: bool, cx: &App) -> Stateful<Div> {
+// A whole row toggles its column. Hidden columns keep an empty box and a dimmed name. The type follows faintly.
+fn column_row(
+    grid: &Entity<Grid>,
+    ix: usize,
+    name: String,
+    type_name: String,
+    visible: bool,
+    cx: &App,
+) -> Stateful<Div> {
     let theme = cx.theme();
     let (hover, primary, check, muted) =
         (theme.accent, theme.primary, theme.primary_foreground, theme.muted_foreground);
@@ -239,4 +254,9 @@ fn column_row(grid: &Entity<Grid>, ix: usize, name: String, visible: bool, cx: &
                 }),
         )
         .child(div().flex_1().min_w_0().truncate().text_color(text).child(name))
+        .when(!type_name.is_empty(), |el| {
+            el.child(
+                div().flex_none().max_w(rems(9.231)).truncate().text_size(TEXT_XS).text_color(muted).child(type_name),
+            )
+        })
 }

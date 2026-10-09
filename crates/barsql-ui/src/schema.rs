@@ -4,6 +4,7 @@ use std::sync::Arc;
 use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
 use barsql_sql::lang::quoting::column_cache_key;
 use barsql_sql::lang::{Catalog, FunctionCatalog};
+use barsql_sql::schema_diff::Tables;
 use futures_util::FutureExt as _;
 use futures_util::future::Shared;
 use gpui_kit::{App, AsyncApp, Global, Task};
@@ -215,6 +216,46 @@ fn load_functions(connection_id: &str, generation: u64, cx: &mut App) {
         }
     })
     .detach();
+}
+
+// A schema's tables, the first `limit` of them with their columns, and how many it has. The table list loads
+// through `load_tables` if it hasn't yet, so this polls for it.
+pub fn load_schema_columns(
+    connection_id: &str,
+    schema: &str,
+    limit: usize,
+    cx: &mut App,
+) -> Task<Result<(usize, Tables), String>> {
+    load_tables(connection_id, schema, cx);
+    let (id, name) = (connection_id.to_string(), schema.to_string());
+    cx.spawn(async move |cx| {
+        let tables = loop {
+            let state = cx.update(|cx| {
+                let entry = get(cx, &id)?;
+                Some(match entry.tables(&name) {
+                    Some(tables) => Ok(tables.to_vec()),
+                    None if entry.tables_loading(&name) => Err(None),
+                    None => Err(Some(entry.error().unwrap_or("the tables didn't load").to_string())),
+                })
+            });
+            match state {
+                Some(Ok(tables)) => break tables,
+                Some(Err(Some(error))) => return Err(error),
+                _ => cx.background_executor().timer(std::time::Duration::from_millis(30)).await,
+            }
+        };
+        let total = tables.len();
+        let names: Vec<String> = tables.into_iter().take(limit).map(|table| table.name).collect();
+        let loads: Vec<ColumnsLoad> =
+            cx.update(|cx| names.iter().map(|table| columns(&id, &name, table, cx)).collect());
+        let columns = futures_util::future::join_all(loads).await;
+        let tables = names
+            .into_iter()
+            .zip(columns)
+            .map(|(table, columns)| (table, columns.map(|c| c.to_vec()).unwrap_or_default()))
+            .collect();
+        Ok((total, tables))
+    })
 }
 
 pub fn load_tables(connection_id: &str, schema: &str, cx: &mut App) {

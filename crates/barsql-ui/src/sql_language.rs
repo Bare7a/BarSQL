@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -6,14 +7,15 @@ use barsql_core::DriverType;
 use barsql_sql::lang::quoting::{column_cache_key, format_sql_identifier};
 use barsql_sql::lang::suggestions::{match_score, rank};
 use barsql_sql::lang::{
-    self, Catalog, ColumnMap, CompletionContext, HoverSubject, ItemKind, SqlDiagnostic, SqlLabels, TokenKind,
+    self, Catalog, ColumnMap, CompletionContext, Definition, HoverSubject, ItemKind, SqlDiagnostic, SqlLabels,
+    TokenKind,
 };
-use gpui_kit::component::input::CompletionProvider;
+use gpui_kit::component::input::{CompletionProvider, DefinitionProvider};
 use gpui_kit::component::{Rope, RopeExt};
 use gpui_kit::{App, Task, Window};
 use lsp_types::{
     CompletionContext as TriggerContext, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
-    CompletionTextEdit, InsertTextFormat, Range as LspRange, TextEdit,
+    CompletionTextEdit, InsertTextFormat, LocationLink, Range as LspRange, TextEdit, Uri,
 };
 
 use crate::i18n::I18n;
@@ -45,6 +47,24 @@ impl SqlLanguage {
         schema::columns(&self.connection_id, schema, table, cx)
     }
 
+    // The span of the name at `offset` and where Go to Definition takes it. A declaration's span is absolute.
+    pub fn definition(&self, text: &str, offset: usize, cx: &App) -> Option<(Range<usize>, Definition)> {
+        let offset = offset.min(text.len());
+        let statements = lang::parse_statements(text, Some(&self.driver));
+        let range = lang::current_statement_range(&statements, offset, text.len());
+        let catalog = self.catalog(cx);
+        let stmt = &text[range.clone()];
+        let parsed = lang::parse_query(stmt, &catalog);
+        let (span, definition) =
+            lang::analyze_definition(stmt, offset - range.start, &parsed, &catalog, Some(&self.driver))?;
+        let shift = |r: Range<usize>| range.start + r.start..range.start + r.end;
+        let definition = match definition {
+            Definition::Declared(declared) => Definition::Declared(shift(declared)),
+            other => other,
+        };
+        Some((shift(span), definition))
+    }
+
     // The span of the name at `offset`, and what it refers to.
     pub fn hover_subject(&self, text: &str, offset: usize, cx: &App) -> Option<(Range<usize>, HoverSubject)> {
         let offset = offset.min(text.len());
@@ -54,6 +74,70 @@ impl SqlLanguage {
         let stmt = &text[range.clone()];
         let query = lang::analyze_hover(stmt, offset - range.start, &lang::parse_query(stmt, &catalog), &catalog)?;
         Some((range.start + query.start..range.start + query.end, query.subject))
+    }
+}
+
+// A declaration is a place in the same text. A table, or the table a column belongs to, is a `barsql://table/`
+// link, which the query tab's document handler opens as a table view.
+pub struct SqlDefinitions(pub Rc<SqlLanguage>);
+
+const TABLE_LINK: &str = "barsql://table/";
+
+fn hex(text: &str) -> String {
+    text.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Option<String> {
+    let bytes: Option<Vec<u8>> =
+        (0..text.len()).step_by(2).map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok()).collect();
+    String::from_utf8(bytes?).ok()
+}
+
+fn table_uri(schema: &str, table: &str) -> Option<Uri> {
+    format!("{TABLE_LINK}{}/{}", hex(schema), hex(table)).parse().ok()
+}
+
+// The schema and table of a link from `SqlDefinitions`.
+pub fn linked_table(uri: &Uri) -> Option<(String, String)> {
+    let (schema, table) = uri.as_str().strip_prefix(TABLE_LINK)?.split_once('/')?;
+    Some((unhex(schema)?, unhex(table)?))
+}
+
+impl DefinitionProvider for SqlDefinitions {
+    fn definitions(&self, rope: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<Result<Vec<LocationLink>>> {
+        let text = rope.to_string();
+        let Some((span, definition)) = self.0.definition(&text, offset, cx) else { return Task::ready(Ok(Vec::new())) };
+        let origin = lsp_range(rope, span);
+        let link = move |uri: Option<Uri>, target: LspRange| {
+            uri.map(|uri| LocationLink {
+                origin_selection_range: Some(origin),
+                target_uri: uri,
+                target_range: target,
+                target_selection_range: target,
+            })
+        };
+        match definition {
+            Definition::Declared(range) => {
+                Task::ready(Ok(link("barsql://editor".parse().ok(), lsp_range(rope, range)).into_iter().collect()))
+            }
+            Definition::Table { schema, name } => {
+                Task::ready(Ok(link(table_uri(&schema, &name), origin).into_iter().collect()))
+            }
+            // The first table that has the column, as the hover card finds it.
+            Definition::Column(lookup) => {
+                let language = self.0.clone();
+                cx.spawn(async move |cx| {
+                    for binding in lookup.bindings {
+                        let load = cx.update(|cx| language.columns(&binding.schema, &binding.table, cx));
+                        let columns = load.await.unwrap_or_default();
+                        if columns.iter().any(|c| c.name.to_lowercase() == lookup.name) {
+                            return Ok(link(table_uri(&binding.schema, &binding.table), origin).into_iter().collect());
+                        }
+                    }
+                    Ok(Vec::new())
+                })
+            }
+        }
     }
 }
 

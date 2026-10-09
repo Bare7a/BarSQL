@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::time::Duration;
 
 use barsql_core::{ConnectionConfig, HistoryEntry};
@@ -119,9 +120,22 @@ impl HistoryPanel {
             .collect()
     }
 
+    // At once, with an Undo on the toast.
     fn delete(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(entry) = self.entries.iter().find(|entry| entry.id == id).cloned() else { return };
         state::bar(cx).delete_query_history_entry(id);
         self.reload(cx);
+        let this = cx.entity().downgrade();
+        let undo = toast::ToastAction {
+            label: t(cx, "common.undo"),
+            on_click: Rc::new(move |_, cx| {
+                if let Err(error) = state::bar(cx).restore_query_history_entry(entry.clone()) {
+                    toast::error(error.message, cx);
+                }
+                let _ = this.update(cx, |this, cx| this.reload(cx));
+            }),
+        };
+        toast::push(t(cx, "toast.historyDeleted"), toast::ToastKind::Success, None, Some(undo), cx);
     }
 
     fn clear_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -187,7 +201,7 @@ impl HistoryPanel {
                 )
                 .separator()
                 .item(
-                    PopupMenuItem::new(t(cx, "sidebar.clearAll"))
+                    PopupMenuItem::new(t(cx, "sidebar.clearHistory"))
                         .icon(Icon::new(Lucide::Trash))
                         .disabled(empty)
                         .on_click(move |_, window, cx| {
@@ -219,10 +233,10 @@ impl HistoryPanel {
                     Self::save_as_query(save_conn.clone(), save_sql.clone(), window, cx)
                 }),
             )
-            .item(
-                PopupMenuItem::new(t(cx, "sidebar.copySql"))
-                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_sql.clone()))),
-            )
+            .item(PopupMenuItem::new(t(cx, "sidebar.copySql")).on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_sql.clone()));
+                toast::success(t(cx, "toast.copiedClipboard"), cx);
+            }))
             .separator()
             .item(PopupMenuItem::new(t(cx, "common.delete")).on_click(move |_, _, cx| {
                 let _ = delete.update(cx, |this, cx| this.delete(&delete_id, cx));
@@ -364,6 +378,16 @@ impl HistoryPanel {
                 cx.listener({
                     let id = entry.id.clone();
                     move |this, _, window, cx| this.nav.pick(&id, window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let id = entry.id.clone();
+                    move |this, _, window, cx| {
+                        this.nav.point_at(&id, window, cx);
+                        cx.notify();
+                    }
                 }),
             )
             .when(ring, |el| list_nav::ring(el, cx))

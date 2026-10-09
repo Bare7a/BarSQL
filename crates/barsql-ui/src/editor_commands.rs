@@ -1,11 +1,13 @@
 use std::ops::Range;
 
 use gpui_kit::base::input::{AddCursorAbove, AddCursorBelow};
-use gpui_kit::component::input::{Copy, Cut, EditorState, Paste};
+use gpui_kit::component::input::{Copy, Cut, EditorState, Escape, GoToDefinition, Paste};
 use gpui_kit::*;
 
-// Line commands from VS Code and Zed that GPUI Kit's editor lacks. GPUI Kit keeps extra cursors private, so these
-// act on the main selection and Select Next Occurrence moves it instead of adding a cursor.
+use crate::occurrences::{self, Query, Session, find_all, find_next, overlaps, word_at};
+
+// Line and multi-cursor commands from VS Code and Zed that GPUI Kit's editor lacks. GPUI Kit doesn't list the extra
+// cursors, so the line commands act on the main selection.
 actions!(
     editor_commands,
     [
@@ -13,6 +15,9 @@ actions!(
         CopyLine,
         PasteLine,
         SelectNextOccurrence,
+        SelectAllOccurrences,
+        SkipOccurrence,
+        UnselectLastOccurrence,
         SelectLine,
         MoveLineUp,
         MoveLineDown,
@@ -35,6 +40,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(&format!("{m}-c"), CopyLine, context),
         KeyBinding::new(&format!("{m}-v"), PasteLine, context),
         KeyBinding::new(&format!("{m}-d"), SelectNextOccurrence, context),
+        KeyBinding::new(&format!("{m}-shift-l"), SelectAllOccurrences, context),
+        KeyBinding::new(&format!("{m}-k {m}-d"), SkipOccurrence, context),
+        KeyBinding::new(&format!("{m}-u"), UnselectLastOccurrence, context),
         KeyBinding::new(&format!("{m}-l"), SelectLine, context),
         KeyBinding::new("alt-up", MoveLineUp, context),
         KeyBinding::new("alt-down", MoveLineDown, context),
@@ -43,6 +51,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(&format!("{m}-shift-d"), DuplicateLineDown, context),
         KeyBinding::new(&format!("{m}-shift-k"), DeleteLine, context),
         KeyBinding::new(&format!("{m}-/"), ToggleComment, context),
+        KeyBinding::new("f12", GoToDefinition, context),
     ]);
     // Alt+Shift+Up/Down duplicate lines here, so Linux gets VS Code's add-cursor keys instead of GPUI Kit's.
     if !cfg!(any(target_os = "macos", target_os = "windows")) {
@@ -70,8 +79,22 @@ pub fn handlers<E: InteractiveElement>(el: E, editor: &Entity<EditorState>, comm
     })
     .on_action({
         let editor = on();
-        move |_: &SelectNextOccurrence, _, cx| select(&editor, cx, next_occurrence)
+        move |_: &SelectNextOccurrence, _, cx| select_next_occurrence(&editor, cx)
     })
+    .on_action({
+        let editor = on();
+        move |_: &SelectAllOccurrences, _, cx| select_all_occurrences(&editor, cx)
+    })
+    .on_action({
+        let editor = on();
+        move |_: &SkipOccurrence, _, cx| skip_occurrence(&editor, cx)
+    })
+    .on_action({
+        let editor = on();
+        move |_: &UnselectLastOccurrence, _, cx| unselect_last_occurrence(&editor, cx)
+    })
+    // Escape drops the extra cursors but keeps the main selection, so Select Next Occurrence starts over from it.
+    .capture_action(|_: &Escape, _, cx| occurrences::end_session(cx))
     .on_action({
         let editor = on();
         move |_: &SelectLine, _, cx| select(&editor, cx, select_line)
@@ -276,24 +299,104 @@ fn toggle_comment(text: &str, sel: Range<usize>, prefix: &str) -> Change {
     (block, new, select)
 }
 
-fn is_word(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_'
-}
-
-fn word_at(text: &str, at: usize) -> Range<usize> {
-    let start = text[..at].char_indices().rev().take_while(|(_, ch)| is_word(*ch)).last().map_or(at, |(ix, _)| ix);
-    let end = text[at..].char_indices().find(|(_, ch)| !is_word(*ch)).map_or(text.len(), |(ix, _)| at + ix);
-    start..end
-}
-
-// With no selection, picks the word at the caret. Otherwise finds the next match, wrapping around.
-fn next_occurrence(text: &str, sel: Range<usize>) -> Option<Range<usize>> {
-    if sel.is_empty() {
-        return Some(word_at(text, sel.start)).filter(|word| !word.is_empty());
+// A caret looks for its word, a selection for the selected text. Returns what to find and the main selection.
+fn query_at(text: &str, main: Range<usize>) -> Option<(Query, Range<usize>)> {
+    if !main.is_empty() {
+        return Some((Query::selection(&text[main.clone()]), main));
     }
-    let needle = &text[sel.clone()];
-    let at = text[sel.end..].find(needle).map(|ix| sel.end + ix).or_else(|| text[..sel.start].find(needle))?;
-    Some(at..at + needle.len())
+    let word = word_at(text, main.start);
+    (!word.is_empty()).then(|| (Query::word(&text[word.clone()]), word))
+}
+
+// The session the last occurrence command left for this main selection, while its ranges still hold.
+fn current(editor: &Entity<EditorState>, text: &str, main: &Range<usize>, cx: &App) -> Option<Session> {
+    occurrences::session(editor.entity_id(), main, cx).filter(|session| session.holds(text))
+}
+
+fn current_or_new(editor: &Entity<EditorState>, text: &str, main: Range<usize>, cx: &App) -> Option<Session> {
+    current(editor, text, &main, cx).or_else(|| {
+        let (query, main) = query_at(text, main)?;
+        Some(Session { editor: editor.entity_id(), query, ranges: vec![main] })
+    })
+}
+
+// Makes `ranges` the editor's selections, the first one the main. GPUI Kit scrolls to each selection it adds, so
+// `keep_scroll` puts the view back afterwards.
+fn show(editor: &Entity<EditorState>, ranges: &[Range<usize>], keep_scroll: bool, cx: &mut App) {
+    editor.update(cx, |state, cx| {
+        let scroll = state.scroll_offset();
+        state.set_selected_range(ranges[0].clone(), cx);
+        for range in &ranges[1..] {
+            state.add_selection(range.clone(), cx);
+        }
+        if keep_scroll {
+            state.set_scroll_offset(scroll, cx);
+        }
+    });
+}
+
+// VS Code's Add Selection to Next Find Match. A caret first selects its word, then each press adds a cursor on
+// the next occurrence after the last one added, wrapping round to the top.
+fn select_next_occurrence(editor: &Entity<EditorState>, cx: &mut App) {
+    let (text, main, _) = read(editor, cx);
+    let caret = main.is_empty();
+    let Some(mut session) = current_or_new(editor, &text, main, cx) else { return };
+    if caret {
+        let word = session.ranges[0].clone();
+        editor.update(cx, |state, cx| state.set_selected_range(word, cx));
+        occurrences::set_session(session, cx);
+        return;
+    }
+    let after = session.ranges.last().map_or(0, |last| last.end);
+    // The search wraps round to a selected match once every match is selected.
+    let next = find_next(&text, &session.query, after).filter(|next| !session.ranges.iter().any(|r| overlaps(r, next)));
+    if let Some(next) = next {
+        editor.update(cx, |state, cx| state.add_selection(next.clone(), cx));
+        session.ranges.push(next);
+    }
+    occurrences::set_session(session, cx);
+}
+
+// VS Code's Select All Occurrences of Find Match. The main selection and the view stay where they are.
+fn select_all_occurrences(editor: &Entity<EditorState>, cx: &mut App) {
+    let (text, main, _) = read(editor, cx);
+    let Some(mut session) = current_or_new(editor, &text, main, cx) else { return };
+    let main = session.ranges[0].clone();
+    let others = find_all(&text, &session.query).into_iter().filter(|found| !overlaps(found, &main));
+    session.ranges = std::iter::once(main.clone()).chain(others).collect();
+    show(editor, &session.ranges, true, cx);
+    occurrences::set_session(session, cx);
+}
+
+// VS Code's Move Last Selection to Next Find Match: the last occurrence added is swapped for the one after it.
+fn skip_occurrence(editor: &Entity<EditorState>, cx: &mut App) {
+    let (text, main, _) = read(editor, cx);
+    if main.is_empty() {
+        return select_next_occurrence(editor, cx);
+    }
+    let Some(mut session) = current_or_new(editor, &text, main, cx) else { return };
+    let Some(last) = session.ranges.pop() else { return };
+    let next = find_next(&text, &session.query, last.end)
+        .filter(|next| *next != last && !session.ranges.iter().any(|r| overlaps(r, next)));
+    match next {
+        Some(next) => {
+            session.ranges.push(next);
+            show(editor, &session.ranges, false, cx);
+        }
+        None => session.ranges.push(last),
+    }
+    occurrences::set_session(session, cx);
+}
+
+// Takes back the last occurrence Select Next Occurrence added, as VS Code's Cursor Undo does after it.
+fn unselect_last_occurrence(editor: &Entity<EditorState>, cx: &mut App) {
+    let (text, main, _) = read(editor, cx);
+    let Some(mut session) = current(editor, &text, &main, cx).filter(|session| session.ranges.len() > 1) else {
+        return;
+    };
+    session.ranges.pop();
+    show(editor, &session.ranges, false, cx);
+    occurrences::set_session(session, cx);
 }
 
 // Selects the line with its newline. Repeating extends to the next line.
@@ -309,9 +412,9 @@ fn select_line(text: &str, sel: Range<usize>) -> Option<Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Change, delete_lines, duplicate_lines, line_block, line_text, move_lines, next_occurrence, select_line,
-        toggle_comment,
+        Change, delete_lines, duplicate_lines, line_block, line_text, move_lines, query_at, select_line, toggle_comment,
     };
+    use crate::occurrences::Query;
 
     fn apply(text: &str, (range, new, _): Change) -> String {
         format!("{}{new}{}", &text[..range.start], &text[range.end..])
@@ -362,14 +465,12 @@ mod tests {
     }
 
     #[test]
-    fn select_next_takes_the_word_then_the_following_match() {
+    fn a_caret_looks_for_its_word_and_a_selection_for_its_text() {
         let text = "SELECT id FROM t WHERE id > 1 AND ids";
-        assert_eq!(next_occurrence(text, 8..8), Some(7..9));
-        assert_eq!(next_occurrence(text, 7..9), Some(23..25));
-        assert_eq!(next_occurrence(text, 23..25), Some(34..36));
-        assert_eq!(next_occurrence(text, 34..36), Some(7..9));
-        assert_eq!(next_occurrence(text, 6..6), Some(0..6));
-        assert_eq!(next_occurrence("a  b", 2..2), None);
+        assert_eq!(query_at(text, 8..8), Some((Query::word("id"), 7..9)));
+        assert_eq!(query_at(text, 6..6), Some((Query::word("SELECT"), 0..6)));
+        assert_eq!(query_at(text, 34..36), Some((Query::selection("id"), 34..36)));
+        assert_eq!(query_at("a  b", 2..2), None);
     }
 
     #[test]

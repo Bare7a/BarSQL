@@ -173,6 +173,12 @@ fn history_sql_lands_in_the_plain_query_tab(cx: &mut TestAppContext) {
         (ws.tabs.len(), tab.title.to_string(), tab.sql(cx).to_string())
     });
     assert_eq!((count, title.as_str(), sql.as_str()), (1, "Query 1", "SELECT 2"));
+    // Once edited, the tab keeps its text and the next entry gets a tab of its own.
+    let tab = cx.update(|_, cx| workspace.read(cx).active_query().cloned().unwrap());
+    tab.update_in(cx, |tab, window, cx| tab.set_sql("SELECT 2 -- mine".into(), window, cx));
+    workspace.update_in(cx, |ws, window, cx| ws.open_sql(connection.clone(), "SELECT 3".into(), window, cx));
+    let (count, kept) = cx.update(|_, cx| (workspace.read(cx).tabs.len(), tab.read(cx).sql(cx).to_string()));
+    assert_eq!((count, kept.as_str()), (2, "SELECT 2 -- mine"));
 }
 
 #[gpui_kit::test]

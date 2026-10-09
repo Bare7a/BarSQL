@@ -5,42 +5,50 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use barsql_app::{EditorTab, RunEvent};
 use barsql_core::{ConnectionConfig, SavedQuery};
 use barsql_sql::lang::{self, TxnControl, detect_transaction_control};
-use barsql_sql::split_statements;
+use barsql_sql::params::{find_params, param_names, substitute};
+use barsql_sql::{is_read_only, split_statements, unbounded_writes};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::resize_handle;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{
-    Copy, Cut, Delete, Editor, EditorMode, EditorState, InputEvent, Paste, Redo, Replace, Search, SelectAll, Undo,
+    Editor, EditorMode, EditorState, GoToDefinition, InputEvent, RangeDecoration, RangeDecorationCollection,
+    RangeDecorationStyle, Replace, Search, SelectAll,
 };
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::native_menu::NativeMenu;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, RopeExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, RopeExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use lsp_types::{Diagnostic, DiagnosticSeverity};
+use lsp_types::{Diagnostic, DiagnosticSeverity, ShowDocumentParams};
 
 use crate::actions::{
-    ExplainAnalyze, ExplainQuery, FormatQuery, RenameSavedQuery, RunAll, RunSelection, SaveQuery, TriggerSuggest,
+    BeginTransaction, CommitTransaction, ExplainAnalyze, ExplainQuery, FormatQuery, RenameSavedQuery,
+    RollbackTransaction, RunAll, RunSelection, SaveQuery, TriggerSuggest,
 };
 use crate::completion::{self, Completion};
 use crate::context_menu::{self, Entry};
-use crate::dialogs::{self, Prompt};
-use crate::editor_commands;
+use crate::dialogs::{self, Confirm, Prompt};
+use crate::editor_commands::{self, CopyLine, CutLine, PasteLine, SelectAllOccurrences, ToggleComment};
 use crate::form::ToolButton;
 use crate::grid::{RowRef, copy};
 use crate::hover_card::HoverCard;
 use crate::i18n::{I18n, t, t_with};
+use crate::occurrences::{self, OccurrenceMarks};
 use crate::results::{ResultStatus, ResultsEvent, ResultsPanel};
 use crate::saved_queries;
 use crate::schema::{self, Schemas};
 use crate::scrollbars::ScrollbarsOnHover as _;
-use crate::sql_language::{self, SqlLanguage, lsp_range};
-use crate::tokens::{ICON_SM, TEXT_XS};
-use crate::{state, theme};
+use crate::sql_language::{self, SqlDefinitions, SqlLanguage, linked_table, lsp_range};
+use crate::status_bar::Caret;
+use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_XS, TINT, TINT_BORDER};
+use crate::{params_dialog, state, theme};
 
 const EDITOR_CONTEXT: &str = "QueryEditor CodeEditor";
 const COMPLETING_CONTEXT: &str = "QueryEditor CodeEditor completing";
 const DIAGNOSTICS_DEBOUNCE: Duration = Duration::from_millis(300);
 const STATUS_TICK: Duration = Duration::from_millis(100);
+// How long a run from the caret marks its statement.
+const FLASH: Duration = Duration::from_millis(500);
 // Results pane share of the tab in percent, as (default, min, max).
 const RESULTS_SHARE: (f32, f32, f32) = (40., 15., 70.);
 
@@ -98,6 +106,8 @@ pub enum QueryTabEvent {
     RunFinished,
     // For the JSON row panel.
     FocusedRowChanged,
+    // Go to Definition on a table, or on a column of it.
+    OpenTable { schema: String, table: String },
 }
 
 pub struct TabStatus {
@@ -116,6 +126,9 @@ pub struct QueryTab {
     editor: Entity<EditorState>,
     completion: Entity<Completion<EditorMode>>,
     hover: Entity<HoverCard>,
+    _occurrences: Entity<OccurrenceMarks>,
+    flash: RangeDecorationCollection,
+    flash_task: Task<()>,
     results: Entity<ResultsPanel>,
     running: Option<Running>,
     txn: TxnState,
@@ -139,8 +152,20 @@ impl QueryTab {
         let editor = cx
             .new(|cx| EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql));
         let hover = cx.new(|cx| HoverCard::new(editor.clone(), language.clone(), cx));
-        editor.update(cx, |state, _| state.lsp_mut().hover_provider = Some(HoverCard::provider(&hover)));
+        let this = cx.weak_entity();
+        editor.update(cx, |state, _| {
+            let lsp = state.lsp_mut();
+            lsp.hover_provider = Some(HoverCard::provider(&hover));
+            lsp.definition_provider = Some(Rc::new(SqlDefinitions(language.clone())));
+            // A table link opens the table. Anything else is a place in this text.
+            lsp.show_document = Some(Rc::new(move |params: &ShowDocumentParams, _: &mut Window, cx: &mut App| {
+                let Some((schema, table)) = linked_table(&params.uri) else { return false };
+                this.update(cx, |_, cx| cx.emit(QueryTabEvent::OpenTable { schema, table })).is_ok()
+            }));
+        });
         let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language), window, cx));
+        let occurrences = cx.new(|cx| OccurrenceMarks::new(&editor, cx));
+        let flash = editor.update(cx, |state, cx| state.create_range_decorations_collection(Vec::new(), cx));
         let dialect = connection.driver.dialect();
         let results = cx.new(|_| {
             let mut results = ResultsPanel::default();
@@ -176,6 +201,9 @@ impl QueryTab {
             editor,
             completion,
             hover,
+            _occurrences: occurrences,
+            flash,
+            flash_task: Task::ready(()),
             results,
             running: None,
             txn: TxnState::Idle,
@@ -222,7 +250,22 @@ impl QueryTab {
             saved_query_id: self.saved_query_id.clone(),
             saved_sql_baseline: self.saved_sql_baseline.clone(),
             table_view: None,
+            // The workspace knows.
+            pinned: false,
         }
+    }
+
+    // For the status bar. Selections counts what Select Next Occurrence holds; other extra cursors aren't listed.
+    pub fn caret(&self, cx: &App) -> Caret {
+        let state = self.editor.read(cx);
+        let (position, range, text) = (state.cursor_position(), state.selected_range(), state.text());
+        let selected = text.offset_to_char_index(range.end) - text.offset_to_char_index(range.start);
+        let selections = occurrences::session(self.editor.entity_id(), &range, cx).map_or(1, |s| s.ranges.len());
+        Caret { line: position.line as usize + 1, column: position.character as usize + 1, selected, selections }
+    }
+
+    pub fn txn_state(&self) -> TxnState {
+        self.txn
     }
 
     pub fn saved_query_id(&self) -> &str {
@@ -304,6 +347,25 @@ impl QueryTab {
                 false
             }
         }
+    }
+
+    // A linked tab renames its saved query. Any other tab just takes a new title.
+    pub fn rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.saved_query_id.is_empty() {
+            return self.rename_saved(window, cx);
+        }
+        let prompt = Prompt {
+            title: t(cx, "tabs.renameTitle"),
+            description: None,
+            label: t(cx, "dialog.renameQueryLabel"),
+            placeholder: SharedString::default(),
+            initial: self.title.to_string(),
+            confirm: t(cx, "common.rename"),
+        };
+        let this = cx.entity().downgrade();
+        dialogs::prompt(prompt, window, cx, move |name, _, cx| {
+            let _ = this.update(cx, |tab, cx| tab.set_title(name.into(), cx));
+        });
     }
 
     fn rename_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -423,13 +485,40 @@ impl QueryTab {
         self.refresh_diagnostics(cx);
     }
 
-    // Does nothing without a selection.
+    // The selection, or with nothing selected the statement holding the caret, as DataGrip's Execute does.
     fn run_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.editor.read(cx);
         let (selected, base) = (state.selected_text().to_string(), state.selected_range().start);
         if !selected.trim().is_empty() {
             self.run_sql(selected, base, window, cx);
+        } else if let Some((text, base)) = self.statement_at_caret(cx) {
+            if self.running.is_none() {
+                self.flash(base..base + text.len(), cx);
+            }
+            self.run_sql(text, base, window, cx);
         }
+    }
+
+    // The statement whose region holds the caret, and where its text starts.
+    fn statement_at_caret(&self, cx: &App) -> Option<(String, usize)> {
+        let state = self.editor.read(cx);
+        let (sql, cursor) = (state.value(), state.cursor());
+        let statements = lang::parse_statements(&sql, Some(&self.connection.driver));
+        let statement =
+            statements.iter().find(|s| cursor >= s.start && cursor <= s.end && !s.text.trim().is_empty())?;
+        Some((statement.text.to_string(), statement.text.as_ptr() as usize - sql.as_ptr() as usize))
+    }
+
+    // Shows briefly which statement a run picked.
+    fn flash(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        let color = cx.theme().primary.opacity(0.16);
+        let mark = RangeDecoration::new(range).with_style(RangeDecorationStyle::Fill).with_color(color);
+        self.flash.set(vec![mark], cx);
+        let flash = self.flash.clone();
+        self.flash_task = cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(FLASH).await;
+            cx.update(|cx| flash.clear(cx));
+        });
     }
 
     pub(crate) fn run_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -536,6 +625,73 @@ impl QueryTab {
     }
 
     fn run_sql(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running.is_some() {
+            return;
+        }
+        self.with_params(sql, window, cx, move |tab, sql, window, cx| {
+            tab.after_check(sql, window, cx, move |tab, sql, window, cx| tab.execute(sql, base, window, cx))
+        });
+    }
+
+    // Hands `then` the SQL, after asking for the values of its `:name` placeholders if it has any.
+    fn with_params(
+        &mut self,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl Fn(&mut Self, String, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let params = find_params(Some(&self.connection.driver), &sql);
+        if params.is_empty() {
+            return then(self, sql, window, cx);
+        }
+        let tab = cx.entity().downgrade();
+        params_dialog::open(param_names(&params), window, cx, move |values, window, cx| {
+            let filled = substitute(&sql, &params, |name| values.get(name).cloned().unwrap_or_else(|| "NULL".into()));
+            let _ = tab.update(cx, |tab, cx| then(tab, filled, window, cx));
+        });
+    }
+
+    // Hands `then` the SQL, after a confirmation when it would change every row of a table, or change anything on
+    // a connection that asks first. A read-only connection refuses changes anyway.
+    fn after_check(
+        &mut self,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl Fn(&mut Self, String, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let Some(confirm) = self.change_check(&sql, cx) else { return then(self, sql, window, cx) };
+        let tab = cx.entity().downgrade();
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            let _ = tab.update(cx, |tab, cx| then(tab, sql.clone(), window, cx));
+        });
+    }
+
+    fn change_check(&self, sql: &str, cx: &App) -> Option<Confirm> {
+        let connection = &self.connection;
+        if connection.read_only {
+            return None;
+        }
+        let every_row = match unbounded_writes(&connection.driver, sql).as_slice() {
+            [] => None,
+            ["DELETE"] => Some(t(cx, "safety.everyRowDelete")),
+            [_] => Some(t(cx, "safety.everyRowUpdate")),
+            many => Some(t_with(cx, "safety.everyRowMany", &[("count", &many.len().to_string())])),
+        };
+        let (title, description) = match every_row {
+            Some(description) => (t(cx, "safety.everyRowTitle"), description),
+            None if connection.confirm_changes && !is_read_only(&connection.driver, sql) => {
+                let name = [("name", connection.name.as_str())];
+                (t_with(cx, "safety.changesTitle", &name), t_with(cx, "safety.changesDescription", &name))
+            }
+            None => return None,
+        };
+        let detail: String = sql.trim().chars().take(4_000).collect();
+        Some(Confirm { title, description, detail: Some(detail.into()), confirm: t(cx, "editor.run"), danger: true })
+    }
+
+    fn execute(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
         if self.running.is_some() {
             return;
         }
@@ -664,13 +820,9 @@ impl QueryTab {
         if !selected.trim().is_empty() {
             return selected.trim().to_string();
         }
-        let sql = state.value();
-        let offset = state.cursor();
-        let statements = lang::parse_statements(&sql, Some(&self.connection.driver));
-        let at_cursor = statements.iter().find(|s| offset >= s.start && offset <= s.end).map(|s| s.text.trim());
-        match at_cursor.filter(|text| !text.is_empty()) {
-            Some(text) => text.to_string(),
-            None => sql.trim().to_string(),
+        match self.statement_at_caret(cx) {
+            Some((text, _)) => text.trim().to_string(),
+            None => state.value().trim().to_string(),
         }
     }
 
@@ -681,6 +833,17 @@ impl QueryTab {
         }
         let sql = self.explain_text(cx);
         if sql.is_empty() {
+            return;
+        }
+        // An analyze runs the statement.
+        self.with_params(sql, window, cx, move |tab, sql, window, cx| match analyze {
+            true => tab.after_check(sql, window, cx, |tab, sql, window, cx| tab.explain_sql(sql, true, window, cx)),
+            false => tab.explain_sql(sql, false, window, cx),
+        });
+    }
+
+    fn explain_sql(&mut self, sql: String, analyze: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running.is_some() {
             return;
         }
         let bar = state::bar(cx);
@@ -725,100 +888,31 @@ impl QueryTab {
         }
     }
 
+    // Run leads, with the other ways to run and explain in its menu. Saving and the tab's other actions follow, and
+    // the transaction sits at the far end.
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let linked = !self.saved_query_id.is_empty();
-        let run_buttons = |el: Div, cx: &mut Context<Self>| {
-            if self.running.is_some() {
-                return el.child(
-                    Button::new("stop")
-                        .debug_selector(|| "stop".into())
-                        .danger()
-                        .tool(Icon::new(Lucide::Square), ICON_SM, t(cx, "editor.stop"))
-                        .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
-                );
-            }
-            el.child(
-                Button::new("run")
-                    .debug_selector(|| "run".into())
-                    .primary()
-                    .tool(Icon::new(Lucide::Play), ICON_SM, t(cx, "editor.run"))
-                    .on_click(cx.listener(|this, _, window, cx| this.run_selection(window, cx))),
-            )
-            .child(
-                Button::new("run-all")
-                    .debug_selector(|| "run-all".into())
-                    .tool(Icon::new(Lucide::CirclePlay), ICON_SM, t(cx, "editor.runAll"))
-                    .on_click(cx.listener(|this, _, window, cx| this.run_all(window, cx))),
-            )
+        let run = match self.running.is_some() {
+            true => Button::new("stop")
+                .debug_selector(|| "stop".into())
+                .danger()
+                .tool(Icon::new(Lucide::Square), ICON_SM, t(cx, "editor.stop"))
+                .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)))
+                .into_any_element(),
+            false => self.run_button(cx).into_any_element(),
+        };
+        let left = h_flex()
+            .gap(rems(0.462))
+            .child(run)
             .child(
                 Button::new("explain")
                     .debug_selector(|| "explain".into())
                     .tool(Icon::new(Lucide::Route), ICON_SM, t(cx, "editor.explain"))
+                    .disabled(self.running.is_some())
                     .on_click(cx.listener(|this, _, window, cx| this.explain(false, window, cx))),
             )
-            .when(self.can_analyze(), |el| {
-                el.child(
-                    Button::new("explain-analyze")
-                        .debug_selector(|| "explain-analyze".into())
-                        .tool(Icon::new(Lucide::Gauge), ICON_SM, t(cx, "editor.explainAnalyze"))
-                        .on_click(cx.listener(|this, _, window, cx| this.explain(true, window, cx))),
-                )
-            })
-        };
-        let txn_buttons =
-            |el: Div, cx: &mut Context<Self>| match self.txn {
-                TxnState::Idle if self.connection.read_only => el,
-                TxnState::Idle if !self.connection.driver.capabilities().interactive_transactions => el,
-                TxnState::Idle => el.child(
-                    Button::new("begin-txn")
-                        .debug_selector(|| "begin-txn".into())
-                        .tool(Icon::new(Lucide::GitBranch), ICON_SM, t(cx, "editor.beginTxn"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.transaction(TxnControl::Begin, false, window, cx)),
-                        ),
-                ),
-                state => {
-                    let (key, color) = match state {
-                        TxnState::Error => ("editor.txnError", theme.danger),
-                        _ => ("editor.txnActive", theme.warning),
-                    };
-                    el.child(
-                        h_flex()
-                            .gap_1p5()
-                            .px_2()
-                            .text_size(TEXT_XS)
-                            .text_color(color)
-                            .child(div().size(px(8.)).rounded_full().bg(color))
-                            .child(t(cx, key)),
-                    )
-                    .child(
-                        Button::new("commit-txn")
-                            .debug_selector(|| "commit-txn".into())
-                            .tool(Icon::new(IconName::Check), ICON_SM, t(cx, "editor.commitTxn"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.transaction(TxnControl::Commit, false, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("rollback-txn")
-                            .debug_selector(|| "rollback-txn".into())
-                            .tool(Icon::new(Lucide::X), ICON_SM, t(cx, "editor.rollbackTxn"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.transaction(TxnControl::Rollback, false, window, cx)
-                            })),
-                    )
-                }
-            };
-        let row = h_flex()
-            .flex_none()
-            .h(rems(3.077))
-            .px(rems(0.769))
-            .gap(rems(0.462))
-            .bg(theme.sidebar)
-            .border_b_1()
-            .border_color(theme.border);
-        let row = run_buttons(row, cx)
+            .child(div().w(px(1.)).h(rems(1.231)).mx(rems(0.154)).bg(theme.border))
             .child(
                 Button::new("save-query")
                     .debug_selector(|| "save-query".into())
@@ -829,37 +923,196 @@ impl QueryTab {
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
             )
-            .when(linked, |el| {
+            .child(self.more_button(cx));
+        h_flex()
+            .debug_selector(|| "query-toolbar".into())
+            .flex_none()
+            .h(rems(3.077))
+            .px(rems(0.769))
+            .gap(rems(0.462))
+            .justify_between()
+            .bg(theme.sidebar)
+            .border_b_1()
+            .border_color(theme.border)
+            .child(left)
+            .child(self.transaction_controls(cx))
+    }
+
+    // One control in two halves: Run, and a caret for the menu of everything else that runs.
+    fn run_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let selected = !self.editor.read(cx).selected_range().is_empty();
+        let analyze = self.can_analyze();
+        let divider = cx.theme().primary_active;
+        let tab = cx.entity().downgrade();
+        h_flex()
+            .child(
+                Button::new("run")
+                    .debug_selector(|| "run".into())
+                    .primary()
+                    .tool(Icon::new(Lucide::Play), ICON_SM, t(cx, "editor.run"))
+                    .rounded_tr(px(0.))
+                    .rounded_br(px(0.))
+                    .on_click(cx.listener(|this, _, window, cx| this.run_selection(window, cx))),
+            )
+            .child(div().w(px(1.)).h(rems(1.692)).bg(divider))
+            .child(
+                Button::new("run-menu")
+                    .debug_selector(|| "run-menu".into())
+                    .primary()
+                    .tool_icon(Icon::new(IconName::ChevronDown), ICON_XS)
+                    .px(rems(0.308))
+                    .rounded_tl(px(0.))
+                    .rounded_bl(px(0.))
+                    .dropdown_menu(move |menu, _, cx| {
+                        let focus = tab.upgrade().map(|tab| tab.read(cx).editor.read(cx).focus_handle(cx));
+                        let run = if selected { "editor.contextRunSelection" } else { "editor.contextRunStatement" };
+                        menu.when_some(focus, |menu, focus| menu.action_context(focus))
+                            .menu(t(cx, run), Box::new(RunSelection))
+                            .menu(t(cx, "editor.contextRunAll"), Box::new(RunAll))
+                            .separator()
+                            .menu(t(cx, "editor.explain"), Box::new(ExplainQuery))
+                            .when(analyze, |menu| menu.menu(t(cx, "editor.explainAnalyze"), Box::new(ExplainAnalyze)))
+                    }),
+            )
+    }
+
+    // The tab's less frequent actions.
+    fn more_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let linked = !self.saved_query_id.is_empty();
+        let tab = cx.entity().downgrade();
+        Button::new("more-menu")
+            .debug_selector(|| "more-menu".into())
+            .ghost()
+            .tool_icon(Icon::new(Lucide::Ellipsis), ICON_SM)
+            .tooltip(t(cx, "editor.more"))
+            .dropdown_menu(move |menu, _, cx| {
+                let focus = tab.upgrade().map(|tab| tab.read(cx).editor.read(cx).focus_handle(cx));
+                let copy = tab.clone();
+                menu.when_some(focus, |menu, focus| menu.action_context(focus))
+                    .when(linked, |menu| menu.menu(t(cx, "editor.renameSaved"), Box::new(RenameSavedQuery)))
+                    .menu(t(cx, "editor.contextFormat"), Box::new(FormatQuery))
+                    .separator()
+                    .item(PopupMenuItem::new(t(cx, "tabs.copySql")).on_click(move |_, _, cx| {
+                        let Some(tab) = copy.upgrade() else { return };
+                        cx.write_to_clipboard(ClipboardItem::new_string(tab.read(cx).sql(cx).to_string()));
+                        crate::toast::success(t(cx, "toast.copiedClipboard"), cx);
+                    }))
+            })
+    }
+
+    fn can_begin(&self) -> bool {
+        self.txn == TxnState::Idle
+            && !self.connection.read_only
+            && self.connection.driver.capabilities().interactive_transactions
+    }
+
+    // Begin while none is open, else the open transaction's state with Commit and Rollback.
+    fn transaction_controls(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
+        let el = h_flex().gap(rems(0.462));
+        match self.txn {
+            TxnState::Idle if !self.can_begin() => el,
+            TxnState::Idle => el.child(
+                Button::new("begin-txn")
+                    .debug_selector(|| "begin-txn".into())
+                    .ghost()
+                    .tool(Icon::new(Lucide::GitBranch), ICON_SM, t(cx, "editor.beginTxn"))
+                    .tooltip(t(cx, "editor.beginTxnHint"))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.transaction(TxnControl::Begin, false, window, cx)),
+                    ),
+            ),
+            state => {
+                let (key, color) = match state {
+                    TxnState::Error => ("editor.txnError", theme.danger),
+                    _ => ("editor.txnActive", theme.warning),
+                };
                 el.child(
-                    Button::new("rename-query")
-                        .debug_selector(|| "rename-query".into())
-                        .tool(Icon::new(Lucide::Pencil), ICON_SM, t(cx, "editor.rename"))
-                        .on_click(cx.listener(|this, _, window, cx| this.rename_saved(window, cx))),
+                    h_flex()
+                        .gap_1p5()
+                        .h(rems(1.692))
+                        .px(rems(0.615))
+                        .rounded(RADIUS)
+                        .text_size(TEXT_XS)
+                        .text_color(color)
+                        .bg(color.opacity(TINT))
+                        .border_1()
+                        .border_color(color.opacity(TINT_BORDER))
+                        .child(div().size(px(6.)).rounded_full().bg(color))
+                        .child(t(cx, key)),
                 )
-            });
-        txn_buttons(row, cx)
+                .child(
+                    Button::new("commit-txn")
+                        .debug_selector(|| "commit-txn".into())
+                        .tool(Icon::new(IconName::Check), ICON_SM, t(cx, "editor.commitTxn"))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.transaction(TxnControl::Commit, false, window, cx)),
+                        ),
+                )
+                .child(
+                    Button::new("rollback-txn")
+                        .debug_selector(|| "rollback-txn".into())
+                        .tool(Icon::new(Lucide::Undo2), ICON_SM, t(cx, "editor.rollbackTxn"))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.transaction(TxnControl::Rollback, false, window, cx)
+                            }),
+                        ),
+                )
+            }
+        }
     }
 }
 
 impl EventEmitter<QueryTabEvent> for QueryTab {}
 
-fn editor_menu(focus: FocusHandle) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
+// Running first, then editing, as VS Code's and DataGrip's editor menus are.
+fn editor_menu(
+    editor: Entity<EditorState>,
+    analyze: bool,
+) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
     move |native, window, cx| {
-        let entries = vec![
-            Entry::item(t(cx, "editor.contextUndo"), Undo, false),
-            Entry::item(t(cx, "editor.contextRedo"), Redo, false),
-            Entry::Separator,
-            Entry::item(t(cx, "editor.contextCut"), Cut, false),
-            Entry::item(t(cx, "editor.contextCopy"), Copy, false),
-            Entry::item(t(cx, "editor.contextPaste"), Paste, false),
-            Entry::item(t(cx, "editor.contextDelete"), Delete, false),
-            Entry::item(t(cx, "editor.contextSelectAll"), SelectAll, false),
-            Entry::Separator,
-            Entry::item(t(cx, "editor.contextFind"), Search, false),
-            Entry::item(t(cx, "editor.contextFindReplace"), Replace, false),
-            Entry::item(t(cx, "editor.contextFormat"), FormatQuery, false),
-        ];
-        context_menu::open(native, entries, &focus, window, cx)
+        let (read, hold) = (editor.clone(), editor.clone());
+        context_menu::open(
+            native,
+            window,
+            cx,
+            move |_, cx| {
+                let state = read.read(cx);
+                let editable = state.is_editable();
+                let pastable = editable && cx.read_from_clipboard().is_some();
+                let run = match state.selected_range().is_empty() {
+                    true => "editor.contextRunStatement",
+                    false => "editor.contextRunSelection",
+                };
+                let mut entries = vec![
+                    Entry::item(t(cx, run), RunSelection, false),
+                    Entry::item(t(cx, "editor.contextRunAll"), RunAll, false),
+                    Entry::item(t(cx, "editor.explain"), ExplainQuery, false),
+                ];
+                if analyze {
+                    entries.push(Entry::item(t(cx, "editor.explainAnalyze"), ExplainAnalyze, false));
+                }
+                entries.extend([
+                    Entry::Separator,
+                    Entry::item(t(cx, "editor.contextGoToDefinition"), GoToDefinition, false),
+                    Entry::item(t(cx, "editor.contextChangeAll"), SelectAllOccurrences, false),
+                    Entry::item(t(cx, "editor.contextToggleComment"), ToggleComment, !editable),
+                    Entry::item(t(cx, "editor.contextFormat"), FormatQuery, !editable),
+                    Entry::Separator,
+                    // As the keys do, these take the whole line when nothing is selected.
+                    Entry::item(t(cx, "editor.contextCut"), CutLine, !editable),
+                    Entry::item(t(cx, "editor.contextCopy"), CopyLine, false),
+                    Entry::item(t(cx, "editor.contextPaste"), PasteLine, !pastable),
+                    Entry::Separator,
+                    Entry::item(t(cx, "editor.contextFind"), Search, false),
+                    Entry::item(t(cx, "editor.contextFindReplace"), Replace, !editable),
+                    Entry::item(t(cx, "editor.contextSelectAll"), SelectAll, false),
+                ]);
+                Some((entries, state.focus_handle(cx)))
+            },
+            move |menu, cx| hold.update(cx, |state, cx| state.set_selection_focus(Some(menu), cx)),
+        )
     }
 }
 
@@ -876,8 +1129,21 @@ impl Render for QueryTab {
             .on_action(cx.listener(|this, _: &TriggerSuggest, window, cx| this.suggest(window, cx)))
             .on_action(cx.listener(|this, _: &SaveQuery, window, cx| this.save(window, cx)))
             .on_action(cx.listener(|this, _: &RenameSavedQuery, window, cx| this.rename_saved(window, cx)))
-            // GPUI Kit's handle drags its value in an Rc.
-            .on_drag_move(cx.listener(|_, event: &DragMoveEvent<Rc<SplitDrag>>, _, cx| {
+            // Only while they apply, so the command palette offers just these.
+            .when(self.can_begin(), |el| {
+                el.on_action(cx.listener(|this, _: &BeginTransaction, window, cx| {
+                    this.transaction(TxnControl::Begin, false, window, cx)
+                }))
+            })
+            .when(self.txn != TxnState::Idle, |el| {
+                el.on_action(cx.listener(|this, _: &CommitTransaction, window, cx| {
+                    this.transaction(TxnControl::Commit, false, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &RollbackTransaction, window, cx| {
+                    this.transaction(TxnControl::Rollback, false, window, cx)
+                }))
+            })
+            .on_drag_move(cx.listener(|_, event: &DragMoveEvent<SplitDrag>, _, cx| {
                 let bounds = event.bounds;
                 if bounds.size.height > px(0.) {
                     let share = (bounds.bottom() - event.event.position.y) / bounds.size.height * 100.;
@@ -899,7 +1165,7 @@ impl Render for QueryTab {
                             .bordered(false)
                             .pl(rems(GLYPH_MARGIN_REM))
                             .text_size(font_size)
-                            .context_menu(editor_menu(self.editor.read(cx).focus_handle(cx)))
+                            .context_menu(editor_menu(self.editor.clone(), self.can_analyze()))
                             .on_paste({
                                 let editor = self.editor.clone();
                                 move |item, window, cx| {
@@ -926,7 +1192,7 @@ impl Render for QueryTab {
                         SplitDrag,
                         |drag, _, _, cx| {
                             cx.stop_propagation();
-                            cx.new(|_| drag.as_ref().clone())
+                            cx.new(|_| drag.clone())
                         },
                     )),
             )
@@ -951,6 +1217,10 @@ fn word_range(text: &str, offset: usize) -> Range<usize> {
 }
 
 impl QueryTab {
+    pub(crate) fn results(&self) -> Entity<ResultsPanel> {
+        self.results.clone()
+    }
+
     pub(crate) fn completion(&self) -> Entity<Completion<EditorMode>> {
         self.completion.clone()
     }
@@ -966,10 +1236,6 @@ impl QueryTab {
         self.running.is_some()
     }
 
-    pub(crate) fn results(&self) -> Entity<ResultsPanel> {
-        self.results.clone()
-    }
-
     pub(crate) fn in_transaction(&self) -> bool {
         self.txn != TxnState::Idle
     }
@@ -979,6 +1245,10 @@ impl QueryTab {
 impl QueryTab {
     pub(crate) fn editor(&self) -> Entity<EditorState> {
         self.editor.clone()
+    }
+
+    pub(crate) fn occurrence_marks(&self, cx: &App) -> Vec<Range<usize>> {
+        self._occurrences.read(cx).ranges(cx)
     }
 
     #[cfg(feature = "e2e")]

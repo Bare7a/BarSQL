@@ -7,7 +7,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -185,6 +185,7 @@ pub struct ConnectionForm {
     original: ConnectionConfig,
     driver: DriverType,
     read_only: bool,
+    confirm_changes: bool,
     color: String,
     ssl_mode: String,
     ssh_enabled: bool,
@@ -248,6 +249,7 @@ impl ConnectionForm {
         Self {
             driver: config.driver.clone(),
             read_only: config.read_only,
+            confirm_changes: config.confirm_changes,
             color: if config.color.is_empty() { DEFAULT_COLOR.into() } else { config.color.clone() },
             ssl_mode: if config.ssl_mode.is_empty() {
                 default_tls(&config.driver).into()
@@ -317,6 +319,7 @@ impl ConnectionForm {
             ssl_mode: self.ssl_mode.clone(),
             schema: value(&f.schema),
             read_only: self.read_only,
+            confirm_changes: self.confirm_changes,
             ssh: SshConfig {
                 enabled: self.ssh_enabled,
                 host: value(&f.ssh_host),
@@ -342,6 +345,7 @@ impl ConnectionForm {
             database: String::new(),
             schema: String::new(),
             read_only: false,
+            confirm_changes: false,
             ..self.config(cx)
         }
         .fingerprint()
@@ -556,6 +560,7 @@ impl ConnectionForm {
     ) -> Div {
         h_flex().gap(rems(0.615)).child(form::input(input, window, cx).flex_1()).child(
             Button::new(id)
+                .large()
                 .debug_selector(move || id.into())
                 .label(t(cx, "common.browse"))
                 .on_click(cx.listener(move |form, _, window, cx| form.browse(target, window, cx))),
@@ -659,10 +664,19 @@ impl Render for ConnectionForm {
             |form| form.read_only = !form.read_only,
             cx,
         );
+        let confirm_changes = self.toggle(
+            "conn-confirm-changes",
+            self.confirm_changes,
+            "connection.confirmChanges",
+            "connection.confirmChangesHint",
+            |form| form.confirm_changes = !form.confirm_changes,
+            cx,
+        );
         let mut body = modal::body()
             .child(form::group(t(cx, "connection.name"), labelled("conn-name", form::input(&f.name, window, cx)), cx))
             .child(form::group(t(cx, "connection.driver"), driver_select, cx))
             .child(read_only)
+            .child(confirm_changes)
             .child(form::group(t(cx, "connection.tabColor"), swatches, cx));
         let location = self.driver.capabilities().location;
         if location == Location::LocalFile {
@@ -737,11 +751,13 @@ impl Render for ConnectionForm {
             modal::footer(cx)
                 .child(
                     Button::new("connection-cancel")
+                        .large()
                         .label(t(cx, "common.cancel"))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 )
                 .child(
                     Button::new("connection-test")
+                        .large()
                         .debug_selector(|| "connection-test".into())
                         .label(t(cx, if testing { "common.testing" } else { "common.test" }))
                         .disabled(testing || saving)
@@ -749,6 +765,7 @@ impl Render for ConnectionForm {
                 )
                 .child(
                     Button::new("connection-save")
+                        .large()
                         .debug_selector(|| "connection-save".into())
                         .primary()
                         .label(t(cx, "common.save"))

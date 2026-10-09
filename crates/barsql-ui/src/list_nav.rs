@@ -65,6 +65,13 @@ impl ListNav {
         self.focus.focus(window, cx);
     }
 
+    // A right-click rings its row, as Finder does, so it's clear which one the menu is for.
+    pub fn point_at(&mut self, id: &str, window: &mut Window, cx: &mut App) {
+        self.cursor = Some(id.to_string());
+        self.keyed = true;
+        self.focus.focus(window, cx);
+    }
+
     // `rows` pairs each row id with its child index, and `isize::MIN`/`MAX` mean Home/End. With no cursor yet, Down
     // starts at the top and Up at the bottom.
     pub fn step(&mut self, rows: &[(String, usize)], step: isize) {

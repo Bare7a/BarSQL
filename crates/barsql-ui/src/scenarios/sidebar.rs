@@ -58,7 +58,7 @@ fn a_history_entry_opens_into_the_editor(cx: &mut TestAppContext) {
     show_recent(&mut app);
     app.click("history-row-0");
     assert_eq!(app.sql(), "SELECT 555 AS hist_open", "opening restores the SQL without running it");
-    app.click("run-all");
+    app.dispatch(crate::actions::RunAll);
     app.wait_idle();
     assert_eq!(app.cell(0, 0).as_deref(), Some("555"));
 }

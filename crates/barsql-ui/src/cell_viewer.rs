@@ -13,6 +13,7 @@ use crate::cell_content::{self, Kind, Mode, SELECTABLE};
 use crate::form;
 use crate::i18n::t;
 use crate::modal::{self, Modal};
+use crate::occurrences::OccurrenceMarks;
 use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::theme;
 use crate::toast;
@@ -20,9 +21,10 @@ use crate::toast;
 // `None` sets the cell to NULL.
 pub type OnSave = Rc<dyn Fn(Option<String>, &mut Window, &mut App)>;
 
-// Only editable from a table view, and never for a NULL cell.
+// Only editable from a table view.
 pub struct CellViewer {
     editor: Entity<EditorState>,
+    _occurrences: Entity<OccurrenceMarks>,
     kind: Kind,
     null: bool,
     lines: usize,
@@ -56,7 +58,8 @@ impl CellViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let null = value.is_none();
+        // Opened to edit, a NULL cell starts empty, and an empty editor saves NULL back.
+        let null = value.is_none() && on_save.is_none();
         let raw = value.unwrap_or_default();
         let json = (!null).then(|| array_json(&raw, &type_name)).flatten();
         let array = json.as_ref().and_then(|_| array_kind(&type_name));
@@ -73,7 +76,8 @@ impl CellViewer {
                 .folding(kind.foldable())
                 .default_value(text)
         });
-        Self { editor, kind, null, lines, error: None, on_save, type_name, array, raw }
+        let occurrences = cx.new(|cx| OccurrenceMarks::new(&editor, cx));
+        Self { editor, _occurrences: occurrences, kind, null, lines, error: None, on_save, type_name, array, raw }
     }
 
     fn editable(&self) -> bool {
