@@ -5,7 +5,7 @@ use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, Row, SqlDialect, Val
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, StyledExt, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -370,12 +370,14 @@ impl Render for InsertRowForm {
             modal::footer(cx)
                 .child(
                     Button::new("insert-row-cancel")
+                        .large()
                         .label(t(cx, "common.cancel"))
                         .disabled(saving)
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 )
                 .child(
                     Button::new("insert-row-submit")
+                        .large()
                         .debug_selector(|| "insert-row-submit".into())
                         .primary()
                         .label(t(cx, "tableView.addRowDialog.submit"))

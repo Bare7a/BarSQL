@@ -74,7 +74,7 @@ fn running_a_query_replaces_the_plan_with_results(cx: &mut TestAppContext) {
     app.connect();
     explain(&mut app, "SELECT id FROM plan_t WHERE id = 1;");
     assert!(app.plan().is_some() && app.grid().is_none());
-    app.click("run-all");
+    app.dispatch(crate::actions::RunAll);
     app.wait_idle();
     assert!(app.plan().is_none());
     assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
@@ -122,7 +122,6 @@ fn sqlite_offers_no_measured_plan(cx: &mut TestAppContext) {
     app.seed(SEED);
     app.connect();
     explain(&mut app, "SELECT * FROM plan_t WHERE id = 1;");
-    assert!(!app.shown("explain-analyze"), "no Explain analyze button");
     let plan = app.plan().unwrap();
     assert!(app.cx.update(|_, cx| plan.read(cx).metrics()).is_empty());
     let note = app.cx.update(|_, cx| t(cx, "results.planNote.noMetrics"));
@@ -141,4 +140,20 @@ fn a_bare_sqlite_explain_keeps_its_bytecode_rows(cx: &mut TestAppContext) {
     app.run("EXPLAIN SELECT * FROM plan_t;");
     assert!(app.plan().is_none());
     assert!(app.cell(0, 0).is_some(), "the opcode rows");
+}
+
+#[gpui_kit::test]
+fn a_plan_rows_menu_collapses_and_expands_the_whole_tree(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.seed(SEED);
+    app.connect();
+    explain(&mut app, "SELECT * FROM plan_t WHERE id IN (SELECT id FROM plan_t WHERE name = 'Bob');");
+    let before = rows(&mut app).len();
+    // Collapse node, Expand all, then Collapse all.
+    app.context_menu("plan-row-0", 2);
+    let collapsed = rows(&mut app);
+    assert!(collapsed.len() < before && collapsed.iter().all(|(key, ..)| !key.contains('.')), "only the top nodes");
+    // Expand node, then Expand all.
+    app.context_menu("plan-row-0", 1);
+    assert_eq!(rows(&mut app).len(), before);
 }

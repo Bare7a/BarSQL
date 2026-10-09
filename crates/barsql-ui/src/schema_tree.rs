@@ -59,6 +59,8 @@ pub enum SchemaTreeEvent {
     // `run` runs it as soon as its tab opens, as the system views do.
     OpenQuery { sql: String, title: String, run: bool },
     Browse { schema: String, table: String },
+    // SQL for another connection, like a schema comparison's sync script. Opens without running.
+    OpenScript { connection: Box<ConnectionConfig>, sql: String, title: String },
     // Connect button succeeded for this connection id, so land in a tab for it.
     Connected(String),
     // A dialog changed a table, so its open table views need to follow.
@@ -796,11 +798,48 @@ impl SchemaTree {
                     let _ = this.update(cx, |tree, cx| tree.import(name.clone(), None, window, cx));
                 }
             };
-            menu.item(PopupMenuItem::new(t(cx, "sidebar.refresh")).on_click(refresh))
+            let diagram = {
+                let (this, name) = (this.clone(), name.clone());
+                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let _ = this.update(cx, |tree, cx| tree.open_er_diagram(name.clone(), window, cx));
+                }
+            };
+            let compare = {
+                let (this, name) = (this.clone(), name.clone());
+                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let _ = this.update(cx, |tree, cx| tree.open_schema_diff(name.clone(), window, cx));
+                }
+            };
+            menu.item(PopupMenuItem::new(t(cx, "erDiagram.menu")).on_click(diagram))
+                .item(PopupMenuItem::new(t(cx, "schemaDiff.menu")).on_click(compare))
+                .separator()
+                .item(PopupMenuItem::new(t(cx, "sidebar.refresh")).on_click(refresh))
                 .item(PopupMenuItem::new(t(cx, "sidebar.importIntoSchema")).disabled(!writable).on_click(import))
                 .separator()
                 .item(Self::copy_item(name.clone(), cx))
         }
+    }
+
+    // A table picked in the diagram opens as a table view.
+    pub(crate) fn open_er_diagram(&mut self, schema: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = &self.connection else { return };
+        let this = cx.entity().downgrade();
+        let name = schema.clone();
+        crate::er_diagram::open(connection.id.clone(), schema, window, cx, move |table, _, cx| {
+            let schema = name.clone();
+            let _ = this.update(cx, |_, cx| cx.emit(SchemaTreeEvent::Browse { schema, table }));
+        });
+    }
+
+    // The sync script opens in a tab of the compared connection.
+    fn open_schema_diff(&mut self, schema: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.connection.clone() else { return };
+        let this = cx.entity().downgrade();
+        crate::schema_diff_view::open(connection, schema, window, cx, move |connection, sql, _, cx| {
+            let title = t(cx, "schemaDiff.scriptTitle").to_string();
+            let connection = Box::new(connection);
+            let _ = this.update(cx, |_, cx| cx.emit(SchemaTreeEvent::OpenScript { connection, sql, title }));
+        });
     }
 
     fn table_menu(
@@ -816,7 +855,9 @@ impl SchemaTree {
             let driver = &connection.driver;
             let qualified = build_qualified_table(driver, &schema_name, &table.name);
             let kind = ObjectKind::for_relation(&table.kind);
-            let is_table = kind == ObjectKind::Table;
+            // Foreign tables and ClickHouse dictionaries list as tables, but take neither rows nor these changes.
+            let foreign = matches!(table.kind.to_lowercase().as_str(), "foreign table" | "dictionary");
+            let is_table = kind == ObjectKind::Table && !foreign;
             let table_views = is_table && views(driver, ViewScope::Table).next().is_some();
             let object = ObjectRef {
                 schema: schema_name.clone(),
@@ -898,14 +939,16 @@ impl SchemaTree {
                 )
                 .item(PopupMenuItem::new(t(cx, "sidebar.copyName")).on_click(copy(table.name.clone())))
                 .item(PopupMenuItem::new(t(cx, "sidebar.copyQualifiedName")).on_click(copy(qualified.clone())))
-                .separator()
-                .when(rename.supported(driver), |menu| {
-                    menu.item(Self::change_item(&this, "sidebar.rename", rename.clone(), writable, cx))
+                .when(!foreign && rename.supported(driver), |menu| {
+                    menu.separator().item(Self::change_item(&this, "sidebar.rename", rename.clone(), writable, cx))
                 })
-                .when(is_table, |menu| {
-                    menu.item(Self::change_item(&this, "sidebar.truncate", truncate.clone(), writable, cx))
+                .when(!foreign, |menu| {
+                    menu.separator()
+                        .when(is_table, |menu| {
+                            menu.item(Self::change_item(&this, "sidebar.truncate", truncate.clone(), writable, cx))
+                        })
+                        .item(Self::change_item(&this, "sidebar.drop", drop.clone(), writable, cx))
                 })
-                .item(Self::change_item(&this, "sidebar.drop", drop.clone(), writable, cx))
         }
     }
 
@@ -935,17 +978,21 @@ impl SchemaTree {
         menu
     }
 
-    // No Insert item since a click already inserts the name. A view's columns only offer Copy.
+    // No Insert item since a click already inserts the name. A view's columns only offer Copy. SQLite and
+    // ClickHouse won't drop a key column.
     fn column_menu(
         &self,
         schema: String,
         table: String,
         column: String,
         view: bool,
+        primary: bool,
         cx: &mut Context<Self>,
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let this = cx.entity().downgrade();
         let writable = self.writable();
+        let driver = self.connection.as_ref().map(|c| c.driver.clone()).unwrap_or_default();
+        let droppable = !(primary && matches!(driver, DriverType::Sqlite | DriverType::Turso | DriverType::ClickHouse));
         move |menu, _, cx| {
             let menu = menu.item(Self::copy_item(column.clone(), cx));
             if view {
@@ -953,9 +1000,12 @@ impl SchemaTree {
             }
             let (schema, table, column) = (schema.clone(), table.clone(), column.clone());
             let rename = Change::RenameColumn { schema: schema.clone(), table: table.clone(), column: column.clone() };
-            menu.separator().item(Self::change_item(&this, "sidebar.rename", rename, writable, cx)).item(
-                Self::change_item(&this, "sidebar.drop", Change::DropColumn { schema, table, column }, writable, cx),
-            )
+            let drop = Change::DropColumn { schema, table, column };
+            menu.separator()
+                .item(Self::change_item(&this, "sidebar.rename", rename, writable, cx))
+                .when(droppable, |menu| {
+                    menu.separator().item(Self::change_item(&this, "sidebar.drop", drop, writable, cx))
+                })
         }
     }
 
@@ -981,6 +1031,7 @@ impl SchemaTree {
         let target = ObjectRef { schema, table: table.unwrap_or_default(), ..object.clone() };
         let drop = Change::DropObject { object: target, constraint };
         let primary_index = object.kind == ObjectKind::Index && row.badge == Some(Badge::Pk);
+        let has_ddl = !(primary_index && driver == DriverType::ClickHouse);
         let drop = (!primary_index && drop.supported(&driver)).then_some(drop);
         move |menu, _, cx| {
             let ddl = |open: bool| {
@@ -989,13 +1040,15 @@ impl SchemaTree {
                     let _ = this.update(cx, |this, cx| this.with_ddl(object.clone(), open, window, cx));
                 }
             };
-            menu.item(PopupMenuItem::new(t(cx, "sidebar.copyDDL")).on_click(ddl(false)))
-                .item(PopupMenuItem::new(t(cx, "sidebar.openDDLInTab")).on_click(ddl(true)))
-                .separator()
-                .item(Self::copy_item(object.name.clone(), cx))
-                .when_some(drop.clone(), |menu, drop| {
-                    menu.separator().item(Self::change_item(&this, "sidebar.drop", drop, writable, cx))
-                })
+            menu.when(has_ddl, |menu| {
+                menu.item(PopupMenuItem::new(t(cx, "sidebar.copyDDL")).on_click(ddl(false)))
+                    .item(PopupMenuItem::new(t(cx, "sidebar.openDDLInTab")).on_click(ddl(true)))
+                    .separator()
+            })
+            .item(Self::copy_item(object.name.clone(), cx))
+            .when_some(drop.clone(), |menu, drop| {
+                menu.separator().item(Self::change_item(&this, "sidebar.drop", drop, writable, cx))
+            })
         }
     }
 
@@ -1074,11 +1127,22 @@ impl SchemaTree {
             .text_size(TEXT_BASE)
             .overflow_hidden()
             .when(Self::focusable(&row), |el| {
+                // A right-click rings its row, as a key move does, so it's clear which one the menu is for.
+                let (left, right) = (row_id.clone(), row_id);
                 el.on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
-                        this.cursor = Some(row_id.clone());
+                        this.cursor = Some(left.clone());
                         this.keyed = false;
+                        this.focus.focus(window, cx);
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, _, window, cx| {
+                        this.cursor = Some(right.clone());
+                        this.keyed = true;
                         this.focus.focus(window, cx);
                         cx.notify();
                     }),
@@ -1125,7 +1189,7 @@ impl SchemaTree {
                     .into_any_element()
             }
             RowKind::Column { column, matched, schema, table, view } => {
-                let menu = self.column_menu(schema, table, column.name.clone(), view, cx);
+                let menu = self.column_menu(schema, table, column.name.clone(), view, column.is_primary, cx);
                 let insert = column.name.clone();
                 column_row(clickable(base))
                     .when(matched, |el| el.bg(theme.primary.opacity(TINT)))
@@ -1270,7 +1334,7 @@ impl SchemaTree {
                 form::filter_button("import-data", Icon::new(Lucide::Upload))
                     .debug_selector(|| "import-data".into())
                     .tooltip(t(cx, "sidebar.importData"))
-                    .disabled(!enabled)
+                    .disabled(!enabled || !self.writable())
                     .on_click(cx.listener(|this, _, window, cx| this.import_default(window, cx))),
             )
             .when(server_views, |bar| {

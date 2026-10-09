@@ -9,7 +9,7 @@ use barsql_sql::alter::{self, ConstraintKind};
 use barsql_sql::ddl::terminate_statement;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme, Disableable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -303,11 +303,13 @@ impl Render for ChangeDialog {
             modal::footer(cx)
                 .child(
                     Button::new("change-cancel")
+                        .large()
                         .label(t(cx, "common.cancel"))
                         .on_click(cx.listener(|dialog, _, window, cx| dialog.dismiss(window, cx))),
                 )
                 .child(
                     Button::new("change-confirm")
+                        .large()
                         .debug_selector(|| "change-confirm".into())
                         .map(|button| if danger { button.danger().outline() } else { button.primary() })
                         .label(self.change.confirm(cx))
@@ -362,17 +364,21 @@ pub fn open_change(
     window.open_dialog(cx, move |modal_dialog, window, cx| {
         let entry = dialog.clone();
         let running = dialog.read(cx).running;
-        Modal::new("schema-change", title.clone())
+        let modal_dialog = Modal::new("schema-change", title.clone())
             .size(modal::Size::Sm)
             .danger(danger)
             .closable(!running)
             .build(modal_dialog, dialog.clone(), window, cx)
             .keyboard(!running)
-            .overlay_closable(false)
-            .on_ok(move |_, window, cx| {
-                entry.update(cx, |dialog, cx| dialog.run(window, cx));
-                false
-            })
+            .overlay_closable(false);
+        // Enter renames, but dropping or emptying takes a click.
+        if danger {
+            return modal_dialog;
+        }
+        modal_dialog.on_ok(move |_, window, cx| {
+            entry.update(cx, |dialog, cx| dialog.run(window, cx));
+            false
+        })
     });
     if let Some(input) = input {
         window.defer(cx, move |window, cx| {
@@ -535,12 +541,14 @@ impl Render for BackupDialog {
                 modal::footer(cx)
                     .child(
                         Button::new("backup-dismiss")
+                            .large()
                             .debug_selector(|| "backup-dismiss".into())
                             .label(t(cx, if writing { "export.stop" } else { "common.cancel" }))
                             .on_click(cx.listener(|dialog, _, window, cx| dialog.dismiss(window, cx))),
                     )
                     .child(
                         Button::new("backup-save")
+                            .large()
                             .debug_selector(|| "backup-save".into())
                             .primary()
                             .label(t(cx, "schemaChange.backupSave"))

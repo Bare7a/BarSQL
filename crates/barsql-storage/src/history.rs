@@ -49,6 +49,18 @@ impl HistoryStore {
             .collect()
     }
 
+    // Puts back a deleted entry where it was, by when it ran. For undoing a delete.
+    pub fn restore(&self, entry: HistoryEntry) -> io::Result<()> {
+        let mut entries = self.lock();
+        if entries.iter().any(|e| e.id == entry.id) {
+            return Ok(());
+        }
+        let at = entries.partition_point(|e| e.executed_at <= entry.executed_at);
+        entries.insert(at, entry);
+        trim(&mut entries);
+        save_json_file(&self.path, &*entries)
+    }
+
     pub fn delete(&self, id: &str) -> io::Result<bool> {
         let mut entries = self.lock();
         let before = entries.len();
@@ -103,6 +115,20 @@ mod tests {
         let reloaded = HistoryStore::open(tmp.path()).unwrap();
         assert!(reloaded.list("c1", 100).is_empty());
         assert_eq!(reloaded.list("c2", 100).len(), 1);
+    }
+
+    #[test]
+    fn a_restored_entry_goes_back_in_its_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        let h = HistoryStore::open(tmp.path()).unwrap();
+        let at =
+            |n: u32| HistoryEntry { executed_at: format!("2026-01-0{n}T00:00:00Z"), ..entry("c1", &n.to_string()) };
+        let (first, second, third) = (h.add(at(1)).unwrap(), h.add(at(2)).unwrap(), h.add(at(3)).unwrap());
+        h.delete(&second.id).unwrap();
+        h.restore(second.clone()).unwrap();
+        h.restore(second.clone()).unwrap();
+        let ids: Vec<String> = h.list("c1", 10).into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, [third.id, second.id, first.id], "newest first, once");
     }
 
     #[test]

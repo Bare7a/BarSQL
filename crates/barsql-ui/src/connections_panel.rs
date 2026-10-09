@@ -350,15 +350,17 @@ impl ConnectionsPanel {
                         }))),
                 )
                 .item(
-                    PopupMenuItem::new(t(cx, "common.edit")).on_click(with(Box::new(move |_, _, cx| {
+                    PopupMenuItem::new(t(cx, "sidebar.editConnection")).on_click(with(Box::new(move |_, _, cx| {
                         cx.emit(ConnectionsEvent::Edit(Box::new(edit.clone())))
                     }))),
                 )
-                .item(PopupMenuItem::new(t(cx, "sidebar.duplicate")).on_click(with(Box::new(move |_, _, cx| {
-                    let copy =
-                        ConnectionConfig { id: String::new(), name: duplicate_name.clone(), ..duplicate.clone() };
-                    cx.emit(ConnectionsEvent::Edit(Box::new(copy)))
-                }))));
+                .item(PopupMenuItem::new(t(cx, "sidebar.duplicateConnection")).on_click(with(Box::new(
+                    move |_, _, cx| {
+                        let copy =
+                            ConnectionConfig { id: String::new(), name: duplicate_name.clone(), ..duplicate.clone() };
+                        cx.emit(ConnectionsEvent::Edit(Box::new(copy)))
+                    },
+                ))));
             if views(&connection.driver, ViewScope::Server).next().is_some() {
                 let (this, connection) = (this.clone(), connection.clone());
                 menu = menu.separator().submenu(t(cx, "sidebar.serverViews"), window, cx, move |mut menu, _, cx| {
@@ -376,26 +378,34 @@ impl ConnectionsPanel {
                 });
             }
             if !folders.is_empty() {
-                menu = menu.separator();
-                for folder in &folders {
-                    let (target, folder_id) = (connection.clone(), folder.id.clone());
-                    menu = menu.item(
-                        PopupMenuItem::new(t_with(cx, "sidebar.moveToFolder", &[("name", &folder.name)]))
-                            .disabled(connection.folder_id == folder.id)
-                            .on_click(with(Box::new(move |panel, window, cx| {
-                                panel.move_to_folder(target.clone(), folder_id.clone(), window, cx)
-                            }))),
-                    );
-                }
-                if !connection.folder_id.is_empty() {
-                    let target = connection.clone();
-                    menu = menu.item(PopupMenuItem::new(t(cx, "sidebar.removeFromFolder")).on_click(with(Box::new(
-                        move |panel, window, cx| panel.move_to_folder(target.clone(), String::new(), window, cx),
-                    ))));
-                }
+                let (this, connection, folders) = (this.clone(), connection.clone(), folders.clone());
+                menu = menu.separator().submenu(t(cx, "sidebar.moveTo"), window, cx, move |mut menu, _, cx| {
+                    let with = |target: ConnectionConfig, folder_id: String| {
+                        let this = this.clone();
+                        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                            let (target, folder_id) = (target.clone(), folder_id.clone());
+                            let _ = this.update(cx, |panel, cx| panel.move_to_folder(target, folder_id, window, cx));
+                        }
+                    };
+                    for folder in &folders {
+                        menu = menu.item(
+                            PopupMenuItem::new(folder.name.clone())
+                                .checked(connection.folder_id == folder.id)
+                                .disabled(connection.folder_id == folder.id)
+                                .on_click(with(connection.clone(), folder.id.clone())),
+                        );
+                    }
+                    if !connection.folder_id.is_empty() {
+                        menu = menu.separator().item(
+                            PopupMenuItem::new(t(cx, "sidebar.removeFromFolder"))
+                                .on_click(with(connection.clone(), String::new())),
+                        );
+                    }
+                    menu
+                });
             }
             menu.separator().item(
-                PopupMenuItem::new(t(cx, "common.delete"))
+                PopupMenuItem::new(t(cx, "sidebar.deleteEllipsis"))
                     .on_click(with(Box::new(move |panel, window, cx| panel.delete(delete.clone(), window, cx)))),
             )
         }
@@ -503,6 +513,16 @@ impl ConnectionsPanel {
                     move |this, _, window, cx| this.nav.pick(&id, window, cx)
                 }),
             )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let id = connection.id.clone();
+                    move |this, _, window, cx| {
+                        this.nav.point_at(&id, window, cx);
+                        cx.notify();
+                    }
+                }),
+            )
             .when(ring, |el| list_nav::ring(el, cx))
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(ConnectionsEvent::Activate(activate.clone()))))
             .debug_selector({
@@ -566,9 +586,12 @@ impl ConnectionsPanel {
                 menu.item(PopupMenuItem::new(t(cx, "sidebar.renameFolder")).on_click(move |_, window, cx| {
                     let _ = this_rename.update(cx, |panel, cx| panel.rename_folder(rename.clone(), window, cx));
                 }))
-                .item(PopupMenuItem::new(t(cx, "common.delete")).on_click(move |_, window, cx| {
-                    let _ = this_delete.update(cx, |panel, cx| panel.delete_folder(delete.clone(), window, cx));
-                }))
+                .separator()
+                .item(PopupMenuItem::new(t(cx, "sidebar.deleteEllipsis")).on_click(
+                    move |_, window, cx| {
+                        let _ = this_delete.update(cx, |panel, cx| panel.delete_folder(delete.clone(), window, cx));
+                    },
+                ))
             });
         let body = (!collapsed).then(|| {
             if members.is_empty() {

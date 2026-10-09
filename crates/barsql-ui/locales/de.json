@@ -48,7 +48,20 @@
       "source": "Aus {{name}}",
       "combinatorOf": "Kombinatorform von {{base}}",
       "deprecated": "veraltet"
-    }
+    },
+    "contextRunStatement": "Anweisung ausführen",
+    "contextRunSelection": "Auswahl ausführen",
+    "contextRunAll": "Alles ausführen",
+    "contextChangeAll": "Alle Vorkommen ändern",
+    "contextToggleComment": "Kommentar umschalten",
+    "contextSelectAll": "Alles auswählen",
+    "contextFindReplace": "Ersetzen",
+    "contextFormat": "SQL formatieren",
+    "more": "Weitere Aktionen",
+    "renameSaved": "Gespeicherte Abfrage umbenennen…",
+    "beginTxn": "Transaktion starten",
+    "beginTxnHint": "Abfragen in diesem Tab laufen darin, bis Sie committen oder zurückrollen",
+    "contextGoToDefinition": "Gehe zu Definition"
   },
   "connection": {
     "turso": "Turso / libSQL",
@@ -68,7 +81,9 @@
     "instanceHint": "Eine benannte Instanz, die der SQL Server Browser anstelle des Ports findet. Nicht über einen SSH-Tunnel.",
     "databasePlaceholderSqlServer": "master",
     "databaseHintSqlServer": "Datenbank, mit der verbunden wird. Leer lassen für die Standarddatenbank des Logins.",
-    "sslStrict": "Strikt (TDS 8.0)"
+    "sslStrict": "Strikt (TDS 8.0)",
+    "confirmChanges": "Vor Änderungen nachfragen",
+    "confirmChangesHint": "Für Produktivdatenbanken: bestätigt INSERT, UPDATE, DELETE, DDL und Tabellenänderungen, bevor sie laufen."
   },
   "results": {
     "messages": "Meldungen",
@@ -88,11 +103,23 @@
       "info": "Info",
       "notice": "Hinweis",
       "warning": "Warnung"
-    }
+    },
+    "contextExportAs": "Exportieren…",
+    "copyAllRows": "Alle Zeilen kopieren",
+    "copyError": "Fehler kopieren",
+    "copyStatement": "Anweisung kopieren",
+    "copyMessage": "Meldung kopieren"
   },
   "sidebar": {
     "serverViews": "Serveransichten",
-    "systemViews": "Systemansichten"
+    "systemViews": "Systemansichten",
+    "editConnection": "Bearbeiten…",
+    "duplicateConnection": "Duplizieren…",
+    "moveTo": "In Ordner verschieben",
+    "deleteEllipsis": "Löschen…",
+    "renameFolder": "Ordner umbenennen…",
+    "saveAsQuery": "Als Abfrage speichern…",
+    "clearHistory": "Verlauf leeren…"
   },
   "systemViews": {
     "tableTabTitle": "{{view}}: {{name}}",
@@ -117,5 +144,154 @@
     "kindTuple": "Tupel",
     "arrayReadOnly": "Als JSON angezeigt und deshalb hier nicht bearbeitbar. Wechseln Sie zu Text, um den Wert selbst zu bearbeiten.",
     "arrayError": "Das lässt sich nicht mehr als Array lesen."
+  },
+  "tips": {
+    "cursorsTitle": "Mehrere Cursor",
+    "cursorsNext": "Wort am Cursor auswählen, dann beim nächsten Vorkommen einen Cursor hinzufügen",
+    "cursorsAll": "Bei jedem Vorkommen des Worts oder der Auswahl einen Cursor setzen",
+    "cursorsSkip": "Zuletzt hinzugefügtes Vorkommen überspringen und das nächste nehmen",
+    "cursorsUndo": "Zuletzt hinzugefügtes Vorkommen zurücknehmen",
+    "cursorsEscape": "Zurück zu einem Cursor. {{alt}}+Klick setzt überall einen weiteren",
+    "editorRunSelection": "Auswahl ausführen, oder ohne Auswahl die Anweisung am Cursor",
+    "editorContext": "Rechtsklick zum Ausführen, Erklären, Formatieren, Kommentieren und Ändern aller Vorkommen",
+    "editorDefinition": "Gehe zu Definition: Ein Alias oder CTE springt zur Deklaration, eine Tabelle öffnet sich. Cmd/Strg-Klick geht auch.",
+    "editorParams": "Schreiben Sie :name für einen Wert, der beim Ausführen eingesetzt wird. BarSQL fragt danach und merkt ihn sich.",
+    "editorPalette": "Befehlspalette: jeder Befehl mit seinem Tastenkürzel.",
+    "resultsChart": "Diagramm in der Ergebnisleiste zeigt das Ergebnis als Balken oder Linie.",
+    "schemaDiagram": "Rechtsklick auf ein Schema für sein ER-Diagramm oder einen Vergleich mit einem anderen."
+  },
+  "grid": {
+    "copyAs": "Kopieren als",
+    "selectAll": "Alles auswählen",
+    "filterByValue": "Nach diesem Wert filtern",
+    "sortAscending": "Aufsteigend sortieren",
+    "sortDescending": "Absteigend sortieren",
+    "clearSort": "Sortierung aufheben",
+    "copyColumnName": "Spaltennamen kopieren",
+    "hideColumn": "Spalte ausblenden",
+    "showAllColumns": "Alle Spalten einblenden"
+  },
+  "tableView": {
+    "markRows": "{{count}} Zeile zum Löschen markieren",
+    "markRows_other": "{{count}} Zeilen zum Löschen markieren",
+    "unmarkRows": "Löschmarkierung von {{count}} Zeile entfernen",
+    "unmarkRows_other": "Löschmarkierung von {{count}} Zeilen entfernen"
+  },
+  "shortcuts": {
+    "items": {
+      "runSelection": "Auswahl oder Anweisung ausführen",
+      "commandPalette": "Befehlspalette"
+    }
+  },
+  "tabs": {
+    "close": "Schließen",
+    "closeOthers": "Andere schließen",
+    "closeRight": "Rechts davon schließen",
+    "closeAll": "Alle schließen",
+    "reopenClosed": "Geschlossenen Tab wieder öffnen",
+    "pin": "Tab anheften",
+    "unpin": "Tab lösen",
+    "duplicate": "Duplizieren",
+    "rename": "Umbenennen…",
+    "renameTitle": "Tab umbenennen",
+    "copySql": "SQL kopieren"
+  },
+  "common": {
+    "undo": "Rückgängig"
+  },
+  "toast": {
+    "historyDeleted": "Verlaufseintrag gelöscht"
+  },
+  "menu": {
+    "undo": "Widerrufen",
+    "redo": "Wiederholen",
+    "cut": "Ausschneiden",
+    "copy": "Kopieren",
+    "paste": "Einsetzen",
+    "selectAll": "Alles auswählen",
+    "services": "Dienste",
+    "hideApp": "BarSQL ausblenden",
+    "hideOthers": "Andere ausblenden",
+    "showAll": "Alle einblenden",
+    "quitApp": "BarSQL beenden",
+    "window": "Fenster",
+    "minimize": "Im Dock ablegen",
+    "zoom": "Zoomen",
+    "bringAllToFront": "Alle nach vorne bringen",
+    "stripedRows": "Gestreifte Zeilen",
+    "commandPalette": "Befehlspalette…"
+  },
+  "errors": {
+    "deleteQueryFailed": "Abfrage konnte nicht gelöscht werden",
+    "deleteQueryFailedDetail": "Die gespeicherte Abfrage ist nicht mehr in der Bibliothek."
+  },
+  "status": {
+    "caret": "Zeile {{line}}, Spalte {{column}}",
+    "selected": "{{count}} ausgewählt",
+    "selected_other": "{{count}} ausgewählt",
+    "selections": "{{count}} Auswahl",
+    "selections_other": "{{count}} Auswahlen",
+    "count": "Anzahl {{count}}",
+    "sum": "Summe {{sum}}",
+    "average": "Mittelwert {{avg}}",
+    "protected": "Fragt vor Änderungen"
+  },
+  "theme": {
+    "system": "Wie System"
+  },
+  "commandPalette": {
+    "placeholder": "Befehl eingeben…",
+    "commitTxn": "Transaktion committen",
+    "rollbackTxn": "Transaktion zurückrollen"
+  },
+  "params": {
+    "title": "Abfrageparameter",
+    "description": "Jeder Wert wird als SQL in die Abfrage eingesetzt, Text also in Anführungszeichen: 'Ann'. Ein leerer Wert läuft als NULL."
+  },
+  "safety": {
+    "everyRowTitle": "Jede Zeile ändern?",
+    "everyRowDelete": "Dieses DELETE hat keine WHERE-Klausel und entfernt daher jede Zeile seiner Tabelle.",
+    "everyRowUpdate": "Dieses UPDATE hat keine WHERE-Klausel und ändert daher jede Zeile seiner Tabelle.",
+    "everyRowMany": "{{count}} Anweisungen haben keine WHERE-Klausel und ändern daher jede Zeile ihrer Tabellen.",
+    "changesTitle": "Änderungen auf {{name}} ausführen?",
+    "changesDescription": "{{name}} fragt nach, bevor Anweisungen laufen, die Daten oder das Schema ändern.",
+    "saveRows_one": "Speichert {{count}} geänderte Zeile in {{name}}.",
+    "saveRows_other": "Speichert {{count}} geänderte Zeilen in {{name}}."
+  },
+  "chart": {
+    "title": "Diagramm",
+    "tooltip": "Dieses Ergebnis als Diagramm zeigen",
+    "bar": "Balken",
+    "line": "Linie",
+    "labels": "Beschriftung",
+    "values": "Werte",
+    "truncated": "Erste {{count}} Punkte",
+    "noNumbers": "Dieses Ergebnis hat keine numerische Spalte für ein Diagramm.",
+    "noValues": "Keine Zeile hat einen Wert in dieser Spalte."
+  },
+  "erDiagram": {
+    "menu": "ER-Diagramm",
+    "title": "ER-Diagramm · {{schema}}",
+    "loading": "Tabellen werden geladen…",
+    "empty": "Dieses Schema hat keine Tabellen.",
+    "more": "+{{count}} weitere",
+    "truncated": "Zeigt die ersten {{shown}} von {{total}} Tabellen."
+  },
+  "schemaDiff": {
+    "menu": "Schema vergleichen…",
+    "title": "Schemas vergleichen",
+    "with": "mit",
+    "pickSchema": "Schema",
+    "compare": "Vergleichen",
+    "hint": "Wählen Sie das Schema, das angeglichen werden soll, dann Vergleichen.",
+    "loading": "Wird verglichen…",
+    "same": "Die Schemas haben dieselben Tabellen und Spalten.",
+    "missingTable": "fehlt in {{schema}} · {{count}} Spalten",
+    "extraTable": "nur in {{schema}}",
+    "changedTable_one": "{{count}} Spalte unterscheidet sich",
+    "changedTable_other": "{{count}} Spalten unterscheiden sich",
+    "copyScript": "Skript kopieren",
+    "openScript": "Skript öffnen",
+    "scriptTitle": "Abgleichskript"
   }
 }

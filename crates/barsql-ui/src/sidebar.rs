@@ -84,6 +84,12 @@ impl Sidebar {
                         let Some(connection) = this.selected().cloned() else { return };
                         SidebarEvent::Browse { connection, schema: schema.clone(), table: table.clone() }
                     }
+                    SchemaTreeEvent::OpenScript { connection, sql, title } => SidebarEvent::OpenQuery {
+                        connection: (**connection).clone(),
+                        sql: sql.clone(),
+                        title: title.clone(),
+                        run: false,
+                    },
                     SchemaTreeEvent::TableChanged { connection_id, schema, table, change } => {
                         SidebarEvent::TableChanged {
                             connection_id: connection_id.clone(),
@@ -376,6 +382,10 @@ impl Sidebar {
             )
             .on_click(cx.listener(|this, _, window, cx| this.toggle_switcher(window, cx)))
             .into_any_element()
+    }
+
+    pub(crate) fn schema_tree(&self) -> Entity<SchemaTree> {
+        self.schema_tree.clone()
     }
 
     fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {

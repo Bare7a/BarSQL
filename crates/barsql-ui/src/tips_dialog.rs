@@ -1,9 +1,9 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::form;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::shortcuts::{self, Binding};
 use crate::tokens::{RADIUS_SM, TEXT_BASE, TEXT_XS};
@@ -48,6 +48,18 @@ pub fn open(window: &mut Window, cx: &mut App) {
         let tip = |keys: Option<String>, key: &str, cx: &App| tip(keys, t(cx, key), cx).into_any_element();
         let copy = shortcuts::format(&Binding { key: "c".into(), ctrl: true, ..Default::default() });
         let escape = shortcuts::format(&Binding { key: "Escape".into(), ..Default::default() });
+        // The editor's multi-cursor keys aren't remappable.
+        let command = |key: &str, shift: bool| {
+            shortcuts::format(&Binding { key: key.into(), ctrl: true, shift, ..Default::default() })
+        };
+        let alt = if cfg!(target_os = "macos") { "⌥" } else { "Alt" };
+        let cursors = vec![
+            tip(Some(command("d", false)), "tips.cursorsNext", cx),
+            tip(Some(command("l", true)), "tips.cursorsAll", cx),
+            tip(Some(format!("{} {}", command("k", false), command("d", false))), "tips.cursorsSkip", cx),
+            tip(Some(command("u", false)), "tips.cursorsUndo", cx),
+            self::tip(Some(escape.clone()), t_with(cx, "tips.cursorsEscape", &[("alt", alt)]), cx).into_any_element(),
+        ];
         let sections = v_flex()
             .gap(rems(1.385))
             .child(section(
@@ -58,9 +70,13 @@ pub fn open(window: &mut Window, cx: &mut App) {
                     tip(Some(keys("saveQuery", cx)), "tips.editorSave", cx),
                     tip(None, "tips.editorGutter", cx),
                     tip(None, "tips.editorContext", cx),
+                    tip(Some("F12".into()), "tips.editorDefinition", cx),
+                    tip(None, "tips.editorParams", cx),
+                    tip(Some(keys("commandPalette", cx)), "tips.editorPalette", cx),
                 ],
                 cx,
             ))
+            .child(section(t(cx, "tips.cursorsTitle"), cursors, cx))
             .child(section(
                 t(cx, "tips.resultsTitle"),
                 vec![
@@ -70,13 +86,18 @@ pub fn open(window: &mut Window, cx: &mut App) {
                     tip(None, "tips.resultsCtrlClick", cx),
                     tip(None, "tips.resultsDoubleClick", cx),
                     tip(None, "tips.resultsContext", cx),
+                    tip(None, "tips.resultsChart", cx),
                     tip(Some(escape), "tips.resultsEsc", cx),
                 ],
                 cx,
             ))
             .child(section(
                 t(cx, "tips.schemaTitle"),
-                vec![tip(None, "tips.schemaClick", cx), tip(None, "tips.schemaDblClick", cx)],
+                vec![
+                    tip(None, "tips.schemaClick", cx),
+                    tip(None, "tips.schemaDblClick", cx),
+                    tip(None, "tips.schemaDiagram", cx),
+                ],
                 cx,
             ))
             .child(section(
@@ -92,6 +113,7 @@ pub fn open(window: &mut Window, cx: &mut App) {
             .child(
                 modal::footer(cx).child(
                     Button::new("tips-close")
+                        .large()
                         .primary()
                         .label(t(cx, "common.close"))
                         .on_click(|_, window, cx| window.close_dialog(cx)),

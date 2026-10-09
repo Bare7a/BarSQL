@@ -1,14 +1,17 @@
 use barsql_app::RunEvent;
 use barsql_core::{QueryError, ResultSummary, SqlDialect};
+use barsql_io::EXPORT_FORMATS;
 use barsql_sql::QueryPlan;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Icon, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, Selectable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::chart_view::ChartView;
 use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef};
 use crate::i18n::{I18n, format_number, t, t_count, t_with};
@@ -114,6 +117,8 @@ impl ShownError {
 #[derive(Default)]
 struct ResultSetView {
     grid: Option<Entity<Grid>>,
+    // Shown in place of the grid while set.
+    chart: Option<Entity<ChartView>>,
     _subscriptions: Vec<Subscription>,
     streaming: bool,
     summary: Option<ResultSummary>,
@@ -387,7 +392,6 @@ impl ResultsPanel {
         self.sets.iter().map(|set| set.count(cx)).collect()
     }
 
-    #[cfg(any(test, feature = "snapshot"))]
     pub(crate) fn active_grid(&self) -> Option<Entity<Grid>> {
         self.sets.get(self.active)?.grid.clone()
     }
@@ -407,7 +411,8 @@ impl ResultsPanel {
         let theme = cx.theme().clone();
         let lang = cx.global::<I18n>().lang().to_string();
         let ordinals = ordinals(self.sets.iter().map(|set| set.plan.is_some()));
-        let mut tabs: Vec<Stateful<Div>> = self
+        let panel = cx.entity().downgrade();
+        let mut tabs: Vec<AnyElement> = self
             .sets
             .iter()
             .zip(ordinals)
@@ -459,10 +464,25 @@ impl ResultsPanel {
                         el.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| this.select_result(ix, cx)))
+                    .context_menu({
+                        let panel = panel.clone();
+                        move |menu, window, cx| Self::result_menu(&panel, ix, menu, window, cx)
+                    })
+                    .into_any_element()
             })
             .collect();
         if !self.messages.is_empty() {
-            tabs.push(self.messages_tab(&lang, cx));
+            let copy = panel.clone();
+            tabs.push(
+                self.messages_tab(&lang, cx)
+                    .context_menu(move |menu, _, cx| {
+                        let copy = copy.clone();
+                        menu.item(PopupMenuItem::new(t(cx, "results.copyMessages")).on_click(move |_, _, cx| {
+                            let _ = copy.update(cx, |this, cx| this.copy_messages(cx));
+                        }))
+                    })
+                    .into_any_element(),
+            );
         }
         div()
             .relative()
@@ -554,9 +574,100 @@ impl ResultsPanel {
                     Line::Result(index) => Some(self.heading(index, cx)),
                     _ => None,
                 };
-                Some(message_log::render_row(ix, line, heading, self.messages.has_codes(), cx))
+                let text = match &line {
+                    Line::Text { text, .. } | Line::Labeled { text, .. } => Some(text.to_string()),
+                    _ => None,
+                };
+                let row = message_log::render_row(ix, line, heading, self.messages.has_codes(), cx);
+                let Some(text) = text else { return Some(row) };
+                let panel = cx.entity().downgrade();
+                Some(
+                    div()
+                        .id(("message-row", ix))
+                        .w_full()
+                        .child(row)
+                        .context_menu(move |menu, _, cx| {
+                            let (text, panel) = (text.clone(), panel.clone());
+                            menu.item(
+                                PopupMenuItem::new(t(cx, "results.copyMessage"))
+                                    .on_click(move |_, _, cx| copy_text(text.clone(), cx)),
+                            )
+                            .item(
+                                PopupMenuItem::new(t(cx, "results.copyMessages")).on_click(move |_, _, cx| {
+                                    let _ = panel.update(cx, |this, cx| this.copy_messages(cx));
+                                }),
+                            )
+                        })
+                        .into_any_element(),
+                )
             })
             .collect()
+    }
+
+    fn copy_messages(&mut self, cx: &mut Context<Self>) {
+        let text = self.messages.copy_text(
+            |index| {
+                let heading = self.heading(index, cx);
+                match heading.statement.is_empty() {
+                    true => heading.label.to_string(),
+                    false => format!("{}: {}", heading.label, heading.statement),
+                }
+            },
+            cx,
+        );
+        copy_text(text, cx);
+    }
+
+    // On a result tab: what it shows, and the statement it came from.
+    fn result_menu(
+        this: &WeakEntity<Self>,
+        ix: usize,
+        menu: PopupMenu,
+        window: &mut Window,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let Some(panel) = this.upgrade() else { return menu };
+        let Some(set) = panel.read(cx).sets.get(ix) else { return menu };
+        let (grid, plan) = (set.grid.clone(), set.plan.clone());
+        let error = set.error.as_ref().map(|error| error.message.to_string());
+        let statement = set.statement.clone().filter(|statement| !statement.trim().is_empty());
+        let mut menu = menu;
+        if let Some(grid) = grid {
+            let (all, export, formats) = (grid.clone(), grid.clone(), grid);
+            menu = menu
+                .item(PopupMenuItem::new(t(cx, "results.copyAllRows")).on_click(move |_, window, cx| {
+                    all.update(cx, |grid, cx| grid.copy_all(grid::copy_format(cx), window, cx));
+                }))
+                .submenu(t(cx, "grid.copyAs"), window, cx, move |menu, _, cx| {
+                    EXPORT_FORMATS.into_iter().fold(menu, |menu, format| {
+                        let grid = formats.clone();
+                        menu.item(PopupMenuItem::new(grid::format_label(format, cx)).on_click(move |_, window, cx| {
+                            grid.update(cx, |grid, cx| grid.copy_all(format, window, cx));
+                        }))
+                    })
+                })
+                .item(PopupMenuItem::new(t(cx, "results.contextExportAs")).on_click(move |_, window, cx| {
+                    crate::export_dialog::open(export.read(cx).export_source(), window, cx);
+                }));
+        }
+        if let Some(plan) = plan {
+            menu = menu.item(
+                PopupMenuItem::new(t(cx, "results.planCopy"))
+                    .on_click(move |_, _, cx| plan.update(cx, |plan, cx| plan.copy_raw(cx))),
+            );
+        }
+        if let Some(error) = error {
+            menu = menu.item(PopupMenuItem::new(t(cx, "results.copyError")).on_click(move |_, _, cx| {
+                copy_text(error.clone(), cx);
+            }));
+        }
+        match statement {
+            Some(statement) => menu.separator().item(
+                PopupMenuItem::new(t(cx, "results.copyStatement"))
+                    .on_click(move |_, _, cx| copy_text(statement.clone(), cx)),
+            ),
+            None => menu,
+        }
     }
 
     fn messages_view(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -565,20 +676,7 @@ impl ResultsPanel {
         let count = t_count(cx, "results.messagesCount", self.messages.total() as i64, &[]);
         let count =
             count.replace(&self.messages.total().to_string(), &format_number(self.messages.total() as f64, 0, &lang));
-        let copy = cx.listener(|this, _, _, cx| {
-            let text = this.messages.copy_text(
-                |index| {
-                    let heading = this.heading(index, cx);
-                    match heading.statement.is_empty() {
-                        true => heading.label.to_string(),
-                        false => format!("{}: {}", heading.label, heading.statement),
-                    }
-                },
-                cx,
-            );
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
-            toast::success(t(cx, "toast.copiedClipboard"), cx);
-        });
+        let copy = cx.listener(|this, _, _, cx| this.copy_messages(cx));
         let toolbar = h_flex()
             .flex_none()
             .px(rems(0.769))
@@ -696,11 +794,33 @@ impl ResultsPanel {
             set.summary.as_ref().filter(|_| !set.streaming).map_or(grid.read(cx).set().rows() as i64, |s| s.row_count);
         let ms = set.summary.as_ref().map_or(0, |s| s.duration_ms);
         let meta = t_with(cx, "results.metaRows", &[("count", &rows.to_string()), ("ms", &ms.to_string())]);
+        let toggle = Button::new("chart-toggle")
+            .debug_selector(|| "chart-toggle".into())
+            .tool(Icon::new(Lucide::ChartColumn), ICON_XS, t(cx, "chart.title"))
+            .selected(set.chart.is_some())
+            .tooltip(t(cx, "chart.tooltip"))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_chart(cx)))
+            .into_any_element();
+        let body = match &set.chart {
+            Some(chart) => chart.clone().into_any_element(),
+            None => grid.clone().into_any_element(),
+        };
         v_flex()
             .size_full()
-            .child(grid::toolbar(grid, meta, cx))
-            .child(div().flex_1().min_h_0().child(grid.clone()))
+            .child(grid::toolbar(grid, meta, Some(toggle), cx))
+            .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
+    }
+
+    // Swaps the active result's grid for a chart of it, and back.
+    pub(crate) fn toggle_chart(&mut self, cx: &mut Context<Self>) {
+        let Some(set) = self.sets.get_mut(self.active) else { return };
+        let Some(grid) = set.grid.clone() else { return };
+        set.chart = match set.chart.take() {
+            Some(_) => None,
+            None => Some(cx.new(|cx| ChartView::new(grid, cx))),
+        };
+        cx.notify();
     }
 }
 
@@ -870,4 +990,9 @@ mod messages_tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("result-tab-messages").is_none(), "a new run starts without them");
     }
+}
+
+fn copy_text(text: String, cx: &mut App) {
+    cx.write_to_clipboard(ClipboardItem::new_string(text));
+    toast::success(t(cx, "toast.copiedClipboard"), cx);
 }

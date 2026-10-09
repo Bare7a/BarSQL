@@ -160,6 +160,10 @@ impl Driver<'_> {
     // Picks item `downs` with the keyboard. Separators don't count.
     pub fn context_menu(&mut self, selector: &'static str, downs: usize) {
         let position = self.center(selector);
+        self.context_menu_at(position, downs);
+    }
+
+    pub fn context_menu_at(&mut self, position: Point<Pixels>, downs: usize) {
         let down = MouseDownEvent {
             button: MouseButton::Right,
             position,
@@ -179,6 +183,10 @@ impl Driver<'_> {
     #[cfg(feature = "e2e")]
     pub fn context_submenu(&mut self, selector: &'static str, downs: usize, pick: usize) {
         let position = self.center(selector);
+        self.context_submenu_at(position, downs, pick);
+    }
+
+    pub fn context_submenu_at(&mut self, position: Point<Pixels>, downs: usize, pick: usize) {
         let (button, modifiers) = (MouseButton::Right, Modifiers::none());
         self.cx.simulate_event(MouseDownEvent { button, position, modifiers, click_count: 1, first_mouse: false });
         self.cx.run_until_parked();
@@ -191,6 +199,10 @@ impl Driver<'_> {
     // Input and editor menus open on mouse up, not down.
     pub fn input_menu(&mut self, selector: &'static str, downs: usize) {
         let position = self.center(selector);
+        self.input_menu_at(position, downs);
+    }
+
+    pub fn input_menu_at(&mut self, position: Point<Pixels>, downs: usize) {
         let (button, modifiers) = (MouseButton::Right, Modifiers::none());
         self.cx.simulate_event(MouseDownEvent { button, position, modifiers, click_count: 1, first_mouse: false });
         self.cx.simulate_event(MouseUpEvent { button, position, modifiers, click_count: 1 });
@@ -200,10 +212,9 @@ impl Driver<'_> {
         self.pause();
     }
 
-    // Same as clicking OK, which dispatches Confirm.
+    // Clicks the confirmation's OK. Enter would leave a danger confirmation open.
     pub fn confirm_dialog(&mut self) {
-        self.dispatch(gpui_kit::component::dialog::Confirm { secondary: false });
-        self.pause();
+        self.click("confirm-ok");
     }
 
     pub fn dialog_open(&mut self) -> bool {
@@ -278,7 +289,7 @@ impl Driver<'_> {
 
     pub fn run(&mut self, sql: &str) {
         self.set_sql(sql);
-        self.click("run-all");
+        self.dispatch(crate::actions::RunAll);
         self.wait_idle();
     }
 

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui_kit::component::{Theme, ThemeMode, ThemeSet};
+use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, ThemeSet};
 use gpui_kit::{App, Window, WindowAppearance, px};
 
 use crate::state::{set_setting, setting};
@@ -24,29 +24,70 @@ pub fn init(cx: &mut App) {
             theme.light_theme = Rc::new(config);
         }
     }
-    let mode = saved_mode(cx);
+    let mode = resolve(choice(cx), cx);
     Theme::change(mode, None, cx);
     // Focus shows as a tinted border instead of a ring.
     Theme::global_mut(cx).focus_ring = false;
-    set_native_appearance(mode, cx);
     apply_zoom(zoom(cx), None, cx);
 }
 
-// Native title bars, menus and dialogs follow the app's theme, not the system's.
-fn set_native_appearance(mode: ThemeMode, cx: &App) {
+// What the View > Theme menu picks. Unset or unknown values mean dark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeChoice {
+    Dark,
+    Light,
+    System,
+}
+
+pub fn choice(cx: &App) -> ThemeChoice {
+    match setting(cx, THEME_KEY).as_deref() {
+        Some("light") => ThemeChoice::Light,
+        Some("system") => ThemeChoice::System,
+        _ => ThemeChoice::Dark,
+    }
+}
+
+// Native title bars, menus and dialogs follow the app's theme. A forced appearance hides the system's, so
+// System clears it before reading.
+fn resolve(choice: ThemeChoice, cx: &App) -> ThemeMode {
+    let mode = match choice {
+        ThemeChoice::Dark => ThemeMode::Dark,
+        ThemeChoice::Light => ThemeMode::Light,
+        ThemeChoice::System => {
+            cx.set_window_appearance(None);
+            return match cx.window_appearance() {
+                WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
+                WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
+            };
+        }
+    };
     cx.set_window_appearance(Some(if mode.is_dark() { WindowAppearance::Dark } else { WindowAppearance::Light }));
+    mode
 }
 
-pub fn saved_mode(cx: &App) -> ThemeMode {
-    if setting(cx, THEME_KEY).as_deref() == Some("light") { ThemeMode::Light } else { ThemeMode::Dark }
+pub fn set_choice(choice: ThemeChoice, window: &mut Window, cx: &mut App) {
+    let value = match choice {
+        ThemeChoice::Dark => "dark",
+        ThemeChoice::Light => "light",
+        ThemeChoice::System => "system",
+    };
+    set_setting(cx, THEME_KEY, value);
+    apply(resolve(choice, cx), window, cx);
 }
 
-pub fn toggle(window: &mut Window, cx: &mut App) {
-    let mode = if Theme::global(cx).is_dark() { ThemeMode::Light } else { ThemeMode::Dark };
-    set_setting(cx, THEME_KEY, if mode.is_dark() { "dark" } else { "light" });
+// Called when the window's appearance changes. Only Match System follows it.
+pub fn follow_system(window: &mut Window, cx: &mut App) {
+    if choice(cx) == ThemeChoice::System {
+        let mode = resolve(ThemeChoice::System, cx);
+        if cx.theme().mode != mode {
+            apply(mode, window, cx);
+        }
+    }
+}
+
+fn apply(mode: ThemeMode, window: &mut Window, cx: &mut App) {
     Theme::change(mode, Some(window), cx);
     Theme::global_mut(cx).focus_ring = false;
-    set_native_appearance(mode, cx);
     apply_zoom(zoom(cx), Some(window), cx);
     crate::actions::set_menus(cx);
 }

@@ -11,7 +11,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{ActiveTheme, Icon, StyledExt, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -229,9 +229,11 @@ impl UpdateDialog {
     }
 
     fn footer(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let close =
-            Button::new("update-close").label(t(cx, "common.close")).on_click(|_, window, cx| window.close_dialog(cx));
-        let primary = |id: &'static str, label: &str| Button::new(id).primary().label(label.to_string());
+        let close = Button::new("update-close")
+            .large()
+            .label(t(cx, "common.close"))
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let primary = |id: &'static str, label: &str| Button::new(id).large().primary().label(label.to_string());
         let footer = modal::footer(cx);
         match &self.state {
             UpdateState::Checking | UpdateState::Verifying(_) | UpdateState::Installing(_) => None,
@@ -253,12 +255,14 @@ impl UpdateDialog {
                             .gap(rems(0.615))
                             .child(
                                 Button::new("update-skip")
+                                    .large()
                                     .ghost()
                                     .label(t(cx, "update.skip"))
                                     .on_click(cx.listener(|this, _, window, cx| this.skip(window, cx))),
                             )
                             .child(
                                 Button::new("update-remind")
+                                    .large()
                                     .ghost()
                                     .label(t(cx, "update.remind"))
                                     .on_click(|_, window, cx| window.close_dialog(cx)),

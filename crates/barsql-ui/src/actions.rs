@@ -1,7 +1,7 @@
+use gpui_kit::component::GlobalState;
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::AppMenuBar;
-use gpui_kit::component::{ActiveTheme, GlobalState};
 use gpui_kit::{
     Action, App, AsKeystroke, Entity, Global, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, WeakEntity, Window,
     actions,
@@ -9,6 +9,7 @@ use gpui_kit::{
 
 use crate::i18n::{I18n, t};
 use crate::state::setting_bool;
+use crate::theme::ThemeChoice;
 
 actions!(
     barsql,
@@ -19,8 +20,10 @@ actions!(
         CloseTab,
         ReopenClosedTab,
         QuickSearch,
+        CommandPalette,
         ThemeDark,
         ThemeLight,
+        ThemeSystem,
         LanguageEn,
         LanguageDe,
         LanguageBg,
@@ -32,6 +35,7 @@ actions!(
         ResetEditorFontSize,
         ToggleSidebar,
         ToggleJsonPanel,
+        ToggleGridStripes,
         ToggleFullscreen,
         KeyboardTips,
         KeyboardShortcuts,
@@ -45,6 +49,9 @@ actions!(
         TriggerSuggest,
         SaveQuery,
         RenameSavedQuery,
+        BeginTransaction,
+        CommitTransaction,
+        RollbackTransaction,
         HideApp,
         HideOtherApps,
         ShowAllApps,
@@ -128,20 +135,21 @@ fn menus(cx: &App) -> Vec<Menu> {
         file.extend([MenuItem::separator(), MenuItem::action(t(cx, "menu.exit"), Quit)]);
     }
     let edit = vec![
-        MenuItem::os_action("Undo", Undo, OsAction::Undo),
-        MenuItem::os_action("Redo", Redo, OsAction::Redo),
+        MenuItem::os_action(t(cx, "menu.undo"), Undo, OsAction::Undo),
+        MenuItem::os_action(t(cx, "menu.redo"), Redo, OsAction::Redo),
         MenuItem::separator(),
-        MenuItem::os_action("Cut", Cut, OsAction::Cut),
-        MenuItem::os_action("Copy", Copy, OsAction::Copy),
-        MenuItem::os_action("Paste", Paste, OsAction::Paste),
-        MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
+        MenuItem::os_action(t(cx, "menu.cut"), Cut, OsAction::Cut),
+        MenuItem::os_action(t(cx, "menu.copy"), Copy, OsAction::Copy),
+        MenuItem::os_action(t(cx, "menu.paste"), Paste, OsAction::Paste),
+        MenuItem::os_action(t(cx, "menu.selectAll"), SelectAll, OsAction::SelectAll),
     ];
-    let dark = cx.theme().mode.is_dark();
+    let choice = crate::theme::choice(cx);
     let theme = menu(
         t(cx, "viewSections.theme"),
         vec![
-            MenuItem::action(t(cx, "theme.dark"), ThemeDark).checked(dark),
-            MenuItem::action(t(cx, "theme.light"), ThemeLight).checked(!dark),
+            MenuItem::action(t(cx, "theme.dark"), ThemeDark).checked(choice == ThemeChoice::Dark),
+            MenuItem::action(t(cx, "theme.light"), ThemeLight).checked(choice == ThemeChoice::Light),
+            MenuItem::action(t(cx, "theme.system"), ThemeSystem).checked(choice == ThemeChoice::System),
         ],
     );
     let lang = cx.global::<I18n>().lang();
@@ -155,7 +163,10 @@ fn menus(cx: &App) -> Vec<Menu> {
     );
     let (sidebar_open, json_open) =
         (setting_bool(cx, "barsql-sidebar-open", true), setting_bool(cx, "barsql-json-open", false));
+    let stripes = setting_bool(cx, crate::grid::STRIPES_KEY, false);
     let view = vec![
+        MenuItem::action(t(cx, "menu.commandPalette"), CommandPalette),
+        MenuItem::separator(),
         MenuItem::submenu(theme),
         MenuItem::submenu(language),
         MenuItem::separator(),
@@ -169,6 +180,7 @@ fn menus(cx: &App) -> Vec<Menu> {
         MenuItem::separator(),
         MenuItem::action(t(cx, "menu.toggleSidebar"), ToggleSidebar).checked(sidebar_open),
         MenuItem::action(t(cx, "menu.toggleJsonPanel"), ToggleJsonPanel).checked(json_open),
+        MenuItem::action(t(cx, "menu.stripedRows"), ToggleGridStripes).checked(stripes),
         MenuItem::separator(),
         MenuItem::action(t(cx, "menu.toggleFullscreen"), ToggleFullscreen),
     ];
@@ -185,25 +197,25 @@ fn menus(cx: &App) -> Vec<Menu> {
             vec![
                 MenuItem::action(t(cx, "menu.about"), About),
                 MenuItem::separator(),
-                MenuItem::os_submenu("Services", SystemMenuType::Services),
+                MenuItem::os_submenu(t(cx, "menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),
-                MenuItem::action("Hide BarSQL", HideApp),
-                MenuItem::action("Hide Others", HideOtherApps),
-                MenuItem::action("Show All", ShowAllApps),
+                MenuItem::action(t(cx, "menu.hideApp"), HideApp),
+                MenuItem::action(t(cx, "menu.hideOthers"), HideOtherApps),
+                MenuItem::action(t(cx, "menu.showAll"), ShowAllApps),
                 MenuItem::separator(),
-                MenuItem::action("Quit BarSQL", Quit),
+                MenuItem::action(t(cx, "menu.quitApp"), Quit),
             ],
         ));
     }
     menus.extend([menu(t(cx, "menu.file"), file), menu(t(cx, "menu.edit"), edit), menu(t(cx, "menu.view"), view)]);
     if mac {
         menus.push(menu(
-            "Window",
+            t(cx, "menu.window"),
             vec![
-                MenuItem::action("Minimize", MinimizeWindow),
-                MenuItem::action("Zoom", ZoomWindow),
+                MenuItem::action(t(cx, "menu.minimize"), MinimizeWindow),
+                MenuItem::action(t(cx, "menu.zoom"), ZoomWindow),
                 MenuItem::separator(),
-                MenuItem::action("Bring All to Front", BringAllToFront),
+                MenuItem::action(t(cx, "menu.bringAllToFront"), BringAllToFront),
             ],
         ));
     }

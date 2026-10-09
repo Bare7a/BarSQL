@@ -111,14 +111,15 @@ fn lone_transaction_statements_drive_the_tab_transaction(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
-fn mod_enter_runs_the_selection_without_typing_a_newline(cx: &mut TestAppContext) {
+fn mod_enter_runs_without_typing_a_newline(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (tab, cx) = open(&env, cx, "SELECT id FROM things WHERE id <= 5");
     let before = text(&tab, cx);
+    // Nothing selected runs the statement at the caret.
     cx.simulate_keystrokes(&format!("{}-enter", modifier()));
-    cx.run_until_parked();
-    assert_eq!(text(&tab, cx), before, "no newline and no run without a selection");
-    assert_eq!(status(&tab, cx).0, 0);
+    settle(cx, |cx| status(&tab, cx).0 == 1 && cx.update(|_, cx| tab.read(cx).running.is_none()));
+    assert_eq!(text(&tab, cx), before, "no newline");
+    assert!(matches!(status(&tab, cx).1, ResultStatus::Rows { count: 5, .. }));
 
     cx.simulate_keystrokes(&format!("{m}-a {m}-enter", m = modifier()));
     settle(cx, |cx| status(&tab, cx).0 == 1 && cx.update(|_, cx| tab.read(cx).running.is_none()));

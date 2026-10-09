@@ -1,7 +1,8 @@
+use barsql_core::{ConnectionConfig, Value};
 use barsql_io::ExportFormat;
 use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
 
-use super::driver::{Driver, open};
+use super::driver::{Driver, open, open_with};
 use crate::results::ResultStatus;
 
 #[gpui_kit::test]
@@ -37,12 +38,31 @@ fn run_takes_only_the_selected_statement(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn run_with_nothing_selected_takes_the_statement_at_the_caret(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT 1 AS first;\nSELECT 7 AS second;\nSELECT 9 AS third;");
+    select(&mut app, 25..25);
+    app.keys("mod-enter");
+    app.wait_idle();
+    assert_eq!(app.result_tabs(), 1);
+    assert_eq!(app.cell(0, 0).as_deref(), Some("7"));
+    // The editor menu's first item does the same.
+    select(&mut app, 45..45);
+    app.input_menu("query-editor", 0);
+    app.wait_idle();
+    assert_eq!(app.cell(0, 0).as_deref(), Some("9"));
+}
+
+#[gpui_kit::test]
 fn the_editors_right_click_menu_selects_all(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();
     app.set_sql("SELECT 1 AS first;\nSELECT 2 AS second;");
-    // Undo, Redo, Cut, Copy, Paste, Delete, then Select All.
-    app.input_menu("query-editor", 6);
+    app.cx.update(|_, cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("x".into())));
+    // Run statement, Run all, Explain, Go to definition, Change all occurrences, Toggle comment, Format SQL, Cut,
+    // Copy, Paste, Find, Replace, then Select all. SQLite has no Explain analyze.
+    app.input_menu("query-editor", 12);
     let tab = app.tab();
     let selected = app.cx.update(|_, cx| tab.read(cx).editor().read(cx).selected_text().to_string());
     assert_eq!(selected, "SELECT 1 AS first;\nSELECT 2 AS second;");
@@ -91,6 +111,119 @@ fn vs_code_line_commands_edit_the_current_line(cx: &mut TestAppContext) {
     caret(&mut app, 0);
     app.keys("mod-v");
     assert_eq!(app.sql(), "Xone\none\ntwo\nthree", "other text pastes at the caret");
+}
+
+fn select(app: &mut super::driver::Driver, range: std::ops::Range<usize>) {
+    let tab = app.tab();
+    app.cx.update(|_, cx| tab.read(cx).editor().update(cx, |state, cx| state.set_selected_range(range, cx)));
+    app.cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn select_next_occurrence_adds_a_cursor_on_each_whole_word_match(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT id, user_id FROM t WHERE id > 1 OR ID < 9 AND id <> 4");
+    select(&mut app, 8..8);
+    // The first press selects the word, then each adds the next one. The last wraps round to it and adds nothing.
+    app.keys("mod-d mod-d mod-d mod-d");
+    app.type_text("uid");
+    assert_eq!(app.sql(), "SELECT uid, user_id FROM t WHERE uid > 1 OR ID < 9 AND uid <> 4");
+}
+
+#[gpui_kit::test]
+fn selected_text_is_found_anywhere_in_any_case(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("id user_id ID");
+    select(&mut app, 0..2);
+    app.keys("mod-shift-l");
+    app.type_text("k");
+    assert_eq!(app.sql(), "k user_k k");
+    app.set_sql("id user_id ID");
+    select(&mut app, 0..2);
+    app.keys("mod-d");
+    app.type_text("k");
+    assert_eq!(app.sql(), "k user_k ID");
+}
+
+#[gpui_kit::test]
+fn occurrences_can_be_skipped_taken_back_and_dropped(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("a b a b a b a");
+    select(&mut app, 0..0);
+    // Add the second a, swap it for the third, add the fourth, then take that back.
+    app.keys("mod-d mod-d mod-k mod-d mod-d mod-u");
+    app.type_text("X");
+    assert_eq!(app.sql(), "X b a b X b a");
+    app.set_sql("a a a");
+    select(&mut app, 0..0);
+    app.keys("mod-d mod-d mod-d escape");
+    // Escape left the first a selected, so the next press starts over from it.
+    app.keys("mod-d");
+    app.type_text("X");
+    assert_eq!(app.sql(), "X X a");
+}
+
+#[gpui_kit::test]
+fn the_status_bar_follows_the_caret_and_the_selections(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT 1;\nSELECT id, id FROM t;");
+    let tab = app.tab();
+    let caret = |app: &mut super::driver::Driver| app.cx.update(|_, cx| tab.read(cx).caret(cx));
+    select(&mut app, 17..17);
+    let at = caret(&mut app);
+    assert_eq!((at.line, at.column, at.selected, at.selections), (2, 8, 0, 1));
+    select(&mut app, 10..16);
+    assert_eq!(caret(&mut app).selected, 6);
+    select(&mut app, 18..18);
+    app.keys("mod-d mod-d");
+    assert_eq!(caret(&mut app).selections, 2, "Select Next Occurrence added a second");
+}
+
+#[gpui_kit::test]
+fn the_word_at_the_caret_is_marked_wherever_it_stands(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    let sql = "SELECT id, user_id FROM t WHERE id > 1 OR ID < 9";
+    app.set_sql(sql);
+    let tab = app.tab();
+    let marks = |app: &mut super::driver::Driver| {
+        app.pause();
+        app.cx.update(|_, cx| tab.read(cx).occurrence_marks(cx))
+    };
+    let at = |needle: &str, nth: usize| {
+        let start = sql.match_indices(needle).nth(nth).unwrap().0;
+        start..start + needle.len()
+    };
+    assert!(marks(&mut app).is_empty(), "nothing is marked before the caret moves");
+    // Whole words in the same case, the one at the caret too. Not user_id's or ID.
+    select(&mut app, 9..9);
+    assert_eq!(marks(&mut app), vec![at("id", 0), at("id", 2)]);
+    // Selected text is marked wherever else it appears, in any case and inside other words.
+    select(&mut app, at("id", 0));
+    assert_eq!(marks(&mut app), vec![at("id", 1), at("id", 2), at("ID", 0)]);
+    // Typing clears the marks until the caret moves again.
+    select(&mut app, 9..9);
+    app.type_text("x");
+    assert!(marks(&mut app).is_empty());
+    select(&mut app, 0..0);
+    assert_eq!(marks(&mut app), vec![0..6], "a word found once is still marked");
+}
+
+#[gpui_kit::test]
+fn marks_follow_what_select_next_occurrence_will_pick(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("id user_id id");
+    select(&mut app, 0..0);
+    app.keys("mod-d");
+    app.pause();
+    let tab = app.tab();
+    let marks = app.cx.update(|_, cx| tab.read(cx).occurrence_marks(cx));
+    assert_eq!(marks, vec![11..13], "whole words only, as the next press will add");
 }
 
 // The editor draws tabs too narrowly to show them, so Text copies from the results line up in columns there.
@@ -144,7 +277,7 @@ fn a_stopped_query_is_reported_calmly_without_an_error_code(cx: &mut TestAppCont
     let mut app = open(cx);
     app.connect();
     app.set_sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n;");
-    app.click("run-all");
+    app.dispatch(crate::actions::RunAll);
     assert!(app.shown("stop"));
     app.click("stop");
     app.wait_idle();
@@ -166,6 +299,31 @@ fn tabs_open_switch_and_close_from_the_keyboard(cx: &mut TestAppContext) {
     assert_eq!(app.active(), 1);
     app.keys("mod-w");
     assert_eq!(app.titles().len(), 1);
+}
+
+// Keys skip a menu's disabled items, so the picks below count only the enabled ones.
+#[gpui_kit::test]
+fn a_tabs_menu_pins_closes_its_neighbours_and_duplicates(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT 42;");
+    app.keys("mod-t mod-t");
+    assert_eq!(app.titles().len(), 3);
+    // Close, Close others, Close to the right, Close all, then Pin tab.
+    app.context_menu("editor-tab-0", 4);
+    assert!(app.shown("unpin-tab-0"), "a pinned tab shows its pin");
+    // Close others leaves the pinned tab.
+    app.context_menu("editor-tab-1", 1);
+    assert_eq!(app.titles().len(), 2);
+    // Close, Close all.
+    app.context_menu("editor-tab-1", 1);
+    assert_eq!(app.titles().len(), 1, "the pinned tab stays");
+    let session = app.env.bar.editor_session();
+    assert!(session.tabs[0].pinned, "the pin is saved");
+    // Close, Reopen closed tab, Unpin tab, then Duplicate.
+    app.context_menu("editor-tab-0", 3);
+    assert_eq!(app.titles().len(), 2);
+    assert_eq!(app.sql(), "SELECT 42;");
 }
 
 // A vertical wheel scrolls the strip sideways.
@@ -311,4 +469,90 @@ fn the_editor_shows_its_bar_while_hovered(cx: &mut TestAppContext) {
     app.draw();
     app.click_at(track, Modifiers::none());
     assert!((top(&mut app) - before).abs() > px(200.), "hovering the editor shows its bar");
+}
+
+// `:name` placeholders ask for values before the run. Values are SQL, an empty one runs as NULL, and the next run
+// offers the same values again.
+#[gpui_kit::test]
+fn placeholders_ask_for_values_and_remember_them(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT :n + 1 AS v, :label IS NULL AS missing, ':skip' AS s;");
+    app.keys("mod-enter");
+    assert!(app.dialog_open(), "the run waits for its parameters");
+    app.type_text("41");
+    app.keys("enter");
+    app.wait_idle();
+    assert!(!app.dialog_open());
+    let row = |app: &mut Driver| (app.cell(0, 0), app.cell(0, 1), app.cell(0, 2));
+    assert_eq!(row(&mut app), (Some("42".into()), Some("1".into()), Some(":skip".into())));
+    app.set_sql("SELECT :n * 2 AS v;");
+    app.keys("mod-enter");
+    assert!(app.dialog_open());
+    app.keys("enter");
+    app.wait_idle();
+    assert_eq!(app.cell(0, 0).as_deref(), Some("82"), "the last value came back");
+}
+
+// An UPDATE or DELETE without a WHERE asks first, and backing out leaves the table alone.
+#[gpui_kit::test]
+fn a_write_to_every_row_asks_first(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.seed("CREATE TABLE marks (n INTEGER); INSERT INTO marks VALUES (1), (2)");
+    let total = |app: &mut Driver| app.query("SELECT sum(n) FROM marks")[0][0].clone();
+    app.set_sql("UPDATE marks SET n = 0;");
+    app.keys("mod-enter");
+    assert!(app.dialog_open(), "asks before changing every row");
+    app.keys("escape");
+    assert!(!app.dialog_open());
+    assert_eq!(total(&mut app), Value::Int(3));
+    app.keys("mod-enter");
+    app.confirm_dialog();
+    app.wait_idle();
+    assert_eq!(total(&mut app), Value::Int(0));
+    app.set_sql("UPDATE marks SET n = 5 WHERE n = 0;");
+    app.keys("mod-enter");
+    assert!(!app.dialog_open(), "a WHERE runs straight away");
+    app.wait_idle();
+    assert_eq!(total(&mut app), Value::Int(10));
+}
+
+// A connection that asks before changes confirms a write from the editor, but not a read.
+#[gpui_kit::test]
+fn a_connection_that_asks_confirms_writes_only(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { confirm_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    app.run("SELECT 1 AS one;");
+    assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
+    app.set_sql("INSERT INTO things (id, name) VALUES (9001, 'new');");
+    app.keys("mod-enter");
+    assert!(app.dialog_open());
+    app.confirm_dialog();
+    app.wait_idle();
+    assert_eq!(app.query("SELECT count(*) FROM things WHERE id = 9001")[0][0], Value::Int(1));
+}
+
+// F12 on an alias jumps to where FROM declares it, and on a table opens that table.
+#[gpui_kit::test]
+fn go_to_definition_jumps_to_an_alias_or_opens_a_table(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.wait_schema();
+    let sql = "SELECT t.name FROM things t;";
+    app.set_sql(sql);
+    let tab = app.tab();
+    let selected = |app: &mut Driver| app.cx.update(|_, cx| tab.read(cx).editor().read(cx).selected_range());
+    select(&mut app, 7..7);
+    app.keys("f12");
+    app.cx.run_until_parked();
+    let declared = sql.rfind(" t;").unwrap() + 1;
+    assert_eq!(selected(&mut app), declared..declared + 1, "the alias's declaration is selected");
+    select(&mut app, sql.find("things").unwrap()..sql.find("things").unwrap());
+    app.keys("f12");
+    app.cx.run_until_parked();
+    assert_eq!(app.titles().last().map(String::as_str), Some("things"), "the table opened in its own tab");
 }

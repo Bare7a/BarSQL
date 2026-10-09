@@ -371,6 +371,48 @@ fn writes(toks: &[(Tok, bool)], rules: &ReadOnlyRules) -> bool {
     false
 }
 
+// The verb of each UPDATE or DELETE with no WHERE of its own, so it changes every row, in order. A WHERE in a
+// subquery doesn't count. After a WITH list the statement's verb is the word after a closing parenthesis.
+pub fn unbounded_writes(driver: &DriverType, sql: &str) -> Vec<&'static str> {
+    let lex = Dialect::for_driver(driver).lex;
+    statement_chunks(sql, &lex)
+        .into_iter()
+        .filter_map(|chunk| {
+            let toks = tokens(&mask_exact(chunk, &lex, true), &lex);
+            let mut depth = 0usize;
+            let mut verb: Option<&'static str> = None;
+            let mut first = true;
+            let mut after_close = false;
+            let mut with = false;
+            for (tok, _) in &toks {
+                match tok {
+                    Tok::Open => depth += 1,
+                    Tok::Close => depth = depth.saturating_sub(1),
+                    Tok::Word(w) if depth == 0 => {
+                        let w = w.as_str();
+                        if verb.is_none() && (first || (with && after_close)) {
+                            with |= first && w == "WITH";
+                            verb = match w {
+                                "UPDATE" => Some("UPDATE"),
+                                "DELETE" => Some("DELETE"),
+                                "WITH" => None,
+                                _ if with => None,
+                                _ => return None,
+                            };
+                        } else if verb.is_some() && w == "WHERE" {
+                            return None;
+                        }
+                        first = false;
+                    }
+                    _ => {}
+                }
+                after_close = depth == 0 && *tok == Tok::Close;
+            }
+            verb
+        })
+        .collect()
+}
+
 fn is_read_only_pragma(stmt: &str) -> bool {
     match PRAGMA_WITH_ARGUMENT.captures(stmt) {
         None => true,
@@ -381,6 +423,44 @@ fn is_read_only_pragma(stmt: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_updates_and_deletes_without_a_where() {
+        let cases: &[(&str, DriverType, &str, &[&str])] = &[
+            ("bare delete", DriverType::Postgres, "DELETE FROM users", &["DELETE"]),
+            ("bare update", DriverType::Postgres, "UPDATE users SET a = 1", &["UPDATE"]),
+            ("with a where", DriverType::Postgres, "DELETE FROM users WHERE id = 1", &[]),
+            (
+                "a where in a subquery only",
+                DriverType::Postgres,
+                "UPDATE t SET a = (SELECT b FROM u WHERE u.id = 1)",
+                &["UPDATE"],
+            ),
+            ("a where after a subquery", DriverType::Postgres, "DELETE FROM t WHERE id IN (SELECT id FROM u)", &[]),
+            ("a where in a string", DriverType::Postgres, "UPDATE t SET note = 'WHERE'", &["UPDATE"]),
+            ("a where in a comment", DriverType::Postgres, "DELETE FROM t -- WHERE id = 1", &["DELETE"]),
+            (
+                "each statement",
+                DriverType::Postgres,
+                "DELETE FROM a; DELETE FROM b WHERE x; UPDATE c SET d = 1",
+                &["DELETE", "UPDATE"],
+            ),
+            ("after a WITH list", DriverType::Postgres, "WITH x AS (SELECT 1 WHERE true) DELETE FROM t", &["DELETE"]),
+            (
+                "a WITH with a where",
+                DriverType::Postgres,
+                "WITH x AS (SELECT 1) DELETE FROM t WHERE id IN (SELECT * FROM x)",
+                &[],
+            ),
+            ("a select", DriverType::Postgres, "SELECT * FROM t FOR UPDATE", &[]),
+            ("an upsert", DriverType::Postgres, "INSERT INTO t VALUES (1) ON CONFLICT (id) DO UPDATE SET a = 2", &[]),
+            ("T-SQL top", DriverType::SqlServer, "DELETE TOP (10) FROM t", &["DELETE"]),
+            ("ClickHouse mutation", DriverType::ClickHouse, "ALTER TABLE t DELETE WHERE 1", &[]),
+        ];
+        for (name, driver, sql, want) in cases {
+            assert_eq!(unbounded_writes(driver, sql), *want, "{name}");
+        }
+    }
 
     fn ro(sql: &str) -> bool {
         is_read_only(&DriverType::Unset, sql)

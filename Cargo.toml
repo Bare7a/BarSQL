@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.0.6"
+version = "1.0.7"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
@@ -25,7 +25,9 @@ dirs = "7"
 enumflags2 = "0.7"
 flate2 = "1"
 futures-util = "0.3"
-gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "tree-sitter-html"] }
+# Temporarily the upstream commit after 0.7.1 that made `add_selection` public (longbridge/gpui-kit#3403), which
+# Select Next Occurrence needs to add a cursor. Go back to an exact crates.io version once a release ships it.
+gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "0bbd9870ce420af9feacbf948b21d3824d82dc0b", features = ["tree-sitter-sql", "tree-sitter-html"] }
 hex = "0.4"
 httparse = "1"
 interprocess = "2"

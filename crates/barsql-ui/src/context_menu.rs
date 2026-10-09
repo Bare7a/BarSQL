@@ -21,60 +21,78 @@ impl Entry {
     }
 }
 
-// Windows' native menu ignores the app theme and Linux has none, so outside macOS, and always in tests, the menu
-// is drawn here and GPUI Kit gets an empty native menu, which it doesn't show.
+// Every text menu is drawn here, as the app's other menus are, so they look alike on every platform and show their
+// shortcuts. GPUI Kit gets an empty native menu back, which it doesn't show.
+//
+// GPUI Kit asks for the menu while it is updating the input, so `build` runs once that's done and may read the input.
+// `hold` gets the open menu's focus, which keeps the input's selection showing and tells a cell editor that the
+// blur it sees is its own menu's.
 pub fn open(
     native: NativeMenu,
-    entries: Vec<Entry>,
-    focus: &FocusHandle,
     window: &mut Window,
     cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> Option<(Vec<Entry>, FocusHandle)> + 'static,
+    hold: impl FnOnce(FocusHandle, &mut App) + 'static,
 ) -> NativeMenu {
-    if cfg!(target_os = "macos") && !cfg!(test) {
-        return entries.into_iter().fold(native, |menu, entry| match entry {
-            Entry::Item { label, action, disabled } => menu.menu_with_disabled(label, disabled, action),
-            Entry::Separator => menu.separator(),
-        });
-    }
-    if let Some(overlay) = overlay(window, cx) {
-        let (focus, position) = (focus.clone(), window.mouse_position());
-        overlay.update(cx, |overlay, cx| overlay.show(entries, focus, position, window, cx));
-    }
+    let position = window.mouse_position();
+    window.defer(cx, move |window, cx| {
+        let Some((entries, focus)) = build(window, cx) else { return };
+        if let Some(overlay) = overlay(window, cx) {
+            overlay.update(cx, |overlay, cx| overlay.show(entries, focus, position, hold, window, cx));
+        }
+    });
     native
 }
 
 pub fn input(state: &Entity<InputState>) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
     let state = state.clone();
-    text(move |cx| {
-        let input = state.read(cx);
-        (!input.selected_range().is_empty(), input.is_editable(), input.focus_handle(cx))
-    })
+    move |native, window, cx| {
+        let (read, hold) = (state.clone(), state.clone());
+        open(
+            native,
+            window,
+            cx,
+            move |_, cx| {
+                let input = read.read(cx);
+                Some((text_entries(input.is_copyable(), input.is_editable(), cx), input.focus_handle(cx)))
+            },
+            move |menu, cx| hold.update(cx, |input, cx| input.set_selection_focus(Some(menu), cx)),
+        )
+    }
 }
 
 pub fn editor(state: &Entity<EditorState>) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
     let state = state.clone();
-    text(move |cx| {
-        let editor = state.read(cx);
-        (!editor.selected_range().is_empty(), editor.is_editable(), editor.focus_handle(cx))
-    })
+    move |native, window, cx| {
+        let (read, hold) = (state.clone(), state.clone());
+        open(
+            native,
+            window,
+            cx,
+            move |_, cx| {
+                let editor = read.read(cx);
+                Some((text_entries(editor.is_copyable(), editor.is_editable(), cx), editor.focus_handle(cx)))
+            },
+            move |menu, cx| hold.update(cx, |editor, cx| editor.set_selection_focus(Some(menu), cx)),
+        )
+    }
 }
 
-// `read` returns whether text is selected, whether it's editable, and where to send the actions.
-fn text(
-    read: impl Fn(&App) -> (bool, bool, FocusHandle) + 'static,
-) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
-    move |native, window, cx| {
-        let (selected, editable, focus) = read(cx);
-        let pastable = editable && cx.read_from_clipboard().is_some();
-        let entries = vec![
-            Entry::item(t(cx, "editor.contextCut"), Cut, !(editable && selected)),
-            Entry::item(t(cx, "editor.contextCopy"), Copy, !selected),
-            Entry::item(t(cx, "editor.contextPaste"), Paste, !pastable),
-            Entry::Separator,
-            Entry::item(t(cx, "editor.contextSelectAll"), SelectAll, false),
-        ];
-        open(native, entries, &focus, window, cx)
+// Cut and Copy need a selection that isn't masked, Paste something to paste. A read-only field only copies.
+fn text_entries(copyable: bool, editable: bool, cx: &App) -> Vec<Entry> {
+    let copy = Entry::item(t(cx, "editor.contextCopy"), Copy, !copyable);
+    let select_all = Entry::item(t(cx, "editor.contextSelectAll"), SelectAll, false);
+    if !editable {
+        return vec![copy, Entry::Separator, select_all];
     }
+    let pastable = cx.read_from_clipboard().is_some();
+    vec![
+        Entry::item(t(cx, "editor.contextCut"), Cut, !copyable),
+        copy,
+        Entry::item(t(cx, "editor.contextPaste"), Paste, !pastable),
+        Entry::Separator,
+        select_all,
+    ]
 }
 
 fn overlay(window: &Window, cx: &App) -> Option<Entity<Overlay>> {
@@ -103,6 +121,7 @@ impl Overlay {
         entries: Vec<Entry>,
         focus: FocusHandle,
         position: Point<Pixels>,
+        hold: impl FnOnce(FocusHandle, &mut App),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -116,6 +135,8 @@ impl Overlay {
             overlay.active = None;
             cx.notify();
         });
+        // Before the menu takes the focus, so the input never sees an unexplained blur.
+        hold(menu.focus_handle(cx), cx);
         menu.focus_handle(cx).focus(window, cx);
         self.active = Some(Active { menu, position, _dismiss: dismiss });
         cx.notify();

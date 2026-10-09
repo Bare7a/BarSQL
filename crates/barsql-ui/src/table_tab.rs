@@ -17,7 +17,7 @@ use crate::completion::{self, Completion};
 use crate::dialogs;
 use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef, TableOverlay};
-use crate::i18n::{I18n, t, t_with};
+use crate::i18n::{I18n, t, t_count, t_with};
 use crate::results::ShownError;
 use crate::schema;
 use crate::sql_language::FilterCompletion;
@@ -139,7 +139,6 @@ impl TableTab {
         self.loaded && self.loading.is_none()
     }
 
-    #[cfg(any(test, feature = "snapshot"))]
     pub(crate) fn grid(&self) -> Entity<Grid> {
         self.grid.clone()
     }
@@ -378,11 +377,13 @@ impl TableTab {
         let sort = sorted.and_then(|name| column_ix(&name)).or((!set.columns.is_empty()).then_some(0));
         let foreign =
             self.foreign.iter().filter_map(|(column, (table, _))| Some((column_ix(column)?, table.clone()))).collect();
+        let primary = self.primary_keys.iter().filter_map(|name| column_ix(name)).collect();
         let overlay = TableOverlay {
             staged: Arc::new(staged),
             deleted,
             sort: sort.map(|column| (column, self.order_desc)),
             foreign,
+            primary,
             editable: self.editable(),
         };
         self.grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
@@ -413,6 +414,38 @@ impl TableTab {
         }
         let offset = self.grid.read(cx).set().rows();
         self.fetch(offset, false, window, cx);
+    }
+
+    // From the header menu. `None` goes back to the primary key's order. Staged changes are dropped, as with sort_by.
+    fn sort_to(&mut self, sort: Option<(usize, bool)>, window: &mut Window, cx: &mut Context<Self>) {
+        let order_by = match sort {
+            Some((column, _)) => match self.grid.read(cx).set().columns.get(column) {
+                Some(meta) => Some(meta.name.clone()),
+                None => return,
+            },
+            None => None,
+        };
+        self.order_by = order_by;
+        self.order_desc = sort.is_some_and(|(_, desc)| desc);
+        self.staging.clear();
+        self.fetch(0, true, window, cx);
+        cx.emit(TableTabEvent::Edited);
+    }
+
+    // Narrows the current filter to rows holding the cell's loaded value.
+    fn filter_by(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let set = self.grid.read(cx).set();
+        let Some(name) = set.columns.get(column).map(|c| c.name.clone()) else { return };
+        let condition = foreign_key_filter(&name, set.cell(row, column), &self.connection.driver);
+        let current = self.applied_filter.trim();
+        let filter = if current.is_empty() {
+            condition
+        } else if current.to_ascii_lowercase().contains(" or ") {
+            format!("({current}) AND {condition}")
+        } else {
+            format!("{current} AND {condition}")
+        };
+        self.show_filter(filter, window, cx);
     }
 
     // Same column flips direction. A new column starts ascending, and staged changes are dropped.
@@ -448,6 +481,12 @@ impl TableTab {
                 let outcome = self.staging.toggle_delete(&self.keys, *row);
                 self.staged(outcome, cx);
             }
+            GridEvent::DeleteRows(rows) if editable => {
+                let outcome = self.staging.toggle_deletes(&self.keys, rows);
+                self.staged(outcome, cx);
+            }
+            GridEvent::SortTo(sort) => self.sort_to(*sort, window, cx),
+            GridEvent::FilterBy { row, column } => self.filter_by(*row, *column, window, cx),
             GridEvent::Undo => {
                 if self.staging.undo() {
                     self.sync_overlay(cx);
@@ -517,9 +556,33 @@ impl TableTab {
         .detach();
     }
 
+    // A connection that asks before changes gets a confirmation first.
+    fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editable() || !self.staging.has_pending() || self.applying || self.loading.is_some() {
+            return;
+        }
+        if !self.connection.confirm_changes {
+            return self.apply_now(window, cx);
+        }
+        let pending = &self.staging.pending;
+        let rows = pending.deletes.len() + pending.edits.keys().filter(|key| !pending.deletes.contains(*key)).count();
+        let name = [("name", self.connection.name.as_str())];
+        let confirm = dialogs::Confirm {
+            title: t_with(cx, "safety.changesTitle", &name),
+            description: t_count(cx, "safety.saveRows", rows as i64, &name),
+            detail: None,
+            confirm: t(cx, "common.save"),
+            danger: true,
+        };
+        let tab = cx.entity().downgrade();
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            let _ = tab.update(cx, |tab, cx| tab.apply_now(window, cx));
+        });
+    }
+
     // Deletes first, then edits of rows not deleted. Reload either way since part of a failed batch may
     // have landed, and re-applying what's still staged is safe.
-    fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn apply_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.editable() || !self.staging.has_pending() || self.applying || self.loading.is_some() {
             return;
         }
@@ -717,7 +780,7 @@ impl TableTab {
         }
         v_flex()
             .size_full()
-            .child(grid::toolbar(&self.grid, meta.into(), cx))
+            .child(grid::toolbar(&self.grid, meta.into(), None, cx))
             .child(div().flex_1().min_h_0().child(self.grid.clone()))
             .into_any_element()
     }

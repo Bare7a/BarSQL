@@ -165,6 +165,7 @@ BarSQL focuses on one thing:
 - Organize into **folders** with drag-and-drop reorder
 - Per-connection **tab colors**
 - **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session
+- **Ask before changes** for production connections - the editor confirms any statement that changes data or schema before it runs, and so does saving grid edits
 - **Pick the database from a list** - the button beside the database field asks the server for its databases with the credentials you've entered, so you don't have to remember the name
 - PostgreSQL SSL (`disable` / `require` / `verify-full`), MySQL TLS, SQL Server TLS including TDS 8.0 `strict`, ClickHouse over HTTPS, and Turso URLs with an auth token
 - SQL Server **named instances** - type `host\INSTANCE`, or fill in the Instance field
@@ -191,8 +192,13 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 - Built-in **`JOIN` snippets** where a join fits
 - **Function completion and hover** for every engine - each dialect's built-in functions (from about 150 on SQLite to over 400 on ClickHouse) plus the server's own (user functions, extensions, ClickHouse combinators like `sumIf`), each with its signatures, return type and a short description
 - Driver-correct identifier quoting (PostgreSQL, MySQL, SQLite, SQL Server `[brackets]`, ClickHouse)
-- **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, select the next occurrence, toggle comments
-- **Run selection** (`Ctrl+Enter`) / **run all** (`Ctrl+Shift+Enter`) / **stop** long-running queries
+- **VS Code-style multiple cursors** - `Ctrl/⌘+D` adds a cursor at the next occurrence of the word or selection, `Ctrl/⌘+Shift+L` at every one, `Ctrl/⌘+K Ctrl/⌘+D` skips one and `Ctrl/⌘+U` takes the last back
+- **Occurrence highlighting** - the word at the caret, or the selected text, is marked wherever else it appears
+- **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, toggle comments
+- **Run selection** (`Ctrl+Enter`) - with nothing selected it runs the statement under the caret, briefly highlighting it / **run all** (`Ctrl+Shift+Enter`) / **stop** long-running queries
+- **Query parameters** - `:name` placeholders ask for their values before a run (values are SQL, so quote text; empty means `NULL`) and the last values come back next time. Casts like `::int`, strings and comments are left alone
+- **Every-row guard** - an `UPDATE` or `DELETE` without a `WHERE` asks before it runs
+- **Go to definition** (`F12` or `⌘/Ctrl`-click) - an alias or CTE jumps to where the query declares it, and a table (or a column's table) opens in the grid
 - **Streaming results** - rows render as the driver yields them
 - **Multi-statement scripts** - run several `;`-separated statements at once; they execute in order on one connection, so temp tables, `SET` and scripted `BEGIN` / `COMMIT` hold. SQL Server scripts run batch by batch, split on `GO` (`GO 3` runs a batch three times)
 - **Messages tab** - PostgreSQL notices, MySQL warnings, SQL Server `PRINT` and `RAISERROR` output, grouped under the statement that raised them, with levels and codes; it opens by itself when a run returns nothing else
@@ -201,7 +207,7 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 - **Query plan viewer** (`Ctrl+Shift+E`) - see below
 - `UPDATE` / `DELETE` / `INSERT` with **`RETURNING`** flow back to the Results Grid
 - Gutter icons to run individual statements
-- Right-click menu with **format SQL**
+- Right-click menu with run, explain, go to definition, **change all occurrences**, toggle comment and **format SQL**
 - **Remappable keyboard shortcuts**
 
 ### 🧭 Query Plan Viewer
@@ -232,6 +238,8 @@ Plans are outputs like any other, so a script can mix them freely - `SELECT …;
 - **Count rows** answers straight away, without opening a tab
 - **System views** - see what the server is doing (PostgreSQL activity, blocking and long-running queries; MySQL processes and open transactions; SQL Server requests, sessions and blocking; ClickHouse running queries) from the activity button above the tree or a connection's menu, and how a table is doing (statistics, index usage, ClickHouse parts, mutations and merges) from its menu. Each opens as an ordinary SQL tab and runs, so you can tweak it and run it again
 - Refresh the whole schema, or one schema from its right-click menu
+- **ER diagram** of a schema from its right-click menu - tables with their keys, laid out so referenced tables stand left of the ones referencing them; click one to open it
+- **Compare schema…** with another schema or database of the same engine - missing and extra tables, added, dropped and changed columns, and a sync script you can copy or open in a tab
 
 Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.
 
@@ -279,6 +287,10 @@ Every change opens a dialog that shows the **exact SQL** it will run, written fo
 - **Virtualized** grid - smooth scroll over thousands of rows
 - **Result-set tabs** - switch between outputs when a run returns multiple result sets
 - **Sortable** columns, **fit columns** to their content, and **show / hide** columns
+- Headers show each column's **type** and **key icons**; numbers are right-aligned, `NULL` is dimmed, and **striped rows** are a View-menu toggle
+- **Status bar sums** - selected cells show their count, and the sum and average of their numbers
+- **Quick charts** - the Chart button shows a result as bars or a line, with the label and value columns picked for you
+- Right-click menus on cells, row numbers and headers: copy as any export format, filter by a value, sort, hide a column, mark rows for delete
 - **Keyboard-first** navigation (arrows, Shift+select, Enter for the cell viewer)
 - Column/row selection with Ctrl+click and Shift+click; `Ctrl+C` copies in the format you pick
 - **Cell viewer** for large values - JSON, XML, HTML, or plain text; beautify/minify; editable in table view
@@ -356,11 +368,14 @@ A `.sql` file runs statement by statement on one connection, so `SET`, temp tabl
 
 ## 🌍 UX
 
-- **Dark & light** themes
+- **Dark & light** themes, or **match the system** and follow it as it changes
+- **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
 - **English**, **Deutsch** and **Български**
 - **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs
 - Custom shortcuts editor + keyboard tips
 - Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
+- Tab menu: close others, to the right or all, **pin**, duplicate, rename, copy SQL
+- Status bar with the caret's line and column, cursor count, read-only and transaction badges
 - Everything opens instantly - no animations
 - **Window state persistence** - size, position and maximized state restored between sessions
 
@@ -373,7 +388,9 @@ Every shortcut is remappable in the in-app shortcuts editor.
 | Action                       | Shortcut                                    |
 | ---------------------------- | ------------------------------------------- |
 | Quick Search palette         | `Ctrl/⌘ + P`                                |
-| Run selection                | `Ctrl/⌘ + Enter`                            |
+| Command palette              | `Ctrl/⌘ + Shift + P`                        |
+| Go to definition             | `F12`                                       |
+| Run selection or statement   | `Ctrl/⌘ + Enter`                            |
 | Run all statements           | `Ctrl/⌘ + Shift + Enter`                    |
 | Explain query plan           | `Ctrl/⌘ + Shift + E`                        |
 | Explain query plan (analyze) | `Ctrl/⌘ + Shift + A`                        |
@@ -478,7 +495,7 @@ For a single screenshot, build with `cargo build -p barsql --features snapshot`,
 - the grid: `cell`, `export`, `json`
 - dialogs: `connection-dialog`, `import`, `about`, `shortcuts`, `tips`
 - the update dialog: `update`, `update-current`, `update-downloading`, `update-ready`, `update-failed`
-- other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`
+- other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`, `palette` (the command palette), `chart` (the first result as a chart, with `BARSQL_SNAPSHOT_RUN=1`), `er` (the `main` schema's ER diagram)
 
 ---
 

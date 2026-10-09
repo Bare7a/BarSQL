@@ -206,3 +206,134 @@ fn a_long_result_always_shows_the_grid_bar(cx: &mut TestAppContext) {
     app.click_at(track, Modifiers::none());
     assert!(first(&mut app).y < before.y - px(200.), "a click on its track jumps, with the pointer away");
 }
+
+fn viewer_text(app: &mut Driver) -> String {
+    let viewer = app.cx.update(|_, cx| cx.try_global::<crate::cell_viewer::Opened>().and_then(|o| o.0.upgrade()));
+    app.cx.update(|_, cx| viewer.expect("the cell viewer").read(cx).shown(cx).1)
+}
+
+#[gpui_kit::test]
+fn a_right_click_acts_on_the_cell_it_lands_on(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS id, 'one' AS label UNION ALL SELECT 2, 'two';");
+    let grid = grid(&mut app);
+    // The first cell has the focus. Copy, Copy as, Export…, then View cell value.
+    let at = app.grid_point(&grid, |grid| grid.cell_point(1, 1));
+    app.context_menu_at(at, 3);
+    assert_eq!(viewer_text(&mut app), "two");
+    app.keys("escape");
+    // Copy as JSON copies the clicked cell alone, not the whole result.
+    let at = app.grid_point(&grid, |grid| grid.cell_point(0, 0));
+    app.context_submenu_at(at, 1, 2);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())).unwrap_or_default();
+    assert!(copied.contains("\"id\": 1") && !copied.contains("two"), "{copied}");
+}
+
+#[gpui_kit::test]
+fn the_header_menu_sorts_copies_and_hides_its_column(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS id, 'b' AS label UNION ALL SELECT 2, 'a' UNION ALL SELECT 3, 'c';");
+    let grid = grid(&mut app);
+    let header = app.grid_point(&grid, |grid| grid.header_point(1));
+    // Sort ascending, Sort descending, Clear sort, then Copy, Copy as, Export… and Copy column name.
+    app.context_menu_at(header, 1);
+    assert_eq!(layout(&mut app).1, Some(("label".into(), true)));
+    assert_eq!(app.cell(0, 1).as_deref(), Some("c"));
+    app.context_menu_at(header, 6);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied.as_deref(), Some("label"));
+    app.context_menu_at(header, 2);
+    assert_eq!(layout(&mut app).1, None);
+    // Keys skip the disabled Clear sort now, so Hide column is one up.
+    app.context_menu_at(header, 6);
+    assert_eq!(layout(&mut app).0, ["id"]);
+}
+
+#[gpui_kit::test]
+fn a_right_click_on_a_row_number_selects_that_row(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS id UNION ALL SELECT 2 UNION ALL SELECT 3;");
+    let grid = grid(&mut app);
+    let row = app.grid_point(&grid, |grid| grid.gutter_point(2));
+    app.context_menu_at(row, 0);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())).unwrap_or_default();
+    assert!(copied.contains('3') && !copied.contains('1'), "{copied}");
+    assert_eq!(app.cx.update(|_, cx| grid.read(cx).selection_counts()), (1, 1));
+}
+
+#[gpui_kit::test]
+fn a_result_tabs_menu_copies_its_rows_and_statement(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS a; SELECT 2 AS b;");
+    // Copy all rows, Copy as, Export…, then Copy statement.
+    app.context_menu("result-tab-1", 3);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied.as_deref(), Some("SELECT 2 AS b"));
+    app.context_menu("result-tab-0", 0);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())).unwrap_or_default();
+    assert!(copied.contains('a') && copied.contains('1'), "{copied}");
+}
+
+#[gpui_kit::test]
+fn a_failed_results_menu_copies_the_error(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    // A lone result has no tabs, so the failure comes second.
+    app.run("SELECT 1; SELECT * FROM missing_e2e_table;");
+    app.context_menu("result-tab-1", 0);
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())).unwrap_or_default();
+    assert!(copied.contains("missing_e2e_table"), "{copied}");
+}
+
+#[gpui_kit::test]
+fn the_status_bar_sums_the_selected_numbers(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS n, 'x' AS t UNION ALL SELECT 2.5, NULL UNION ALL SELECT NULL, 'y';");
+    let grid = grid(&mut app);
+    let aggregate = |app: &mut Driver| app.cx.update(|_, cx| grid.read(cx).aggregate());
+    assert_eq!(aggregate(&mut app), None, "a lone focused cell has nothing to sum");
+    let header = app.grid_point(&grid, |grid| grid.header_point(0));
+    app.click_at(header, Modifiers::none());
+    let total = aggregate(&mut app).expect("a column");
+    assert_eq!((total.count, total.numbers, total.sum), (2, 2, 3.5), "NULL isn't counted");
+    let text = app.grid_point(&grid, |grid| grid.header_point(1));
+    app.click_at(text, Modifiers::none());
+    let total = aggregate(&mut app).expect("a column");
+    assert_eq!((total.count, total.numbers), (2, 0), "text counts but doesn't sum");
+}
+
+// The chart toggle swaps the grid for a chart of the result, and back.
+#[gpui_kit::test]
+fn a_result_shows_as_a_chart_and_back(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 'a' AS k, 1 AS v UNION ALL SELECT 'b', 2;");
+    app.click("chart-toggle");
+    assert!(app.shown("result-chart"));
+    app.click("chart-toggle");
+    assert!(!app.shown("result-chart"));
+    assert_eq!(app.cell(1, 1).as_deref(), Some("2"), "the grid is back");
+}
+
+// The JSON viewer's lines continue the editor's: its header ends with the tab bar and its filter row with the
+// toolbar.
+#[gpui_kit::test]
+fn the_json_viewer_lines_up_with_the_editor(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS id;");
+    app.dispatch(ToggleJsonPanel);
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.cell_point(0, 0));
+    app.click_at(at, Modifiers::none());
+    let header = app.bounds("json-panel-header").expect("the JSON viewer is open");
+    let filter = app.bounds("json-filter").expect("a row is shown");
+    let toolbar = app.bounds("query-toolbar").expect("the toolbar");
+    assert_eq!(header.bottom(), app.bounds("tab-bar").expect("the tab bar").bottom());
+    assert_eq!(filter.bottom(), toolbar.bottom());
+}

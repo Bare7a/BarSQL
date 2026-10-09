@@ -8,7 +8,7 @@ use barsql_io::ExportFormat;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::input::{Copy, Input, InputState, Paste, Redo, SelectAll, Undo};
-use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::*;
 
@@ -19,17 +19,32 @@ use super::scroll::{GridScroll, LANE};
 use super::selection::{Arrow, GUTTER, Selection, View};
 use super::sort::{RowOrder, SortState, sort_order};
 use crate::i18n::t;
-use crate::state::{set_setting, setting};
+use crate::state::{set_setting, setting, setting_bool};
 use crate::toast;
 
 const CONTEXT: &str = "Grid";
 const FORMAT_KEY: &str = "barsql-export-format";
+pub const STRIPES_KEY: &str = "barsql-grid-stripes";
 const MIN_COLUMN_PX: f32 = 40.;
 const RESIZE_HANDLE_PX: f32 = 5.;
 // Longer values are cut before layout. The cell viewer still shows them whole.
 const MAX_CELL_CHARS: usize = 1000;
 // Larger results sort off the main thread, keeping the previous order until the new one is ready.
 const SYNC_SORT_ROWS: usize = 20_000;
+// Selections larger than this get no status bar sums.
+const MAX_AGGREGATE_CELLS: usize = 500_000;
+
+// Count of the selected cells that aren't NULL, and the sum of those that are numbers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Aggregate {
+    pub count: usize,
+    pub numbers: usize,
+    pub sum: f64,
+}
+
+// What an aggregate was worked out for: the selection's shape, its ends and the rows loaded.
+type AggregateKey =
+    (Option<range::CellRange>, usize, usize, Option<usize>, Option<usize>, Option<usize>, Option<usize>, usize);
 
 actions!(
     grid,
@@ -134,11 +149,17 @@ pub enum GridEvent {
     HiddenChanged,
     // Table views only. The server sorts, pages load on demand and the owner stages edits.
     SortRequested(usize),
+    // From the header menu. `None` goes back to the table's own order.
+    SortTo(Option<(usize, bool)>),
     LoadMore,
     EditCell { row: usize, column: usize, value: Option<String> },
     EditInViewer { row: usize, column: usize },
     PasteCells(Vec<(usize, usize, Option<String>)>),
     ToggleDelete(usize),
+    // Marks all the rows, or unmarks them when every one is marked already.
+    DeleteRows(Vec<usize>),
+    // Filters the table to the rows holding this cell's value.
+    FilterBy { row: usize, column: usize },
     OpenForeignKey { row: usize, column: usize },
     Undo,
     Redo,
@@ -154,6 +175,8 @@ pub struct TableOverlay {
     pub sort: Option<(usize, bool)>,
     // Column -> referenced table.
     pub foreign: HashMap<usize, String>,
+    // The primary key's columns.
+    pub primary: HashSet<usize>,
     pub editable: bool,
 }
 
@@ -263,12 +286,16 @@ pub struct Grid {
     selection: Selection,
     press: Option<Press>,
     hover: Option<Target>,
+    // What the last right-click landed on, which picks the menu.
+    menu_target: Option<Target>,
     published: (Option<usize>, Vec<usize>),
     pub(super) picker_open: bool,
     // Kept across renders so the column picker's list doesn't jump back to the top.
     pub(super) picker_scroll: ScrollHandle,
     overlay: Option<TableOverlay>,
     editing: Option<Editing>,
+    // Read while the status bar draws, before the grid renders, so it's worked out on demand.
+    aggregate: std::cell::RefCell<Option<(AggregateKey, Option<Aggregate>)>>,
     load_armed: bool,
     scrolled_to: Pixels,
 }
@@ -304,11 +331,13 @@ impl Grid {
             selection: Selection::default(),
             press: None,
             hover: None,
+            menu_target: None,
             published: (None, Vec::new()),
             picker_open: false,
             picker_scroll: ScrollHandle::new(),
             overlay: None,
             editing: None,
+            aggregate: Default::default(),
             load_armed: true,
             scrolled_to: px(0.),
         }
@@ -382,8 +411,11 @@ impl Grid {
         cx.notify();
     }
 
-    pub fn column_names(&self) -> impl Iterator<Item = &str> {
-        self.set.columns.iter().map(|c| c.name.as_str())
+    // `None` puts the rows back in the order they arrived.
+    pub fn sort_to(&mut self, sort: Option<(usize, bool)>, cx: &mut Context<Self>) {
+        self.sort = sort.map_or_else(SortState::default, |(column, desc)| SortState { column: Some(column), desc });
+        self.sync_order(cx);
+        cx.notify();
     }
 
     pub fn is_hidden(&self, column: usize) -> bool {
@@ -446,10 +478,23 @@ impl Grid {
         self.sampled = Some(want);
     }
 
+    // A fitted width makes room for the header's key icon. A dragged one is as dragged.
     fn width_px(&self, column: usize) -> Pixels {
         match self.widths[column] {
-            Width::Ch(ch) => (self.metrics.ch * ch as f32).round(),
+            Width::Ch(ch) => {
+                let icon = self.key_icon(column).map_or(px(0.), |_| self.metrics.icon + self.metrics.gap);
+                (self.metrics.ch * ch as f32 + icon).round()
+            }
             Width::Px(width) => width,
+        }
+    }
+
+    // A table view's primary and foreign key columns carry an icon in their header.
+    fn key_icon(&self, column: usize) -> Option<Lucide> {
+        let overlay = self.overlay.as_ref()?;
+        match overlay.primary.contains(&column) {
+            true => Some(Lucide::KeyRound),
+            false => overlay.foreign.contains_key(&column).then_some(Lucide::Link),
         }
     }
 
@@ -473,6 +518,68 @@ impl Grid {
     // (rows, columns)
     pub fn selection_counts(&self) -> (usize, usize) {
         self.selection.counts(&self.view())
+    }
+
+    // For the status bar, with more than one cell selected.
+    pub fn aggregate(&self) -> Option<Aggregate> {
+        let s = &self.selection;
+        let key = (
+            s.range,
+            s.rows.len(),
+            s.columns.len(),
+            s.rows.first().copied(),
+            s.rows.last().copied(),
+            s.columns.first().copied(),
+            s.columns.last().copied(),
+            self.set.rows(),
+        );
+        if let Some((cached, value)) = self.aggregate.borrow().as_ref()
+            && *cached == key
+        {
+            return *value;
+        }
+        let value = self.compute_aggregate();
+        *self.aggregate.borrow_mut() = Some((key, value));
+        value
+    }
+
+    fn compute_aggregate(&self) -> Option<Aggregate> {
+        let s = &self.selection;
+        if s.is_empty() {
+            return None;
+        }
+        let all_rows = || (0..self.order.len()).filter_map(|d| self.order.global_at(d)).collect::<Vec<_>>();
+        let (rows, columns): (Vec<usize>, Vec<usize>) = match &s.range {
+            Some(range) => (
+                (range.r0..=range.r1).filter_map(|d| self.order.global_at(d)).collect(),
+                (range.c0..=range.c1).filter_map(|c| self.columns.get(c).copied()).collect(),
+            ),
+            None if !s.rows.is_empty() => (s.rows.iter().copied().collect(), self.columns.clone()),
+            None => (all_rows(), self.columns.iter().copied().filter(|c| s.columns.contains(c)).collect()),
+        };
+        let cells = rows.len() * columns.len();
+        if !(2..=MAX_AGGREGATE_CELLS).contains(&cells) {
+            return None;
+        }
+        let mut total = Aggregate { count: 0, numbers: 0, sum: 0. };
+        for &row in &rows {
+            for &column in &columns {
+                match self.shown(row, column) {
+                    barsql_db::Cell::Null => {}
+                    barsql_db::Cell::Number(text) => {
+                        total.count += 1;
+                        if let Ok(value) = text.parse::<f64>()
+                            && value.is_finite()
+                        {
+                            total.numbers += 1;
+                            total.sum += value;
+                        }
+                    }
+                    _ => total.count += 1,
+                }
+            }
+        }
+        Some(total)
     }
 
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -509,16 +616,42 @@ impl Grid {
 
     // With `single_cell`, a lone focused cell copies just its value.
     pub fn copy(&mut self, single_cell: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let staged = self.staged();
         if single_cell && let Some((row, column)) = copy::single_cell(&self.selection, &self.view()) {
+            let staged = self.staged();
             let text = copy::cell_text(&self.set, staged.as_ref(), row, column);
             let target = CopyTarget { columns: vec![column], rows: vec![row] };
             cx.write_to_clipboard(copy::clipboard_item(text, None, &self.set, staged.as_ref(), &target));
             toast::success(t(cx, "toast.copiedCell"), cx);
             return;
         }
-        let (set, target, table, dialect) = (self.set.clone(), self.copy_target(), self.table.clone(), self.dialect);
-        let format = copy_format(cx);
+        self.copy_target_as(self.copy_target(), copy_format(cx), window, cx);
+    }
+
+    // The menu's Copy as, which leaves the copy format setting alone. A lone focused cell is copied by itself
+    // rather than the whole result.
+    pub fn copy_as(&mut self, format: ExportFormat, window: &mut Window, cx: &mut Context<Self>) {
+        let target = match copy::single_cell(&self.selection, &self.view()) {
+            Some((row, column)) => CopyTarget { columns: vec![column], rows: vec![row] },
+            None => self.copy_target(),
+        };
+        self.copy_target_as(target, format, window, cx);
+    }
+
+    // Every row and visible column, whatever is selected. For the result tab's menu.
+    pub fn copy_all(&mut self, format: ExportFormat, window: &mut Window, cx: &mut Context<Self>) {
+        let target = copy::resolve(&Selection::default(), &self.view());
+        self.copy_target_as(target, format, window, cx);
+    }
+
+    fn copy_target_as(
+        &mut self,
+        target: CopyTarget,
+        format: ExportFormat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let staged = self.staged();
+        let (set, table, dialect) = (self.set.clone(), self.table.clone(), self.dialect);
         let item = cx.background_spawn(async move {
             let text = copy::export(&set, staged.as_ref(), format, table.as_deref(), dialect, &target);
             copy::clipboard_item(text, Some(format), &set, staged.as_ref(), &target)
@@ -839,42 +972,6 @@ impl Grid {
         }
         cx.stop_propagation();
     }
-
-    fn menu(grid: &WeakEntity<Self>, menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {
-        let Some(this) = grid.upgrade() else { return menu };
-        if this.read(cx).overlay.is_some() {
-            return Self::table_menu(this, menu, cx);
-        }
-        let (has_selection, can_view) = {
-            let grid = this.read(cx);
-            (!grid.selection.rows.is_empty() || !grid.selection.columns.is_empty(), grid.focused_cell().is_some())
-        };
-        let target = this.clone();
-        let menu = menu
-            .item(PopupMenuItem::new(t(cx, "common.copy")).on_click({
-                let target = target.clone();
-                move |_, window, cx| target.update(cx, |grid, cx| grid.copy(true, window, cx))
-            }))
-            .item(PopupMenuItem::new(t(cx, "results.contextExportAs")).on_click({
-                let target = target.clone();
-                move |_, _, cx| target.update(cx, |_, cx| cx.emit(GridEvent::Export))
-            }))
-            .separator()
-            .item(PopupMenuItem::new(t(cx, "results.contextClearSelection")).disabled(!has_selection).on_click({
-                let target = target.clone();
-                move |_, _, cx| target.update(cx, |grid, cx| grid.clear_selection(cx))
-            }));
-        if !can_view {
-            return menu;
-        }
-        menu.item(PopupMenuItem::new(t(cx, "results.contextViewCell")).on_click(move |_, _, cx| {
-            target.update(cx, |grid, cx| {
-                if let Some((row, column)) = grid.focused_cell() {
-                    cx.emit(GridEvent::ViewCell { row, column });
-                }
-            })
-        }))
-    }
 }
 
 fn grid_font(cx: &App) -> Font {
@@ -901,6 +998,8 @@ impl Render for Grid {
                 .border_2()
                 .border_color(theme.primary)
                 .bg(theme.background)
+                // Its own Cut/Copy/Paste menu, not the grid's, which would also take focus and commit the edit.
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .child(
                     Input::new(&input)
                         .context_menu(crate::context_menu::input(&input))
@@ -961,7 +1060,7 @@ impl Render for Grid {
             .child(lane_bar(Scrollbar::vertical(&self.scroll.bar(Axis::Vertical))))
             .child(lane_bar(Scrollbar::horizontal(&self.scroll.bar(Axis::Horizontal))))
             .children(editor)
-            .context_menu(move |menu, _, cx| Grid::menu(&weak, menu, cx));
+            .context_menu(move |menu, window, cx| Grid::menu(&weak, menu, window, cx));
         div().relative().size_full().child(grid).child(lane_guard(self.scroll.clone()))
     }
 }
@@ -995,6 +1094,7 @@ fn lane_guard(scroll: GridScroll) -> impl IntoElement {
 
 struct Colors {
     background: Hsla,
+    stripe: Hsla,
     head: Hsla,
     hover: Hsla,
     border: Hsla,
@@ -1007,6 +1107,9 @@ struct Colors {
     selected_hover: Hsla,
     head_selected: Hsla,
     handle: Hsla,
+    // Type names in the header, and primary key icons.
+    faint: Hsla,
+    key: Hsla,
     staged: Hsla,
     staged_border: Hsla,
     deleted: Hsla,
@@ -1027,6 +1130,7 @@ impl Colors {
         let background = theme.background;
         Self {
             background: theme.table,
+            stripe: mix(theme.foreground, theme.table, 0.035),
             head: theme.table_head,
             hover: theme.table_hover,
             border: theme.border,
@@ -1039,6 +1143,8 @@ impl Colors {
             selected_hover: mix(accent, background, 0.28),
             head_selected: mix(accent, theme.table_head, 0.22),
             handle: accent.opacity(0.5),
+            faint: theme.muted_foreground.opacity(0.75),
+            key: theme.warning,
             staged: mix(theme.warning, background, 0.22),
             staged_border: theme.warning.opacity(0.55),
             deleted: theme.danger.opacity(0.22),
@@ -1159,6 +1265,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         _ => None,
     };
     let null = t(cx, "common.null");
+    let striped = setting_bool(cx, STRIPES_KEY, false);
 
     let mut background = Layer::new(bounds);
     background.quads.push(fill(bounds, colors.background));
@@ -1176,6 +1283,9 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             None
         };
         let row_band = Bounds::from_corners(point(body.left(), top), point(columns_right, top + m.row_height));
+        if striped && row % 2 == 1 {
+            cells.quads.push(fill(row_band, colors.stripe));
+        }
         if let Some(color) = row_fill {
             cells.quads.push(fill(row_band, color));
         }
@@ -1205,12 +1315,16 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                 && !value.is_null()
                 && matches!(grid.hover, Some(Target::Cell { row: r, col: c } | Target::Jump { row: r, col: c }) if r == row && c == col);
             let text_width = width - m.cell_pad_x * 2. - if jump { m.chevron } else { px(0.) };
-            let origin = point(left + m.cell_pad_x, top + m.cell_pad_y);
             let line = match value.display() {
                 Some(text) => plain.shape(&display_text(text), colors.text, text_width, window),
                 None => italic.shape(&null, colors.muted, text_width, window),
             };
-            cells.texts.push((line, origin));
+            // Numbers line up on their last digit, as in a spreadsheet.
+            let x = match value {
+                barsql_db::Cell::Number(_) => left + m.cell_pad_x + (text_width - line.width).max(px(0.)),
+                _ => left + m.cell_pad_x,
+            };
+            cells.texts.push((line, point(x, top + m.cell_pad_y)));
             let inner = Bounds::new(cell.origin, size(width - px(1.), m.row_height - px(1.)));
             if staged && edges.is_none() {
                 cells.quads.push(quad(
@@ -1342,11 +1456,26 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             point(cell.right() - m.cell_pad_x - m.chevron, cell.top() + (m.header_height - m.chevron) / 2.),
             size(m.chevron, m.chevron),
         );
-        let title_width = chevron.left() - m.gap - (left + m.cell_pad_x);
+        let key = grid.key_icon(column);
+        let mut title_left = left + m.cell_pad_x;
+        if let Some(icon) = key {
+            let top = cell.top() + (m.header_height - px(1.) - m.icon) / 2.;
+            let color = if icon == Lucide::KeyRound { colors.key } else { colors.muted };
+            header.icons.push((Bounds::new(point(title_left, top), size(m.icon, m.icon)), icon.path(), color));
+            title_left += m.icon + m.gap;
+        }
+        let title_width = chevron.left() - m.gap - title_left;
         let title_color = if selected { colors.accent } else { colors.text };
-        let line = bold.shape(&display_text(&grid.set.columns[column].name), title_color, title_width, window);
+        let meta = &grid.set.columns[column];
+        let line = bold.shape(&display_text(&meta.name), title_color, title_width, window);
         let title_top = cell.top() + (m.header_height - px(1.) - m.line_height) / 2.;
-        header.texts.push((line, point(left + m.cell_pad_x, title_top)));
+        // The type follows faintly, where the name leaves room for a few characters of it.
+        let room = title_width - line.width - m.gap;
+        if !meta.type_name.is_empty() && room > m.ch * 4. {
+            let type_name = plain.shape(&meta.type_name.to_lowercase(), colors.faint, room, window);
+            header.texts.push((type_name, point(title_left + line.width + m.gap, title_top)));
+        }
+        header.texts.push((line, point(title_left, title_top)));
         let (sort_column, desc) = match overlay {
             Some(overlay) => (overlay.sort.map(|(c, _)| c), overlay.sort.is_some_and(|(_, desc)| desc)),
             None => (grid.sort.column, grid.sort.desc),
@@ -1483,6 +1612,7 @@ fn paint(entity: &Entity<Grid>, _: Bounds<Pixels>, frame: Frame, window: &mut Wi
     });
 }
 
+mod menu;
 mod table;
 
 #[cfg(any(test, feature = "snapshot"))]
@@ -1531,6 +1661,19 @@ impl Grid {
             bounds.left() + m.gutter_width / 2.,
             bounds.top() + m.header_height + m.row_height * (row as f32 + 0.5) - scroll.y,
         )
+    }
+
+    // On the column's name, clear of its sort button and resize edge.
+    pub(crate) fn header_point(&self, col: usize) -> Point<Pixels> {
+        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
+        point(
+            bounds.left() + m.gutter_width + self.col_x[col] + m.cell_pad_x + px(2.) - scroll.x,
+            bounds.top() + m.header_height / 2.,
+        )
+    }
+
+    pub(crate) fn is_editing(&self) -> bool {
+        self.editing.is_some()
     }
 
     pub(crate) fn chevron_point(&self, col: usize) -> Point<Pixels> {
