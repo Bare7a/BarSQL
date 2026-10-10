@@ -212,7 +212,7 @@ impl Driver<'_> {
         self.pause();
     }
 
-    // Clicks the confirmation's OK. Enter would leave a danger confirmation open.
+    // Clicks the confirmation's OK.
     pub fn confirm_dialog(&mut self) {
         self.click("confirm-ok");
     }

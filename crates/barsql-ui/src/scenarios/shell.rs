@@ -2,7 +2,7 @@ use gpui_kit::TestAppContext;
 use gpui_kit::component::ActiveTheme as _;
 
 use super::driver::{Driver, open};
-use crate::actions::{ThemeDark, ThemeLight, ThemeSystem, ToggleJsonPanel, ToggleSidebar};
+use crate::actions::{About, ThemeDark, ThemeLight, ThemeSystem, ToggleJsonPanel, ToggleSidebar};
 use crate::theme::{ThemeChoice, choice};
 
 #[gpui_kit::test]
@@ -83,4 +83,19 @@ fn the_command_palette_lists_what_the_focus_can_run(cx: &mut TestAppContext) {
     let open = labels(&mut app);
     assert!(has(&open, "Commit transaction") && has(&open, "Roll back transaction"), "{open:?}");
     assert!(!has(&open, "Begin transaction"));
+}
+
+// About copies the version and platform for a bug report, and its release notes are this version's.
+#[gpui_kit::test]
+fn about_copies_the_version_and_links_its_release_notes(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.dispatch(About);
+    assert!(app.dialog_open());
+    app.click("about-copy-version");
+    let copied = app.cx.read_from_clipboard().and_then(|item| item.text());
+    let version = barsql_app::VERSION;
+    assert_eq!(copied, Some(format!("BarSQL {version} ({})", crate::about_dialog::platform())));
+    app.click("about-release-notes");
+    let notes = format!("https://github.com/Bare7a/BarSQL/releases/tag/v{version}");
+    assert_eq!(app.cx.opened_url(), Some(notes));
 }

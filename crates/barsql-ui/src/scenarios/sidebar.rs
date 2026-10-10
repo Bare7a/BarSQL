@@ -121,6 +121,39 @@ fn a_saved_query_opens_into_a_tab(cx: &mut TestAppContext) {
     assert_eq!(app.sql(), "SELECT 1 AS opened;");
 }
 
+// Closing a tab whose saved query changed asks first, and Enter saves before it closes.
+#[gpui_kit::test]
+fn closing_a_changed_linked_tab_saves_it_on_enter(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    save_as(&mut app, "SELECT 1 AS kept;", "Changed query");
+    app.set_sql("SELECT 2 AS kept;");
+    app.keys("mod-w");
+    assert!(app.dialog_open(), "asks to save the change");
+    app.keys("enter");
+    app.settle_dialog_closed();
+    assert!(app.titles().is_empty());
+    let sql: Vec<String> = app.cx.update(|_, cx| saved_queries::list(cx).iter().map(|q| q.sql.clone()).collect());
+    assert_eq!(sql, ["SELECT 2 AS kept;"]);
+}
+
+// Only a tab with a saved query has the toolbar's Rename.
+#[gpui_kit::test]
+fn the_toolbar_renames_a_linked_tabs_saved_query(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    assert!(!app.shown("rename-query"));
+    save_as(&mut app, "SELECT 5 AS r;", "Old name");
+    app.click("rename-query");
+    assert!(app.dialog_open());
+    app.keys("mod-a");
+    app.type_text("New name");
+    app.keys("enter");
+    app.pause();
+    assert_eq!(names(saved(&mut app)), ["New name"]);
+    assert_eq!(app.titles(), ["New name"]);
+}
+
 #[gpui_kit::test]
 fn a_saved_query_is_renamed_from_its_hover_button(cx: &mut TestAppContext) {
     let mut app = open(cx);

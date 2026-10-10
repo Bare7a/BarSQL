@@ -141,6 +141,11 @@ pub fn find(id: &str) -> Option<&'static ShortcutDef> {
     SHORTCUTS.iter().find(|def| def.id == id)
 }
 
+// The current binding of a shortcut, as menus write it.
+pub fn shown(id: &str, cx: &App) -> String {
+    find(id).map(|def| format(&effective(def, cx))).unwrap_or_default()
+}
+
 type Overrides = serde_json::Map<String, serde_json::Value>;
 
 fn read_overrides(cx: &App) -> Overrides {

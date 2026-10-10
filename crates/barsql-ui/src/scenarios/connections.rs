@@ -11,7 +11,7 @@ fn open_switcher(app: &mut Driver) {
 }
 
 // `kind` is connect, edit or delete. Connect doubles as disconnect.
-fn row_button(app: &mut Driver, kind: &str, id: &str) {
+pub(super) fn row_button(app: &mut Driver, kind: &str, id: &str) {
     open_switcher(app);
     app.hover(selector(format!("connection-row-{id}")));
     app.click(selector(format!("{kind}-{id}")));
@@ -90,6 +90,29 @@ fn a_new_connection_is_tested_saved_connected_and_disconnected(cx: &mut TestAppC
     row_button(&mut app, "connect", &id);
     let target = id.clone();
     app.settle(|_| !bar.is_connected(&target));
+}
+
+// Enter in the open driver menu only picks, even with the form ready to save. Enter in a field saves.
+#[gpui_kit::test]
+fn enter_saves_the_connection_dialog(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("enter.sqlite");
+    std::fs::write(&file, b"").unwrap();
+    open_switcher(&mut app);
+    app.click("new-connection");
+    app.click("conn-name");
+    app.type_text("Saved on Enter");
+    app.cx.update(|_, cx| cx.set_global(Stub(Some(file.clone()))));
+    app.click("browse-sqlite");
+    let sqlite = DriverType::KNOWN.iter().filter(|d| d.is_supported()).position(|d| *d == DriverType::Sqlite);
+    app.menu_pick("conn-driver", sqlite.expect("listed"));
+    assert!(app.dialog_open(), "the menu took the Enter");
+    app.click("conn-name");
+    app.keys("enter");
+    app.settle_dialog_closed();
+    let saved = app.env.bar.list_connections().into_iter().find(|c| c.name == "Saved on Enter").expect("saved");
+    assert_eq!(saved.driver, DriverType::Sqlite);
 }
 
 #[gpui_kit::test]

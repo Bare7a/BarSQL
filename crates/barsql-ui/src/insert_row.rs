@@ -196,7 +196,14 @@ impl InsertRowForm {
             .collect()
     }
 
+    fn ready(&self) -> bool {
+        !self.loading && !self.saving && !self.columns.is_empty()
+    }
+
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.ready() {
+            return;
+        }
         let driver = self.connection.driver.clone();
         let fields = self.fields(cx);
         self.invalid = validate(&self.columns, &fields, &driver);
@@ -365,7 +372,7 @@ impl Render for InsertRowForm {
                 .children(message.map(|message| form::error(message, cx)))
                 .child(v_flex().gap(rems(0.923)).mt(rems(0.615)).children(fields))
         };
-        let (loading, saving) = (self.loading, self.saving);
+        let (ready, saving) = (self.ready(), self.saving);
         modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(
             modal::footer(cx)
                 .child(
@@ -381,7 +388,7 @@ impl Render for InsertRowForm {
                         .debug_selector(|| "insert-row-submit".into())
                         .primary()
                         .label(t(cx, "tableView.addRowDialog.submit"))
-                        .disabled(loading || saving || self.columns.is_empty())
+                        .disabled(!ready)
                         .on_click(cx.listener(|form, _, window, cx| form.submit(window, cx))),
                 ),
         )
@@ -399,7 +406,11 @@ pub fn open(
     let title = t_with(cx, "tableView.addRowDialog.title", &[("table", &table)]);
     let form = cx.new(|cx| InsertRowForm::new(connection, schema, table, Rc::new(on_inserted), cx));
     window.open_dialog(cx, move |dialog, window, cx| {
-        Modal::new("insert-row", title.clone()).build(dialog, form.clone(), window, cx).on_ok(|_, _, _| false)
+        let entry = form.clone();
+        Modal::new("insert-row", title.clone()).build(dialog, form.clone(), window, cx).on_ok(move |_, window, cx| {
+            entry.update(cx, |form, cx| form.submit(window, cx));
+            false
+        })
     });
 }
 

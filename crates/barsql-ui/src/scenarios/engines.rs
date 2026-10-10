@@ -589,7 +589,8 @@ mod postgres_only {
     fn explain_analyze_measures_rows_and_timings(cx: &mut TestAppContext) {
         let (mut app, name) = seeded(cx);
         app.set_sql(&format!("SELECT * FROM {name};"));
-        app.dispatch(crate::actions::ExplainAnalyze);
+        // Explain, then Explain analyze.
+        app.menu_pick("explain-menu", 1);
         app.wait_idle();
         assert!(analyzed(&mut app));
         assert!(metrics(&mut app).contains(&"time"));

@@ -1,7 +1,8 @@
-use gpui_kit::{Entity, Modifiers, TestAppContext, point, px};
+use gpui_kit::{Entity, Modifiers, TestAppContext, point, px, size};
 
 use super::driver::{Driver, open, selector};
 use crate::actions::ToggleJsonPanel;
+use crate::chart_view::{Aggregate, ChartView, Kind};
 use crate::export_dialog::{ExportDialog, Opened};
 use crate::grid::Grid;
 
@@ -307,7 +308,7 @@ fn the_status_bar_sums_the_selected_numbers(cx: &mut TestAppContext) {
     assert_eq!((total.count, total.numbers), (2, 0), "text counts but doesn't sum");
 }
 
-// The chart toggle swaps the grid for a chart of the result, and back.
+// The chart toggle swaps the grid for a chart of the result, and back. The grid's own tools step aside meanwhile.
 #[gpui_kit::test]
 fn a_result_shows_as_a_chart_and_back(cx: &mut TestAppContext) {
     let mut app = open(cx);
@@ -315,9 +316,82 @@ fn a_result_shows_as_a_chart_and_back(cx: &mut TestAppContext) {
     app.run("SELECT 'a' AS k, 1 AS v UNION ALL SELECT 'b', 2;");
     app.click("chart-toggle");
     assert!(app.shown("result-chart"));
+    assert!(!app.shown("column-picker-button") && app.shown("export-results"), "Export stays");
     app.click("chart-toggle");
     assert!(!app.shown("result-chart"));
+    assert!(app.shown("column-picker-button"));
     assert_eq!(app.cell(1, 1).as_deref(), Some("2"), "the grid is back");
+}
+
+fn chart(app: &mut Driver) -> Entity<ChartView> {
+    let results = app.results();
+    app.cx.update(|_, cx| results.read(cx).chart()).expect("the chart")
+}
+
+fn picks(app: &mut Driver) -> (usize, Vec<usize>, Kind, Aggregate) {
+    let chart = chart(app);
+    app.draw();
+    app.cx.update(|_, cx| {
+        let settings = chart.read(cx).settings();
+        let values = settings.picked().map(|(_, column)| column).collect();
+        (settings.label, values, settings.kind, settings.aggregate)
+    })
+}
+
+// The panel picks the labels, values, kind and aggregate, and the picks outlive a trip back to the grid.
+#[gpui_kit::test]
+fn the_chart_panel_picks_what_to_plot(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.seed(
+        "CREATE TABLE e2e_sales (id INTEGER PRIMARY KEY, region TEXT, units INTEGER, revenue REAL);
+         INSERT INTO e2e_sales VALUES (1, 'North', 3, 10.5), (2, 'South', 4, 12), (3, 'North', 1, 3)",
+    );
+    app.connect();
+    app.cx.simulate_resize(size(px(1400.), px(1000.)));
+    app.run("SELECT * FROM e2e_sales;");
+    app.click("chart-toggle");
+    assert_eq!(picks(&mut app), (1, vec![3], Kind::Bars, Aggregate::Sum), "region and revenue");
+    let data = chart(&mut app);
+    let labels = app.cx.update(|_, cx| data.read(cx).shown().unwrap().labels.clone());
+    assert_eq!(labels, [Some("North".to_string()), Some("South".to_string())]);
+    app.click("chart-value-2");
+    app.click("chart-line");
+    app.click("chart-average");
+    app.menu_pick("chart-label", 0);
+    let picked = (0, vec![3, 2], Kind::Line, Aggregate::Average);
+    assert_eq!(picks(&mut app), picked, "id labels, units joins revenue");
+    app.click("chart-toggle");
+    app.click("chart-toggle");
+    assert_eq!(picks(&mut app), picked, "kept while the grid showed");
+}
+
+// A wide result's values scroll, and past eight number columns a filter narrows them.
+#[gpui_kit::test]
+fn a_wide_results_values_filter_and_scroll(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    let columns: Vec<String> = (1..=60).map(|i| format!("{i} AS m{i:02}")).collect();
+    app.run(&format!("SELECT 'a' AS label, {};", columns.join(", ")));
+    app.click("chart-toggle");
+    app.scrolls_by_its_bar("chart-values", "chart-value-1");
+    app.click("chart-filter");
+    app.type_text("m42");
+    app.pause();
+    assert!(app.shown("chart-value-42") && !app.shown("chart-value-41"));
+}
+
+// Bars that would thin to nothing scroll sideways instead.
+#[gpui_kit::test]
+fn many_bars_scroll_sideways(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.cx.simulate_resize(size(px(1000.), px(800.)));
+    app.run("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 150) SELECT 'k' || i, i FROM n;");
+    app.click("chart-toggle");
+    let chart = chart(&mut app);
+    app.draw();
+    let overflow = app.cx.update(|_, cx| chart.read(cx).plot_overflow());
+    assert!(overflow > px(100.), "150 bars scroll, by {overflow:?}");
 }
 
 // The JSON viewer's lines continue the editor's: its header ends with the tab bar and its filter row with the

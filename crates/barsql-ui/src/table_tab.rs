@@ -228,6 +228,19 @@ impl TableTab {
         self.reset(window, cx);
     }
 
+    // Takes edits like name, colour, read-only or asking before changes. A changed driver is ignored, as in a
+    // query tab. Turning read-only drops staged edits, which could no longer be applied.
+    pub fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
+        if connection.driver != self.connection.driver {
+            return;
+        }
+        if connection.read_only {
+            self.staging.clear();
+        }
+        self.connection = connection;
+        self.sync_overlay(cx);
+    }
+
     // A foreign-key jump into an open tab refilters it.
     pub fn show_filter(&mut self, filter: String, window: &mut Window, cx: &mut Context<Self>) {
         self.filter.update(cx, |state, cx| state.set_value(filter.clone(), window, cx));
@@ -635,6 +648,9 @@ impl TableTab {
     }
 
     fn delete_focused(&mut self, cx: &mut Context<Self>) {
+        if !self.editable() {
+            return;
+        }
         if let Some(row) = self.grid.read(cx).focused_row().map(|row| row.row) {
             let outcome = self.staging.toggle_delete(&self.keys, row);
             self.staged(outcome, cx);
@@ -780,7 +796,7 @@ impl TableTab {
         }
         v_flex()
             .size_full()
-            .child(grid::toolbar(&self.grid, meta.into(), None, cx))
+            .child(grid::toolbar(&self.grid, meta.into(), None, true, cx))
             .child(div().flex_1().min_h_0().child(self.grid.clone()))
             .into_any_element()
     }

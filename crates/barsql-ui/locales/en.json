@@ -57,8 +57,6 @@
     "contextSelectAll": "Select all",
     "contextFindReplace": "Replace",
     "contextFormat": "Format SQL",
-    "more": "More actions",
-    "renameSaved": "Rename saved query…",
     "beginTxn": "Begin transaction",
     "beginTxnHint": "Queries on this tab run in it until you commit or roll back",
     "contextGoToDefinition": "Go to definition"
@@ -157,7 +155,7 @@
     "editorDefinition": "Go to definition: an alias or CTE jumps to its declaration, a table opens. Cmd/Ctrl-click works too.",
     "editorParams": "Write :name for a value to fill in at run time. BarSQL asks for it and remembers it.",
     "editorPalette": "Command palette: every command with its shortcut.",
-    "resultsChart": "Chart in the results toolbar shows the result as bars or a line.",
+    "resultsChart": "Chart in the results toolbar plots the result as bars or lines. Pick the labels and up to 5 values in the panel beside it.",
     "schemaDiagram": "Right-click a schema for its ER diagram, or to compare it with another."
   },
   "grid": {
@@ -265,17 +263,48 @@
     "line": "Line",
     "labels": "Labels",
     "values": "Values",
-    "truncated": "First {{count}} points",
-    "noNumbers": "This result has no numeric column to chart.",
-    "noValues": "No rows have a value in this column."
+    "noNumbers": "No numeric columns, so the chart counts rows.",
+    "noValues": "No row has a value in the picked columns.",
+    "sum": "Sum",
+    "count": "Count",
+    "average": "Average",
+    "rows": "Rows",
+    "filterColumns": "Filter columns",
+    "noMatch": "No column matches.",
+    "sumBy": "Sum of {{values}} by {{label}}",
+    "countBy": "Count of {{values}} by {{label}}",
+    "averageBy": "Average of {{values}} by {{label}}",
+    "rowsBy": "Rows by {{label}}",
+    "rowCount_one": "{{count}} row",
+    "rowCount_other": "{{count}} rows",
+    "cappedTop": "the largest {{shown}} of {{total}} labels",
+    "cappedFirst": "the first {{shown}} of {{total}} labels",
+    "cappedRows": "first {{count}} rows",
+    "howTitle": "Pick what to plot",
+    "howLabels": "Labels: the column along the bottom. Rows that share a label make one bar or point.",
+    "howValues": "Values: up to 5 numeric columns, each in its own colour.",
+    "howAggregate": "Sum, Count or Average: how rows that share a label combine.",
+    "noRows": "No rows to chart yet.",
+    "blank": "(empty)"
   },
   "erDiagram": {
     "menu": "ER diagram",
     "title": "ER diagram · {{schema}}",
     "loading": "Loading tables…",
     "empty": "This schema has no tables.",
-    "more": "+{{count}} more",
-    "truncated": "Showing the first {{shown}} of {{total}} tables."
+    "truncated": "Showing the first {{shown}} of {{total}} tables.",
+    "hint": "Drag to pan · {{modifier}}+scroll or pinch to zoom · Double-click a table to open it",
+    "search": "Find a table",
+    "matches": "{{index}} of {{count}}",
+    "noMatches": "No table matches",
+    "keysOnly": "Keys only",
+    "keysOnlyTooltip": "Show only the key columns",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Back to 100%",
+    "fit": "Fit",
+    "fitTooltip": "Show the whole diagram",
+    "open": "Open table"
   },
   "schemaDiff": {
     "menu": "Compare schema…",
@@ -293,5 +322,18 @@
     "copyScript": "Copy script",
     "openScript": "Open script",
     "scriptTitle": "Sync script"
+  },
+  "tooltip": {
+    "runStatementAtCaret": "Run the statement at the caret ({{shortcut}})"
+  },
+  "about": {
+    "versionLine": "Version {{version}} · {{platform}}",
+    "copyVersion": "Copy the version for a bug report",
+    "tagline": "A fast, local-first SQL workbench",
+    "releaseNotes": "Release notes",
+    "reportIssue": "Report an issue",
+    "license": "{{name}} license",
+    "madeWith": "Made with",
+    "checkUpdates": "Check for updates"
   }
 }

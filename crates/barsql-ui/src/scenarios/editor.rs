@@ -55,6 +55,20 @@ fn run_with_nothing_selected_takes_the_statement_at_the_caret(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+fn the_toolbar_runs_the_statement_at_the_caret_or_all(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT 1 AS first;\nSELECT 7 AS second;");
+    select(&mut app, 25..25);
+    app.click("run");
+    app.wait_idle();
+    assert_eq!((app.result_tabs(), app.cell(0, 0).as_deref()), (1, Some("7")));
+    app.click("run-all");
+    app.wait_idle();
+    assert_eq!(app.result_tabs(), 2);
+}
+
+#[gpui_kit::test]
 fn the_editors_right_click_menu_selects_all(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();
@@ -279,6 +293,7 @@ fn a_stopped_query_is_reported_calmly_without_an_error_code(cx: &mut TestAppCont
     app.set_sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n;");
     app.dispatch(crate::actions::RunAll);
     assert!(app.shown("stop"));
+    assert!(!app.shown("run") && !app.shown("run-all"), "Stop stands in for both");
     app.click("stop");
     app.wait_idle();
     let error = app.error().expect("a cancelled card");
@@ -534,6 +549,29 @@ fn a_connection_that_asks_confirms_writes_only(cx: &mut TestAppContext) {
     app.confirm_dialog();
     app.wait_idle();
     assert_eq!(app.query("SELECT count(*) FROM things WHERE id = 9001")[0][0], Value::Int(1));
+}
+
+// Enter presses Run in the confirmation, on a connection that asks and for a write to every row.
+#[gpui_kit::test]
+fn enter_confirms_a_write(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { confirm_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    app.set_sql("INSERT INTO things (id, name) VALUES (9001, 'new');");
+    app.keys("mod-enter");
+    assert!(app.dialog_open());
+    app.keys("enter");
+    app.wait_idle();
+    assert!(!app.dialog_open());
+    assert_eq!(app.query("SELECT count(*) FROM things WHERE id = 9001")[0][0], Value::Int(1));
+    app.set_sql("DELETE FROM things;");
+    app.keys("mod-enter");
+    assert!(app.dialog_open(), "asks before changing every row");
+    app.keys("enter");
+    app.wait_idle();
+    assert_eq!(app.query("SELECT count(*) FROM things")[0][0], Value::Int(0));
 }
 
 // F12 on an alias jumps to where FROM declares it, and on a table opens that table.

@@ -104,7 +104,37 @@ impl SchemaDiffView {
         };
     }
 
+    fn can_compare(&self) -> bool {
+        self.target_schema.is_some() && !matches!(self.state, Compare::Loading)
+    }
+
+    // The script that syncs the target, once a comparison found differences.
+    fn script(&self) -> Option<String> {
+        match &self.state {
+            Compare::Ready { script, .. } if !script.is_empty() => Some(script.clone()),
+            _ => None,
+        }
+    }
+
+    fn open_script(&self, window: &mut Window, cx: &mut App) {
+        let Some(script) = self.script() else { return };
+        let (on_script, target) = (self.on_script.clone(), self.target().clone());
+        window.close_dialog(cx);
+        on_script(target, script, window, cx);
+    }
+
+    // Enter opens the script once there is one, else compares.
+    fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.script() {
+            Some(_) => self.open_script(window, cx),
+            None => self.compare(cx),
+        }
+    }
+
     fn compare(&mut self, cx: &mut Context<Self>) {
+        if !self.can_compare() {
+            return;
+        }
         let Some(target_schema) = self.target_schema.clone() else { return };
         let target = self.target().clone();
         let source = schema::load_schema_columns(&self.source.id, &self.source_schema, MAX_TABLES, cx);
@@ -195,7 +225,7 @@ impl SchemaDiffView {
                     .small()
                     .primary()
                     .label(t(cx, "schemaDiff.compare"))
-                    .disabled(self.target_schema.is_none() || matches!(self.state, Compare::Loading))
+                    .disabled(!self.can_compare())
                     .on_click(cx.listener(|view, _, _, cx| view.compare(cx))),
             )
     }
@@ -285,14 +315,9 @@ fn describe(column: &ColumnInfo) -> String {
 
 impl Render for SchemaDiffView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let script = match &self.state {
-            Compare::Ready { script, .. } if !script.is_empty() => Some(script.clone()),
-            _ => None,
-        };
+        let script = self.script();
         let body = v_flex().child(self.results(cx));
-        let (copy, open) = (script.clone(), script.clone());
-        let on_script = self.on_script.clone();
-        let target = self.target().clone();
+        let (copy, open) = (script.clone(), script.is_some());
         modal::scroll_content().child(self.pickers(cx)).child(modal::scroll_body(&self.scroll, body)).child(
             modal::footer(cx)
                 .child(
@@ -314,13 +339,8 @@ impl Render for SchemaDiffView {
                         .primary()
                         .debug_selector(|| "diff-open-script".into())
                         .label(t(cx, "schemaDiff.openScript"))
-                        .disabled(open.is_none())
-                        .on_click(move |_, window, cx| {
-                            if let Some(script) = &open {
-                                window.close_dialog(cx);
-                                on_script(target.clone(), script.clone(), window, cx);
-                            }
-                        }),
+                        .disabled(!open)
+                        .on_click(cx.listener(|view, _, window, cx| view.open_script(window, cx))),
                 ),
         )
     }
@@ -338,11 +358,14 @@ pub fn open(
     let view = cx.new(|cx| SchemaDiffView::new(source, schema, Rc::new(on_script), cx));
     window.open_dialog(cx, move |dialog, window, cx| {
         let height = window.viewport_size().height * 0.75;
-        Modal::new("schema-diff", title.clone()).size(modal::Size::Xl).height(height).build(
-            dialog,
-            view.clone(),
-            window,
-            cx,
-        )
+        let entry = view.clone();
+        Modal::new("schema-diff", title.clone())
+            .size(modal::Size::Xl)
+            .height(height)
+            .build(dialog, view.clone(), window, cx)
+            .on_ok(move |_, window, cx| {
+                entry.update(cx, |view, cx| view.enter(window, cx));
+                false
+            })
     });
 }

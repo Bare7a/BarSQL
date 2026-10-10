@@ -116,7 +116,7 @@ pub fn prompt(
     window.defer(cx, move |window, cx| input.update(cx, |state, cx| state.focus(window, cx)));
 }
 
-// Enter confirms, except a danger confirmation, which takes a click so a stray Enter can't delete anything.
+// Enter presses OK, as in every dialog. `danger` only colours it.
 pub struct Confirm {
     pub title: SharedString,
     pub description: SharedString,
@@ -158,19 +158,16 @@ pub fn confirm(
                             }),
                     ),
             );
-        let dialog = Modal::new("confirm", confirm.title.clone())
+        Modal::new("confirm", confirm.title.clone())
             .size(modal::Size::Sm)
             .danger(confirm.danger)
             .build(dialog, content, window, cx)
-            .overlay_closable(false);
-        if confirm.danger {
-            return dialog;
-        }
-        dialog.on_ok(move |_, window, cx| {
-            window.close_dialog(cx);
-            on_ok(window, cx);
-            false
-        })
+            .overlay_closable(false)
+            .on_ok(move |_, window, cx| {
+                window.close_dialog(cx);
+                on_ok(window, cx);
+                false
+            })
     });
 }
 
@@ -201,7 +198,7 @@ pub fn unsaved(
 ) {
     let (on_save, on_discard) = (Rc::new(on_save), Rc::new(on_discard));
     window.open_dialog(cx, move |dialog, window, cx| {
-        let (save, discard) = (on_save.clone(), on_discard.clone());
+        let (save, save_on_enter, discard) = (on_save.clone(), on_save.clone(), on_discard.clone());
         let content = v_flex()
             .child(modal::body().child(modal::description(t(cx, "dialog.unsavedDescription"), cx)).when(
                 !name.is_empty(),
@@ -242,6 +239,14 @@ pub fn unsaved(
                         },
                     )),
             );
-        Modal::new("unsaved", t(cx, "dialog.unsavedTitle")).size(modal::Size::Sm).build(dialog, content, window, cx)
+        // Enter saves, the main button.
+        Modal::new("unsaved", t(cx, "dialog.unsavedTitle"))
+            .size(modal::Size::Sm)
+            .build(dialog, content, window, cx)
+            .on_ok(move |_, window, cx| {
+                window.close_dialog(cx);
+                save_on_enter(window, cx);
+                false
+            })
     });
 }

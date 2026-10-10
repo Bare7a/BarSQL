@@ -364,21 +364,17 @@ pub fn open_change(
     window.open_dialog(cx, move |modal_dialog, window, cx| {
         let entry = dialog.clone();
         let running = dialog.read(cx).running;
-        let modal_dialog = Modal::new("schema-change", title.clone())
+        Modal::new("schema-change", title.clone())
             .size(modal::Size::Sm)
             .danger(danger)
             .closable(!running)
             .build(modal_dialog, dialog.clone(), window, cx)
             .keyboard(!running)
-            .overlay_closable(false);
-        // Enter renames, but dropping or emptying takes a click.
-        if danger {
-            return modal_dialog;
-        }
-        modal_dialog.on_ok(move |_, window, cx| {
-            entry.update(cx, |dialog, cx| dialog.run(window, cx));
-            false
-        })
+            .overlay_closable(false)
+            .on_ok(move |_, window, cx| {
+                entry.update(cx, |dialog, cx| dialog.run(window, cx));
+                false
+            })
     });
     if let Some(input) = input {
         window.defer(cx, move |window, cx| {
@@ -402,7 +398,14 @@ struct BackupDialog {
 }
 
 impl BackupDialog {
+    fn ready(&self) -> bool {
+        (self.structure || self.data) && !self.picking && self.progress.is_none()
+    }
+
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.ready() {
+            return;
+        }
         self.picking = true;
         cx.notify();
         let picked = pick_save_path(&format!("{}.sql", self.table), cx);
@@ -532,7 +535,7 @@ impl Render for BackupDialog {
             |dialog| dialog.data = !dialog.data,
             cx,
         );
-        let ready = (self.structure || self.data) && !self.picking && !writing;
+        let ready = self.ready();
         v_flex()
             .child(
                 modal::body().child(modal::description(description, cx)).child(structure).child(data).children(status),
@@ -572,13 +575,17 @@ pub fn open_backup(connection: ConnectionConfig, schema: String, table: String, 
     });
     window.open_dialog(cx, move |modal_dialog, window, cx| {
         let busy = dialog.read(cx).progress.is_some();
+        let entry = dialog.clone();
         Modal::new("backup", t(cx, "schemaChange.backupTitle"))
             .size(modal::Size::Sm)
             .closable(!busy)
             .build(modal_dialog, dialog.clone(), window, cx)
             .keyboard(!busy)
             .overlay_closable(!busy)
-            .on_ok(|_, _, _| false)
+            .on_ok(move |_, window, cx| {
+                entry.update(cx, |dialog, cx| dialog.save(window, cx));
+                false
+            })
     });
 }
 

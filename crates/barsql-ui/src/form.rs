@@ -10,8 +10,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::tokens::{
-    DIMMED, ICON_MD, ICON_SM, ICON_XL, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS, TINT,
-    TINT_BORDER,
+    DIMMED, ICON_2XS, ICON_MD, ICON_SM, ICON_XL, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS,
+    TINT, TINT_BORDER,
 };
 
 // 30px tall with body-size text.
@@ -238,6 +238,51 @@ pub fn checkbox(
                 }),
         )
         .child(div().flex_1().min_w_0().text_size(TEXT_BASE).font_medium().child(label.into()))
+}
+
+// A 24px row of a column list, which toggles as a whole: a check box filled with the colour when on, the name, and
+// the type faintly after it. The name takes the row's text colour. A row that isn't `enabled` dims.
+pub fn pick_row(
+    id: SharedString,
+    on: Option<Hsla>,
+    enabled: bool,
+    name: impl Into<SharedString>,
+    type_name: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let (hover, check, muted) = (theme.accent, theme.primary_foreground, theme.muted_foreground);
+    let group = SharedString::from(format!("{id}-row"));
+    let type_name: SharedString = type_name.into();
+    let mark =
+        div().flex_none().size(rems(1.077)).flex().items_center().justify_center().rounded(RADIUS_SM).border_1().map(
+            |el| match on {
+                Some(color) => {
+                    el.bg(color).border_color(color).child(Icon::new(IconName::Check).size(ICON_2XS).text_color(check))
+                }
+                None => el
+                    .border_color(muted.opacity(TINT_BORDER))
+                    .when(enabled, |el| el.group_hover(group.clone(), |style| style.border_color(muted))),
+            },
+        );
+    h_flex()
+        .id(ElementId::Name(id))
+        .group(group)
+        .h(rems(1.846))
+        .px(rems(0.462))
+        .gap(rems(0.615))
+        .rounded(RADIUS_SM)
+        .map(|el| match enabled {
+            true => el.cursor_pointer().hover(|style| style.bg(hover)),
+            false => el.opacity(DIMMED),
+        })
+        .child(mark)
+        .child(div().flex_1().min_w_0().truncate().child(name.into()))
+        .when(!type_name.is_empty(), |el| {
+            el.child(
+                div().flex_none().max_w(rems(9.231)).truncate().text_size(TEXT_XS).text_color(muted).child(type_name),
+            )
+        })
 }
 
 pub fn alert(color: Hsla) -> Div {
