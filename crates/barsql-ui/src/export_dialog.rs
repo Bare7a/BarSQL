@@ -70,6 +70,9 @@ impl ExportDialog {
     }
 
     fn copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
         self.busy = true;
         cx.notify();
         let (set, staged, table) = (self.source.set.clone(), self.source.staged.clone(), self.source.table.clone());
@@ -90,6 +93,9 @@ impl ExportDialog {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
         let format = copy_format(cx);
         self.busy = true;
         cx.notify();
@@ -210,6 +216,7 @@ impl ExportDialog {
             .child(
                 Button::new("export-save")
                     .large()
+                    .debug_selector(|| "export-save".into())
                     .primary()
                     .label(t(cx, "export.saveToFile"))
                     .disabled(self.busy)
@@ -362,14 +369,20 @@ pub fn open(source: ExportSource, window: &mut Window, cx: &mut App) {
     let dialog = cx.new(|_| ExportDialog::new(source));
     #[cfg(test)]
     cx.set_global(Opened(dialog.downgrade()));
+    // Enter saves to a file, the main button.
     window.open_dialog(cx, move |frame, window, cx| {
         let writing = dialog.read(cx).writing();
+        let entry = dialog.clone();
         Modal::new("export", t(cx, "export.title"))
             .size(modal::Size::Sm)
             .closable(!writing)
             .build(frame, dialog.clone(), window, cx)
             .keyboard(!writing)
             .overlay_closable(!writing)
+            .on_ok(move |_, window, cx| {
+                entry.update(cx, |dialog, cx| dialog.save(window, cx));
+                false
+            })
     });
 }
 

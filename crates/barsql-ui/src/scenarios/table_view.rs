@@ -196,6 +196,23 @@ fn the_add_row_dialog_inserts_a_row(cx: &mut TestAppContext) {
     assert_eq!(column(&mut app, 1), [Some("Alice".into()), Some("Bob".into())]);
 }
 
+// Enter in the open mode menu picks the mode, and Enter in a field then presses Add.
+#[gpui_kit::test]
+fn enter_in_the_add_row_dialog_inserts_the_row(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, &format!("CREATE TABLE e2e_enterrow {PEOPLE}; INSERT INTO e2e_enterrow VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_enterrow");
+    app.click("table-add-row");
+    app.menu_pick("insert-mode-name", 2);
+    assert!(app.dialog_open(), "Enter in the menu only picks");
+    app.click("insert-field-name");
+    app.type_text("Bob");
+    app.keys("enter");
+    app.settle_dialog_closed();
+    wait(&mut app);
+    assert_eq!(column(&mut app, 1), [Some("Alice".into()), Some("Bob".into())]);
+}
+
 #[gpui_kit::test]
 fn an_edited_cell_persists_after_apply(cx: &mut TestAppContext) {
     let mut app = prepared(cx, &format!("CREATE TABLE e2e_edit {PEOPLE}; INSERT INTO e2e_edit VALUES (1, 'Alice')"));
@@ -468,4 +485,42 @@ fn a_text_fields_menu_copies_its_selection(cx: &mut TestAppContext) {
     app.input_menu_at(point(field.left() + px(16.), field.center().y), 1);
     let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
     assert_eq!(copied.as_deref(), Some("1 = 1"));
+}
+
+// Making the connection read-only reaches an open table view at once: its staged edits go and it stops editing.
+#[gpui_kit::test]
+fn an_open_table_view_turns_read_only_with_its_connection(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, &format!("CREATE TABLE e2e_ro {PEOPLE}; INSERT INTO e2e_ro VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_ro");
+    edit_cell(&mut app, 0, 1, "Changed");
+    assert_eq!(pending(&mut app), (1, 0));
+    let id = app.connection.id.clone();
+    super::connections::row_button(&mut app, "edit", &id);
+    app.click("conn-read-only");
+    app.click("connection-save");
+    app.settle_dialog_closed();
+    assert_eq!(pending(&mut app), (0, 0), "staged edits could no longer be applied");
+    assert!(!app.shown("table-add-row"));
+    click_cell(&mut app, 0, 1);
+    app.keys("mod-delete");
+    assert_eq!(pending(&mut app), (0, 0), "the grid no longer edits");
+}
+
+// Asking before changes reaches an open table view at once, and Enter confirms the save.
+#[gpui_kit::test]
+fn an_open_table_view_asks_once_its_connection_does(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, &format!("CREATE TABLE e2e_ask {PEOPLE}; INSERT INTO e2e_ask VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_ask");
+    let id = app.connection.id.clone();
+    super::connections::row_button(&mut app, "edit", &id);
+    app.click("conn-confirm-changes");
+    app.click("connection-save");
+    app.settle_dialog_closed();
+    edit_cell(&mut app, 0, 1, "Changed");
+    app.click("table-apply");
+    assert!(app.dialog_open(), "the save asks first");
+    app.keys("enter");
+    wait(&mut app);
+    assert_eq!(pending(&mut app), (0, 0));
+    assert_eq!(app.query("SELECT name FROM e2e_ask")[0][0], Value::Text("Changed".into()));
 }

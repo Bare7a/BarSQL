@@ -140,6 +140,18 @@ fn a_dropped_table_leaves_the_tree_and_closes_its_view(cx: &mut TestAppContext) 
     assert!(app.query("SELECT name FROM sqlite_master WHERE name = 'e2e_gone'").is_empty());
 }
 
+// Enter presses Drop, as in every dialog.
+#[gpui_kit::test]
+fn enter_drops_a_table(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_enter (id INTEGER PRIMARY KEY)");
+    app.context_menu("tree:t:main.e2e_enter", DROP);
+    assert!(app.dialog_open());
+    app.keys("enter");
+    app.settle_dialog_closed();
+    listed_row(&mut app, "t:main.e2e_enter", false);
+    assert!(app.query("SELECT name FROM sqlite_master WHERE name = 'e2e_enter'").is_empty());
+}
+
 #[gpui_kit::test]
 fn truncate_empties_the_table(cx: &mut TestAppContext) {
     let mut app =
@@ -339,9 +351,7 @@ fn a_long_tree_shows_its_bar_on_hover(cx: &mut TestAppContext) {
     app.shows_its_bar_on_hover("schema-tree", "tree:s:main");
 }
 
-// The schema menu's ER diagram draws its tables, and clicking one opens it.
-#[gpui_kit::test]
-fn the_er_diagram_shows_the_schema_and_opens_a_table(cx: &mut TestAppContext) {
+fn er_diagram(cx: &mut TestAppContext) -> Driver<'_> {
     let mut app = prepared(
         cx,
         "CREATE TABLE e2e_users (id INTEGER PRIMARY KEY); \
@@ -352,11 +362,34 @@ fn the_er_diagram_shows_the_schema_and_opens_a_table(cx: &mut TestAppContext) {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.debug_bounds("er-table-0").is_some()
     });
+    app
+}
+
+// The schema menu's ER diagram draws its tables. A click picks one and its open button opens it. Enter in the search
+// steps through the matches and leaves the diagram open.
+#[gpui_kit::test]
+fn the_er_diagram_shows_the_schema_and_opens_a_table(cx: &mut TestAppContext) {
+    let mut app = er_diagram(cx);
     let (posts, users) = (app.bounds("er-table-0").unwrap(), app.bounds("er-table-1").unwrap());
     assert!(users.right() < posts.left(), "the referenced table stands left of the one referencing it");
+    app.click("er-search");
+    app.type_text("users");
+    app.keys("enter");
+    assert!(app.dialog_open(), "Enter steps through the matches");
     app.click("er-table-0");
+    assert!(app.dialog_open(), "a click picks the table");
+    app.click("er-open-0");
     assert!(!app.dialog_open());
     assert_eq!(app.titles().last().map(String::as_str), Some("e2e_posts"));
+}
+
+#[gpui_kit::test]
+fn a_double_click_in_the_er_diagram_opens_the_table(cx: &mut TestAppContext) {
+    let mut app = er_diagram(cx);
+    let users = app.bounds("er-table-1").unwrap().center();
+    app.double_click_at(users);
+    assert!(!app.dialog_open());
+    assert_eq!(app.titles().last().map(String::as_str), Some("e2e_users"));
 }
 
 // Comparing with another database lists what differs, and its sync script opens in a tab of that database.

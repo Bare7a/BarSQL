@@ -127,3 +127,21 @@ fn an_exported_csv_reimports_with_nulls_and_formula_text_intact(cx: &mut TestApp
         OR (id = 2 AND txt = '' AND note = '-not a number') OR (id = 3 AND txt = 'x' AND note = '=1+2')";
     assert_eq!(app.query(exact)[0][0], barsql_core::Value::Int(6), "each row came back exactly");
 }
+
+// Enter imports. Once the import is through Enter closes, so a second press can't load the file twice.
+#[gpui_kit::test]
+fn enter_imports_and_then_closes(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_import_enter (id INTEGER PRIMARY KEY, name TEXT)");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("enter.csv");
+    std::fs::write(&path, "id,name\n1,ann\n2,bob\n").unwrap();
+    app.context_menu("tree:t:main.e2e_import_enter", IMPORT_INTO_TABLE);
+    browse(&mut app, &path);
+    app.keys("enter");
+    let dialog = dialog(&mut app);
+    app.settle(|cx| cx.update(|_, cx| dialog.read(cx).shown(cx).result.is_some()));
+    assert!(app.dialog_open(), "the result shows");
+    app.keys("enter");
+    assert!(!app.dialog_open());
+    assert_eq!(app.query("SELECT count(*) FROM e2e_import_enter")[0][0], barsql_core::Value::Int(2));
+}

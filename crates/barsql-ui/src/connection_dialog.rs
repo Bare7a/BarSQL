@@ -437,8 +437,12 @@ impl ConnectionForm {
         cx.notify();
     }
 
+    fn busy(&self) -> bool {
+        self.testing || self.saving
+    }
+
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.busy() {
             return;
         }
         let mut config = self.config(cx);
@@ -746,7 +750,7 @@ impl Render for ConnectionForm {
                 .child(self.ssh_section(window, cx));
         }
         let body = body.children(self.error.clone().map(|error| form::error(error, cx)));
-        let (testing, saving) = (self.testing, self.saving);
+        let (testing, busy) = (self.testing, self.busy());
         modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(
             modal::footer(cx)
                 .child(
@@ -760,7 +764,7 @@ impl Render for ConnectionForm {
                         .large()
                         .debug_selector(|| "connection-test".into())
                         .label(t(cx, if testing { "common.testing" } else { "common.test" }))
-                        .disabled(testing || saving)
+                        .disabled(busy)
                         .on_click(cx.listener(|form, _, window, cx| form.test(window, cx))),
                 )
                 .child(
@@ -769,7 +773,7 @@ impl Render for ConnectionForm {
                         .debug_selector(|| "connection-save".into())
                         .primary()
                         .label(t(cx, "common.save"))
-                        .disabled(testing || saving)
+                        .disabled(busy)
                         .on_click(cx.listener(|form, _, window, cx| form.save(window, cx))),
                 ),
         )
@@ -879,7 +883,7 @@ impl ConnectionForm {
     }
 }
 
-// None or a config with an empty id is a new connection. Enter in a field doesn't close the dialog.
+// None or a config with an empty id is a new connection. Enter saves, as Save does.
 pub fn open(
     config: Option<ConnectionConfig>,
     window: &mut Window,
@@ -896,10 +900,13 @@ pub fn open(
     let name = form.read(cx).fields.name.clone();
     window.open_dialog(cx, move |dialog, window, cx| {
         let title = t(cx, if editing { "connection.editTitle" } else { "connection.newTitle" });
-        Modal::new("connection", title)
-            .size(modal::Size::Rem(WIDTH))
-            .build(dialog, form.clone(), window, cx)
-            .on_ok(|_, _, _| false)
+        let entry = form.clone();
+        Modal::new("connection", title).size(modal::Size::Rem(WIDTH)).build(dialog, form.clone(), window, cx).on_ok(
+            move |_, window, cx| {
+                entry.update(cx, |form, cx| form.save(window, cx));
+                false
+            },
+        )
     });
     window.defer(cx, move |window, cx| name.update(cx, |state, cx| state.focus(window, cx)));
     handle

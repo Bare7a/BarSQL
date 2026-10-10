@@ -228,6 +228,17 @@ impl UpdateDialog {
         window.close_dialog(cx);
     }
 
+    // Enter presses the main button: Install, Try again or Restart. Elsewhere Close is the only button, so it closes.
+    fn enter(&mut self, cx: &mut Context<Self>) -> bool {
+        match &self.state {
+            UpdateState::Available(_) => self.install(cx),
+            UpdateState::Failed { .. } => self.retry(cx),
+            UpdateState::Ready(..) => self.restart(cx),
+            _ => return true,
+        }
+        false
+    }
+
     fn footer(&self, cx: &mut Context<Self>) -> Option<Div> {
         let close = Button::new("update-close")
             .large()
@@ -425,7 +436,10 @@ pub fn open_in(base: String, state: Option<UpdateState>, window: &mut Window, cx
     let dialog = view.clone();
     window.open_dialog(cx, move |frame, window, cx| {
         let title = dialog.read(cx).title(cx);
-        Modal::new("update", title).build(frame, dialog.clone(), window, cx)
+        let entry = dialog.clone();
+        Modal::new("update", title)
+            .build(frame, dialog.clone(), window, cx)
+            .on_ok(move |_, _, cx| entry.update(cx, |dialog, cx| dialog.enter(cx)))
     });
     view
 }

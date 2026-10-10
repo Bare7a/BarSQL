@@ -212,7 +212,7 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 
 ### 🧭 Query Plan Viewer
 
-**Explain** (`Ctrl+Shift+E`) plans the statement under the cursor and shows the engine's plan as one tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates. **Explain analyze** (`Ctrl+Shift+A`, or the toolbar button) _executes_ the statement instead and reports what really happened: measured rows, real timings, loop counts.
+**Explain** (`Ctrl+Shift+E`) plans the statement under the cursor and shows the engine's plan as one tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates. **Explain analyze** (`Ctrl+Shift+A`, or the menu on the toolbar's Explain button) _executes_ the statement instead and reports what really happened: measured rows, real timings, loop counts.
 
 Typing `EXPLAIN` yourself works the same way - **Run** recognises it and opens the plan viewer instead of dumping the engine's raw rows into the grid. Statements whose output already carries structure (any `FORMAT JSON`, MySQL's `EXPLAIN ANALYZE`, `EXPLAIN QUERY PLAN`) run exactly as typed; the rest are asked again in JSON. Name a format on purpose (`EXPLAIN (FORMAT TEXT)`, `FORMAT=TRADITIONAL`) or use SQLite's bytecode `EXPLAIN` and you get the raw rows, as asked.
 
@@ -238,7 +238,7 @@ Plans are outputs like any other, so a script can mix them freely - `SELECT …;
 - **Count rows** answers straight away, without opening a tab
 - **System views** - see what the server is doing (PostgreSQL activity, blocking and long-running queries; MySQL processes and open transactions; SQL Server requests, sessions and blocking; ClickHouse running queries) from the activity button above the tree or a connection's menu, and how a table is doing (statistics, index usage, ClickHouse parts, mutations and merges) from its menu. Each opens as an ordinary SQL tab and runs, so you can tweak it and run it again
 - Refresh the whole schema, or one schema from its right-click menu
-- **ER diagram** of a schema from its right-click menu - tables with their keys, laid out so referenced tables stand left of the ones referencing them; click one to open it
+- **ER diagram** of a schema from its right-click menu - every table with all its columns, keys first, laid out so referenced tables stand left of the ones referencing them and the keys cross as little as possible. Drag to pan, zoom with the buttons, `⌘/Ctrl`+scroll or a pinch, and Fit to see it all. Hover or click a table to light up its keys and neighbours, find one by name, show only the key columns, and double-click (or use the open button) to open it
 - **Compare schema…** with another schema or database of the same engine - missing and extra tables, added, dropped and changed columns, and a sync script you can copy or open in a tab
 
 Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.
@@ -289,7 +289,7 @@ Every change opens a dialog that shows the **exact SQL** it will run, written fo
 - **Sortable** columns, **fit columns** to their content, and **show / hide** columns
 - Headers show each column's **type** and **key icons**; numbers are right-aligned, `NULL` is dimmed, and **striped rows** are a View-menu toggle
 - **Status bar sums** - selected cells show their count, and the sum and average of their numbers
-- **Quick charts** - the Chart button shows a result as bars or a line, with the label and value columns picked for you
+- **Quick charts** - the Chart button plots a result as bars or lines. A panel beside it picks the label column and up to five value columns, each in its own colour, and how rows that share a label combine (sum, count or average). It starts from sensible picks, keeps them when you switch back to the grid, and scrolls sideways through many bars
 - Right-click menus on cells, row numbers and headers: copy as any export format, filter by a value, sort, hide a column, mark rows for delete
 - **Keyboard-first** navigation (arrows, Shift+select, Enter for the cell viewer)
 - Column/row selection with Ctrl+click and Shift+click; `Ctrl+C` copies in the format you pick

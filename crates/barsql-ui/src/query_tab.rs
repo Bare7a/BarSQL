@@ -14,7 +14,7 @@ use gpui_kit::component::input::{
     Editor, EditorMode, EditorState, GoToDefinition, InputEvent, RangeDecoration, RangeDecorationCollection,
     RangeDecorationStyle, Replace, Search, SelectAll,
 };
-use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
+use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, RopeExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -40,8 +40,8 @@ use crate::schema::{self, Schemas};
 use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::sql_language::{self, SqlDefinitions, SqlLanguage, linked_table, lsp_range};
 use crate::status_bar::Caret;
-use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_XS, TINT, TINT_BORDER};
-use crate::{params_dialog, state, theme};
+use crate::tokens::{ICON_XS, RADIUS, TEXT_XS, TINT, TINT_BORDER};
+use crate::{params_dialog, shortcuts, state, theme};
 
 const EDITOR_CONTEXT: &str = "QueryEditor CodeEditor";
 const COMPLETING_CONTEXT: &str = "QueryEditor CodeEditor completing";
@@ -888,42 +888,65 @@ impl QueryTab {
         }
     }
 
-    // Run leads, with the other ways to run and explain in its menu. Saving and the tab's other actions follow, and
-    // the transaction sits at the far end.
+    // Run and Run all lead, then Explain with Explain analyze in its menu, then saving. Stop stands in for both runs
+    // while one is going. The transaction sits at the far end.
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let linked = !self.saved_query_id.is_empty();
-        let run = match self.running.is_some() {
-            true => Button::new("stop")
-                .debug_selector(|| "stop".into())
-                .danger()
-                .tool(Icon::new(Lucide::Square), ICON_SM, t(cx, "editor.stop"))
-                .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)))
-                .into_any_element(),
-            false => self.run_button(cx).into_any_element(),
+        let left = h_flex().gap(rems(0.462));
+        let left = match self.running.is_some() {
+            true => left.child(
+                Button::new("stop")
+                    .debug_selector(|| "stop".into())
+                    .danger()
+                    .tool(Icon::new(Lucide::Square), ICON_XS, t(cx, "editor.stop"))
+                    .tooltip(t(cx, "tooltip.stopQuery"))
+                    .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
+            ),
+            false => {
+                let selected = !self.editor.read(cx).selected_range().is_empty();
+                let run = if selected { "tooltip.runSelection" } else { "tooltip.runStatementAtCaret" };
+                left.child(
+                    Button::new("run")
+                        .debug_selector(|| "run".into())
+                        .primary()
+                        .tool(Icon::new(Lucide::Play), ICON_XS, t(cx, "editor.run"))
+                        .tooltip(hint(run, "runSelection", cx))
+                        .on_click(cx.listener(|this, _, window, cx| this.run_selection(window, cx))),
+                )
+                .child(
+                    Button::new("run-all")
+                        .debug_selector(|| "run-all".into())
+                        .tool(Icon::new(Lucide::SkipForward), ICON_XS, t(cx, "editor.contextRunAll"))
+                        .tooltip(hint("tooltip.runAll", "runAll", cx))
+                        .on_click(cx.listener(|this, _, window, cx| this.run_all(window, cx))),
+                )
+            }
         };
-        let left = h_flex()
-            .gap(rems(0.462))
-            .child(run)
-            .child(
-                Button::new("explain")
-                    .debug_selector(|| "explain".into())
-                    .tool(Icon::new(Lucide::Route), ICON_SM, t(cx, "editor.explain"))
-                    .disabled(self.running.is_some())
-                    .on_click(cx.listener(|this, _, window, cx| this.explain(false, window, cx))),
-            )
+        let (save, save_hint) = match linked {
+            true => ("editor.update", "tooltip.updateSavedQuery"),
+            false => ("editor.save", "tooltip.saveQuery"),
+        };
+        let left = left
+            .child(self.explain_button(cx))
             .child(div().w(px(1.)).h(rems(1.231)).mx(rems(0.154)).bg(theme.border))
             .child(
                 Button::new("save-query")
                     .debug_selector(|| "save-query".into())
-                    .tool(
-                        Icon::new(Lucide::Bookmark),
-                        ICON_SM,
-                        t(cx, if linked { "editor.update" } else { "editor.save" }),
-                    )
+                    .tool(Icon::new(Lucide::Bookmark), ICON_XS, t(cx, save))
+                    .tooltip(hint(save_hint, "saveQuery", cx))
                     .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
             )
-            .child(self.more_button(cx));
+            .when(linked, |el| {
+                el.child(
+                    Button::new("rename-query")
+                        .debug_selector(|| "rename-query".into())
+                        .ghost()
+                        .tool_icon(Icon::new(Lucide::SquarePen), ICON_XS)
+                        .tooltip(hint("tooltip.renameSavedQuery", "renameSavedQuery", cx))
+                        .on_click(cx.listener(|this, _, window, cx| this.rename_saved(window, cx))),
+                )
+            });
         h_flex()
             .debug_selector(|| "query-toolbar".into())
             .flex_none()
@@ -938,66 +961,40 @@ impl QueryTab {
             .child(self.transaction_controls(cx))
     }
 
-    // One control in two halves: Run, and a caret for the menu of everything else that runs.
-    fn run_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let selected = !self.editor.read(cx).selected_range().is_empty();
-        let analyze = self.can_analyze();
-        let divider = cx.theme().primary_active;
+    // Explain, and a caret for Explain analyze where the engine has one. Without it the caret would only repeat the
+    // button, so Explain stands alone.
+    fn explain_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let running = self.running.is_some();
+        let explain = Button::new("explain")
+            .debug_selector(|| "explain".into())
+            .tool(Icon::new(Lucide::Route), ICON_XS, t(cx, "editor.explain"))
+            .tooltip(hint("tooltip.explain", "explainQuery", cx))
+            .disabled(running)
+            .on_click(cx.listener(|this, _, window, cx| this.explain(false, window, cx)));
+        if !self.can_analyze() {
+            return explain.into_any_element();
+        }
         let tab = cx.entity().downgrade();
         h_flex()
+            .child(explain.rounded_tr(px(0.)).rounded_br(px(0.)))
             .child(
-                Button::new("run")
-                    .debug_selector(|| "run".into())
-                    .primary()
-                    .tool(Icon::new(Lucide::Play), ICON_SM, t(cx, "editor.run"))
-                    .rounded_tr(px(0.))
-                    .rounded_br(px(0.))
-                    .on_click(cx.listener(|this, _, window, cx| this.run_selection(window, cx))),
-            )
-            .child(div().w(px(1.)).h(rems(1.692)).bg(divider))
-            .child(
-                Button::new("run-menu")
-                    .debug_selector(|| "run-menu".into())
-                    .primary()
+                Button::new("explain-menu")
+                    .debug_selector(|| "explain-menu".into())
                     .tool_icon(Icon::new(IconName::ChevronDown), ICON_XS)
                     .px(rems(0.308))
                     .rounded_tl(px(0.))
                     .rounded_bl(px(0.))
+                    .border_l_0()
+                    .tooltip(t(cx, "editor.explainOptions"))
+                    .disabled(running)
                     .dropdown_menu(move |menu, _, cx| {
                         let focus = tab.upgrade().map(|tab| tab.read(cx).editor.read(cx).focus_handle(cx));
-                        let run = if selected { "editor.contextRunSelection" } else { "editor.contextRunStatement" };
                         menu.when_some(focus, |menu, focus| menu.action_context(focus))
-                            .menu(t(cx, run), Box::new(RunSelection))
-                            .menu(t(cx, "editor.contextRunAll"), Box::new(RunAll))
-                            .separator()
                             .menu(t(cx, "editor.explain"), Box::new(ExplainQuery))
-                            .when(analyze, |menu| menu.menu(t(cx, "editor.explainAnalyze"), Box::new(ExplainAnalyze)))
+                            .menu(t(cx, "editor.explainAnalyze"), Box::new(ExplainAnalyze))
                     }),
             )
-    }
-
-    // The tab's less frequent actions.
-    fn more_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let linked = !self.saved_query_id.is_empty();
-        let tab = cx.entity().downgrade();
-        Button::new("more-menu")
-            .debug_selector(|| "more-menu".into())
-            .ghost()
-            .tool_icon(Icon::new(Lucide::Ellipsis), ICON_SM)
-            .tooltip(t(cx, "editor.more"))
-            .dropdown_menu(move |menu, _, cx| {
-                let focus = tab.upgrade().map(|tab| tab.read(cx).editor.read(cx).focus_handle(cx));
-                let copy = tab.clone();
-                menu.when_some(focus, |menu, focus| menu.action_context(focus))
-                    .when(linked, |menu| menu.menu(t(cx, "editor.renameSaved"), Box::new(RenameSavedQuery)))
-                    .menu(t(cx, "editor.contextFormat"), Box::new(FormatQuery))
-                    .separator()
-                    .item(PopupMenuItem::new(t(cx, "tabs.copySql")).on_click(move |_, _, cx| {
-                        let Some(tab) = copy.upgrade() else { return };
-                        cx.write_to_clipboard(ClipboardItem::new_string(tab.read(cx).sql(cx).to_string()));
-                        crate::toast::success(t(cx, "toast.copiedClipboard"), cx);
-                    }))
-            })
+            .into_any_element()
     }
 
     fn can_begin(&self) -> bool {
@@ -1016,7 +1013,7 @@ impl QueryTab {
                 Button::new("begin-txn")
                     .debug_selector(|| "begin-txn".into())
                     .ghost()
-                    .tool(Icon::new(Lucide::GitBranch), ICON_SM, t(cx, "editor.beginTxn"))
+                    .tool(Icon::new(Lucide::GitBranch), ICON_XS, t(cx, "editor.beginTxn"))
                     .tooltip(t(cx, "editor.beginTxnHint"))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.transaction(TxnControl::Begin, false, window, cx)),
@@ -1044,7 +1041,7 @@ impl QueryTab {
                 .child(
                     Button::new("commit-txn")
                         .debug_selector(|| "commit-txn".into())
-                        .tool(Icon::new(IconName::Check), ICON_SM, t(cx, "editor.commitTxn"))
+                        .tool(Icon::new(IconName::Check), ICON_XS, t(cx, "editor.commitTxn"))
                         .on_click(
                             cx.listener(|this, _, window, cx| this.transaction(TxnControl::Commit, false, window, cx)),
                         ),
@@ -1052,7 +1049,7 @@ impl QueryTab {
                 .child(
                     Button::new("rollback-txn")
                         .debug_selector(|| "rollback-txn".into())
-                        .tool(Icon::new(Lucide::Undo2), ICON_SM, t(cx, "editor.rollbackTxn"))
+                        .tool(Icon::new(Lucide::Undo2), ICON_XS, t(cx, "editor.rollbackTxn"))
                         .on_click(
                             cx.listener(|this, _, window, cx| {
                                 this.transaction(TxnControl::Rollback, false, window, cx)
@@ -1065,6 +1062,11 @@ impl QueryTab {
 }
 
 impl EventEmitter<QueryTabEvent> for QueryTab {}
+
+// A toolbar tooltip with the action's current shortcut.
+fn hint(key: &str, shortcut: &str, cx: &App) -> SharedString {
+    t_with(cx, key, &[("shortcut", &shortcuts::shown(shortcut, cx))])
+}
 
 // Running first, then editing, as VS Code's and DataGrip's editor menus are.
 fn editor_menu(

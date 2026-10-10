@@ -76,6 +76,13 @@ impl TabView {
         }
     }
 
+    fn set_connection(&self, connection: ConnectionConfig, cx: &mut App) {
+        match self {
+            Self::Query(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
+            Self::Table(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
+        }
+    }
+
     fn stored(&self, cx: &App) -> EditorTab {
         match self {
             Self::Query(tab) => tab.read(cx).stored(cx),
@@ -261,9 +268,9 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
                 // Run with BARSQL_SNAPSHOT_RUN, so there's a result to chart.
                 Some("chart") => {
                     let view = view.clone();
-                    after = Some(Box::new(move |_, cx| {
+                    after = Some(Box::new(move |window, cx| {
                         if let Some(tab) = view.read(cx).active_query().cloned() {
-                            tab.read(cx).results().update(cx, |results, cx| results.toggle_chart(cx));
+                            tab.read(cx).results().update(cx, |results, cx| results.toggle_chart(window, cx));
                         }
                     }));
                 }
@@ -417,10 +424,10 @@ impl Workspace {
                     this.open_table(connection.clone(), schema.clone(), table.clone(), None, window, cx)
                 }
                 SidebarEvent::ConnectionsChanged(connections) => {
-                    for tab in this.query_tabs() {
-                        let id = tab.read(cx).connection.id.clone();
+                    for open in &this.tabs {
+                        let id = open.view.connection(cx).id.clone();
                         if let Some(connection) = connections.iter().find(|c| c.id == id).cloned() {
-                            tab.update(cx, |tab, cx| tab.set_connection(connection, cx));
+                            open.view.set_connection(connection, cx);
                         }
                     }
                 }

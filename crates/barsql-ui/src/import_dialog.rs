@@ -359,6 +359,15 @@ impl ImportDialog {
         cx.notify();
     }
 
+    // Enter imports, but once an import has finished it closes, so a second press can't import the file twice.
+    fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.result.is_some() || self.error.is_some() {
+            window.close_dialog(cx);
+        } else {
+            self.run(window, cx);
+        }
+    }
+
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match &self.import_id {
             Some(id) if self.running.is_some() => {
@@ -851,13 +860,17 @@ pub fn open(
     cx.set_global(Opened(dialog.downgrade()));
     window.open_dialog(cx, move |frame, window, cx| {
         let running = dialog.read(cx).running.is_some();
+        let entry = dialog.clone();
         Modal::new("import", t(cx, "import.title"))
             .size(modal::Size::Lg)
             .closable(!running)
             .build(frame, dialog.clone(), window, cx)
             .keyboard(!running)
             .overlay_closable(!running)
-            .on_ok(|_, _, _| false)
+            .on_ok(move |_, window, cx| {
+                entry.update(cx, |dialog, cx| dialog.enter(window, cx));
+                false
+            })
     });
 }
 

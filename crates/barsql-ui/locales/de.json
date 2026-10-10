@@ -57,8 +57,6 @@
     "contextSelectAll": "Alles auswählen",
     "contextFindReplace": "Ersetzen",
     "contextFormat": "SQL formatieren",
-    "more": "Weitere Aktionen",
-    "renameSaved": "Gespeicherte Abfrage umbenennen…",
     "beginTxn": "Transaktion starten",
     "beginTxnHint": "Abfragen in diesem Tab laufen darin, bis Sie committen oder zurückrollen",
     "contextGoToDefinition": "Gehe zu Definition"
@@ -157,7 +155,7 @@
     "editorDefinition": "Gehe zu Definition: Ein Alias oder CTE springt zur Deklaration, eine Tabelle öffnet sich. Cmd/Strg-Klick geht auch.",
     "editorParams": "Schreiben Sie :name für einen Wert, der beim Ausführen eingesetzt wird. BarSQL fragt danach und merkt ihn sich.",
     "editorPalette": "Befehlspalette: jeder Befehl mit seinem Tastenkürzel.",
-    "resultsChart": "Diagramm in der Ergebnisleiste zeigt das Ergebnis als Balken oder Linie.",
+    "resultsChart": "Diagramm in der Ergebnisleiste zeigt das Ergebnis als Balken oder Linien. Beschriftung und bis zu 5 Werte wählen Sie im Bereich daneben.",
     "schemaDiagram": "Rechtsklick auf ein Schema für sein ER-Diagramm oder einen Vergleich mit einem anderen."
   },
   "grid": {
@@ -265,17 +263,48 @@
     "line": "Linie",
     "labels": "Beschriftung",
     "values": "Werte",
-    "truncated": "Erste {{count}} Punkte",
-    "noNumbers": "Dieses Ergebnis hat keine numerische Spalte für ein Diagramm.",
-    "noValues": "Keine Zeile hat einen Wert in dieser Spalte."
+    "noNumbers": "Keine numerischen Spalten, daher zählt das Diagramm Zeilen.",
+    "noValues": "Keine Zeile hat einen Wert in den gewählten Spalten.",
+    "sum": "Summe",
+    "count": "Anzahl",
+    "average": "Durchschnitt",
+    "rows": "Zeilen",
+    "filterColumns": "Spalten filtern",
+    "noMatch": "Keine Spalte passt.",
+    "sumBy": "Summe von {{values}} nach {{label}}",
+    "countBy": "Anzahl von {{values}} nach {{label}}",
+    "averageBy": "Durchschnitt von {{values}} nach {{label}}",
+    "rowsBy": "Zeilen nach {{label}}",
+    "rowCount_one": "{{count}} Zeile",
+    "rowCount_other": "{{count}} Zeilen",
+    "cappedTop": "die größten {{shown}} von {{total}} Beschriftungen",
+    "cappedFirst": "die ersten {{shown}} von {{total}} Beschriftungen",
+    "cappedRows": "erste {{count}} Zeilen",
+    "howTitle": "Wählen, was dargestellt wird",
+    "howLabels": "Beschriftung: die Spalte entlang der unteren Achse. Zeilen mit derselben Beschriftung ergeben einen Balken oder Punkt.",
+    "howValues": "Werte: bis zu 5 numerische Spalten, jede in eigener Farbe.",
+    "howAggregate": "Summe, Anzahl oder Durchschnitt: wie Zeilen mit derselben Beschriftung zusammengefasst werden.",
+    "noRows": "Noch keine Zeilen für ein Diagramm.",
+    "blank": "(leer)"
   },
   "erDiagram": {
     "menu": "ER-Diagramm",
     "title": "ER-Diagramm · {{schema}}",
     "loading": "Tabellen werden geladen…",
     "empty": "Dieses Schema hat keine Tabellen.",
-    "more": "+{{count}} weitere",
-    "truncated": "Zeigt die ersten {{shown}} von {{total}} Tabellen."
+    "truncated": "Zeigt die ersten {{shown}} von {{total}} Tabellen.",
+    "hint": "Ziehen zum Verschieben · {{modifier}}+Scrollen oder Zoomgeste zum Zoomen · Doppelklick öffnet eine Tabelle",
+    "search": "Tabelle suchen",
+    "matches": "{{index}} von {{count}}",
+    "noMatches": "Keine Tabelle passt",
+    "keysOnly": "Nur Schlüssel",
+    "keysOnlyTooltip": "Nur die Schlüsselspalten zeigen",
+    "zoomIn": "Vergrößern",
+    "zoomOut": "Verkleinern",
+    "zoomReset": "Zurück auf 100 %",
+    "fit": "Einpassen",
+    "fitTooltip": "Das ganze Diagramm zeigen",
+    "open": "Tabelle öffnen"
   },
   "schemaDiff": {
     "menu": "Schema vergleichen…",
@@ -293,5 +322,18 @@
     "copyScript": "Skript kopieren",
     "openScript": "Skript öffnen",
     "scriptTitle": "Abgleichskript"
+  },
+  "tooltip": {
+    "runStatementAtCaret": "Anweisung an der Einfügemarke ausführen ({{shortcut}})"
+  },
+  "about": {
+    "versionLine": "Version {{version}} · {{platform}}",
+    "copyVersion": "Version für einen Fehlerbericht kopieren",
+    "tagline": "Eine schnelle, lokale SQL-Workbench",
+    "releaseNotes": "Versionshinweise",
+    "reportIssue": "Problem melden",
+    "license": "Lizenz {{name}}",
+    "madeWith": "Erstellt mit",
+    "checkUpdates": "Nach Updates suchen"
   }
 }

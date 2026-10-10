@@ -98,8 +98,9 @@ fn a_skipped_release_counts_as_up_to_date_for_the_session(cx: &mut TestAppContex
     assert!(matches!(state(&open(&base, cx), cx), UpdateState::Available(_)), "a newer release is offered again");
 }
 
+// Enter presses Try again. Once the check is through, Close is the only button, so Enter closes.
 #[gpui_kit::test]
-fn a_failed_check_can_be_retried(cx: &mut TestAppContext) {
+fn a_failed_check_retries_on_enter(cx: &mut TestAppContext) {
     let _env = Env::new(cx);
     let (base, routes) = server();
     routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (502, "bad gateway".into()));
@@ -111,9 +112,12 @@ fn a_failed_check_can_be_retried(cx: &mut TestAppContext) {
     assert_eq!(state(&dialog, cx), failed);
 
     routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (200, release(&base, "v0.0.1")));
-    dialog.update(cx, |dialog, cx| dialog.retry(cx));
+    cx.simulate_keystrokes("enter");
     settle(cx, |cx| cx.update(|_, cx| dialog.read(cx).state != UpdateState::Checking));
     assert_eq!(state(&dialog, cx), UpdateState::UpToDate, "0.0.1 is older than this build");
+    assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+    cx.simulate_keystrokes("enter");
+    assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
 }
 
 fn toasts(cx: &mut VisualTestContext) -> usize {

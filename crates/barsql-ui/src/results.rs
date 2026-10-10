@@ -117,8 +117,10 @@ impl ShownError {
 #[derive(Default)]
 struct ResultSetView {
     grid: Option<Entity<Grid>>,
-    // Shown in place of the grid while set.
+    // Shown in place of the grid while charting. Built on the first toggle and kept, so its picks survive going
+    // back to the grid.
     chart: Option<Entity<ChartView>>,
+    charting: bool,
     _subscriptions: Vec<Subscription>,
     streaming: bool,
     summary: Option<ResultSummary>,
@@ -797,30 +799,35 @@ impl ResultsPanel {
         let toggle = Button::new("chart-toggle")
             .debug_selector(|| "chart-toggle".into())
             .tool(Icon::new(Lucide::ChartColumn), ICON_XS, t(cx, "chart.title"))
-            .selected(set.chart.is_some())
+            .selected(set.charting)
             .tooltip(t(cx, "chart.tooltip"))
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_chart(cx)))
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_chart(window, cx)))
             .into_any_element();
         let body = match &set.chart {
-            Some(chart) => chart.clone().into_any_element(),
-            None => grid.clone().into_any_element(),
+            Some(chart) if set.charting => chart.clone().into_any_element(),
+            _ => grid.clone().into_any_element(),
         };
         v_flex()
             .size_full()
-            .child(grid::toolbar(grid, meta, Some(toggle), cx))
+            .child(grid::toolbar(grid, meta, Some(toggle), !set.charting, cx))
             .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
     }
 
     // Swaps the active result's grid for a chart of it, and back.
-    pub(crate) fn toggle_chart(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_chart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(set) = self.sets.get_mut(self.active) else { return };
         let Some(grid) = set.grid.clone() else { return };
-        set.chart = match set.chart.take() {
-            Some(_) => None,
-            None => Some(cx.new(|cx| ChartView::new(grid, cx))),
-        };
+        set.charting = !set.charting;
+        if set.charting && set.chart.is_none() {
+            set.chart = Some(cx.new(|cx| ChartView::new(grid, window, cx)));
+        }
         cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn chart(&self) -> Option<Entity<ChartView>> {
+        self.sets.get(self.active).filter(|set| set.charting)?.chart.clone()
     }
 }
 

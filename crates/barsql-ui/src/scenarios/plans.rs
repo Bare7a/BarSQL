@@ -31,6 +31,15 @@ fn explain_shows_an_estimated_plan_with_sqlites_note(cx: &mut TestAppContext) {
     assert!(rows(&mut app).iter().all(|(_, label, _)| !label.is_empty()));
 }
 
+// SQLite can't analyze, so Explain has no menu: it would only repeat the button.
+#[gpui_kit::test]
+fn the_explain_button_has_no_menu_without_analyze(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    assert!(app.shown("explain"));
+    assert!(!app.shown("explain-menu"));
+}
+
 #[gpui_kit::test]
 fn the_selected_node_shows_its_details_and_the_raw_plan(cx: &mut TestAppContext) {
     let mut app = open(cx);

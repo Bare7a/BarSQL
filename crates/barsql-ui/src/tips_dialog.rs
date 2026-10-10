@@ -8,10 +8,6 @@ use crate::modal::{self, Modal};
 use crate::shortcuts::{self, Binding};
 use crate::tokens::{RADIUS_SM, TEXT_BASE, TEXT_XS};
 
-fn keys(id: &str, cx: &App) -> String {
-    shortcuts::find(id).map(|def| shortcuts::format(&shortcuts::effective(def, cx))).unwrap_or_default()
-}
-
 fn tip(keys: Option<String>, text: SharedString, cx: &App) -> impl IntoElement + use<> {
     let theme = cx.theme();
     h_flex()
@@ -65,14 +61,14 @@ pub fn open(window: &mut Window, cx: &mut App) {
             .child(section(
                 t(cx, "tips.editorTitle"),
                 vec![
-                    tip(Some(keys("runSelection", cx)), "tips.editorRunSelection", cx),
-                    tip(Some(keys("runAll", cx)), "tips.editorRunAll", cx),
-                    tip(Some(keys("saveQuery", cx)), "tips.editorSave", cx),
+                    tip(Some(shortcuts::shown("runSelection", cx)), "tips.editorRunSelection", cx),
+                    tip(Some(shortcuts::shown("runAll", cx)), "tips.editorRunAll", cx),
+                    tip(Some(shortcuts::shown("saveQuery", cx)), "tips.editorSave", cx),
                     tip(None, "tips.editorGutter", cx),
                     tip(None, "tips.editorContext", cx),
                     tip(Some("F12".into()), "tips.editorDefinition", cx),
                     tip(None, "tips.editorParams", cx),
-                    tip(Some(keys("commandPalette", cx)), "tips.editorPalette", cx),
+                    tip(Some(shortcuts::shown("commandPalette", cx)), "tips.editorPalette", cx),
                 ],
                 cx,
             ))
@@ -102,7 +98,7 @@ pub fn open(window: &mut Window, cx: &mut App) {
             ))
             .child(section(
                 t(cx, "tips.jsonTitle"),
-                vec![tip(Some(keys("toggleJsonPanel", cx)), "tips.jsonToggle", cx)],
+                vec![tip(Some(shortcuts::shown("toggleJsonPanel", cx)), "tips.jsonToggle", cx)],
                 cx,
             ));
         let content = modal::scroll_content()
