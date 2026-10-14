@@ -3,7 +3,7 @@ use std::time::Duration;
 use barsql_io::row_json;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, TITLE_BAR_HEIGHT, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::actions::{ToggleJsonPanel, shortcut_label};
@@ -90,23 +90,26 @@ impl Render for JsonPanel {
         let theme = cx.theme();
         let shortcut = shortcut_label(&ToggleJsonPanel, window).unwrap_or_default();
         let close = t_with(cx, "tooltip.closeJsonViewer", &[("shortcut", &shortcut)]);
-        // Its lines continue the editor's: the header ends with the tab bar and the filter row with the toolbar.
+        // Its lines continue the editor's: the header ends with the tab bar and the filter row with the toolbar. Close
+        // sits under the window's close button, which GPUI Kit centres in a TITLE_BAR_HEIGHT-wide column at the edge.
         let header = h_flex()
             .debug_selector(|| "json-panel-header".into())
             .h(rems(2.769))
             .flex_none()
-            .px(rems(0.769))
+            .pl(rems(0.769))
             .justify_between()
             .border_b_1()
             .border_color(theme.border)
             .child(form::caption(t(cx, "jsonViewer.title"), cx))
             .child(
-                Button::new("json-panel-close")
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(IconName::Close))
-                    .tooltip(close)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleJsonPanel), cx)),
+                h_flex().flex_none().w(TITLE_BAR_HEIGHT).justify_center().child(
+                    Button::new("json-panel-close")
+                        .ghost()
+                        .small()
+                        .icon(Icon::new(IconName::Close))
+                        .tooltip(close)
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleJsonPanel), cx)),
+                ),
             );
         let body = match self.row {
             None => div()
@@ -131,7 +134,12 @@ impl Render for JsonPanel {
                         .border_color(theme.border)
                         .debug_selector(|| "json-filter".into())
                         .child(Icon::new(IconName::Search).size(ICON_SM).text_color(theme.muted_foreground))
-                        .child(div().flex_1().min_w_0().child(form::filter_input(&self.filter, window, cx))),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(form::filter_input(&self.filter, window, cx).cleanable(true)),
+                        ),
                 )
                 .child(
                     div().flex_1().min_h_0().child(
@@ -162,7 +170,9 @@ mod tests {
     use std::sync::Arc;
 
     use barsql_db::{ChunkBuilder, ColumnMeta, ResultSet};
-    use gpui_kit::{TestAppContext, VisualTestContext};
+    use gpui_kit::component::TITLE_BAR_HEIGHT;
+    use gpui_kit::test::TestWindowExt as _;
+    use gpui_kit::{TestAppContext, VisualTestContext, px};
 
     use super::JsonPanel;
     use crate::grid::RowRef;
@@ -200,6 +210,41 @@ mod tests {
         assert_eq!(text(cx).as_deref(), Some("// No keys match filter"));
         panel.update_in(cx, |panel, window, cx| panel.show(None, window, cx));
         assert_eq!(text(cx), None);
+    }
+
+    // GPUI Kit puts each window button in a TITLE_BAR_HEIGHT-wide column, close at the right edge. Smallest, default
+    // and largest zoom.
+    #[gpui_kit::test]
+    fn the_close_button_sits_under_the_windows_close_button(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (_panel, cx) = cx.add_window_view(JsonPanel::new);
+        for zoom in [10., 13., 22.] {
+            cx.update(|window, cx| {
+                window.set_rem_size(px(zoom));
+                window.render_frame(cx);
+                let close = window.find("json-panel-close").bounds().center().x;
+                let window_close = window.viewport_size().width - TITLE_BAR_HEIGHT / 2.;
+                assert!((close - window_close).abs() < px(0.5), "zoom {zoom}: {close:?} vs {window_close:?}");
+            });
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_filter_clears_with_its_x(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = cx.add_window_view(JsonPanel::new);
+        panel.update_in(cx, |panel, window, cx| {
+            panel.show(Some(row()), window, cx);
+            panel.filter.update(cx, |state, cx| state.set_value("nick", window, cx));
+        });
+        // GPUI Kit's clear button.
+        cx.update(|window, cx| window.click("clean", cx));
+        cx.executor().advance_clock(super::FILTER_DEBOUNCE);
+        cx.run_until_parked();
+        let (filter, text) = panel
+            .read_with(cx, |panel, cx| (panel.filter.read(cx).value().to_string(), panel.text().map(str::to_string)));
+        assert_eq!(filter, "");
+        assert_eq!(text.as_deref(), Some("{\n  \"id\": 7,\n  \"name\": {\n    \"nick\": \"ann\"\n  }\n}"));
     }
 
     // The editor element sets read-only on its state as it draws, so the element has to ask for it.

@@ -301,7 +301,7 @@ fn extract_zip(archive: &Path, root: &Path) -> Result<(), String> {
     let (mut links, mut written) = (Vec::new(), 0u64);
     for ix in 0..zip.len() {
         let mut entry = zip.by_index(ix).map_err(|e| format!("zip: {e}"))?;
-        let target = safe_join(root, entry.name())?;
+        let target = safe_join(root, &entry.name().map_err(|e| format!("zip: {e}"))?)?;
         let mode = entry.unix_mode().unwrap_or(0);
         if entry.is_symlink() {
             let mut link = String::new();

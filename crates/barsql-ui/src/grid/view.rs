@@ -1046,21 +1046,28 @@ impl Render for Grid {
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
+            // The menu wraps the cells but not the editor. GPUI Kit's menu takes a right-click before anything inside
+            // it, so the editor's stop would come too late if the menu wrapped the editor too.
             .child(
-                canvas(
-                    {
-                        let entity = entity.clone();
-                        move |bounds, window, cx| prepaint(&entity, bounds, window, cx)
-                    },
-                    move |bounds, frame, window, cx| paint(&entity, bounds, frame, window, cx),
-                )
-                .size_full(),
+                div()
+                    .id("grid-cells")
+                    .size_full()
+                    .child(
+                        canvas(
+                            {
+                                let entity = entity.clone();
+                                move |bounds, window, cx| prepaint(&entity, bounds, window, cx)
+                            },
+                            move |bounds, frame, window, cx| paint(&entity, bounds, frame, window, cx),
+                        )
+                        .size_full(),
+                    )
+                    .context_menu(move |menu, window, cx| Grid::menu(&weak, menu, window, cx)),
             )
             // Each bar has a lane of its own, clear of the cells, so it can show at all times.
             .child(lane_bar(Scrollbar::vertical(&self.scroll.bar(Axis::Vertical))))
             .child(lane_bar(Scrollbar::horizontal(&self.scroll.bar(Axis::Horizontal))))
-            .children(editor)
-            .context_menu(move |menu, window, cx| Grid::menu(&weak, menu, window, cx));
+            .children(editor);
         div().relative().size_full().child(grid).child(lane_guard(self.scroll.clone()))
     }
 }

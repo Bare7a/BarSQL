@@ -24,57 +24,40 @@ impl Entry {
 // Every text menu is drawn here, as the app's other menus are, so they look alike on every platform and show their
 // shortcuts. GPUI Kit gets an empty native menu back, which it doesn't show.
 //
-// GPUI Kit asks for the menu while it is updating the input, so `build` runs once that's done and may read the input.
-// `hold` gets the open menu's focus, which keeps the input's selection showing and tells a cell editor that the
-// blur it sees is its own menu's.
+// GPUI Kit asks for the menu once it has let go of the input, so the entries can come from reading it. The menu takes
+// the focus at once, and GPUI Kit ties it to the input: the selection keeps showing, and a cell editor can tell that
+// the blur it sees is its own menu's.
 pub fn open(
     native: NativeMenu,
+    entries: Vec<Entry>,
+    focus: FocusHandle,
     window: &mut Window,
     cx: &mut App,
-    build: impl FnOnce(&mut Window, &mut App) -> Option<(Vec<Entry>, FocusHandle)> + 'static,
-    hold: impl FnOnce(FocusHandle, &mut App) + 'static,
 ) -> NativeMenu {
-    let position = window.mouse_position();
-    window.defer(cx, move |window, cx| {
-        let Some((entries, focus)) = build(window, cx) else { return };
-        if let Some(overlay) = overlay(window, cx) {
-            overlay.update(cx, |overlay, cx| overlay.show(entries, focus, position, hold, window, cx));
-        }
-    });
+    if let Some(overlay) = overlay(window, cx) {
+        let position = window.mouse_position();
+        overlay.update(cx, |overlay, cx| overlay.show(entries, focus, position, window, cx));
+    }
     native
 }
 
 pub fn input(state: &Entity<InputState>) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
     let state = state.clone();
     move |native, window, cx| {
-        let (read, hold) = (state.clone(), state.clone());
-        open(
-            native,
-            window,
-            cx,
-            move |_, cx| {
-                let input = read.read(cx);
-                Some((text_entries(input.is_copyable(), input.is_editable(), cx), input.focus_handle(cx)))
-            },
-            move |menu, cx| hold.update(cx, |input, cx| input.set_selection_focus(Some(menu), cx)),
-        )
+        let input = state.read(cx);
+        let entries = text_entries(input.is_copyable(), input.is_editable(), cx);
+        let focus = input.focus_handle(cx);
+        open(native, entries, focus, window, cx)
     }
 }
 
 pub fn editor(state: &Entity<EditorState>) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
     let state = state.clone();
     move |native, window, cx| {
-        let (read, hold) = (state.clone(), state.clone());
-        open(
-            native,
-            window,
-            cx,
-            move |_, cx| {
-                let editor = read.read(cx);
-                Some((text_entries(editor.is_copyable(), editor.is_editable(), cx), editor.focus_handle(cx)))
-            },
-            move |menu, cx| hold.update(cx, |editor, cx| editor.set_selection_focus(Some(menu), cx)),
-        )
+        let editor = state.read(cx);
+        let entries = text_entries(editor.is_copyable(), editor.is_editable(), cx);
+        let focus = editor.focus_handle(cx);
+        open(native, entries, focus, window, cx)
     }
 }
 
@@ -121,7 +104,6 @@ impl Overlay {
         entries: Vec<Entry>,
         focus: FocusHandle,
         position: Point<Pixels>,
-        hold: impl FnOnce(FocusHandle, &mut App),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -135,8 +117,6 @@ impl Overlay {
             overlay.active = None;
             cx.notify();
         });
-        // Before the menu takes the focus, so the input never sees an unexplained blur.
-        hold(menu.focus_handle(cx), cx);
         menu.focus_handle(cx).focus(window, cx);
         self.active = Some(Active { menu, position, _dismiss: dismiss });
         cx.notify();

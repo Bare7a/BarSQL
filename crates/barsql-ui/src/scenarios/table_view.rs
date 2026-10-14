@@ -463,6 +463,8 @@ fn a_right_click_in_the_cell_editor_leaves_the_edit_open(cx: &mut TestAppContext
     browse(&mut app, "e2e_tveditmenu");
     let grid = grid(&mut app);
     let at = app.grid_point(&grid, |grid| grid.cell_point(0, 1));
+    // Blurs only reach listeners in an active window, and a blur is what would commit the edit.
+    app.cx.update(|window, _| window.activate_window());
     app.double_click_at(at);
     app.keys("mod-a");
     app.type_text("Zed");
@@ -471,7 +473,7 @@ fn a_right_click_in_the_cell_editor_leaves_the_edit_open(cx: &mut TestAppContext
     assert_eq!(pending(&mut app), (0, 0), "nothing committed");
 }
 
-// GPUI Kit asks for a text field's menu while it updates the field, so the menu reads the field afterwards.
+// The menu reads the field it opens on, to know what it can cut and copy.
 #[gpui_kit::test]
 fn a_text_fields_menu_copies_its_selection(cx: &mut TestAppContext) {
     let mut app =

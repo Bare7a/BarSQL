@@ -1074,47 +1074,39 @@ fn editor_menu(
     analyze: bool,
 ) -> impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static {
     move |native, window, cx| {
-        let (read, hold) = (editor.clone(), editor.clone());
-        context_menu::open(
-            native,
-            window,
-            cx,
-            move |_, cx| {
-                let state = read.read(cx);
-                let editable = state.is_editable();
-                let pastable = editable && cx.read_from_clipboard().is_some();
-                let run = match state.selected_range().is_empty() {
-                    true => "editor.contextRunStatement",
-                    false => "editor.contextRunSelection",
-                };
-                let mut entries = vec![
-                    Entry::item(t(cx, run), RunSelection, false),
-                    Entry::item(t(cx, "editor.contextRunAll"), RunAll, false),
-                    Entry::item(t(cx, "editor.explain"), ExplainQuery, false),
-                ];
-                if analyze {
-                    entries.push(Entry::item(t(cx, "editor.explainAnalyze"), ExplainAnalyze, false));
-                }
-                entries.extend([
-                    Entry::Separator,
-                    Entry::item(t(cx, "editor.contextGoToDefinition"), GoToDefinition, false),
-                    Entry::item(t(cx, "editor.contextChangeAll"), SelectAllOccurrences, false),
-                    Entry::item(t(cx, "editor.contextToggleComment"), ToggleComment, !editable),
-                    Entry::item(t(cx, "editor.contextFormat"), FormatQuery, !editable),
-                    Entry::Separator,
-                    // As the keys do, these take the whole line when nothing is selected.
-                    Entry::item(t(cx, "editor.contextCut"), CutLine, !editable),
-                    Entry::item(t(cx, "editor.contextCopy"), CopyLine, false),
-                    Entry::item(t(cx, "editor.contextPaste"), PasteLine, !pastable),
-                    Entry::Separator,
-                    Entry::item(t(cx, "editor.contextFind"), Search, false),
-                    Entry::item(t(cx, "editor.contextFindReplace"), Replace, !editable),
-                    Entry::item(t(cx, "editor.contextSelectAll"), SelectAll, false),
-                ]);
-                Some((entries, state.focus_handle(cx)))
-            },
-            move |menu, cx| hold.update(cx, |state, cx| state.set_selection_focus(Some(menu), cx)),
-        )
+        let state = editor.read(cx);
+        let editable = state.is_editable();
+        let pastable = editable && cx.read_from_clipboard().is_some();
+        let run = match state.selected_range().is_empty() {
+            true => "editor.contextRunStatement",
+            false => "editor.contextRunSelection",
+        };
+        let mut entries = vec![
+            Entry::item(t(cx, run), RunSelection, false),
+            Entry::item(t(cx, "editor.contextRunAll"), RunAll, false),
+            Entry::item(t(cx, "editor.explain"), ExplainQuery, false),
+        ];
+        if analyze {
+            entries.push(Entry::item(t(cx, "editor.explainAnalyze"), ExplainAnalyze, false));
+        }
+        entries.extend([
+            Entry::Separator,
+            Entry::item(t(cx, "editor.contextGoToDefinition"), GoToDefinition, false),
+            Entry::item(t(cx, "editor.contextChangeAll"), SelectAllOccurrences, false),
+            Entry::item(t(cx, "editor.contextToggleComment"), ToggleComment, !editable),
+            Entry::item(t(cx, "editor.contextFormat"), FormatQuery, !editable),
+            Entry::Separator,
+            // As the keys do, these take the whole line when nothing is selected.
+            Entry::item(t(cx, "editor.contextCut"), CutLine, !editable),
+            Entry::item(t(cx, "editor.contextCopy"), CopyLine, false),
+            Entry::item(t(cx, "editor.contextPaste"), PasteLine, !pastable),
+            Entry::Separator,
+            Entry::item(t(cx, "editor.contextFind"), Search, false),
+            Entry::item(t(cx, "editor.contextFindReplace"), Replace, !editable),
+            Entry::item(t(cx, "editor.contextSelectAll"), SelectAll, false),
+        ]);
+        let focus = state.focus_handle(cx);
+        context_menu::open(native, entries, focus, window, cx)
     }
 }
 
@@ -1145,7 +1137,7 @@ impl Render for QueryTab {
                     this.transaction(TxnControl::Rollback, false, window, cx)
                 }))
             })
-            .on_drag_move(cx.listener(|_, event: &DragMoveEvent<SplitDrag>, _, cx| {
+            .on_drag_move(cx.listener(|_, event: &DragMoveEvent<Rc<SplitDrag>>, _, cx| {
                 let bounds = event.bounds;
                 if bounds.size.height > px(0.) {
                     let share = (bounds.bottom() - event.event.position.y) / bounds.size.height * 100.;
@@ -1194,7 +1186,7 @@ impl Render for QueryTab {
                         SplitDrag,
                         |drag, _, _, cx| {
                             cx.stop_propagation();
-                            cx.new(|_| drag.clone())
+                            cx.new(|_| drag.as_ref().clone())
                         },
                     )),
             )
