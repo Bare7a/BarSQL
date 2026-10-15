@@ -10,7 +10,9 @@ pub mod write;
 pub use array_literal::{ArrayKind, array_json, array_kind};
 pub use csv::{CsvField, CsvReader, csv_values};
 pub use csv_import::{CsvOptions, ImportPreview, count_rows, infer_column_type, new_reader, preview_file};
-pub use export::{EXPORT_FORMATS, ExportChunk, ExportFormat, Exporter, export_to_string, is_space, restringify_json};
+pub use export::{
+    EXPORT_FORMATS, ExportChunk, ExportFormat, Exporter, export_to_string, is_space, restringify_json, sql_literal,
+};
 pub use format::{format_query, format_sql};
 pub use row_json::row_json;
 pub use write::{WriteOutcome, write_chunks};

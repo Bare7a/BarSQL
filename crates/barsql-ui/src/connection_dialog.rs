@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use barsql_app::path_defaults;
-use barsql_core::capabilities::{DatabaseField, DefaultSchema, Location};
-use barsql_core::{ConnectionConfig, DriverType, SshConfig};
+use barsql_core::capabilities::{DefaultSchema, Location};
+use barsql_core::{ConfigError, ConnectionConfig, DriverType, SshConfig};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
@@ -147,6 +147,30 @@ fn ssl_label(mode: &str) -> &'static str {
 fn parse_port(value: &str, fallback: i64) -> i64 {
     let digits: String = value.trim().chars().take_while(char::is_ascii_digit).collect();
     digits.parse::<i64>().ok().filter(|port| *port != 0).unwrap_or(fallback)
+}
+
+fn config_problem(config: &ConnectionConfig, cx: &App) -> Option<SharedString> {
+    let mut config = config.clone();
+    config.normalize();
+    Some(match config.check().err()? {
+        ConfigError::UnsupportedDriver(driver) => {
+            t_with(cx, "connection.driverUnsupported", &[("driver", driver.as_str())])
+        }
+        ConfigError::NotInThisBuild(driver) => {
+            t_with(cx, "connection.driverNotInBuild", &[("driver", &t(cx, copy(&driver).label))])
+        }
+        ConfigError::FilePathRequired => t(cx, "connection.fileRequired"),
+        ConfigError::UrlRequired => t(cx, "connection.urlRequired"),
+        ConfigError::UrlScheme => t(cx, "connection.urlScheme"),
+        ConfigError::HostRequired => t(cx, "connection.hostRequired"),
+        ConfigError::DatabaseRequired(_) => t(cx, "connection.dbRequired"),
+        ConfigError::UsernameRequired => t(cx, "connection.usernameRequired"),
+        ConfigError::SshHostRequired => t(cx, "connection.sshHostRequired"),
+        ConfigError::SshUsernameRequired => t(cx, "connection.sshUsernameRequired"),
+        ConfigError::SshPortRange => t(cx, "connection.sshPortRange"),
+        ConfigError::SshKeyRequired => t(cx, "connection.sshKeyRequired"),
+        ConfigError::SshAuthMethod(method) => t_with(cx, "connection.sshAuthUnsupported", &[("method", &method)]),
+    })
 }
 
 fn input(
@@ -401,24 +425,13 @@ impl ConnectionForm {
             })
     }
 
-    fn validate(&self, config: &ConnectionConfig) -> Option<&'static str> {
-        if config.name.trim().is_empty() {
-            Some("connection.nameRequired")
-        } else if config.driver.capabilities().location == Location::LocalFile && config.file_path.trim().is_empty() {
-            Some("connection.fileRequired")
-        } else if config.driver.capabilities().location == Location::Url && config.url.trim().is_empty() {
-            Some("connection.urlRequired")
-        } else if config.driver.capabilities().database == DatabaseField::Required && config.database.trim().is_empty()
-        {
-            Some("connection.dbRequired")
-        } else {
-            None
-        }
-    }
-
     fn test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.testing = true;
         let config = self.config(cx);
+        if let Some(problem) = config_problem(&config, cx) {
+            toast::error(problem, cx);
+            return;
+        }
+        self.testing = true;
         let bar = state::bar(cx);
         let task = state::spawn(cx, async move { bar.test_connection(config).await });
         cx.spawn_in(window, async move |this, cx| {
@@ -446,8 +459,12 @@ impl ConnectionForm {
             return;
         }
         let mut config = self.config(cx);
-        if let Some(key) = self.validate(&config) {
-            self.error = Some(t(cx, key));
+        let problem = match config.name.trim().is_empty() {
+            true => Some(t(cx, "connection.nameRequired")),
+            false => config_problem(&config, cx),
+        };
+        if let Some(problem) = problem {
+            self.error = Some(problem);
             cx.notify();
             return;
         }
@@ -934,6 +951,7 @@ mod tests {
     use gpui_kit::component::Root;
     use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext};
 
+    use crate::i18n::I18n;
     use crate::test_support::{Env, settle};
 
     struct Blank;
@@ -1000,6 +1018,37 @@ mod tests {
         assert_eq!((stored.schema.as_str(), stored.port, stored.username.as_str()), ("public", 5432, "postgres"));
         assert!(!stored.id.is_empty());
         assert!(env.bar.list_connections().iter().any(|c| c.id == stored.id && c.name == "Notes"));
+    }
+
+    #[gpui_kit::test]
+    fn server_url_and_ssh_problems_are_translated(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        cx.update(|_, cx| cx.set_global(I18n::new("de")));
+        let (form, saved) = open_form(None, cx);
+        let save = |cx: &mut VisualTestContext| {
+            form.update_in(cx, |form, window, cx| form.save(window, cx));
+            error(&form, cx).unwrap_or_default()
+        };
+        fill(&form, |f| &f.name, "Prod", cx);
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
+        fill(&form, |f| &f.database, "shop", cx);
+        fill(&form, |f| &f.host, "  ", cx);
+        assert_eq!(save(cx), "Host ist erforderlich.");
+        fill(&form, |f| &f.host, "db.local", cx);
+        fill(&form, |f| &f.username, "", cx);
+        assert_eq!(save(cx), "Benutzername ist erforderlich.");
+        fill(&form, |f| &f.username, "app", cx);
+        form.update(cx, |form, _| form.ssh_enabled = true);
+        assert_eq!(save(cx), "SSH-Host ist erforderlich.");
+        form.update_in(cx, |form, window, cx| form.test(window, cx));
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        assert!(toasts.iter().any(|(_, text)| text == "SSH-Host ist erforderlich."), "{toasts:?}");
+
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Turso, window, cx));
+        fill(&form, |f| &f.url, "ftp://db.local", cx);
+        assert_eq!(save(cx), "Die Datenbank-URL muss mit libsql://, https://, http://, wss:// oder ws:// beginnen.");
+        assert!(saved.borrow().is_empty());
     }
 
     #[gpui_kit::test]

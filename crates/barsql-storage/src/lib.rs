@@ -10,6 +10,7 @@ use std::path::Path;
 
 pub use connections::{ConnectionFolder, ConnectionStore, ConnectionsFile, DEFAULT_COLOR, load_connections};
 pub use history::{HISTORY_LIMIT, HistoryStore};
+pub(crate) use json_file::update;
 pub use json_file::{load_json_file, save_json_file, write_file_atomic};
 pub use saved_queries::SavedQueriesStore;
 pub use session::{EditorSession, EditorTab, SessionStore, TableViewRef};
@@ -33,4 +34,12 @@ impl Stores {
             settings: SettingsStore::open(data_dir)?,
         })
     }
+}
+
+// A directory where the store's file goes, so every write fails at the rename, even for root.
+#[cfg(test)]
+pub(crate) fn block_writes(data_dir: &Path, file: &str) {
+    let path = data_dir.join(file);
+    let _ = std::fs::remove_file(&path);
+    std::fs::create_dir(&path).unwrap();
 }

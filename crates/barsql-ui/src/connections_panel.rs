@@ -207,24 +207,32 @@ impl ConnectionsPanel {
             danger: true,
         };
         let this = cx.entity().downgrade();
-        dialogs::confirm(confirm, window, cx, move |_, cx| {
-            let bar = state::bar(cx);
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
             let id = connection.id.clone();
-            let task = state::spawn(cx, async move { bar.delete_connection(&id).await });
-            let (this, id) = (this.clone(), connection.id.clone());
-            cx.spawn(async move |cx| {
-                task.await;
-                let _ = this.update(cx, |_, cx| {
-                    schema::forget(&id, cx);
-                    cx.emit(ConnectionsEvent::Changed);
-                });
-            })
-            .detach();
+            let _ = this.update(cx, |panel, cx| panel.delete_confirmed(id, window, cx));
         });
     }
 
-    // Dropping on a connection moves the dragged one to its index.
-    fn reorder(&mut self, from_id: &str, to_id: &str, cx: &mut Context<Self>) {
+    // Disconnects even when the store can't drop the connection, so the schema goes either way.
+    fn delete_confirmed(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let bar = state::bar(cx);
+        let target = id.clone();
+        let task = state::spawn(cx, async move { bar.delete_connection(&target).await });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |_, window, cx| {
+                if let Some(Err(error)) = result {
+                    failed(error.message, "errors.deleteConnectionFailed", window, cx);
+                }
+                schema::forget(&id, cx);
+                cx.emit(ConnectionsEvent::Changed);
+            });
+        })
+        .detach();
+    }
+
+    // Dropping on a connection moves the dragged one to its index. A failed save puts the old order back.
+    fn reorder(&mut self, from_id: &str, to_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let from = self.connections.iter().position(|c| c.id == from_id);
         let to = self.connections.iter().position(|c| c.id == to_id);
         let (Some(from), Some(to)) = (from, to) else { return };
@@ -234,7 +242,9 @@ impl ConnectionsPanel {
         let moved = self.connections.remove(from);
         self.connections.insert(to, moved);
         let ordered: Vec<String> = self.connections.iter().map(|c| c.id.clone()).collect();
-        state::bar(cx).reorder_connections(&ordered);
+        if let Err(error) = state::bar(cx).reorder_connections(&ordered) {
+            failed(error.message, "errors.reorderConnectionsFailed", window, cx);
+        }
         cx.emit(ConnectionsEvent::Changed);
         cx.notify();
     }
@@ -274,8 +284,10 @@ impl ConnectionsPanel {
             confirm: t(cx, "common.create"),
         };
         let this = cx.entity().downgrade();
-        dialogs::prompt(prompt, window, cx, move |name, _, cx| {
-            state::bar(cx).save_folder(ConnectionFolder { id: String::new(), name });
+        dialogs::prompt(prompt, window, cx, move |name, window, cx| {
+            if let Err(error) = state::bar(cx).save_folder(ConnectionFolder { id: String::new(), name }) {
+                return failed(error.message, "errors.saveFolderFailed", window, cx);
+            }
             let _ = this.update(cx, |_, cx| cx.emit(ConnectionsEvent::Changed));
         });
     }
@@ -290,11 +302,14 @@ impl ConnectionsPanel {
             confirm: t(cx, "common.save"),
         };
         let this = cx.entity().downgrade();
-        dialogs::prompt(prompt, window, cx, move |name, _, cx| {
-            if name != folder.name {
-                state::bar(cx).save_folder(ConnectionFolder { id: folder.id.clone(), name });
-                let _ = this.update(cx, |_, cx| cx.emit(ConnectionsEvent::Changed));
+        dialogs::prompt(prompt, window, cx, move |name, window, cx| {
+            if name == folder.name {
+                return;
             }
+            if let Err(error) = state::bar(cx).save_folder(ConnectionFolder { id: folder.id.clone(), name }) {
+                return failed(error.message, "errors.saveFolderFailed", window, cx);
+            }
+            let _ = this.update(cx, |_, cx| cx.emit(ConnectionsEvent::Changed));
         });
     }
 
@@ -307,8 +322,10 @@ impl ConnectionsPanel {
             danger: true,
         };
         let this = cx.entity().downgrade();
-        dialogs::confirm(confirm, window, cx, move |_, cx| {
-            state::bar(cx).delete_folder(&folder.id);
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            if let Err(error) = state::bar(cx).delete_folder(&folder.id) {
+                return failed(error.message, "errors.deleteFolderFailed", window, cx);
+            }
             let _ = this.update(cx, |_, cx| cx.emit(ConnectionsEvent::Changed));
         });
     }
@@ -536,7 +553,7 @@ impl ConnectionsPanel {
             .drag_over::<ConnectionDrag>(|style, _, _, cx| drop_ring(style, cx))
             .on_drop(cx.listener({
                 let target = connection.id.clone();
-                move |this, drag: &ConnectionDrag, _, cx| this.reorder(&drag.id, &target, cx)
+                move |this, drag: &ConnectionDrag, window, cx| this.reorder(&drag.id, &target, window, cx)
             }))
             .context_menu(menu)
             .into_any_element()
@@ -688,15 +705,17 @@ mod tests {
 
     use barsql_app::ConnectionFolder;
     use barsql_core::{ConnectionConfig, DriverType};
-    use gpui_kit::TestAppContext;
+    use gpui_kit::component::WindowExt;
+    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
     use super::{ConnectionsEvent, ConnectionsPanel, connection_subtitle, parse_color};
-    use crate::test_support::{Env, settle};
+    use crate::dialogs::Alerted;
+    use crate::test_support::{Env, chord, in_root, settle};
 
     #[gpui_kit::test]
     fn connections_drag_into_order_and_folders(cx: &mut TestAppContext) {
         let env = Env::new(cx);
-        let folder = env.bar.save_folder(ConnectionFolder { id: String::new(), name: "Prod".into() });
+        let folder = env.bar.save_folder(ConnectionFolder { id: String::new(), name: "Prod".into() }).unwrap();
         let save = |name: &str| {
             let config = ConnectionConfig {
                 name: name.into(),
@@ -739,7 +758,7 @@ mod tests {
     #[gpui_kit::test]
     fn moving_connecting_and_disconnecting_report_back(cx: &mut TestAppContext) {
         let env = Env::new(cx);
-        let folder = env.bar.save_folder(ConnectionFolder { id: String::new(), name: "Prod".into() });
+        let folder = env.bar.save_folder(ConnectionFolder { id: String::new(), name: "Prod".into() }).unwrap();
         let (panel, cx) = cx.add_window_view(|_, cx| ConnectionsPanel::new(cx));
         let (connections, folders) = (env.bar.list_connections(), env.bar.list_folders());
         panel.update(cx, |panel, cx| panel.set_state(connections, folders, None, cx));
@@ -768,6 +787,63 @@ mod tests {
         assert!(env.bar.is_connected(&id));
         panel.update(cx, |panel, cx| panel.disconnect(id.clone(), cx));
         settle(cx, |_| !env.bar.is_connected(&id));
+    }
+
+    fn open_in_root<'a>(
+        env: &Env,
+        cx: &'a mut TestAppContext,
+    ) -> (Entity<ConnectionsPanel>, &'a mut VisualTestContext) {
+        let (panel, cx) = in_root(cx, |_, cx| ConnectionsPanel::new(cx));
+        let (connections, folders) = (env.bar.list_connections(), env.bar.list_folders());
+        panel.update(cx, |panel, cx| panel.set_state(connections, folders, None, cx));
+        (panel, cx)
+    }
+
+    fn alerted(cx: &mut VisualTestContext) -> String {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.close_all_dialogs(cx);
+            let title = cx.try_global::<Alerted>().map(|alert| alert.0.to_string()).unwrap_or_default();
+            cx.set_global(Alerted("".into(), "".into()));
+            title
+        })
+    }
+
+    // Typed into the dialog's field, which takes focus once the dialog has been drawn.
+    fn answer(cx: &mut VisualTestContext, keys: &str) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes(keys);
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn changes_the_store_cannot_save_say_so(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let prod = env.bar.save_folder(ConnectionFolder { id: String::new(), name: "Prod".into() }).unwrap();
+        let config = ConnectionConfig { id: String::new(), name: "B".into(), ..env.connection.clone() };
+        let b = env.runtime.block_on(env.bar.save_connection(config)).unwrap();
+        let a = env.connection.id.clone();
+        let (panel, cx) = open_in_root(&env, cx);
+        env.block_writes("connections.json");
+        let state = || {
+            let ids = env.bar.list_connections().into_iter().map(|c| c.id).collect::<Vec<_>>();
+            (ids, env.bar.list_folders())
+        };
+        let before = state();
+
+        panel.update_in(cx, |panel, window, cx| panel.reorder(&b.id, &a, window, cx));
+        assert_eq!(alerted(cx), "Could not save the connection order");
+        panel.update_in(cx, |panel, window, cx| panel.create_folder(window, cx));
+        answer(cx, "D e v enter");
+        assert_eq!(alerted(cx), "Could not save folder");
+        panel.update_in(cx, |panel, window, cx| panel.rename_folder(prod.clone(), window, cx));
+        answer(cx, &chord("mod-a N e w enter"));
+        assert_eq!(alerted(cx), "Could not save folder");
+        panel.update_in(cx, |panel, window, cx| panel.delete_folder(prod.clone(), window, cx));
+        answer(cx, "enter");
+        assert_eq!(alerted(cx), "Could not delete folder");
+        assert_eq!(state(), before);
     }
 
     #[test]

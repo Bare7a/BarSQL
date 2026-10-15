@@ -28,6 +28,15 @@ pub fn save_json_file<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::Resu
     write_file_atomic(path, &data)
 }
 
+// Changes a copy and keeps it only once it's on disk, so a failed write leaves the store as the file is.
+pub(crate) fn update<T: Serialize + Clone>(path: &Path, state: &mut T, change: impl FnOnce(&mut T)) -> io::Result<()> {
+    let mut next = state.clone();
+    change(&mut next);
+    save_json_file(path, &next)?;
+    *state = next;
+    Ok(())
+}
+
 // Write-then-rename, so a crash mid-write never leaves a truncated file.
 pub fn write_file_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));

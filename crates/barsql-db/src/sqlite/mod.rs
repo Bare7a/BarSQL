@@ -10,7 +10,7 @@ use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::{Connection, InterruptHandle, OpenFlags, ToSql, params_from_iter};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use crate::event::{ScriptEvent, Sink, StatementResult};
+use crate::event::{ScriptEvent, Sink, StatementResult, emit};
 use crate::lite::{LiteRef, LiteRows, LiteSource, LiteValue, values};
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
 use crate::{Cancel, ChunkBuilder, ColumnMeta};
@@ -142,21 +142,18 @@ impl SqliteSession {
         sink: &Sink,
         cancel: &Cancel,
     ) -> Result<usize, QueryError> {
-        self.hold().await;
         let result = script::run_script(self, statements, sink, cancel).await;
         self.release();
         result
     }
 
     pub async fn buffered(&mut self, sql: &str, cancel: &Cancel) -> Result<Buffered, QueryError> {
-        self.hold().await;
         let result = script::buffered(self, sql, cancel).await;
         self.release();
         result
     }
 
     pub async fn plan_rows(&mut self, strategy: &ExplainStrategy, cancel: &Cancel) -> Result<PlanRows, QueryError> {
-        self.hold().await;
         let result = script::plan_rows(self, strategy, cancel).await;
         self.release();
         result
@@ -216,6 +213,23 @@ impl StatementRunner for SqliteSession {
         sink: &Sink,
         cancel: &Cancel,
     ) -> StatementRun {
+        // Another session's transaction keeps the connection for as long as it lasts, so a cancel ends the wait.
+        tokio::select! {
+            biased;
+            () = self.hold() => {}
+            _ = cancel.cancelled() => {
+                let error = QueryError::cancelled();
+                let result = StatementResult {
+                    result_index: first_index,
+                    statement: stmt.into(),
+                    error: Some(error.clone()),
+                    ..Default::default()
+                };
+                emit(sink, ScriptEvent::Result(Box::new(result))).await;
+                return StatementRun { sets: 1, error: Some(error) };
+            }
+        }
+        // Only once the connection is this session's, since an interrupt stops whatever runs on it.
         let _server_cancel = cancel.on_server(self.engine.server_cancel());
         let stmt = stmt.to_string();
         let sink = sink.clone();
@@ -287,7 +301,7 @@ fn stream_statement(
     let mut rows = prepared.raw_query();
     let mut builder = ChunkBuilder::new(width, batch_rows.min(1024));
     let mut count = 0usize;
-    loop {
+    let failed = loop {
         match rows.next() {
             Ok(Some(row)) => {
                 for (i, time) in time_columns.iter().enumerate() {
@@ -303,12 +317,16 @@ fn stream_statement(
                     emit(ScriptEvent::Rows { result_index: index, chunk: Arc::new(full.finish()) });
                 }
             }
-            Ok(None) => break,
-            Err(err) => return fail(lite_error(&err), Some(summary_for_rows(&columns, count, started))),
+            Ok(None) => break None,
+            Err(err) => break Some(lite_error(&err)),
         }
-    }
+    };
+    // Rows that came before an error or a cancel still show, so the count matches the grid.
     if !builder.is_empty() {
         emit(ScriptEvent::Rows { result_index: index, chunk: Arc::new(builder.finish()) });
+    }
+    if let Some(error) = failed {
+        return fail(error, Some(summary_for_rows(&columns, count, started)));
     }
     emit(ScriptEvent::Result(Box::new(StatementResult {
         result_index: index,

@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 
 use jiff::civil::DateTime;
-use jiff::tz::{Offset, TimeZone};
+use jiff::tz::{AmbiguousOffset, Offset, TimeZone};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Timestamp {
@@ -16,10 +16,12 @@ pub(crate) struct Timestamp {
 }
 
 impl Timestamp {
+    fn civil(self) -> Option<DateTime> {
+        DateTime::new(self.year as i16, self.month, self.day, self.hour, self.minute, self.second, self.nanos).ok()
+    }
+
     pub(crate) fn in_zone(self, zone: &TimeZone) -> Option<(Timestamp, i32)> {
-        let civil =
-            DateTime::new(self.year as i16, self.month, self.day, self.hour, self.minute, self.second, self.nanos)
-                .ok()?;
+        let civil = self.civil()?;
         let instant = Offset::from_seconds(self.offset.unwrap_or(0)).ok()?.to_timestamp(civil).ok()?;
         let zoned = instant.to_zoned(zone.clone());
         let local = zoned.datetime();
@@ -34,6 +36,21 @@ impl Timestamp {
             offset: None,
         };
         Some((converted, zoned.offset().seconds()))
+    }
+
+    // The offset `zone` has at this wall-clock time, or the one before a clock change that repeats or skips it.
+    pub(crate) fn offset_in(self, zone: &TimeZone) -> i32 {
+        let Some(civil) = self.civil() else { return 0 };
+        match zone.to_ambiguous_timestamp(civil).offset() {
+            AmbiguousOffset::Unambiguous { offset } => offset,
+            AmbiguousOffset::Gap { before, .. } | AmbiguousOffset::Fold { before, .. } => before,
+        }
+        .seconds()
+    }
+
+    // False for a date with no such day, like MySQL's 0000-00-00 or 2024-02-30.
+    pub(crate) fn is_calendar_date(self) -> bool {
+        i16::try_from(self.year).is_ok_and(|year| jiff::civil::Date::new(year, self.month, self.day).is_ok())
     }
 
     pub(crate) fn push_rfc3339_nano(self, offset: i32, out: &mut String) {
@@ -103,7 +120,8 @@ pub(crate) fn parse_timestamp(text: &str) -> Option<Timestamp> {
     Some(ts)
 }
 
-fn parse_offset(raw: &str) -> Option<i32> {
+// "+05", "-03:30" or "+05:30:15" in seconds. `raw` must start with its sign.
+pub(crate) fn parse_offset(raw: &str) -> Option<i32> {
     let (sign, rest) = raw.split_at(1);
     let mut parts = rest.split(':');
     let hours: i32 = parts.next()?.parse().ok()?;

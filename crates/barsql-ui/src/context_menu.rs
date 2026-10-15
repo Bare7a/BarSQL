@@ -1,4 +1,3 @@
-use gpui_kit::component::Root;
 use gpui_kit::component::input::{Copy, Cut, EditorState, InputState, Paste, SelectAll};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::native_menu::NativeMenu;
@@ -79,9 +78,7 @@ fn text_entries(copyable: bool, editable: bool, cx: &App) -> Vec<Entry> {
 }
 
 fn overlay(window: &Window, cx: &App) -> Option<Entity<Overlay>> {
-    let root = window.root::<Root>()??;
-    let workspace = root.read(cx).view().clone().downcast::<Workspace>().ok()?;
-    Some(workspace.read(cx).context_menu())
+    Some(Workspace::in_window(window, cx)?.read(cx).context_menu())
 }
 
 pub struct Overlay {

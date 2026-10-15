@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use barsql_core::{ColumnInfo, ObjectKind, ObjectRef, TableInfo};
 use barsql_sql::split_statement_texts;
 
-use crate::harness::{E2e, unique_table};
+use crate::harness::{E2e, Kind, run, unique_table};
 
 fn by_name(columns: Vec<ColumnInfo>) -> HashMap<String, ColumnInfo> {
     columns.into_iter().map(|c| (c.name.clone(), c)).collect()
@@ -62,6 +62,20 @@ each_engine!(async fn views(e) {
     let found = tables.iter().find(|t| t.name == view).unwrap_or_else(|| panic!("{view} not in {:?}", table_names(&tables)));
     assert_eq!(found.kind, "view");
 });
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn turso_marks_only_the_rowid_alias_as_an_identity() {
+    run(Kind::Turso, |e| async move {
+        for (options, alias) in [("", true), (" WITHOUT ROWID", false)] {
+            let table = unique_table("rowid_key");
+            let ddl = format!("CREATE TABLE {} (id INTEGER PRIMARY KEY, v TEXT){options}", e.qualified(&table));
+            e.create_temp_table(&ddl, &table).await;
+            let columns = by_name(e.app.list_columns(&e.id, &e.schema(), &table).await.unwrap());
+            assert_eq!(columns["id"].is_identity, alias, "{ddl}");
+        }
+    })
+    .await
+}
 
 // None on SQLite, which has no routines.
 fn create_function_sql(e: &E2e, name: &str) -> Option<String> {

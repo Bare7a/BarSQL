@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use barsql_core::{DriverType, Row, Value};
 use barsql_db::{Cell, ResultSet};
+use barsql_io::sql_literal;
 use barsql_sql::lang::quoting::format_sql_identifier;
 use serde_json::Value as Json;
 
@@ -313,14 +314,12 @@ pub fn paste_cells(
 // Numeric-looking text stays quoted, since unquoting a text key like '007' would match another row.
 pub fn foreign_key_filter(column: &str, value: Cell<'_>, driver: &DriverType) -> String {
     let ident = format_sql_identifier(column, driver);
-    let literal = match value {
+    let value = match value {
         Cell::Null => return format!("{ident} IS NULL"),
-        Cell::Bool(true) => "TRUE".to_string(),
-        Cell::Bool(false) => "FALSE".to_string(),
-        Cell::Number(text) if !matches!(text, "NaN" | "Infinity" | "-Infinity") => text.to_string(),
-        Cell::Number(text) | Cell::Text(text) => format!("'{}'", text.replace('\'', "''")),
+        Cell::Number(text @ ("NaN" | "Infinity" | "-Infinity")) => Cell::Text(text),
+        value => value,
     };
-    format!("{ident} = {literal}")
+    format!("{ident} = {}", sql_literal(value, driver.dialect(), false))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -525,5 +524,27 @@ mod tests {
         assert_eq!(foreign_key_filter("order", Cell::Number("1"), &pg), "\"order\" = 1");
         assert_eq!(foreign_key_filter("order", Cell::Number("1"), &DriverType::MySql), "`order` = 1");
         assert_eq!(foreign_key_filter("user id", Cell::Number("1"), &DriverType::Sqlite), "\"user id\" = 1");
+        assert_eq!(foreign_key_filter("path", Cell::Text(r"C:\tmp"), &pg), r"path = E'C:\\tmp'");
+        assert_eq!(foreign_key_filter("path", Cell::Text(r"C:\tmp"), &DriverType::Sqlite), r"path = 'C:\tmp'");
+    }
+
+    #[test]
+    fn mysql_foreign_key_filters_read_backslashes_the_same_in_any_mode() {
+        let my = DriverType::MySql;
+        assert_eq!(foreign_key_filter("path", Cell::Text(r"C:\tmp"), &my), "path = _utf8mb4 X'433A5C746D70'");
+        assert_eq!(foreign_key_filter("name", Cell::Text("O'Brien"), &my), "name = 'O''Brien'");
+        assert_eq!(foreign_key_filter("flag", Cell::Bool(true), &my), "flag = TRUE");
+    }
+
+    #[test]
+    fn tsql_foreign_key_filters_compare_bits_with_numbers() {
+        let ms = DriverType::SqlServer;
+        assert_eq!(foreign_key_filter("flag", Cell::Bool(true), &ms), "flag = 1");
+        assert_eq!(foreign_key_filter("flag", Cell::Bool(false), &ms), "flag = 0");
+        assert_eq!(foreign_key_filter("name", Cell::Text("Zoë's"), &ms), "name = N'Zoë''s'");
+        assert_eq!(foreign_key_filter("code", Cell::Text("007"), &ms), "code = N'007'");
+        assert_eq!(foreign_key_filter("id", Cell::Number("7"), &ms), "id = 7");
+        assert_eq!(foreign_key_filter("id", Cell::Null, &ms), "id IS NULL");
+        assert_eq!(foreign_key_filter("user id", Cell::Number("7"), &ms), "[user id] = 7");
     }
 }

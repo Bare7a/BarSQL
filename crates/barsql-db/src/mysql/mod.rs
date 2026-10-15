@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use barsql_core::{ConnectionConfig, DriverType, MessageLevel, QueryError, ServerMessage, Value};
 use barsql_sql::{first_keyword, strip_leading_comments};
+use jiff::tz::{Offset, TimeZone};
+use mysql_async::consts::StatusFlags;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, Row, SslOpts, Value as MyValue};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -14,6 +16,7 @@ use crate::event::{MAX_MESSAGES, ScriptEvent, Sink, StatementResult, emit};
 use crate::postgres::port_or;
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
 use crate::ssh::{Forward, SshOptions, TunnelSlot};
+use crate::temporal::parse_offset;
 use crate::tls::TlsMode;
 use crate::{Cancel, ChunkBuilder, ColumnMeta};
 
@@ -22,6 +25,8 @@ pub use values::{Decoder, type_name};
 
 const MAX_CONNECTIONS: usize = 10;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+// Sessions start in UTC, as dumps do, whatever the server's zone. NOW() and TIMESTAMP literals follow it too.
+const SESSION_SETUP: &str = "SET time_zone = '+00:00'";
 
 #[derive(Debug, Clone)]
 pub struct MyConnectOptions {
@@ -93,6 +98,8 @@ impl MyEngine {
             .prefer_socket(false)
             .ssl_opts(ssl)
             .pool_opts(pool_opts)
+            // Runs again each time the pool resets a connection.
+            .setup(vec![SESSION_SETUP])
             .into();
         let pool = Pool::new(opts.clone());
         let engine = Arc::new(Self {
@@ -120,8 +127,7 @@ impl MyEngine {
     }
 
     pub(crate) async fn lease(self: &Arc<Self>) -> Result<MyLease, QueryError> {
-        let permit =
-            self.permits.clone().acquire_owned().await.map_err(|_| QueryError::message("connection is closed"))?;
+        let permit = crate::pool::acquire(&self.permits, MAX_CONNECTIONS, crate::pool::LEASE_TIMEOUT).await?;
         let conn = self.get_conn().await?;
         Ok(MyLease { conn, _permit: permit })
     }
@@ -129,7 +135,14 @@ impl MyEngine {
     pub async fn session(self: &Arc<Self>) -> Result<MySession, QueryError> {
         let lease = self.lease().await?;
         let id = lease.conn.id();
-        Ok(MySession { lease, id, engine: self.clone(), in_transaction: false, reporting: false })
+        Ok(MySession {
+            lease,
+            id,
+            engine: self.clone(),
+            in_transaction: false,
+            reporting: false,
+            time_zone: TimeZone::UTC,
+        })
     }
 
     pub async fn close(&self) {
@@ -172,6 +185,7 @@ pub struct MySession {
     engine: Arc<MyEngine>,
     in_transaction: bool,
     reporting: bool,
+    time_zone: TimeZone,
 }
 
 impl MySession {
@@ -179,12 +193,15 @@ impl MySession {
         self.id
     }
 
+    // The driver drops the connection on an I/O error. MySQL's notice that it closed an idle one arrives out of
+    // turn, which counts as one.
     pub fn is_broken(&self) -> bool {
-        false
+        self.lease.conn.is_disconnected()
     }
 
+    // The server rolls back what a closed connection had open.
     pub fn in_transaction(&self) -> bool {
-        self.in_transaction
+        self.in_transaction && !self.is_broken()
     }
 
     pub fn read_only(&self) -> bool {
@@ -211,13 +228,18 @@ impl MySession {
     }
 
     pub async fn commit(&mut self) -> Result<(), QueryError> {
-        self.in_transaction = false;
-        self.lease.conn.query_drop("COMMIT").await.map_err(my_error)
+        self.end_transaction("COMMIT").await
     }
 
     pub async fn rollback(&mut self) -> Result<(), QueryError> {
-        self.in_transaction = false;
-        self.lease.conn.query_drop("ROLLBACK").await.map_err(my_error)
+        self.end_transaction("ROLLBACK").await
+    }
+
+    // A refused COMMIT may end the transaction (read-only server) or not (XA), so the status flags decide.
+    async fn end_transaction(&mut self, sql: &str) -> Result<(), QueryError> {
+        let result = self.lease.conn.query_drop(sql).await.map_err(my_error);
+        self.sync_transaction().await;
+        result
     }
 
     pub async fn execute_params(&mut self, sql: &str, params: &[Value]) -> Result<u64, QueryError> {
@@ -230,20 +252,47 @@ impl MySession {
         &mut self.lease.conn
     }
 
-    // Implicit-commit statements like DDL end the transaction too.
-    fn track_transaction(&mut self, stmt: &str) {
-        let keyword = first_keyword(strip_leading_comments(stmt));
-        let upper = keyword.as_str();
-        let rest = barsql_sql::to_upper(strip_leading_comments(stmt));
-        match upper {
-            "BEGIN" | "START" => self.in_transaction = true,
-            "COMMIT" => self.in_transaction = false,
-            "ROLLBACK" if !rest.contains(" TO ") => self.in_transaction = false,
-            "CREATE" | "ALTER" | "DROP" | "TRUNCATE" | "RENAME" | "LOCK" | "UNLOCK" | "GRANT" | "REVOKE" => {
-                self.in_transaction = false
-            }
-            _ => {}
+    pub(crate) fn time_zone(&self) -> &TimeZone {
+        &self.time_zone
+    }
+
+    // The status flags track every way a transaction opens or ends, like XA, AND CHAIN, DDL or a deadlock. An error
+    // carries none and clears the driver's, so a ping fetches them.
+    async fn sync_transaction(&mut self) {
+        if self.lease.conn.last_ok_packet().is_none() && !self.is_broken() {
+            let _ = self.lease.conn.ping().await;
         }
+        self.in_transaction = self
+            .lease
+            .conn
+            .last_ok_packet()
+            .is_some_and(|ok| ok.status_flags().contains(StatusFlags::SERVER_STATUS_IN_TRANS));
+    }
+
+    async fn read_time_zone(&mut self) {
+        if let Ok(Some(name)) = self.lease.conn.query_first::<String, _>("SELECT @@session.time_zone").await {
+            self.time_zone = parse_time_zone(&name);
+        }
+    }
+}
+
+// SET time_zone, and code CALL or EXECUTE runs, can change the zone TIMESTAMPs come back in. Naming time_zone covers
+// every form of SET and MariaDB's compound statements. Queries and writes can't set it, so they skip the scan.
+fn may_set_time_zone(stmt: &str) -> bool {
+    match first_keyword(strip_leading_comments(stmt)).as_str() {
+        "CALL" | "EXECUTE" => true,
+        "SELECT" | "WITH" | "TABLE" | "VALUES" | "INSERT" | "REPLACE" | "UPDATE" | "DELETE" | "LOAD" => false,
+        _ => stmt.as_bytes().windows(9).any(|word| word.eq_ignore_ascii_case(b"time_zone")),
+    }
+}
+
+// @@time_zone is an offset like +05:00, a name from the server's time zone tables, or SYSTEM, the server OS's zone.
+// That one, and a name jiff doesn't know, give UTC.
+fn parse_time_zone(name: &str) -> TimeZone {
+    let offset = name.starts_with(['+', '-']).then(|| parse_offset(name)).flatten();
+    match offset.and_then(|seconds| Offset::from_seconds(seconds).ok()) {
+        Some(offset) => TimeZone::fixed(offset),
+        None => TimeZone::get(name).unwrap_or(TimeZone::UTC),
     }
 }
 
@@ -264,10 +313,15 @@ impl StatementRunner for MySession {
         sink: &Sink,
         cancel: &Cancel,
     ) -> StatementRun {
-        let _server_cancel = cancel.on_server(self.engine.server_cancel(self.id));
-        let run = stream_query(&mut self.lease.conn, stmt, first_index, batch_rows, self.reporting, sink, cancel).await;
-        if run.error.is_none() {
-            self.track_transaction(stmt);
+        let run = {
+            // Only while the statement runs, so a late cancel can't kill the queries after it.
+            let _server_cancel = cancel.on_server(self.engine.server_cancel(self.id));
+            let conn = &mut self.lease.conn;
+            stream_query(conn, stmt, first_index, batch_rows, self.reporting, &self.time_zone, sink, cancel).await
+        };
+        self.sync_transaction().await;
+        if may_set_time_zone(stmt) && !self.is_broken() {
+            self.read_time_zone().await;
         }
         run
     }
@@ -275,12 +329,14 @@ impl StatementRunner for MySession {
 
 // With `reporting`, a result's info line (like "Rows matched: 1  Changed: 1  Warnings: 0") comes before it as a
 // message, and the statement's warnings and notes after its last result.
+#[allow(clippy::too_many_arguments)]
 async fn stream_query(
     conn: &mut Conn,
     stmt: &str,
     first_index: usize,
     batch_rows: usize,
     reporting: bool,
+    zone: &TimeZone,
     sink: &Sink,
     cancel: &Cancel,
 ) -> StatementRun {
@@ -343,10 +399,10 @@ async fn stream_query(
             emit(sink, ScriptEvent::Meta { result_index: index, columns: meta.clone() }).await;
             let mut builder = ChunkBuilder::new(meta.len(), batch_rows.min(1024));
             let mut rows = 0usize;
-            loop {
+            let failed = loop {
                 match result.next().await {
                     Ok(Some(row)) => {
-                        push_text_row(&row, &decoders, &mut builder);
+                        push_text_row(&row, &decoders, zone, &mut builder);
                         rows += 1;
                         if builder.rows() >= batch_rows {
                             let full =
@@ -354,38 +410,31 @@ async fn stream_query(
                             emit(sink, ScriptEvent::Rows { result_index: index, chunk: Arc::new(full.finish()) }).await;
                         }
                     }
-                    Ok(None) => break,
-                    Err(err) => {
-                        let error = mark_cancelled(my_error(err), cancel);
-                        emit(
-                            sink,
-                            ScriptEvent::Result(Box::new(StatementResult {
-                                result_index: index,
-                                statement: stmt.into(),
-                                summary: Some(summary_for_rows(&meta, rows, started)),
-                                error: Some(error.clone()),
-                                ..Default::default()
-                            })),
-                        )
-                        .await;
-                        return StatementRun { sets: index - first_index + 1, error: Some(error) };
-                    }
+                    Ok(None) => break None,
+                    Err(err) => break Some(mark_cancelled(my_error(err), cancel)),
                 }
-            }
+            };
+            // Rows that came before an error or a cancel still show, so the count matches the grid.
             if !builder.is_empty() {
                 emit(sink, ScriptEvent::Rows { result_index: index, chunk: Arc::new(builder.finish()) }).await;
             }
-            warnings = result.warnings().saturating_add(warnings);
+            if failed.is_none() {
+                warnings = result.warnings().saturating_add(warnings);
+            }
             emit(
                 sink,
                 ScriptEvent::Result(Box::new(StatementResult {
                     result_index: index,
                     statement: stmt.into(),
                     summary: Some(summary_for_rows(&meta, rows, started)),
+                    error: failed.clone(),
                     ..Default::default()
                 })),
             )
             .await;
+            if let Some(error) = failed {
+                return StatementRun { sets: index - first_index + 1, error: Some(error) };
+            }
         }
         index += 1;
         if result.is_empty() {
@@ -415,12 +464,12 @@ async fn show_warnings(conn: &mut Conn) -> Vec<ServerMessage> {
         .collect()
 }
 
-fn push_text_row(row: &Row, decoders: &[Decoder], builder: &mut ChunkBuilder) {
+fn push_text_row(row: &Row, decoders: &[Decoder], zone: &TimeZone, builder: &mut ChunkBuilder) {
     for (i, decoder) in decoders.iter().enumerate() {
         match row.as_ref(i) {
-            Some(MyValue::Bytes(bytes)) => decoder.push(bytes, builder),
+            Some(MyValue::Bytes(bytes)) => decoder.push(bytes, zone, builder),
             Some(MyValue::NULL) | None => builder.push_null(),
-            Some(other) => values::push_binary(other, decoder, builder),
+            Some(other) => values::push_binary(other, decoder, zone, builder),
         }
     }
     builder.end_row();
@@ -492,5 +541,43 @@ mod tests {
         assert_eq!(full.tls_hostname_override(), Some("db.example.com"));
         assert!(mysql_ssl_opts("disable", "db.example.com").is_none());
         assert!(mysql_ssl_opts("", "db.example.com").is_none());
+    }
+
+    #[test]
+    fn set_call_and_execute_may_change_the_time_zone() {
+        for stmt in [
+            "SET time_zone = '+05:00'",
+            "set @@SESSION.Time_Zone = 'UTC'",
+            "SET autocommit = 0, time_zone = 'Europe/Sofia'",
+            "/* zone */ CALL barsql.set_zone()",
+            "execute set_zone",
+            "BEGIN NOT ATOMIC SET time_zone = '+01:00'; END",
+        ] {
+            assert!(may_set_time_zone(stmt), "{stmt}");
+        }
+        for stmt in [
+            "SELECT 1",
+            "SET @zone = '+05:00'",
+            "BEGIN",
+            "INSERT INTO users (id, time_zone) VALUES (1, 'UTC')",
+            "SELECT time_zone FROM users",
+        ] {
+            assert!(!may_set_time_zone(stmt), "{stmt}");
+        }
+    }
+
+    #[test]
+    fn time_zones_are_offsets_or_names() {
+        // 2024-02-29T13:45:30Z, in winter.
+        let instant = jiff::Timestamp::from_second(1_709_214_330).unwrap();
+        let offset = |name: &str| parse_time_zone(name).to_offset(instant).seconds();
+        assert_eq!(offset("+05:00"), 5 * 3600);
+        assert_eq!(offset("-03:30"), -(3 * 3600 + 1800));
+        assert_eq!(offset("+00:00"), 0);
+        assert_eq!(offset("Europe/Sofia"), 2 * 3600);
+        assert_eq!(offset("europe/sofia"), 2 * 3600);
+        assert_eq!(offset("UTC"), 0);
+        assert_eq!(offset("SYSTEM"), 0);
+        assert_eq!(offset("Mars/Olympus_Mons"), 0);
     }
 }

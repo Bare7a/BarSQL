@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::time::Duration;
+
 use barsql_core::{ConnectionConfig, Value};
 use gpui_kit::component::scroll::ScrollbarMode;
 use gpui_kit::component::{Root, Theme};
@@ -6,19 +9,25 @@ use gpui_kit::{
     ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px,
 };
 
+use crate::dialogs::{Alerted, Asked};
 use crate::grid::Grid;
 use crate::plan_view::PlanView;
 use crate::query_tab::QueryTab;
 use crate::results::{ResultStatus, ResultsPanel, ShownError};
 use crate::sidebar::Sidebar;
-use crate::test_support::{Env, settle};
+use crate::test_support::{Env, chord, settle};
+use crate::toast::{self, ToastKind};
 use crate::workspace::Workspace;
+
+// Each step of the cleanup waits at most this long, so a lock or an unreachable server can't hang the run.
+const DROP_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct Driver<'a> {
     pub env: Env,
     pub connection: ConnectionConfig,
     pub workspace: Entity<Workspace>,
     pub cx: &'a mut VisualTestContext,
+    drops: RefCell<Vec<String>>,
 }
 
 pub fn open(cx: &mut TestAppContext) -> Driver<'_> {
@@ -37,7 +46,7 @@ pub fn open_with(cx: &mut TestAppContext, connection: impl FnOnce(&Env) -> Conne
     });
     let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
     cx.run_until_parked();
-    Driver { env, connection, workspace: workspace.unwrap(), cx }
+    Driver { env, connection, workspace: workspace.unwrap(), cx, drops: RefCell::default() }
 }
 
 // debug_bounds wants a &'static str, so run-time selectors are leaked. Fine for tests.
@@ -45,12 +54,13 @@ pub fn selector(text: String) -> &'static str {
     Box::leak(text.into_boxed_str())
 }
 
-// "mod" means the platform's command key, as in the default shortcuts.
-pub fn chord(keys: &str) -> String {
-    keys.replace("mod-", if cfg!(target_os = "macos") { "cmd-" } else { "ctrl-" })
-}
-
 impl Driver<'_> {
+    // Runs `sql` on the scenario's connection when it ends, passed or failed, newest first.
+    #[cfg(feature = "e2e")]
+    pub fn defer(&self, sql: impl Into<String>) {
+        self.drops.borrow_mut().push(sql.into());
+    }
+
     pub fn seed(&self, sql: &str) {
         for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
             self.env.runtime.block_on(self.env.bar.execute_query(&self.connection.id, statement)).unwrap();
@@ -217,6 +227,15 @@ impl Driver<'_> {
         self.click("confirm-ok");
     }
 
+    // The window's close button. Returns whether the window may close.
+    pub fn close_window(&mut self) -> bool {
+        let was_open = self.dialog_open();
+        let closes = self.cx.simulate_close();
+        self.cx.run_until_parked();
+        self.after_dialogs(was_open);
+        closes
+    }
+
     pub fn dialog_open(&mut self) -> bool {
         self.cx.update(gpui_kit::component::WindowExt::has_active_dialog)
     }
@@ -318,6 +337,24 @@ impl Driver<'_> {
         self.cx.update(|_, cx| results.read(cx).active_error())
     }
 
+    // The last confirmation's title and detail.
+    pub fn asked(&mut self) -> (String, Option<String>) {
+        self.cx.update(|_, cx| {
+            let Asked(title, detail) = cx.global::<Asked>();
+            (title.to_string(), detail.as_ref().map(ToString::to_string))
+        })
+    }
+
+    // The last alert's title and message.
+    pub fn alerted(&mut self) -> Option<(String, String)> {
+        self.cx.update(|_, cx| cx.try_global::<Alerted>().map(|alert| (alert.0.to_string(), alert.1.to_string())))
+    }
+
+    pub fn error_toasts(&mut self) -> Vec<String> {
+        let toasts = self.cx.update(|_, cx| toast::messages(cx));
+        toasts.into_iter().filter(|(kind, _)| *kind == ToastKind::Error).map(|(_, text)| text).collect()
+    }
+
     pub fn grid(&mut self) -> Option<Entity<Grid>> {
         let results = self.results();
         self.cx.update(|_, cx| results.read(cx).active_grid())
@@ -417,5 +454,30 @@ impl Driver<'_> {
         self.cx.update(|window, cx| window.draw(cx).clear(cx));
         self.keys(&format!("{}enter", "down ".repeat(downs + 1)));
         self.pause();
+    }
+}
+
+// The app shuts down first, so a tab's open transaction can't hold a lock a drop needs. The drops then go through a
+// connection of their own and never panic, since a failed scenario is still unwinding.
+impl Drop for Driver<'_> {
+    fn drop(&mut self) {
+        let drops = self.drops.take();
+        if drops.is_empty() {
+            return;
+        }
+        let (bar, connection) = (&self.env.bar, &self.connection);
+        self.env.runtime.block_on(async {
+            bar.shutdown().await;
+            let Ok(Ok(engine)) = tokio::time::timeout(DROP_TIMEOUT, barsql_db::Engine::connect(connection)).await
+            else {
+                return;
+            };
+            if let Ok(Ok(mut session)) = tokio::time::timeout(DROP_TIMEOUT, engine.session()).await {
+                for sql in drops.iter().rev() {
+                    let _ = tokio::time::timeout(DROP_TIMEOUT, session.buffered(sql, &barsql_db::Cancel::new())).await;
+                }
+            }
+            engine.close().await;
+        });
     }
 }

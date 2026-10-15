@@ -1,9 +1,20 @@
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Duration;
+
+use barsql_app::update::{Asset, Release, Staged};
 use barsql_core::{ConnectionConfig, Value};
 use barsql_io::ExportFormat;
-use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
+use gpui_kit::{Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
 
 use super::driver::{Driver, open, open_with};
+use crate::actions::{PrevTab, Quit};
+use crate::dialogs::Asked;
+use crate::query_tab::TxnState;
 use crate::results::ResultStatus;
+use crate::update_dialog::{self, UpdateDialog, UpdateState};
+use crate::workspace::QuitRequests;
 
 #[gpui_kit::test]
 fn a_simple_query_shows_its_row(cx: &mut TestAppContext) {
@@ -376,6 +387,33 @@ fn a_tab_closes_from_its_close_button(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn open_tabs_that_cannot_be_saved_say_so_once(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("");
+    // Typing saves after a second's pause, and opening a tab saves at once.
+    let edit = |app: &mut Driver, text: &str| {
+        app.type_text(text);
+        app.cx.executor().advance_clock(Duration::from_secs(1));
+        app.cx.run_until_parked();
+    };
+    app.env.block_writes("editor_session.json");
+    edit(&mut app, "1");
+    let shown = app.error_toasts();
+    assert!(shown.len() == 1 && shown[0].starts_with("Open tabs could not be saved"), "{shown:?}");
+    edit(&mut app, "2");
+    app.click("new-tab");
+    assert_eq!(app.error_toasts().len(), 1, "once while saving keeps failing");
+    app.env.unblock_writes("editor_session.json");
+    edit(&mut app, "3");
+    let saved: Vec<String> = app.env.bar.editor_session().tabs.into_iter().map(|tab| tab.sql).collect();
+    assert_eq!(saved, ["12", "3"], "the next change saves what failed before");
+    app.env.block_writes("editor_session.json");
+    app.click("new-tab");
+    assert_eq!(app.error_toasts().len(), 2, "again once a save got through in between");
+}
+
+#[gpui_kit::test]
 fn the_toolbar_rolls_back_and_commits(cx: &mut TestAppContext) {
     let mut app = open(cx);
     let tab = app.connect();
@@ -402,6 +440,224 @@ fn the_toolbar_rolls_back_and_commits(cx: &mut TestAppContext) {
     in_txn(&mut app, false);
     app.run("SELECT COUNT(*) FROM e2e_txn;");
     assert_eq!(app.cell(0, 0).as_deref(), Some("1"));
+}
+
+fn txn(app: &mut Driver) -> TxnState {
+    let tab = app.tab();
+    app.cx.update(|_, cx| tab.read(cx).txn_state())
+}
+
+// SQLite has one connection, which an open transaction holds, so the table is read only once it has ended.
+#[gpui_kit::test]
+fn a_batch_that_begins_or_commits_moves_the_transaction_badge(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("BEGIN; DELETE FROM things WHERE id > 10;");
+    assert_eq!(txn(&mut app), TxnState::Active);
+    assert!(app.shown("commit-txn") && !app.shown("begin-txn"), "the badge, with Commit and Rollback");
+    app.run("DELETE FROM things WHERE id > 5; COMMIT;");
+    assert_eq!(txn(&mut app), TxnState::Idle);
+    assert!(app.shown("begin-txn") && !app.shown("commit-txn"));
+    assert_eq!(app.query("SELECT count(*) FROM things")[0][0], Value::Int(5));
+
+    app.run("BEGIN; INSERT INTO nope VALUES (1);");
+    assert_eq!(txn(&mut app), TxnState::Error, "the statement after BEGIN failed");
+    app.click("rollback-txn");
+    let tab = app.tab();
+    app.settle(|cx| cx.update(|_, cx| tab.read(cx).txn_state() == TxnState::Idle));
+}
+
+// A deferred foreign key fails the COMMIT, and SQLite keeps the transaction open, so Begin would fail.
+#[gpui_kit::test]
+fn a_failed_commit_keeps_the_transaction_badge(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    let tab = app.connect();
+    app.seed(
+        "CREATE TABLE parents (id INTEGER PRIMARY KEY);
+         CREATE TABLE children (parent INTEGER REFERENCES parents (id) DEFERRABLE INITIALLY DEFERRED)",
+    );
+    app.click("begin-txn");
+    app.settle(|cx| cx.update(|_, cx| tab.read(cx).in_transaction()));
+    app.run("INSERT INTO children VALUES (42);");
+    app.click("commit-txn");
+    app.settle(|cx| cx.update(|_, cx| tab.read(cx).status(cx).error));
+    assert_eq!(txn(&mut app), TxnState::Active);
+    assert!(app.shown("commit-txn") && !app.shown("begin-txn"));
+    app.click("rollback-txn");
+    app.settle(|cx| cx.update(|_, cx| !tab.read(cx).in_transaction()));
+    assert_eq!(app.query("SELECT count(*) FROM children")[0][0], Value::Int(0));
+}
+
+#[gpui_kit::test]
+fn closing_a_tab_with_an_open_transaction_asks_first(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("BEGIN; DELETE FROM things WHERE id > 10;");
+    app.keys("mod-w");
+    assert!(app.dialog_open(), "asks before rolling back");
+    app.keys("escape");
+    assert_eq!(app.titles().len(), 1);
+    assert_eq!(txn(&mut app), TxnState::Active);
+
+    app.keys("mod-t");
+    // Close, Close others, Close to the right, then Close all.
+    app.context_menu("editor-tab-0", 3);
+    assert!(app.dialog_open(), "closing several tabs asks too");
+    app.keys("escape");
+    assert_eq!(app.titles().len(), 2);
+    app.context_menu("editor-tab-0", 3);
+    app.confirm_dialog();
+    assert!(app.titles().is_empty());
+    assert_eq!(app.query("SELECT count(*) FROM things")[0][0], Value::Int(3000), "rolled back");
+}
+
+fn quits(app: &mut Driver) -> usize {
+    app.cx.update(|_, cx| cx.try_global::<QuitRequests>().map_or(0, |quits| quits.0))
+}
+
+#[gpui_kit::test]
+fn quitting_with_an_open_transaction_asks_first(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    let tab = app.connect();
+    // The close button quits on macOS, and elsewhere the window closes, which quits.
+    app.dispatch(Quit);
+    let closes = app.close_window();
+    assert_eq!(closes, !cfg!(target_os = "macos"));
+    let quit = quits(&mut app);
+    assert_eq!(quit, if closes { 1 } else { 2 });
+    assert!(!app.dialog_open());
+
+    app.run("BEGIN; DELETE FROM things WHERE id > 10;");
+    app.keys("mod-t");
+    let titles = app.titles();
+    app.dispatch(Quit);
+    assert!(app.dialog_open(), "asks before rolling back");
+    let asked = app.asked();
+    assert_eq!(asked, ("Roll back and quit?".into(), Some(titles[0].clone())), "lists the tab with the transaction");
+    app.dispatch(Quit);
+    app.keys("escape");
+    assert!(!app.dialog_open(), "Quit again didn't stack a second confirmation");
+
+    assert!(!app.close_window(), "the window stays open");
+    assert!(app.dialog_open(), "the close button asks too");
+    app.keys("escape");
+    assert_eq!(quits(&mut app), quit, "Cancel keeps the app running");
+    assert_eq!(app.titles(), titles);
+    assert_eq!(app.cx.update(|_, cx| tab.read(cx).txn_state()), TxnState::Active);
+    app.dispatch(PrevTab);
+    app.run("SELECT count(*) FROM things");
+    assert_eq!(app.cell(0, 0).as_deref(), Some("10"), "the tab's transaction still holds its deletes");
+
+    app.dispatch(Quit);
+    app.confirm_dialog();
+    assert_eq!(quits(&mut app), quit + 1);
+}
+
+// The real helper would start this test binary again, so every dialog gets this stand-in before any click.
+fn staged_update(app: &mut Driver, handed: &Rc<RefCell<Vec<PathBuf>>>, dir: &Path) -> Entity<UpdateDialog> {
+    let release = Release {
+        version: "9.9.9".into(),
+        name: "BarSQL v9.9.9".into(),
+        notes: String::new(),
+        html_url: String::new(),
+        asset: Asset::default(),
+        digest: None,
+    };
+    let ready = UpdateState::Ready(release, Staged { path: dir.join("BarSQL"), dir: dir.to_path_buf() });
+    let dialog = app.cx.update(|window, cx| update_dialog::open_in(String::new(), Some(ready), window, cx));
+    let handed = handed.clone();
+    dialog.update(app.cx, |dialog, _| {
+        dialog.set_apply(move |_, path, _| {
+            handed.borrow_mut().push(path.to_path_buf());
+            Ok(())
+        })
+    });
+    dialog
+}
+
+#[gpui_kit::test]
+fn restarting_for_an_update_with_an_open_transaction_asks_first(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    let tab = app.connect();
+    let dir = tempfile::tempdir().unwrap();
+    let handed: Rc<RefCell<Vec<PathBuf>>> = Rc::default();
+    staged_update(&mut app, &handed, dir.path());
+    app.click("update-restart");
+    assert_eq!((handed.borrow().len(), quits(&mut app)), (1, 1));
+    assert!(!app.cx.update(|_, cx| cx.has_global::<Asked>()), "nothing to ask about");
+    app.keys("escape");
+
+    app.run("BEGIN; DELETE FROM things WHERE id > 10;");
+    app.keys("mod-t");
+    let titles = app.titles();
+    let dialog = staged_update(&mut app, &handed, dir.path());
+    app.click("update-restart");
+    assert!(app.shown("confirm-ok"), "asks before rolling back");
+    let asked = app.asked();
+    assert_eq!(asked, ("Roll back and quit?".into(), Some(titles[0].clone())), "lists the tab with the transaction");
+    app.dispatch(Quit);
+    app.keys("escape");
+    // The update dialog under the confirmation gets focus back after GPUI Kit's close delay.
+    app.pause();
+    assert!(!app.shown("confirm-ok"), "Quit didn't stack a second confirmation");
+    assert!(app.shown("update-restart"), "Cancel goes back to the update");
+    assert!(matches!(app.cx.update(|_, cx| dialog.read(cx).state().clone()), UpdateState::Ready(..)));
+    assert_eq!((handed.borrow().len(), quits(&mut app)), (1, 1), "Cancel keeps the app running");
+
+    app.keys("enter");
+    assert!(app.shown("confirm-ok"));
+    assert_eq!(handed.borrow().len(), 1);
+    app.keys("escape");
+    app.pause();
+    app.keys("escape");
+    assert!(!app.dialog_open());
+    assert_eq!(app.titles(), titles);
+    assert_eq!(app.cx.update(|_, cx| tab.read(cx).txn_state()), TxnState::Active);
+    app.dispatch(PrevTab);
+    app.run("SELECT count(*) FROM things");
+    assert_eq!(app.cell(0, 0).as_deref(), Some("10"), "the tab's transaction still holds its deletes");
+
+    staged_update(&mut app, &handed, dir.path());
+    app.click("update-restart");
+    app.confirm_dialog();
+    assert_eq!(*handed.borrow(), [dir.path().join("BarSQL"), dir.path().join("BarSQL")]);
+    assert_eq!(quits(&mut app), 2);
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn the_docks_quit_asks_before_rolling_back(cx: &mut TestAppContext) {
+    use crate::system_quit::{Reply, should_terminate};
+
+    let mut app = open(cx);
+    app.connect();
+    let bar = app.env.bar.clone();
+    let system = app.cx.update(|_, cx| cx.to_async());
+    assert_eq!(should_terminate(&bar, &system), Reply::Now);
+    app.cx.run_until_parked();
+    assert!(!app.dialog_open());
+
+    app.run("BEGIN; DELETE FROM things WHERE id > 10;");
+    let titles = app.titles();
+    assert!(!app.cx.update(|window, _| window.is_window_active()));
+    assert_eq!(should_terminate(&bar, &system), Reply::Cancel);
+    app.cx.run_until_parked();
+    assert!(app.cx.update(|window, _| window.is_window_active()), "the window comes to the front");
+    assert!(app.dialog_open(), "asks the way Quit does");
+    let asked = app.asked().1;
+    assert_eq!(asked, Some(titles[0].clone()));
+    assert_eq!(should_terminate(&bar, &system), Reply::Cancel);
+    app.cx.run_until_parked();
+    app.keys("escape");
+    assert!(!app.dialog_open(), "asking again didn't stack a second confirmation");
+    assert_eq!(quits(&mut app), 0, "Cancel keeps the app running");
+    assert!(bar.any_transaction_open(), "and the transaction open");
+
+    assert_eq!(should_terminate(&bar, &system), Reply::Cancel);
+    app.cx.run_until_parked();
+    app.confirm_dialog();
+    assert_eq!(quits(&mut app), 1);
+    assert_eq!(should_terminate(&bar, &system), Reply::Now, "OK's quit goes through");
 }
 
 pub(super) fn suggestions(app: &mut super::driver::Driver) -> Vec<String> {

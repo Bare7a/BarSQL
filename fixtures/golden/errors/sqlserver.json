@@ -401,6 +401,81 @@
           }
         }
       ]
+    },
+    {
+      "name": "mid_stream",
+      "sql": "SELECT n, 1 / (6 - n) AS t FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)) AS v (n)",
+      "results": [
+        {
+          "statement": "SELECT n, 1 / (6 - n) AS t FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)) AS v (n)",
+          "columns": [
+            "n",
+            "t"
+          ],
+          "columnTypes": [
+            "int",
+            "int"
+          ],
+          "rows": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              5,
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "0"
+            ],
+            [
+              "2",
+              "0"
+            ],
+            [
+              "3",
+              "0"
+            ],
+            [
+              "4",
+              "0"
+            ],
+            [
+              "5",
+              "1"
+            ]
+          ],
+          "rowCount": 5,
+          "affectedRows": 0
+        },
+        {
+          "statement": "SELECT n, 1 / (6 - n) AS t FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)) AS v (n)",
+          "rowCount": 0,
+          "affectedRows": 0,
+          "error": {
+            "message": "Divide by zero error encountered.",
+            "code": "8134",
+            "detail": "Msg 8134, Level 16, State 1, Line 1",
+            "position": 1,
+            "severity": "ERROR"
+          }
+        }
+      ]
     }
   ]
 }

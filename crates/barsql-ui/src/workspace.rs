@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use barsql_app::{AppEvent, EditorSession, EditorTab, TableViewRef, is_sqlite_file, sqlite_file_payload};
+use barsql_app::{AppEvent, EditorSession, EditorTab, TableViewRef, Unsaved, is_sqlite_file, sqlite_file_payload};
 use barsql_core::{ConnectionConfig, SavedQuery};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{AppMenuBar, ContextMenuExt, PopupMenu, PopupMenuItem};
@@ -11,9 +11,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::actions::*;
-use crate::dialogs;
+use crate::dialogs::{self, Confirm};
 use crate::grid::RowRef;
-use crate::i18n::{I18n, t, t_with};
+use crate::i18n::{I18n, t, t_count, t_with};
 use crate::json_panel::JsonPanel;
 use crate::query_tab::{QueryTab, QueryTabEvent, TxnState, new_tab_id};
 use crate::quick_search::{self, QuickSearchDialog, TabEntry, Target};
@@ -203,6 +203,8 @@ pub struct Workspace {
     kept: Vec<(usize, EditorTab)>,
     saved: Option<EditorSession>,
     save_task: Task<()>,
+    // Focused while the quit confirmation shows.
+    quit_dialog: Option<WeakFocusHandle>,
     _subscriptions: Vec<Subscription>,
     _app_events: Task<()>,
 }
@@ -224,15 +226,6 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
         let mut after: Option<crate::snapshot::AfterRun> = None;
         let window = cx.open_window(window_options, |window, cx| {
             window.set_rem_size(px(theme::zoom(cx)));
-            // On macOS the close button quits like Cmd+Q, with the window still open. Closing the window first
-            // drops GPUI's AccessKit adapter, which resets the class of the content view while the Touch Bar
-            // observes it through KVO, and AppKit aborts on the Touch Bar's next update.
-            if cfg!(target_os = "macos") {
-                window.on_window_should_close(cx, |_, cx| {
-                    cx.quit();
-                    false
-                });
-            }
             let view = cx.new(|cx| Workspace::new(window, cx));
             if track {
                 view.update(cx, |workspace, cx| workspace.track_window(saved.clone(), window, cx));
@@ -399,7 +392,58 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
     .detach();
 }
 
+// The Quit action. Its dispatch can hold the workspace's window, so the workspace is asked once that's done. The
+// window handle stays untyped so nothing holds the root view, which dialogs update.
+pub fn quit(cx: &mut App) {
+    cx.defer(|cx| {
+        let asked = cx.windows().into_iter().any(|window| {
+            let asked = window.update(cx, |_, window, cx| {
+                let workspace = Workspace::in_window(window, cx)?;
+                workspace.update(cx, |this, cx| this.quit(window, cx));
+                Some(())
+            });
+            matches!(asked, Ok(Some(())))
+        });
+        if !asked {
+            quit_now(cx);
+        }
+    });
+}
+
+// For views that quit, like the updater's Restart. `then` runs after the caller's update, or on the quit
+// confirmation's OK when a tab holds an open transaction.
+pub(crate) fn before_quit(window: &mut Window, cx: &mut App, then: impl Fn(&mut Window, &mut App) + 'static) {
+    match Workspace::in_window(window, cx) {
+        Some(workspace) => workspace.update(cx, |this, cx| this.before_quit(window, cx, then)),
+        None => window.defer(cx, then),
+    }
+}
+
+// The test platform ignores quitting, so scenarios count the requests.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct QuitRequests(pub usize);
+
+#[cfg(test)]
+impl Global for QuitRequests {}
+
+// BarApp::shutdown, in on_app_quit, rolls back what's still open.
+pub(crate) fn quit_now(cx: &mut App) {
+    #[cfg(test)]
+    {
+        cx.default_global::<QuitRequests>().0 += 1;
+    }
+    // So macOS's applicationShouldTerminate: doesn't ask again.
+    #[cfg(target_os = "macos")]
+    crate::system_quit::allow_terminate();
+    cx.quit();
+}
+
 impl Workspace {
+    pub(crate) fn in_window(window: &Window, cx: &App) -> Option<Entity<Workspace>> {
+        window.root::<Root>().flatten()?.read(cx).view().clone().downcast::<Workspace>().ok()
+    }
+
     pub(crate) fn context_menu(&self) -> Entity<context_menu::Overlay> {
         self.context_menu.clone()
     }
@@ -407,6 +451,10 @@ impl Workspace {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let this = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            this.update(cx, |this, cx| this.close_window(window, cx)).unwrap_or(true)
+        });
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, window, cx| match event {
@@ -490,6 +538,7 @@ impl Workspace {
             kept: Vec::new(),
             saved: None,
             save_task: Task::ready(()),
+            quit_dialog: None,
             _subscriptions: subscriptions,
             _app_events: app_events,
         };
@@ -619,6 +668,14 @@ impl Workspace {
                 window.activate_window();
             }
             AppEvent::UpdateAvailable { .. } => {}
+            AppEvent::NotSaved { what, error } => {
+                let key = match what {
+                    Unsaved::Settings => "errors.settingsNotSaved",
+                    Unsaved::Session => "errors.sessionNotSaved",
+                    Unsaved::History => "errors.historyNotSaved",
+                };
+                toast::error(t_with(cx, key, &[("error", &error)]), cx);
+            }
         }
     }
 
@@ -1016,32 +1073,9 @@ impl Workspace {
     }
 
     fn request_close(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(view) =
-            self.tabs.get(ix).and_then(|tab| tab.view.query().cloned()).filter(|view| view.read(cx).is_dirty(cx))
-        else {
-            self.close_tab(ix, window, cx);
-            return;
-        };
-        let (name, id) = (view.read(cx).title.clone(), view.read(cx).id.clone());
-        let (on_save, on_discard) = (cx.entity().downgrade(), cx.entity().downgrade());
-        let discard_id = id.clone();
-        dialogs::unsaved(
-            name,
-            window,
-            cx,
-            move |window, cx| {
-                let saved = view.update(cx, |tab, cx| {
-                    let sql = tab.sql(cx).to_string();
-                    tab.persist(sql, window, cx)
-                });
-                if saved {
-                    let _ = on_save.update(cx, |this, cx| this.close_tab_by_id(&id, window, cx));
-                }
-            },
-            move |window, cx| {
-                let _ = on_discard.update(cx, |this, cx| this.close_tab_by_id(&discard_id, window, cx));
-            },
-        );
+        if let Some(id) = self.tabs.get(ix).map(|tab| tab.view.id(cx)) {
+            self.close_tabs(vec![id], window, cx);
+        }
     }
 
     fn close_tab_by_id(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1098,8 +1132,76 @@ impl Workspace {
         }
     }
 
-    // For Close Others, To the Right and All. Tabs without changes close at once, and the rest ask together.
+    // For Close, Close Others, To the Right and All. Closing rolls back a tab's open transaction, so that asks first.
     fn close_tabs(&mut self, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let keys = ["tabs.rollbackTitle", "tabs.rollbackDescription", "tabs.rollbackConfirm"];
+        let Some(confirm) = self.confirm_rollback(&ids, keys, cx) else {
+            return self.close_tabs_saving(ids, window, cx);
+        };
+        let this = cx.entity().downgrade();
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            let _ = this.update(cx, |this, cx| this.close_tabs_saving(ids.clone(), window, cx));
+        });
+    }
+
+    // Asks before rolling back the open transactions among `ids`, listing their tabs. None when there's none.
+    fn confirm_rollback(&self, ids: &[String], [title, description, confirm]: [&str; 3], cx: &App) -> Option<Confirm> {
+        let bar = state::bar(cx);
+        let open: Vec<String> = ids
+            .iter()
+            .filter(|id| bar.transaction_status(id))
+            .filter_map(|id| self.index_of(id, cx).map(|ix| self.tabs[ix].view.title(cx).to_string()))
+            .collect();
+        (!open.is_empty()).then(|| Confirm {
+            title: t(cx, title),
+            description: t_count(cx, description, open.len() as i64, &[]),
+            detail: Some(open.join("\n").into()),
+            confirm: t(cx, confirm),
+            danger: true,
+        })
+    }
+
+    fn tab_ids(&self, cx: &App) -> Vec<String> {
+        self.tabs.iter().map(|tab| tab.view.id(cx)).collect()
+    }
+
+    fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.before_quit(window, cx, |_, cx| quit_now(cx));
+    }
+
+    // Asking again while the confirmation shows doesn't stack a second one.
+    fn before_quit(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl Fn(&mut Window, &mut App) + 'static,
+    ) {
+        let asking = self.quit_dialog.as_ref().and_then(WeakFocusHandle::upgrade);
+        if asking.is_some_and(|dialog| dialog.contains_focused(window, cx)) {
+            return;
+        }
+        let keys = ["tabs.quitTitle", "tabs.quitDescription", "tabs.quitConfirm"];
+        let Some(confirm) = self.confirm_rollback(&self.tab_ids(cx), keys, cx) else {
+            return window.defer(cx, then);
+        };
+        dialogs::confirm(confirm, window, cx, then);
+        // A dialog takes focus as it opens.
+        self.quit_dialog = window.focused(cx).map(|dialog| dialog.downgrade());
+    }
+
+    // Returns whether the window may close. On macOS it stays open while the app quits: closing it first drops GPUI's
+    // AccessKit adapter, which resets the class of the content view while the Touch Bar observes it through KVO, and
+    // AppKit aborts on the Touch Bar's next update.
+    fn close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if cfg!(target_os = "macos") || state::bar(cx).any_transaction_open() {
+            self.quit(window, cx);
+            return false;
+        }
+        true
+    }
+
+    // Tabs without changes close at once, and the rest ask together.
+    fn close_tabs_saving(&mut self, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         let dirty = |this: &Self, id: &String| this.index_of(id, cx).is_some_and(|ix| this.tabs[ix].view.is_dirty(cx));
         let (dirty, clean): (Vec<String>, Vec<String>) = ids.into_iter().partition(|id| dirty(self, id));
         for id in &clean {
@@ -1723,7 +1825,16 @@ impl Render for Workspace {
                 theme::set_editor_font_size(theme::DEFAULT_EDITOR_FONT, window, cx)
             }))
             .on_action(cx.listener(|_, _: &ToggleFullscreen, window, _| window.toggle_fullscreen()))
-            .child(title_bar::render(self.menu_bar.as_ref(), title, cx))
+            .child(title_bar::render(
+                self.menu_bar.as_ref(),
+                title,
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    if this.close_window(window, cx) {
+                        window.remove_window();
+                    }
+                }),
+                cx,
+            ))
             .child(
                 div().flex_1().min_h_0().child(
                     h_resizable("workspace")

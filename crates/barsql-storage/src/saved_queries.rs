@@ -6,7 +6,7 @@ use barsql_core::SavedQuery;
 use barsql_core::clock::now_rfc3339;
 
 use crate::connections::upsert;
-use crate::{load_json_file, save_json_file};
+use crate::{load_json_file, update};
 
 pub struct SavedQueriesStore {
     path: PathBuf,
@@ -43,19 +43,16 @@ impl SavedQueriesStore {
             query.created_at = now.clone();
         }
         query.updated_at = now;
-        upsert(&mut queries, query.clone(), |q| &q.id);
-        save_json_file(&self.path, &*queries)?;
+        update(&self.path, &mut *queries, |next| upsert(next, query.clone(), |q| &q.id))?;
         Ok(query)
     }
 
     pub fn delete(&self, id: &str) -> io::Result<bool> {
         let mut queries = self.lock();
-        let before = queries.len();
-        queries.retain(|q| q.id != id);
-        if queries.len() == before {
+        if !queries.iter().any(|q| q.id == id) {
             return Ok(false);
         }
-        save_json_file(&self.path, &*queries)?;
+        update(&self.path, &mut *queries, |next| next.retain(|q| q.id != id))?;
         Ok(true)
     }
 
@@ -108,5 +105,18 @@ mod tests {
         let names = |list: Vec<SavedQuery>| list.into_iter().map(|q| q.name).collect::<Vec<_>>();
         assert_eq!(names(store.list("c1")), ["Alpha", "beta"]);
         assert_eq!(names(store.list("")), ["Alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_store_as_the_file_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SavedQueriesStore::open(tmp.path()).unwrap();
+        let kept = store.save(SavedQuery { name: "kept".into(), ..Default::default() }).unwrap();
+        crate::block_writes(tmp.path(), "saved_queries.json");
+        assert!(store.save(SavedQuery { name: "new".into(), ..Default::default() }).is_err());
+        assert!(store.save(SavedQuery { name: "renamed".into(), ..kept.clone() }).is_err());
+        assert!(store.delete(&kept.id).is_err());
+        let names: Vec<String> = store.list("").into_iter().map(|q| q.name).collect();
+        assert_eq!(names, ["kept"]);
     }
 }

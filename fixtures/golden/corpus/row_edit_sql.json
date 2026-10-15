@@ -152,6 +152,104 @@
         "values": {}
       },
       "error": "no column values provided"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "1010"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE `s`.`t` SET `flags` = CAST(CONV(?, 2, 10) AS UNSIGNED) WHERE `id` = ? AND `mask` = CAST(CONV(?, 2, 10) AS UNSIGNED)",
+      "args": [
+        "1010",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "12"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "column \"flags\" takes binary digits like 1010, got \"12\""
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "mask": "0101"
+        },
+        "pkCols": [
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "DELETE FROM `s`.`t` WHERE `mask` = CAST(CONV(?, 2, 10) AS UNSIGNED)",
+      "args": [
+        "0101"
+      ]
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "flags": null,
+          "id": 2,
+          "mask": "1"
+        }
+      },
+      "sql": "INSERT INTO `s`.`t` (`flags`, `id`, `mask`) VALUES (CAST(CONV(?, 2, 10) AS UNSIGNED), ?, CAST(CONV(?, 2, 10) AS UNSIGNED))",
+      "args": [
+        null,
+        2,
+        "1"
+      ]
     }
   ],
   "postgres": [
@@ -307,6 +405,109 @@
         "values": {}
       },
       "error": "no column values provided"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "1010"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE \"s\".\"t\" SET \"flags\" = $1 WHERE \"id\" = $2 AND \"mask\" = $3",
+      "args": [
+        "1010",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "12"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE \"s\".\"t\" SET \"flags\" = $1 WHERE \"id\" = $2 AND \"mask\" = $3",
+      "args": [
+        "12",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "mask": "0101"
+        },
+        "pkCols": [
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "DELETE FROM \"s\".\"t\" WHERE \"mask\" = $1",
+      "args": [
+        "0101"
+      ]
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "flags": null,
+          "id": 2,
+          "mask": "1"
+        }
+      },
+      "sql": "INSERT INTO \"s\".\"t\" (\"flags\", \"id\", \"mask\") VALUES ($1, $2, $3)",
+      "args": [
+        null,
+        2,
+        "1"
+      ]
     }
   ],
   "sqlite": [
@@ -462,6 +663,109 @@
         "values": {}
       },
       "error": "no column values provided"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "1010"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE \"t\" SET \"flags\" = ? WHERE \"id\" = ? AND \"mask\" = ?",
+      "args": [
+        "1010",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "12"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE \"t\" SET \"flags\" = ? WHERE \"id\" = ? AND \"mask\" = ?",
+      "args": [
+        "12",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "mask": "0101"
+        },
+        "pkCols": [
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "DELETE FROM \"t\" WHERE \"mask\" = ?",
+      "args": [
+        "0101"
+      ]
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "flags": null,
+          "id": 2,
+          "mask": "1"
+        }
+      },
+      "sql": "INSERT INTO \"t\" (\"flags\", \"id\", \"mask\") VALUES (?, ?, ?)",
+      "args": [
+        null,
+        2,
+        "1"
+      ]
     }
   ],
   "tsql": [
@@ -617,6 +921,109 @@
         "values": {}
       },
       "error": "no column values provided"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "1010"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE [s].[t] SET [flags] = @P1 WHERE [id] = @P2 AND [mask] = @P3",
+      "args": [
+        "1010",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "12"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "UPDATE [s].[t] SET [flags] = @P1 WHERE [id] = @P2 AND [mask] = @P3",
+      "args": [
+        "12",
+        1,
+        "0101"
+      ]
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "mask": "0101"
+        },
+        "pkCols": [
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "sql": "DELETE FROM [s].[t] WHERE [mask] = @P1",
+      "args": [
+        "0101"
+      ]
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "flags": null,
+          "id": 2,
+          "mask": "1"
+        }
+      },
+      "sql": "INSERT INTO [s].[t] ([flags], [id], [mask]) VALUES (@P1, @P2, @P3)",
+      "args": [
+        null,
+        2,
+        "1"
+      ]
     }
   ],
   "clickhouse": [
@@ -755,6 +1162,96 @@
         "values": {}
       },
       "error": "no column values provided"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "1010"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "update",
+      "input": {
+        "changes": {
+          "flags": "12"
+        },
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "id": 1,
+          "mask": "0101"
+        },
+        "pkCols": [
+          "id",
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "delete",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "pk": {
+          "mask": "0101"
+        },
+        "pkCols": [
+          "mask"
+        ],
+        "schema": "s",
+        "table": "t"
+      },
+      "error": "clickhouse can't edit single rows"
+    },
+    {
+      "kind": "insert",
+      "input": {
+        "columnTypes": {
+          "flags": "bit",
+          "id": "int",
+          "mask": "bit(64)"
+        },
+        "schema": "s",
+        "table": "t",
+        "values": {
+          "flags": null,
+          "id": 2,
+          "mask": "1"
+        }
+      },
+      "sql": "INSERT INTO `s`.`t` (`flags`, `id`, `mask`) VALUES (?, ?, ?)",
+      "args": [
+        null,
+        2,
+        "1"
+      ]
     }
   ]
 }

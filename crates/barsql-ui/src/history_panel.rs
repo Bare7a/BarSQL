@@ -123,8 +123,11 @@ impl HistoryPanel {
     // At once, with an Undo on the toast.
     fn delete(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(entry) = self.entries.iter().find(|entry| entry.id == id).cloned() else { return };
-        state::bar(cx).delete_query_history_entry(id);
+        let result = state::bar(cx).delete_query_history_entry(id);
         self.reload(cx);
+        if let Err(error) = result {
+            return toast::error_in(t(cx, "errors.deleteHistoryFailed"), error.message, cx);
+        }
         let this = cx.entity().downgrade();
         let undo = toast::ToastAction {
             label: t(cx, "common.undo"),

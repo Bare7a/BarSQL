@@ -81,7 +81,17 @@
     "databaseHintSqlServer": "Datenbank, mit der verbunden wird. Leer lassen für die Standarddatenbank des Logins.",
     "sslStrict": "Strikt (TDS 8.0)",
     "confirmChanges": "Vor Änderungen nachfragen",
-    "confirmChangesHint": "Für Produktivdatenbanken: bestätigt INSERT, UPDATE, DELETE, DDL und Tabellenänderungen, bevor sie laufen."
+    "confirmChangesHint": "Für Produktivdatenbanken: bestätigt INSERT, UPDATE, DELETE, DDL und Tabellenänderungen, bevor sie laufen.",
+    "hostRequired": "Host ist erforderlich.",
+    "usernameRequired": "Benutzername ist erforderlich.",
+    "urlScheme": "Die Datenbank-URL muss mit libsql://, https://, http://, wss:// oder ws:// beginnen.",
+    "sshHostRequired": "SSH-Host ist erforderlich.",
+    "sshUsernameRequired": "SSH-Benutzername ist erforderlich.",
+    "sshPortRange": "Der SSH-Port muss zwischen 1 und 65535 liegen.",
+    "sshKeyRequired": "Die Datei mit dem privaten SSH-Schlüssel ist erforderlich.",
+    "sshAuthUnsupported": "Nicht unterstützte SSH-Authentifizierungsmethode: {{method}}.",
+    "driverUnsupported": "Nicht unterstützter Treiber: {{driver}}.",
+    "driverNotInBuild": "{{driver}} ist in diesem Build nicht verfügbar."
   },
   "results": {
     "messages": "Meldungen",
@@ -192,7 +202,15 @@
     "duplicate": "Duplizieren",
     "rename": "Umbenennen…",
     "renameTitle": "Tab umbenennen",
-    "copySql": "SQL kopieren"
+    "copySql": "SQL kopieren",
+    "rollbackTitle": "Zurückrollen und schließen?",
+    "rollbackDescription_one": "Dieser Tab hat eine offene Transaktion. Beim Schließen wird sie zurückgerollt, und die Änderungen darin gehen verloren.",
+    "rollbackDescription_other": "{{count}} Tabs haben offene Transaktionen. Beim Schließen werden sie zurückgerollt, und die Änderungen darin gehen verloren.",
+    "rollbackConfirm": "Zurückrollen und schließen",
+    "quitTitle": "Zurückrollen und beenden?",
+    "quitDescription_one": "Ein Tab hat eine offene Transaktion. Beim Beenden wird sie zurückgerollt, und die Änderungen darin gehen verloren.",
+    "quitDescription_other": "{{count}} Tabs haben offene Transaktionen. Beim Beenden werden sie zurückgerollt, und die Änderungen darin gehen verloren.",
+    "quitConfirm": "Zurückrollen und beenden"
   },
   "common": {
     "undo": "Rückgängig"
@@ -221,7 +239,15 @@
   },
   "errors": {
     "deleteQueryFailed": "Abfrage konnte nicht gelöscht werden",
-    "deleteQueryFailedDetail": "Die gespeicherte Abfrage ist nicht mehr in der Bibliothek."
+    "deleteQueryFailedDetail": "Die gespeicherte Abfrage ist nicht mehr in der Bibliothek.",
+    "deleteConnectionFailed": "Verbindung konnte nicht gelöscht werden",
+    "reorderConnectionsFailed": "Reihenfolge der Verbindungen konnte nicht gespeichert werden",
+    "saveFolderFailed": "Ordner konnte nicht gespeichert werden",
+    "deleteFolderFailed": "Ordner konnte nicht gelöscht werden",
+    "deleteHistoryFailed": "Verlaufseintrag konnte nicht gelöscht werden",
+    "settingsNotSaved": "Einstellungen konnten nicht gespeichert werden: {{error}}. Die Änderung gilt bis zum Beenden von BarSQL.",
+    "sessionNotSaved": "Offene Tabs konnten nicht gespeichert werden: {{error}}. BarSQL öffnet sie eventuell nicht so wieder, wie sie jetzt sind.",
+    "historyNotSaved": "Der Abfrageverlauf konnte nicht gespeichert werden: {{error}}. Neue Abfragen erscheinen erst wieder unter „Zuletzt“, wenn das Speichern gelingt."
   },
   "status": {
     "caret": "Zeile {{line}}, Spalte {{column}}",

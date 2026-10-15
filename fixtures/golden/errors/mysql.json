@@ -254,6 +254,73 @@
           }
         }
       ]
+    },
+    {
+      "name": "mid_stream",
+      "sql": "WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10) SELECT n, IF(n = 6, 9223372036854775807 + n, n) AS t FROM seq",
+      "results": [
+        {
+          "statement": "WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10) SELECT n, IF(n = 6, 9223372036854775807 + n, n) AS t FROM seq",
+          "columns": [
+            "n",
+            "t"
+          ],
+          "columnTypes": [
+            "BIGINT",
+            "BIGINT"
+          ],
+          "rows": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              3
+            ],
+            [
+              4,
+              4
+            ],
+            [
+              5,
+              5
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "4",
+              "4"
+            ],
+            [
+              "5",
+              "5"
+            ]
+          ],
+          "rowCount": 5,
+          "affectedRows": 0,
+          "error": {
+            "message": "BIGINT value is out of range in '(9223372036854775807 + `seq`.`n`)'",
+            "code": "1690"
+          }
+        }
+      ]
     }
   ],
   "setup": [

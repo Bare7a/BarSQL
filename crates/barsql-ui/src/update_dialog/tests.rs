@@ -221,20 +221,18 @@ fn install_downloads_verifies_stages_and_hands_the_build_to_the_helper(cx: &mut 
 
     let applied: Rc<RefCell<Vec<(String, PathBuf, String)>>> = Rc::default();
     let record = applied.clone();
-    dialog.update(cx, |dialog, cx| {
+    dialog.update(cx, |dialog, _| {
         dialog.apply = Rc::new(move |release, path, prompt| {
             record.borrow_mut().push((release.version.clone(), path.to_path_buf(), prompt.to_string()));
             Ok(())
-        });
-        dialog.restart(cx);
+        })
     });
+    cx.update(|window, cx| dialog.update(cx, |dialog, cx| dialog.restart(window, cx)));
     let prompt = "BarSQL needs your password to install the update.".to_string();
     assert_eq!(*applied.borrow(), [("9.9.9".to_string(), staged.path.clone(), prompt)]);
 
-    dialog.update(cx, |dialog, cx| {
-        dialog.apply = Rc::new(|_, _, _| Err(std::io::Error::other("denied")));
-        dialog.restart(cx);
-    });
+    dialog.update(cx, |dialog, _| dialog.apply = Rc::new(|_, _, _| Err(std::io::Error::other("denied"))));
+    cx.update(|window, cx| dialog.update(cx, |dialog, cx| dialog.restart(window, cx)));
     let failed =
         UpdateState::Failed { stage: Stage::Install, message: "spawn helper: denied".into(), release: Some(release) };
     assert_eq!(state(&dialog, cx), failed);

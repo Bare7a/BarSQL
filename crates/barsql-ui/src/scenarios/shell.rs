@@ -99,3 +99,20 @@ fn about_copies_the_version_and_links_its_release_notes(cx: &mut TestAppContext)
     let notes = format!("https://github.com/Bare7a/BarSQL/releases/tag/v{version}");
     assert_eq!(app.cx.opened_url(), Some(notes));
 }
+
+#[gpui_kit::test]
+fn a_setting_that_cannot_be_saved_says_so_once(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.env.block_writes("settings.json");
+    app.dispatch(ThemeLight);
+    assert_eq!(app.cx.update(|_, cx| choice(cx)), ThemeChoice::Light, "it applies anyway");
+    let shown = app.error_toasts();
+    assert!(shown.len() == 1 && shown[0].starts_with("Settings could not be saved"), "{shown:?}");
+    app.dispatch(ThemeDark);
+    assert_eq!(app.error_toasts().len(), 1, "once while saving keeps failing");
+    app.env.unblock_writes("settings.json");
+    app.dispatch(ThemeLight);
+    app.env.block_writes("settings.json");
+    app.dispatch(ThemeDark);
+    assert_eq!(app.error_toasts().len(), 2, "again once a save got through in between");
+}

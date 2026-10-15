@@ -196,6 +196,41 @@ fn the_add_row_dialog_inserts_a_row(cx: &mut TestAppContext) {
     assert_eq!(column(&mut app, 1), [Some("Alice".into()), Some("Bob".into())]);
 }
 
+#[gpui_kit::test]
+fn the_add_row_dialog_asks_for_each_column_of_a_composite_key(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        "CREATE TABLE e2e_pairs (left_id INTEGER NOT NULL, right_id INTEGER NOT NULL, note TEXT, \
+         PRIMARY KEY (left_id, right_id))",
+    );
+    browse(&mut app, "e2e_pairs");
+    app.click("table-add-row");
+    for (field, value) in [("insert-field-left_id", "1"), ("insert-field-right_id", "2")] {
+        app.click(field);
+        app.type_text(value);
+    }
+    app.click("insert-row-submit");
+    app.settle_dialog_closed();
+    wait(&mut app);
+    assert_eq!(app.query("SELECT left_id, right_id FROM e2e_pairs"), [[Value::Int(1), Value::Int(2)]]);
+}
+
+#[gpui_kit::test]
+fn the_add_row_dialog_asks_for_the_key_of_a_without_rowid_table(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_keyed (id INTEGER PRIMARY KEY, note TEXT) WITHOUT ROWID");
+    browse(&mut app, "e2e_keyed");
+    app.click("table-add-row");
+    app.click("insert-field-id");
+    app.type_text("7");
+    app.menu_pick("insert-mode-note", 2);
+    app.click("insert-field-note");
+    app.type_text("x");
+    app.click("insert-row-submit");
+    app.settle_dialog_closed();
+    wait(&mut app);
+    assert_eq!(app.query("SELECT id, note FROM e2e_keyed"), [[Value::Int(7), Value::Text("x".into())]]);
+}
+
 // Enter in the open mode menu picks the mode, and Enter in a field then presses Add.
 #[gpui_kit::test]
 fn enter_in_the_add_row_dialog_inserts_the_row(cx: &mut TestAppContext) {

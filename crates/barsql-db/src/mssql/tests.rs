@@ -1,6 +1,6 @@
 use barsql_core::{ConnectionConfig, DriverType, Value};
 
-use super::session::inline_nulls;
+use super::session::{inline_nulls, touches_rows};
 use super::{MsOptions, MsTls, line_position};
 
 fn config(host: &str, ssl_mode: &str) -> ConnectionConfig {
@@ -52,6 +52,33 @@ fn null_parameters_are_written_in_and_the_rest_renumbered() {
     assert_eq!(kept, [Value::Text("x".into()), Value::Int(7)]);
     let untouched = inline_nulls("SELECT @P1", &[Value::Int(1)]);
     assert_eq!(untouched, ("SELECT @P1".to_string(), vec![Value::Int(1)]));
+}
+
+#[test]
+fn only_batches_that_can_change_rows_list_counts() {
+    for batch in [
+        "DECLARE @i int = 1; WHILE @i <= 3 BEGIN SET @i += 1 END",
+        "DECLARE @n int; SELECT @n = COUNT(*) FROM sys.objects; SELECT @n AS n",
+        "USE barsql_test; CREATE TABLE #t (id int); DROP TABLE #t",
+        "-- EXEC p\nPRINT 'DELETE FROM t'",
+        "SELECT [insert], @exec FROM #merge",
+    ] {
+        assert!(!touches_rows(batch), "{batch}");
+    }
+    for batch in [
+        "DECLARE @n int = 5; UPDATE t SET n = @n",
+        "SELECT * INTO #copy FROM t",
+        "MERGE t USING s ON t.id = s.id WHEN MATCHED THEN DELETE;",
+        "SELECT 1 EXECUTE p",
+        "sp_who",
+        "[dbo].[purge] 7",
+        // Left as is: INTO also catches a cursor's FETCH, so its loop keeps the assignments' counts.
+        "DECLARE c CURSOR FOR SELECT id FROM t; OPEN c; FETCH NEXT FROM c INTO @id",
+    ] {
+        assert!(touches_rows(batch), "{batch}");
+    }
+    let long = format!("DECLARE @i int = 1;{}", " ".repeat(1 << 20));
+    assert!(touches_rows(&long), "too long to scan");
 }
 
 // A login is a future of tens of kilobytes. Inline, it rode along in every catalog call, and debug builds gave each

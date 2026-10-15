@@ -6,7 +6,10 @@ use std::time::Duration;
 
 use barsql_core::{DriverType, FunctionKind};
 use barsql_db::{Cancel, Engine};
-use common::{Report, assert_matches, compare_probes, fixture, postgres_config, run_all, schema_snapshot, strings};
+use common::{
+    Report, assert_matches, check_probes, fixture, golden_write, postgres_config, run_all, schema_snapshot, strings,
+    write_fixture,
+};
 use jiff::tz::{Offset, TimeZone};
 
 // Result sets come from the protocol, so SHOW returns its row. A CALL without OUT parameters reports rows
@@ -25,19 +28,23 @@ async fn postgres_values_and_errors_match_the_fixtures() {
     let mut report = Report::default();
     let pg = DriverType::Postgres;
 
-    let values = fixture("values/postgres.json");
+    let mut values = fixture("values/postgres.json");
     let utc = connect(TimeZone::UTC).await;
     let mut session = utc.session().await.unwrap();
     run_all(&mut session, &strings(&values["setup"])).await;
-    compare_probes(&mut session, &pg, &values["probes"], "values", DEVIATIONS, &mut report).await;
+    check_probes(&mut session, &pg, &mut values, "probes", "values", DEVIATIONS, &mut report).await;
 
     let plus3 = connect(TimeZone::fixed(Offset::from_seconds(3 * 3600).unwrap())).await;
     let mut local = plus3.session().await.unwrap();
-    compare_probes(&mut local, &pg, &values["localProbes"], "local", DEVIATIONS, &mut report).await;
+    check_probes(&mut local, &pg, &mut values, "localProbes", "local", DEVIATIONS, &mut report).await;
 
-    let errors = fixture("errors/postgres.json");
+    let mut errors = fixture("errors/postgres.json");
     run_all(&mut session, &strings(&errors["setup"])).await;
-    compare_probes(&mut session, &pg, &errors["probes"], "errors", DEVIATIONS, &mut report).await;
+    check_probes(&mut session, &pg, &mut errors, "probes", "errors", DEVIATIONS, &mut report).await;
+    if golden_write() {
+        write_fixture("values/postgres.json", &values);
+        write_fixture("errors/postgres.json", &errors);
+    }
     report.assert_clean("postgres");
 }
 
@@ -76,6 +83,19 @@ async fn postgres_lists_callable_functions() {
     let names: std::collections::HashSet<_> = list.functions.iter().map(|f| (&f.schema, &f.name)).collect();
     assert_eq!(names.len(), list.functions.len(), "overloads fold into one entry");
     assert!(elapsed < Duration::from_secs(2), "{} functions took {elapsed:?}", list.functions.len());
+}
+
+#[tokio::test]
+async fn a_cancel_keeps_the_rows_already_fetched() {
+    let _serial = common::serial().await;
+    let engine = connect(TimeZone::UTC).await;
+    let mut session = engine.session().await.unwrap();
+    let slow = "SELECT i, pg_sleep(0.001) AS slept FROM generate_series(1, 100000) AS i";
+    let (error, events, _) = common::cancel_after(&mut session, slow, Duration::from_millis(500)).await;
+    assert_eq!(error.code, "57014");
+    let (sent, counted) = common::rows_and_count(&events);
+    assert!(sent > 0, "the cancel came before the first row");
+    assert_eq!(counted, Some(sent as i64));
 }
 
 #[tokio::test]

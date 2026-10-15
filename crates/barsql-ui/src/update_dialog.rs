@@ -22,6 +22,7 @@ use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
 use crate::toast::{self, ToastAction, ToastKind};
 use crate::tokens::{ICON_MD, ICON_SM, RADIUS};
+use crate::workspace;
 
 const STARTUP_DELAY: Duration = Duration::from_secs(5);
 
@@ -206,11 +207,22 @@ impl UpdateDialog {
         cx.notify();
     }
 
+    // Quitting rolls back open transactions, so with one open this asks like Quit, and Cancel leaves the update staged.
+    fn restart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.state, UpdateState::Ready(..)) {
+            return;
+        }
+        let this = cx.entity().downgrade();
+        workspace::before_quit(window, cx, move |_, cx| {
+            let _ = this.update(cx, |this, cx| this.hand_over(cx));
+        });
+    }
+
     // The helper waits for this process to exit, then puts the staged version in place.
-    fn restart(&mut self, cx: &mut Context<Self>) {
+    fn hand_over(&mut self, cx: &mut Context<Self>) {
         let UpdateState::Ready(release, staged) = &self.state else { return };
         match (self.apply)(release, &staged.path, &t(cx, "update.adminPrompt")) {
-            Ok(()) => cx.quit(),
+            Ok(()) => workspace::quit_now(cx),
             Err(error) => {
                 let _ = std::fs::remove_dir_all(&staged.dir);
                 let message = format!("spawn helper: {error}");
@@ -229,11 +241,11 @@ impl UpdateDialog {
     }
 
     // Enter presses the main button: Install, Try again or Restart. Elsewhere Close is the only button, so it closes.
-    fn enter(&mut self, cx: &mut Context<Self>) -> bool {
+    fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match &self.state {
             UpdateState::Available(_) => self.install(cx),
             UpdateState::Failed { .. } => self.retry(cx),
-            UpdateState::Ready(..) => self.restart(cx),
+            UpdateState::Ready(..) => self.restart(window, cx),
             _ => return true,
         }
         false
@@ -255,7 +267,8 @@ impl UpdateDialog {
             UpdateState::Ready(..) => Some(
                 footer.child(close).child(
                     primary("update-restart", &t(cx, "update.restart"))
-                        .on_click(cx.listener(|this, _, _, cx| this.restart(cx))),
+                        .debug_selector(|| "update-restart".into())
+                        .on_click(cx.listener(|this, _, window, cx| this.restart(window, cx))),
                 ),
             ),
             UpdateState::Available(_) => Some(
@@ -421,6 +434,18 @@ impl Render for UpdateDialog {
     }
 }
 
+// Scenarios stand in for the helper.
+#[cfg(test)]
+impl UpdateDialog {
+    pub(crate) fn state(&self) -> &UpdateState {
+        &self.state
+    }
+
+    pub(crate) fn set_apply(&mut self, apply: impl Fn(&Release, &Path, &str) -> io::Result<()> + 'static) {
+        self.apply = Rc::new(apply);
+    }
+}
+
 pub fn open(window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
     open_in(api_base(), None, window, cx)
 }
@@ -439,7 +464,7 @@ pub fn open_in(base: String, state: Option<UpdateState>, window: &mut Window, cx
         let entry = dialog.clone();
         Modal::new("update", title)
             .build(frame, dialog.clone(), window, cx)
-            .on_ok(move |_, _, cx| entry.update(cx, |dialog, cx| dialog.enter(cx)))
+            .on_ok(move |_, window, cx| entry.update(cx, |dialog, cx| dialog.enter(window, cx)))
     });
     view
 }

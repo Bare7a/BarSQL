@@ -6,7 +6,7 @@ use barsql_core::{
     ObjectRef, QueryError, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest, TableInfo,
     TriggerInfo, Value,
 };
-use barsql_sql::dml::{build_delete, build_insert, build_table_select, build_update, first_integer_primary_key};
+use barsql_sql::dml::{build_delete, build_insert, build_table_select, build_update};
 use barsql_sql::{
     ExplainStrategy, PlanRows, READ_ONLY_ERROR, assert_read_only, quote_ident, table_ref, validate_table_filter,
 };
@@ -304,12 +304,13 @@ impl Engine {
     pub async fn update_row(&self, update: &RowUpdate) -> Result<(), QueryError> {
         self.require_writable()?;
         let schema = self.schema_or(&update.schema);
-        let pks = primary_keys(&self.list_columns(&schema, &update.table).await?);
+        let columns = self.list_columns(&schema, &update.table).await?;
+        let pks = primary_keys(&columns);
         if pks.is_empty() {
             return Err(QueryError::message("table has no primary key"));
         }
         let (sql, args) =
-            build_update(&self.driver(), &schema, &update.table, &update.changes, &update.primary_key, &pks)
+            build_update(&self.driver(), &schema, &update.table, &update.changes, &update.primary_key, &pks, &columns)
                 .map_err(QueryError::message)?;
         self.execute_params(&sql, &args).await.map(|_| ())
     }
@@ -320,16 +321,17 @@ impl Engine {
             return (0, Some(err));
         }
         let schema = self.schema_or(&delete.schema);
-        let pks = match self.list_columns(&schema, &delete.table).await {
-            Ok(cols) => primary_keys(&cols),
+        let columns = match self.list_columns(&schema, &delete.table).await {
+            Ok(columns) => columns,
             Err(err) => return (0, Some(err)),
         };
+        let pks = primary_keys(&columns);
         if pks.is_empty() {
             return (0, Some(QueryError::message("table has no primary key")));
         }
         let mut total = 0;
         for key in &delete.primary_keys {
-            let (sql, args) = match build_delete(&self.driver(), &schema, &delete.table, &pks, key) {
+            let (sql, args) = match build_delete(&self.driver(), &schema, &delete.table, &pks, key, &columns) {
                 Ok(built) => built,
                 Err(err) => return (total, Some(QueryError::message(err))),
             };
@@ -353,26 +355,31 @@ impl Engine {
                 let res = session.buffered(&format!("{sql} RETURNING *"), &Cancel::new()).await?;
                 Ok(first_row(&res))
             }
+            // The catalog comes first, to find the BIT columns, whose values need converting.
             Self::MySql(engine) => {
                 let schema = self.schema_or(schema);
-                let (sql, args) = build_insert(&driver, &schema, table, values).map_err(QueryError::message)?;
+                let cols = self.list_columns(&schema, table).await?;
+                let (sql, args) = build_insert(&driver, &schema, table, values, &cols).map_err(QueryError::message)?;
                 let mut session = engine.session().await?;
                 session.execute_params(&sql, &args).await?;
                 let id = session.conn().last_insert_id().unwrap_or(0);
                 if id == 0 {
                     return Ok(Row::new());
                 }
-                let cols = self.list_columns(&schema, table).await.unwrap_or_default();
-                match reselect_mysql(&mut session, &schema, table, &cols, id as i64).await {
+                // The id is the AUTO_INCREMENT column's, which the catalog marks as the identity.
+                let Some(identity) = cols.into_iter().find(|c| c.is_identity) else {
+                    return Ok(Row::from([("id".to_string(), Value::Int(id as i64))]));
+                };
+                match reselect_mysql(&mut session, &schema, table, &identity.name, id as i64).await {
                     Some(row) => Ok(row),
-                    None => Ok(Row::from([("id".to_string(), Value::Int(id as i64))])),
+                    None => Ok(Row::from([(identity.name, Value::Int(id as i64))])),
                 }
             }
             // OUTPUT goes before VALUES. A table with triggers takes no plain OUTPUT (error 334), so an identity
             // key finds the row instead, in the same scope as the insert.
             Self::SqlServer(engine) => {
                 let schema = self.schema_or(schema);
-                let (sql, args) = build_insert(&driver, &schema, table, values).map_err(QueryError::message)?;
+                let (sql, args) = build_insert(&driver, &schema, table, values, &[]).map_err(QueryError::message)?;
                 let mut session = engine.session().await?;
                 let output = sql.replacen(") VALUES (", ") OUTPUT INSERTED.* VALUES (", 1);
                 match session.query_params(&output, &args).await {
@@ -396,59 +403,48 @@ impl Engine {
             // No RETURNING and no unique keys to look the row up by, so the view reloads instead.
             Self::ClickHouse(_) => {
                 let schema = self.schema_or(schema);
-                let (sql, args) = build_insert(&driver, &schema, table, values).map_err(QueryError::message)?;
+                let (sql, args) = build_insert(&driver, &schema, table, values, &[]).map_err(QueryError::message)?;
                 self.execute_params(&sql, &args).await?;
                 Ok(Row::new())
             }
             // libSQL has RETURNING, so the stored row comes back with the insert.
             Self::Turso(engine) => {
-                let (sql, args) = build_insert(&driver, schema, table, values).map_err(QueryError::message)?;
+                let (sql, args) = build_insert(&driver, schema, table, values, &[]).map_err(QueryError::message)?;
                 let mut session = engine.session().await?;
                 let res = session.buffered_params(&format!("{sql} RETURNING *"), &args).await?;
                 Ok(first_row(&res))
             }
+            // The rowid finds the stored row. An insert through a view's trigger or into a WITHOUT ROWID table leaves
+            // last_insert_rowid at an earlier insert's, so those rows are looked up by what was written.
             Self::Sqlite(engine) => {
-                let (sql, args) = build_insert(&driver, schema, table, values).map_err(QueryError::message)?;
+                let (sql, args) = build_insert(&driver, schema, table, values, &[]).map_err(QueryError::message)?;
                 let params: Vec<rusqlite::types::Value> = args.iter().map(crate::sqlite::lite_value).collect();
+                let name = table.to_string();
                 let rowid = engine
                     .with_conn(move |conn| {
                         conn.execute(&sql, rusqlite::params_from_iter(params.iter()))
                             .map_err(|err| crate::sqlite::lite_error(&err))?;
-                        Ok(conn.last_insert_rowid())
+                        // An unqualified name finds a temp table first, as the INSERT did.
+                        let has_rowid = conn.query_row(
+                            "SELECT type <> 'view' AND NOT wr FROM pragma_table_list(?1) ORDER BY schema = 'temp' DESC",
+                            [&name],
+                            |r| r.get::<_, bool>(0),
+                        );
+                        Ok(has_rowid.unwrap_or(false).then(|| conn.last_insert_rowid()))
                     })
                     .await?;
+                let cols = self.list_columns(schema, table).await.unwrap_or_default();
+                let filters = match (rowid, rowid_name(&cols)) {
+                    (Some(rowid), Some(name)) => vec![format!("{name} = {rowid}")],
+                    _ => sqlite_written_filters(&cols, values),
+                };
+                let sql = format!(
+                    "SELECT * FROM {} WHERE {} LIMIT 1",
+                    table_ref(&driver, schema, table),
+                    filters.join(" AND ")
+                );
                 let mut session = self.session().await?;
-                if rowid > 0 {
-                    let cols = self.list_columns(schema, table).await.unwrap_or_default();
-                    if let Some(pk) = first_integer_primary_key(&cols) {
-                        let sql = format!(
-                            "SELECT * FROM {} WHERE {} = {} LIMIT 1",
-                            table_ref(&driver, schema, table),
-                            quote_ident(&driver, pk),
-                            rowid
-                        );
-                        if let Ok(res) = session.buffered(&sql, &Cancel::new()).await
-                            && res.rows() > 0
-                        {
-                            return Ok(first_row(&res));
-                        }
-                    }
-                    return Ok(Row::from([("rowid".to_string(), Value::Int(rowid))]));
-                }
-                if values.is_empty() {
-                    return Ok(Row::new());
-                }
-                // No integer key, so look the row up by the values just written.
-                let filters: Vec<String> = values
-                    .iter()
-                    .map(|(col, value)| format!("{} = {}", quote_ident(&driver, col), crate::lite::literal(value)))
-                    .collect();
-                let sql =
-                    format!("SELECT * FROM {} WHERE {} LIMIT 1", quote_ident(&driver, table), filters.join(" AND "));
-                match session.buffered(&sql, &Cancel::new()).await {
-                    Ok(res) if res.rows() > 0 => Ok(first_row(&res)),
-                    _ => Ok(Row::new()),
-                }
+                Ok(session.buffered(&sql, &Cancel::new()).await.map(|res| first_row(&res)).unwrap_or_default())
             }
         }
     }
@@ -565,18 +561,31 @@ fn postgres_insert_sql(schema: &str, table: &str, values: &Row) -> Result<String
     ))
 }
 
+// The first of SQLite's names for the rowid that no column has taken.
+fn rowid_name(cols: &[ColumnInfo]) -> Option<&'static str> {
+    ["rowid", "_rowid_", "oid"].into_iter().find(|name| !cols.iter().any(|c| c.name.eq_ignore_ascii_case(name)))
+}
+
+// A WITHOUT ROWID table's key is unique and NOT NULL, so when fully written it alone finds the row. IS matches NULLs.
+fn sqlite_written_filters(cols: &[ColumnInfo], values: &Row) -> Vec<String> {
+    let keys = primary_keys(cols);
+    let keyed = !keys.is_empty() && keys.iter().all(|key| values.contains_key(key));
+    values
+        .iter()
+        .filter(|(col, _)| !keyed || keys.contains(col))
+        .map(|(col, value)| format!("{} IS {}", quote_ident(&DriverType::Sqlite, col), crate::lite::literal(value)))
+        .collect()
+}
+
 // Goes through a prepared statement, so values arrive in the binary protocol.
-async fn reselect_mysql(
-    session: &mut MySession,
-    schema: &str,
-    table: &str,
-    cols: &[ColumnInfo],
-    id: i64,
-) -> Option<Row> {
-    let pk = first_integer_primary_key(cols)?;
+async fn reselect_mysql(session: &mut MySession, schema: &str, table: &str, column: &str, id: i64) -> Option<Row> {
     let driver = DriverType::MySql;
-    let sql =
-        format!("SELECT * FROM {} WHERE {} = ? LIMIT 1", table_ref(&driver, schema, table), quote_ident(&driver, pk));
+    let sql = format!(
+        "SELECT * FROM {} WHERE {} = ? LIMIT 1",
+        table_ref(&driver, schema, table),
+        quote_ident(&driver, column)
+    );
+    let zone = session.time_zone().clone();
     let mut result = session.conn().exec_iter(sql, vec![mysql_async::Value::Int(id)]).await.ok()?;
     let columns = result.columns()?;
     let decoders: Vec<crate::mysql::Decoder> = columns.iter().map(crate::mysql::Decoder::for_column).collect();
@@ -585,7 +594,7 @@ async fn reselect_mysql(
     let mut builder = ChunkBuilder::new(columns.len(), 1);
     for (i, decoder) in decoders.iter().enumerate() {
         match row.as_ref(i) {
-            Some(value) => crate::mysql::push_binary_value(value, decoder, &mut builder),
+            Some(value) => crate::mysql::push_binary_value(value, decoder, &zone, &mut builder),
             None => builder.push_null(),
         }
     }

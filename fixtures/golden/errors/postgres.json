@@ -243,6 +243,74 @@
           }
         }
       ]
+    },
+    {
+      "name": "mid_stream",
+      "sql": "SELECT i, 1 / (6 - i) AS t FROM generate_series(1, 10) AS i",
+      "results": [
+        {
+          "statement": "SELECT i, 1 / (6 - i) AS t FROM generate_series(1, 10) AS i",
+          "columns": [
+            "i",
+            "t"
+          ],
+          "columnTypes": [
+            "INT4",
+            "INT4"
+          ],
+          "rows": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              5,
+              1
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "0"
+            ],
+            [
+              "2",
+              "0"
+            ],
+            [
+              "3",
+              "0"
+            ],
+            [
+              "4",
+              "0"
+            ],
+            [
+              "5",
+              "1"
+            ]
+          ],
+          "rowCount": 5,
+          "affectedRows": 0,
+          "error": {
+            "message": "division by zero",
+            "code": "22012",
+            "severity": "ERROR"
+          }
+        }
+      ]
     }
   ],
   "setup": [

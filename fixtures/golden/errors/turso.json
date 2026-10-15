@@ -200,6 +200,73 @@
           }
         }
       ]
+    },
+    {
+      "name": "mid_stream",
+      "sql": "WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10) SELECT n, abs(CASE WHEN n = 6 THEN -9223372036854775807 - 1 ELSE n END) AS t FROM seq",
+      "results": [
+        {
+          "statement": "WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10) SELECT n, abs(CASE WHEN n = 6 THEN -9223372036854775807 - 1 ELSE n END) AS t FROM seq",
+          "columns": [
+            "n",
+            "t"
+          ],
+          "columnTypes": [
+            "",
+            ""
+          ],
+          "rows": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              3
+            ],
+            [
+              4,
+              4
+            ],
+            [
+              5,
+              5
+            ]
+          ],
+          "display": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "4",
+              "4"
+            ],
+            [
+              "5",
+              "5"
+            ]
+          ],
+          "rowCount": 5,
+          "affectedRows": 0,
+          "error": {
+            "message": "integer overflow",
+            "code": "SQLITE_UNKNOWN"
+          }
+        }
+      ]
     }
   ]
 }

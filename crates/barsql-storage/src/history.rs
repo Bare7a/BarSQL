@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 use barsql_core::HistoryEntry;
 use barsql_core::clock::now_rfc3339;
 
-use crate::{load_json_file, save_json_file};
+use crate::{load_json_file, save_json_file, update};
 
 pub const HISTORY_LIMIT: usize = 500;
 
@@ -32,9 +32,12 @@ impl HistoryStore {
         if entry.executed_at.is_empty() {
             entry.executed_at = now_rfc3339();
         }
+        // Runs once per statement, so it writes a borrowed view instead of a copy of the whole history.
+        let skip = (entries.len() + 1).saturating_sub(HISTORY_LIMIT);
+        let next: Vec<&HistoryEntry> = entries[skip..].iter().chain([&entry]).collect();
+        save_json_file(&self.path, &next)?;
         entries.push(entry.clone());
         trim(&mut entries);
-        save_json_file(&self.path, &*entries)?;
         Ok(entry)
     }
 
@@ -55,31 +58,26 @@ impl HistoryStore {
         if entries.iter().any(|e| e.id == entry.id) {
             return Ok(());
         }
-        let at = entries.partition_point(|e| e.executed_at <= entry.executed_at);
-        entries.insert(at, entry);
-        trim(&mut entries);
-        save_json_file(&self.path, &*entries)
+        update(&self.path, &mut *entries, |next| {
+            let at = next.partition_point(|e| e.executed_at <= entry.executed_at);
+            next.insert(at, entry);
+            trim(next);
+        })
     }
 
     pub fn delete(&self, id: &str) -> io::Result<bool> {
         let mut entries = self.lock();
-        let before = entries.len();
-        entries.retain(|e| e.id != id);
-        if entries.len() == before {
+        if !entries.iter().any(|e| e.id == id) {
             return Ok(false);
         }
-        save_json_file(&self.path, &*entries)?;
+        update(&self.path, &mut *entries, |next| next.retain(|e| e.id != id))?;
         Ok(true)
     }
 
     pub fn clear(&self, connection_id: &str) -> io::Result<()> {
-        let mut entries = self.lock();
-        if connection_id.is_empty() {
-            entries.clear();
-        } else {
-            entries.retain(|e| e.connection_id != connection_id);
-        }
-        save_json_file(&self.path, &*entries)
+        update(&self.path, &mut *self.lock(), |next| {
+            next.retain(|e| !connection_id.is_empty() && e.connection_id != connection_id)
+        })
     }
 
     fn lock(&self) -> MutexGuard<'_, Vec<HistoryEntry>> {
@@ -157,5 +155,19 @@ mod tests {
         assert!(!first.id.is_empty() && !first.executed_at.is_empty());
         assert!(h.delete(&first.id).unwrap());
         assert!(!h.delete(&first.id).unwrap());
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_store_as_the_file_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let h = HistoryStore::open(tmp.path()).unwrap();
+        let kept = h.add(entry("c1", "SELECT 1")).unwrap();
+        crate::block_writes(tmp.path(), "query_history.json");
+        assert!(h.add(entry("c1", "SELECT 2")).is_err());
+        assert!(h.restore(entry("c1", "SELECT 3")).is_err());
+        assert!(h.delete(&kept.id).is_err());
+        assert!(h.clear("").is_err());
+        let ids: Vec<String> = h.list("", 10).into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, [kept.id]);
     }
 }

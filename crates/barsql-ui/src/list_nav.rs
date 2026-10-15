@@ -174,27 +174,14 @@ mod tests {
     use std::rc::Rc;
 
     use barsql_core::{HistoryEntry, SavedQuery};
-    use gpui_kit::component::{Root, WindowExt};
-    use gpui_kit::{AppContext as _, Entity, Render, TestAppContext, VisualTestContext};
+    use gpui_kit::component::WindowExt;
+    use gpui_kit::{Render, TestAppContext, VisualTestContext};
 
     use crate::connections_panel::{ConnectionsEvent, ConnectionsPanel};
     use crate::history_panel::{HistoryEvent, HistoryPanel};
     use crate::saved_panel::{SavedEvent, SavedPanel};
     use crate::saved_queries;
-    use crate::test_support::Env;
-
-    fn window<V: Render>(
-        cx: &mut TestAppContext,
-        build: impl FnOnce(&mut gpui_kit::Window, &mut gpui_kit::Context<V>) -> V,
-    ) -> (Entity<V>, &mut VisualTestContext) {
-        let mut view = None;
-        let handle = cx.add_window(|window, cx| {
-            let entity = cx.new(|cx| build(window, cx));
-            view = Some(entity.clone());
-            Root::new(entity, window, cx)
-        });
-        (view.unwrap(), VisualTestContext::from_window(handle.into(), cx).into_mut())
-    }
+    use crate::test_support::{Env, in_root};
 
     struct Host {
         nav: super::ListNav,
@@ -211,7 +198,7 @@ mod tests {
     #[gpui_kit::test]
     fn the_ring_shows_only_once_the_keys_move_the_row(cx: &mut TestAppContext) {
         let _env = Env::new(cx);
-        let (host, cx) = window(cx, |_, cx| Host { nav: super::ListNav::new(cx) });
+        let (host, cx) = in_root(cx, |_, cx| Host { nav: super::ListNav::new(cx) });
         let rows = vec![("a".to_string(), 0), ("b".to_string(), 1)];
         let ringed = |id: &'static str, cx: &mut VisualTestContext| {
             cx.run_until_parked();
@@ -238,7 +225,7 @@ mod tests {
             env.bar.save_saved_query(query).unwrap();
         }
         cx.update(saved_queries::refresh);
-        let (panel, cx) = window(cx, SavedPanel::new);
+        let (panel, cx) = in_root(cx, SavedPanel::new);
         let (id, connections) = (env.connection.id.clone(), env.bar.list_connections());
         panel.update(cx, |panel, cx| panel.set_connection(Some(id), connections, cx));
         let opened = Rc::new(RefCell::new(Vec::new()));
@@ -264,7 +251,7 @@ mod tests {
     #[gpui_kit::test]
     fn history_entries_open_from_the_keyboard(cx: &mut TestAppContext) {
         let env = Env::new(cx);
-        let (panel, cx) = window(cx, HistoryPanel::new);
+        let (panel, cx) = in_root(cx, HistoryPanel::new);
         let now = jiff::Timestamp::now().to_string();
         let entry = |id: &str, sql: &str| HistoryEntry {
             id: id.into(),
@@ -294,7 +281,7 @@ mod tests {
     #[gpui_kit::test]
     fn connections_activate_from_the_keyboard(cx: &mut TestAppContext) {
         let env = Env::new(cx);
-        let (panel, cx) = window(cx, |_, cx| ConnectionsPanel::new(cx));
+        let (panel, cx) = in_root(cx, |_, cx| ConnectionsPanel::new(cx));
         let connections = env.bar.list_connections();
         panel.update(cx, |panel, cx| panel.set_state(connections, Vec::new(), None, cx));
         let activated = Rc::new(RefCell::new(Vec::new()));

@@ -180,8 +180,7 @@ impl PgEngine {
     }
 
     pub(crate) async fn lease(self: &Arc<Self>) -> Result<PgLease, QueryError> {
-        let permit =
-            self.permits.clone().acquire_owned().await.map_err(|_| QueryError::message("connection is closed"))?;
+        let permit = crate::pool::acquire(&self.permits, MAX_CONNECTIONS, crate::pool::LEASE_TIMEOUT).await?;
         let pooled = {
             let mut idle = self.lock_idle();
             idle.retain(|c| !c.client.is_closed());

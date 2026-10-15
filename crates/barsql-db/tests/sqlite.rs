@@ -1,3 +1,5 @@
+mod common;
+
 use barsql_core::{
     ConnectionConfig, DriverType, FunctionKind, ObjectKind, ObjectRef, Row, RowDelete, RowUpdate, Value,
 };
@@ -128,6 +130,67 @@ async fn a_composite_foreign_key_is_one_constraint() {
     assert_eq!(fks[0].ref_table, "parent");
 }
 
+// A column declared INTEGER PRIMARY KEY DESC doesn't alias the rowid, though a PRIMARY KEY (id DESC) constraint does.
+#[tokio::test]
+async fn only_the_rowid_alias_is_an_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("rowid.db"), false).await;
+    let mut session = engine.session().await.unwrap();
+    for (table, definition, alias) in [
+        ("plain", "(id INTEGER PRIMARY KEY, v TEXT)", true),
+        ("no_rowid", "(id INTEGER PRIMARY KEY, v TEXT) WITHOUT ROWID", false),
+        ("pair", "(id INTEGER, other INTEGER, v TEXT, PRIMARY KEY (id, other))", false),
+        ("column_desc", "(id INTEGER PRIMARY KEY DESC, v TEXT)", false),
+        ("constraint_desc", "(id INTEGER, v TEXT, PRIMARY KEY (id DESC))", true),
+    ] {
+        exec(&engine, &format!("CREATE TABLE {table} {definition}")).await;
+        let columns = engine.list_columns("main", table).await.unwrap();
+        let identities: Vec<&str> = columns.iter().filter(|c| c.is_identity).map(|c| c.name.as_str()).collect();
+        assert_eq!(identities, if alias { vec!["id"] } else { vec![] }, "{table}");
+        // SQLite agrees: an INSERT without the key gets one only through the alias.
+        let insert = format!("INSERT INTO {table} (v) VALUES ('x') RETURNING id");
+        let inserted = session.buffered(&insert, &Cancel::new()).await.map(|res| res.values());
+        assert_eq!(matches!(inserted.as_deref(), Ok([row]) if row[0] != Value::Null), alias, "{table}: {inserted:?}");
+    }
+}
+
+// Earlier rows hold the values a wrong lookup would find, like a stale last_insert_rowid or a shadowed table's.
+#[tokio::test]
+async fn an_insert_returns_the_row_it_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("insert.db"), false).await;
+    for sql in [
+        "CREATE TABLE plain (id INTEGER PRIMARY KEY, v TEXT)",
+        "CREATE TABLE pair (a INTEGER, b INTEGER, v TEXT, PRIMARY KEY (a, b))",
+        "CREATE TABLE named (rowid TEXT, v TEXT)",
+        "CREATE TABLE no_rowid (id INTEGER PRIMARY KEY, v TEXT) WITHOUT ROWID",
+        "CREATE TABLE tagged (k TEXT PRIMARY KEY DEFAULT 'auto', v TEXT, note TEXT) WITHOUT ROWID",
+        "CREATE TABLE shaded (id INTEGER PRIMARY KEY, v TEXT)",
+        "CREATE TEMP TABLE shaded (id INTEGER PRIMARY KEY, v TEXT) WITHOUT ROWID",
+        "CREATE VIEW recent AS SELECT id, v FROM plain",
+        "CREATE TRIGGER add_recent INSTEAD OF INSERT ON recent BEGIN INSERT INTO plain (v) VALUES (NEW.v); END",
+        "INSERT INTO pair VALUES (2, 9, 'old')",
+        "INSERT INTO named VALUES ('2', 'old')",
+        "INSERT INTO no_rowid VALUES (7, 'old')",
+        "INSERT INTO plain VALUES (7, 'old')",
+    ] {
+        exec(&engine, sql).await;
+    }
+    let new = Value::from("new");
+    for (table, values, stored) in [
+        ("no_rowid", vec![("id", Value::Int(9)), ("v", new.clone())], vec![]),
+        ("tagged", vec![("v", new.clone()), ("note", Value::Null)], vec![("k", Value::from("auto"))]),
+        ("shaded", vec![("id", Value::Int(3)), ("v", new.clone())], vec![]),
+        ("pair", vec![("a", Value::Int(5)), ("b", Value::Int(6)), ("v", new.clone())], vec![]),
+        ("named", vec![("rowid", Value::from("r")), ("v", new.clone())], vec![]),
+        ("plain", vec![("v", new.clone())], vec![("id", Value::Int(8))]),
+        ("recent", vec![("v", Value::from("seen"))], vec![("id", Value::Int(9))]),
+    ] {
+        let inserted = engine.insert_row("main", table, &row(&values)).await.unwrap();
+        assert_eq!(inserted, row(&[values, stored].concat()), "{table}");
+    }
+}
+
 #[tokio::test]
 async fn ddl_for_routines_and_missing_objects_fails() {
     let dir = tempfile::tempdir().unwrap();
@@ -211,6 +274,18 @@ async fn a_long_statement_stops_when_cancelled_mid_run() {
 }
 
 #[tokio::test]
+async fn a_cancel_mid_stream_keeps_the_rows_already_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = seeded(&dir).await;
+    let mut session = engine.session().await.unwrap();
+    let (_, events, _) =
+        common::cancel_after(&mut session, "SELECT * FROM t, t AS t2", std::time::Duration::from_millis(100)).await;
+    let (sent, counted) = common::rows_and_count(&events);
+    assert!(sent > 0, "the cancel came before the first row");
+    assert_eq!(counted, Some(sent as i64));
+}
+
+#[tokio::test]
 async fn read_only_sessions_refuse_writes_themselves() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("guard.db");
@@ -226,6 +301,31 @@ async fn read_only_sessions_refuse_writes_themselves() {
     let streamed = session.stream("DELETE FROM t", &tx, &Cancel::new()).await;
     assert_eq!(streamed.map_err(|e| e.message), Err(barsql_sql::READ_ONLY_ERROR.to_string()));
     assert!(session.run_script(&["SELECT count(*) FROM t".into()], &tx, &Cancel::new()).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_cancel_ends_the_wait_for_the_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = seeded(&dir).await;
+    let mut holder = engine.session().await.unwrap();
+    holder.begin().await.unwrap();
+    let mut waiting = engine.session().await.unwrap();
+    let cancel = Cancel::new();
+    let (tx, rx) = async_channel::unbounded();
+    let run = tokio::spawn({
+        let cancel = cancel.clone();
+        async move { waiting.run_script(&["SELECT count(*) FROM t".into()], &tx, &cancel).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    cancel.cancel();
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), run).await.expect("the cancel ends the wait");
+    assert!(ended.unwrap().is_err_and(|e| e.cancelled));
+    let events: Vec<ScriptEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(
+        matches!(events.as_slice(), [ScriptEvent::Result(r)] if r.error.as_ref().is_some_and(|e| e.cancelled)),
+        "{events:?}"
+    );
+    holder.commit().await.unwrap();
 }
 
 // A tab keeps its session between runs, so a plan must not keep the file's one connection with it.

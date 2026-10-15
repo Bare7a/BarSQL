@@ -164,8 +164,7 @@ impl MsEngine {
     }
 
     pub(crate) async fn lease(self: &Arc<Self>) -> Result<MsLease, QueryError> {
-        let permit =
-            self.permits.clone().acquire_owned().await.map_err(|_| QueryError::message("connection is closed"))?;
+        let permit = crate::pool::acquire(&self.permits, MAX_CONNECTIONS, crate::pool::LEASE_TIMEOUT).await?;
         let pooled = self.lock_idle().pop();
         // Boxed: a login is a big future, and every catalog call would carry it inline.
         let client = match pooled {

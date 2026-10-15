@@ -26,6 +26,7 @@ impl SettingsStore {
         self.lock().get(key).cloned()
     }
 
+    // Unlike the other stores, keeps a value whose write failed: the UI has applied it and reads it back from here.
     pub fn set(&self, key: &str, value: &str) -> io::Result<()> {
         let mut values = self.lock();
         values.insert(key.to_string(), value.to_string());

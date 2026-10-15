@@ -54,6 +54,8 @@ mod sql_language;
 pub mod state;
 mod status_bar;
 mod syntax;
+#[cfg(target_os = "macos")]
+mod system_quit;
 mod table_edits;
 mod table_tab;
 #[cfg(test)]
@@ -101,6 +103,11 @@ pub fn run(bar: BarApp, options: LaunchOptions) {
             opener.open_sqlite(&path);
         }
     });
+    // Snapshots and screenshots quit unattended, with nobody to ask.
+    #[cfg(target_os = "macos")]
+    if options.snapshot.is_none() && options.screenshots.is_none() {
+        system_quit::install();
+    }
     app.run(move |cx| {
         gpui_kit::init(cx);
         if options.screenshots.is_some() {
@@ -111,6 +118,8 @@ pub fn run(bar: BarApp, options: LaunchOptions) {
         syntax::init();
         assets::load_fonts(cx);
         state::init(bar.clone(), cx);
+        #[cfg(target_os = "macos")]
+        system_quit::init(bar.clone(), cx);
         schema::init(cx);
         saved_queries::init(cx);
         theme::init(cx);

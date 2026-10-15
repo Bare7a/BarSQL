@@ -7,7 +7,7 @@ pub mod query;
 pub mod schema;
 
 pub use capabilities::Capabilities;
-pub use config::{ConnectionConfig, DriverType, SshConfig};
+pub use config::{ConfigError, ConnectionConfig, DriverType, SshConfig};
 pub use dialect::SqlDialect;
 pub use query::{
     HistoryEntry, MessageLevel, QueryError, ResultSummary, Row, RowDelete, RowUpdate, SavedQuery, ServerMessage,

@@ -2,13 +2,33 @@ use std::time::Duration;
 
 use barsql_app::BarApp;
 use barsql_core::{ConnectionConfig, DriverType};
-use gpui_kit::{TestAppContext, VisualTestContext};
+use gpui_kit::component::Root;
+use gpui_kit::{AppContext as _, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
 
 use crate::{actions, grid, list_nav, plan_view, saved_queries, schema, schema_tree, shortcuts, state, theme};
 
+// "mod" means the platform's command key, as in the default shortcuts.
+pub fn chord(keys: &str) -> String {
+    keys.replace("mod-", if cfg!(target_os = "macos") { "cmd-" } else { "ctrl-" })
+}
+
+// A window with `build`'s view inside Root, like the app's, so dialogs can open.
+pub fn in_root<V: Render>(
+    cx: &mut TestAppContext,
+    build: impl FnOnce(&mut Window, &mut Context<V>) -> V,
+) -> (Entity<V>, &mut VisualTestContext) {
+    let mut view = None;
+    let handle = cx.add_window(|window, cx| {
+        let entity = cx.new(|cx| build(window, cx));
+        view = Some(entity.clone());
+        Root::new(entity, window, cx)
+    });
+    (view.unwrap(), VisualTestContext::from_window(handle.into(), cx).into_mut())
+}
+
 pub struct Env {
     pub runtime: tokio::runtime::Runtime,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
     pub bar: BarApp,
     pub connection: ConnectionConfig,
 }
@@ -57,7 +77,17 @@ impl Env {
             crate::completion::init(cx);
             shortcuts::init(cx);
         });
-        Self { runtime, _dir: dir, bar, connection }
+        Self { runtime, dir, bar, connection }
+    }
+
+    pub fn block_writes(&self, file: &str) {
+        let path = self.dir.path().join("data").join(file);
+        let _ = std::fs::remove_file(&path);
+        std::fs::create_dir(&path).unwrap();
+    }
+
+    pub fn unblock_writes(&self, file: &str) {
+        std::fs::remove_dir(self.dir.path().join("data").join(file)).unwrap();
     }
 }
 

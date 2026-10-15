@@ -4,6 +4,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::{Pixels, TestAppContext, px, size};
 
 use super::driver::{Driver, open, selector};
+use crate::dialogs::Alerted;
 use crate::file_dialogs::Stub;
 
 fn open_switcher(app: &mut Driver) {
@@ -141,6 +142,22 @@ fn a_connection_is_deleted_after_confirming(cx: &mut TestAppContext) {
     app.settle(|cx| cx.update(|_, cx| sidebar.read(cx).connections().is_empty()));
     assert!(names(&app).is_empty());
     assert_eq!(selected(&mut app), None, "the switcher offers a new connection");
+}
+
+#[gpui_kit::test]
+fn a_connection_the_store_cannot_delete_stays(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    let id = app.connection.id.clone();
+    app.env.block_writes("connections.json");
+    row_button(&mut app, "delete", &id);
+    app.confirm_dialog();
+    app.settle(|cx| cx.update(|_, cx| cx.has_global::<Alerted>()));
+    let (title, _) = app.alerted().expect("an alert");
+    assert_eq!(title, "Could not delete connection");
+    assert_eq!(names(&app), ["Local"]);
+    let sidebar = app.sidebar();
+    app.settle(|cx| cx.update(|_, cx| sidebar.read(cx).connections().len() == 1));
+    assert_eq!(selected(&mut app).as_deref(), Some("Local"));
 }
 
 #[gpui_kit::test]

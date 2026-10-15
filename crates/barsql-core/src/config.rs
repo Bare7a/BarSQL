@@ -215,52 +215,44 @@ impl ConnectionConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        self.check().map_err(|error| error.to_string())
+    }
+
+    // What validate reports, as a value the UI can word in its own language.
+    pub fn check(&self) -> Result<(), ConfigError> {
         let caps = self.driver.capabilities();
         if !caps.supported {
             return Err(match self.driver {
-                DriverType::Other(_) | DriverType::Unset => format!("unsupported driver: {}", self.driver),
+                DriverType::Other(_) | DriverType::Unset => ConfigError::UnsupportedDriver(self.driver.clone()),
                 DriverType::Sqlite
                 | DriverType::Postgres
                 | DriverType::MySql
                 | DriverType::Turso
                 | DriverType::ClickHouse
-                | DriverType::SqlServer => format!("{} is not available in this build", self.driver),
+                | DriverType::SqlServer => ConfigError::NotInThisBuild(self.driver.clone()),
             });
         }
         match caps.location {
-            Location::LocalFile => require(&self.file_path, "SQLite database file path is required")?,
+            Location::LocalFile => require(&self.file_path, ConfigError::FilePathRequired)?,
             Location::Url => {
-                require(&self.url, "database URL is required")?;
+                require(&self.url, ConfigError::UrlRequired)?;
                 let lower = self.url.to_ascii_lowercase();
                 if !URL_SCHEMES.iter().any(|scheme| lower.len() > scheme.len() && lower.starts_with(scheme)) {
-                    return Err("database URL must start with libsql://, https://, http://, wss:// or ws://".into());
+                    return Err(ConfigError::UrlScheme);
                 }
             }
             Location::Network => {
-                require(&self.host, "host is required")?;
+                require(&self.host, ConfigError::HostRequired)?;
                 if caps.database == DatabaseField::Required {
-                    require(&self.database, self.database_required_message())?;
+                    require(&self.database, ConfigError::DatabaseRequired(self.driver.clone()))?;
                 }
-                require(&self.username, "username is required")?;
+                require(&self.username, ConfigError::UsernameRequired)?;
             }
         }
         if caps.ssh_tunnel {
-            return self.ssh.validate();
+            return self.ssh.check();
         }
         Ok(())
-    }
-
-    fn database_required_message(&self) -> &'static str {
-        match self.driver {
-            DriverType::Postgres => "database name is required (e.g. blog - not the username \"postgres\")",
-            DriverType::Sqlite
-            | DriverType::MySql
-            | DriverType::Turso
-            | DriverType::ClickHouse
-            | DriverType::SqlServer
-            | DriverType::Other(_)
-            | DriverType::Unset => "database name is required",
-        }
     }
 
     pub fn dialect(&self) -> Result<SqlDialect, String> {
@@ -334,27 +326,69 @@ impl SshConfig {
         }
     }
 
-    fn validate(&self) -> Result<(), String> {
+    fn check(&self) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
-        require(&self.host, "SSH host is required")?;
-        require(&self.username, "SSH username is required")?;
+        require(&self.host, ConfigError::SshHostRequired)?;
+        require(&self.username, ConfigError::SshUsernameRequired)?;
         if !(0..=65535).contains(&self.port) {
-            return Err("SSH port must be between 1 and 65535".into());
+            return Err(ConfigError::SshPortRange);
         }
         match self.auth.as_str() {
-            SSH_AUTH_KEY | "" => require(&self.key_path, "SSH private key file is required"),
+            SSH_AUTH_KEY | "" => require(&self.key_path, ConfigError::SshKeyRequired),
             SSH_AUTH_PASSWORD | SSH_AUTH_AGENT => Ok(()),
-            other => Err(format!("unsupported SSH authentication method: {other}")),
+            other => Err(ConfigError::SshAuthMethod(other.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigError {
+    UnsupportedDriver(DriverType),
+    NotInThisBuild(DriverType),
+    FilePathRequired,
+    UrlRequired,
+    UrlScheme,
+    HostRequired,
+    DatabaseRequired(DriverType),
+    UsernameRequired,
+    SshHostRequired,
+    SshUsernameRequired,
+    SshPortRange,
+    SshKeyRequired,
+    SshAuthMethod(String),
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedDriver(driver) => write!(f, "unsupported driver: {driver}"),
+            Self::NotInThisBuild(driver) => write!(f, "{driver} is not available in this build"),
+            Self::FilePathRequired => f.write_str("SQLite database file path is required"),
+            Self::UrlRequired => f.write_str("database URL is required"),
+            Self::UrlScheme => {
+                f.write_str("database URL must start with libsql://, https://, http://, wss:// or ws://")
+            }
+            Self::HostRequired => f.write_str("host is required"),
+            Self::DatabaseRequired(DriverType::Postgres) => {
+                f.write_str("database name is required (e.g. blog - not the username \"postgres\")")
+            }
+            Self::DatabaseRequired(_) => f.write_str("database name is required"),
+            Self::UsernameRequired => f.write_str("username is required"),
+            Self::SshHostRequired => f.write_str("SSH host is required"),
+            Self::SshUsernameRequired => f.write_str("SSH username is required"),
+            Self::SshPortRange => f.write_str("SSH port must be between 1 and 65535"),
+            Self::SshKeyRequired => f.write_str("SSH private key file is required"),
+            Self::SshAuthMethod(method) => write!(f, "unsupported SSH authentication method: {method}"),
         }
     }
 }
 
 const URL_SCHEMES: [&str; 5] = ["libsql://", "https://", "http://", "wss://", "ws://"];
 
-fn require(value: &str, message: &str) -> Result<(), String> {
-    if value.is_empty() { Err(message.to_string()) } else { Ok(()) }
+fn require(value: &str, error: ConfigError) -> Result<(), ConfigError> {
+    if value.is_empty() { Err(error) } else { Ok(()) }
 }
 
 fn trim_in_place(value: &mut String) {
@@ -448,6 +482,40 @@ mod tests {
                 (Err(err), want) if !want.is_empty() && err.contains(want) => {}
                 (got, want) => panic!("{name}: got {got:?}, want {want:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn check_names_the_problem_that_validate_words() {
+        let cases = [
+            (ConnectionConfig { host: String::new(), ..pg() }, ConfigError::HostRequired, "host is required"),
+            (
+                ConnectionConfig { database: String::new(), ..pg() },
+                ConfigError::DatabaseRequired(DriverType::Postgres),
+                "database name is required (e.g. blog - not the username \"postgres\")",
+            ),
+            (
+                ConnectionConfig { username: String::new(), ..pg() },
+                ConfigError::UsernameRequired,
+                "username is required",
+            ),
+            (
+                ConnectionConfig { driver: DriverType::Turso, url: "ftp://db".into(), ..Default::default() },
+                ConfigError::UrlScheme,
+                "database URL must start with libsql://, https://, http://, wss:// or ws://",
+            ),
+            (
+                ConnectionConfig {
+                    ssh: SshConfig { enabled: true, username: "u".into(), ..Default::default() },
+                    ..pg()
+                },
+                ConfigError::SshHostRequired,
+                "SSH host is required",
+            ),
+        ];
+        for (cfg, error, message) in cases {
+            assert_eq!(cfg.check(), Err(error));
+            assert_eq!(cfg.validate(), Err(message.to_string()));
         }
     }
 

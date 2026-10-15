@@ -81,7 +81,17 @@
     "databaseHintSqlServer": "Database to connect to. Leave it empty for the login's default.",
     "sslStrict": "Strict (TDS 8.0)",
     "confirmChanges": "Ask before running changes",
-    "confirmChangesHint": "For production databases: confirms INSERT, UPDATE, DELETE, DDL and grid saves before they run."
+    "confirmChangesHint": "For production databases: confirms INSERT, UPDATE, DELETE, DDL and grid saves before they run.",
+    "hostRequired": "Host is required.",
+    "usernameRequired": "Username is required.",
+    "urlScheme": "The database URL must start with libsql://, https://, http://, wss:// or ws://.",
+    "sshHostRequired": "SSH host is required.",
+    "sshUsernameRequired": "SSH username is required.",
+    "sshPortRange": "SSH port must be between 1 and 65535.",
+    "sshKeyRequired": "SSH private key file is required.",
+    "sshAuthUnsupported": "Unsupported SSH authentication method: {{method}}.",
+    "driverUnsupported": "Unsupported driver: {{driver}}.",
+    "driverNotInBuild": "{{driver}} is not available in this build."
   },
   "results": {
     "messages": "Messages",
@@ -192,7 +202,15 @@
     "duplicate": "Duplicate",
     "rename": "Rename…",
     "renameTitle": "Rename tab",
-    "copySql": "Copy SQL"
+    "copySql": "Copy SQL",
+    "rollbackTitle": "Roll back and close?",
+    "rollbackDescription_one": "This tab has an open transaction. Closing it rolls the transaction back, and the changes made in it are lost.",
+    "rollbackDescription_other": "{{count}} tabs have open transactions. Closing them rolls the transactions back, and the changes made in them are lost.",
+    "rollbackConfirm": "Roll back and close",
+    "quitTitle": "Roll back and quit?",
+    "quitDescription_one": "One tab has an open transaction. Quitting rolls it back, and the changes made in it are lost.",
+    "quitDescription_other": "{{count}} tabs have open transactions. Quitting rolls them back, and the changes made in them are lost.",
+    "quitConfirm": "Roll back and quit"
   },
   "common": {
     "undo": "Undo"
@@ -221,7 +239,15 @@
   },
   "errors": {
     "deleteQueryFailed": "Could not delete query",
-    "deleteQueryFailedDetail": "The saved query is no longer in the library."
+    "deleteQueryFailedDetail": "The saved query is no longer in the library.",
+    "deleteConnectionFailed": "Could not delete connection",
+    "reorderConnectionsFailed": "Could not save the connection order",
+    "saveFolderFailed": "Could not save folder",
+    "deleteFolderFailed": "Could not delete folder",
+    "deleteHistoryFailed": "Could not delete history entry",
+    "settingsNotSaved": "Settings could not be saved: {{error}}. The change lasts until BarSQL quits.",
+    "sessionNotSaved": "Open tabs could not be saved: {{error}}. BarSQL may not reopen them as they are now.",
+    "historyNotSaved": "Query history could not be saved: {{error}}. Recent won't list new queries until saving works again."
   },
   "status": {
     "caret": "Ln {{line}}, Col {{column}}",

@@ -10,6 +10,7 @@ use barsql_db::Engine;
 use barsql_storage::ConnectionFolder;
 
 use crate::events::AppEvent;
+use crate::stores::storage_error;
 use crate::{BarApp, PooledEngine, lock};
 
 // A saturated pool must not wedge the sidebar, which loads these lazily.
@@ -29,18 +30,18 @@ impl BarApp {
     pub async fn save_connection(&self, mut cfg: ConnectionConfig) -> Result<ConnectionConfig, QueryError> {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
-        let saved = self.inner.stores.connections.save(cfg).map_err(|e| QueryError::message(e.to_string()))?;
+        let saved = self.inner.stores.connections.save(cfg).map_err(storage_error)?;
         self.disconnect(&saved.id).await;
         Ok(saved)
     }
 
-    pub async fn delete_connection(&self, id: &str) -> bool {
+    pub async fn delete_connection(&self, id: &str) -> Result<bool, QueryError> {
         self.disconnect(id).await;
-        self.inner.stores.connections.delete(id).unwrap_or(false)
+        self.inner.stores.connections.delete(id).map_err(storage_error)
     }
 
-    pub fn reorder_connections(&self, ordered_ids: &[String]) -> bool {
-        self.inner.stores.connections.reorder(ordered_ids).is_ok()
+    pub fn reorder_connections(&self, ordered_ids: &[String]) -> Result<(), QueryError> {
+        self.inner.stores.connections.reorder(ordered_ids).map_err(storage_error)
     }
 
     pub async fn test_connection(&self, mut cfg: ConnectionConfig) -> Result<(), QueryError> {
@@ -77,7 +78,7 @@ impl BarApp {
         Ok(engine)
     }
 
-    fn connect_lock(&self, id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    pub(crate) fn connect_lock(&self, id: &str) -> Arc<tokio::sync::Mutex<()>> {
         lock(&self.inner.connect_locks).entry(id.to_string()).or_default().clone()
     }
 
@@ -116,26 +117,28 @@ impl BarApp {
     pub async fn load_schema_data(&self, id: &str) -> Result<SchemaBundle, QueryError> {
         let cfg = self.config(id)?;
         let engine = self.engine(id).await?;
-        let mut status = engine.connection_info().await?;
+        let mut status = within(SCHEMA_TIMEOUT, engine.connection_info()).await?;
         status.connected = true;
-        let schemas = engine.list_schemas().await?;
+        let schemas = within(SCHEMA_TIMEOUT, engine.list_schemas()).await?;
         let browse = cfg.default_browse_schema();
         let mut preload: HashSet<String> = HashSet::from([browse.clone()]);
         preload.extend(cfg.driver.capabilities().preload_schemas.iter().map(|s| s.to_string()));
         let mut loaded_tables = Vec::new();
         for schema in schemas.iter().filter(|s| preload.contains(&s.name)) {
-            let tables = engine.list_tables(&schema.name).await?;
+            let tables = within(SCHEMA_TIMEOUT, engine.list_tables(&schema.name)).await?;
             loaded_tables.push(SchemaTables { schema: schema.name.clone(), tables });
         }
         Ok(SchemaBundle { status, schemas, loaded_tables })
     }
 
     pub async fn list_schemas(&self, id: &str) -> Result<Vec<SchemaInfo>, QueryError> {
-        self.engine(id).await?.list_schemas().await
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.list_schemas()).await
     }
 
     pub async fn list_tables(&self, id: &str, schema: &str) -> Result<Vec<TableInfo>, QueryError> {
-        self.engine(id).await?.list_tables(schema).await
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.list_tables(schema)).await
     }
 
     pub async fn list_columns(&self, id: &str, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
@@ -202,17 +205,17 @@ impl BarApp {
         self.inner.stores.connections.folders()
     }
 
-    pub fn save_folder(&self, folder: ConnectionFolder) -> ConnectionFolder {
-        self.inner.stores.connections.save_folder(folder.clone()).unwrap_or(folder)
+    pub fn save_folder(&self, folder: ConnectionFolder) -> Result<ConnectionFolder, QueryError> {
+        self.inner.stores.connections.save_folder(folder).map_err(storage_error)
     }
 
-    pub fn delete_folder(&self, id: &str) {
-        let _ = self.inner.stores.connections.delete_folder(id);
+    pub fn delete_folder(&self, id: &str) -> Result<(), QueryError> {
+        self.inner.stores.connections.delete_folder(id).map_err(storage_error)
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use barsql_core::{ConnectionConfig, DriverType};
@@ -225,7 +228,7 @@ mod tests {
         matches!((a, b), (Engine::Sqlite(x), Engine::Sqlite(y)) if Arc::ptr_eq(x, y))
     }
 
-    async fn setup() -> (BarApp, String, tempfile::TempDir) {
+    pub(crate) async fn setup() -> (BarApp, String, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let app = BarApp::open(&dir.path().join("data"), tokio::runtime::Handle::current()).unwrap();
         let cfg = ConnectionConfig {

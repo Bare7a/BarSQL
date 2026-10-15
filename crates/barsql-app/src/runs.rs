@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use barsql_core::{DriverType, HistoryEntry, QueryError, SqlDialect, TableDataRequest, Value};
+use barsql_core::{DriverType, QueryError, SqlDialect, TableDataRequest, Value};
 use barsql_db::{Cancel, ScriptEvent, Session};
 use barsql_sql::plan::{NOTE_ROLLED_BACK, NOTE_TAB_TRANSACTION};
 use barsql_sql::{
@@ -10,6 +10,7 @@ use barsql_sql::{
 
 use crate::BarApp;
 use crate::events::{RunEvent, RunHandle, RunResult};
+use crate::tabs::Slot;
 
 const RUN_CHANNEL: usize = 16;
 
@@ -34,17 +35,6 @@ impl BarApp {
         Ok(cfg.driver)
     }
 
-    pub(crate) fn record_history(&self, connection_id: &str, sql: &str, duration_ms: i64, error: Option<&QueryError>) {
-        let _ = self.inner.stores.history.add(HistoryEntry {
-            connection_id: connection_id.to_string(),
-            sql: sql.to_string(),
-            duration_ms,
-            success: error.is_none(),
-            error: error.map(|e| e.message.clone()).unwrap_or_default(),
-            ..Default::default()
-        });
-    }
-
     // Runs on the tab's own session and ends with Done. A new run cancels the tab's previous one.
     pub async fn execute_query_stream(
         &self,
@@ -55,16 +45,21 @@ impl BarApp {
         if tab_id.is_empty() {
             return Err(QueryError::message("tab id is required"));
         }
-        self.guard_execute(connection_id, sql)?;
+        let driver = self.guard_execute(connection_id, sql)?;
         // Split with the connection's dialect so the boundaries match the editor's run glyphs.
-        let engine = self.engine(connection_id).await?;
-        let statements = split_statement_texts(&engine.driver(), sql);
+        let statements = split_statement_texts(&driver, sql);
+        // Both before the connect, so Stop and closing the tab reach a run that is still connecting.
+        let slot = self.inner.tabs.slot(tab_id);
         let (stream_id, cancel) = self.inner.jobs.start(tab_id, connection_id);
+        if let Err(error) = self.engine_unless_cancelled(connection_id, &cancel).await {
+            self.inner.jobs.end(tab_id, stream_id);
+            return Err(error);
+        }
         let (tx, rx) = async_channel::bounded(RUN_CHANNEL);
         let app = self.clone();
         let (tab, connection) = (tab_id.to_string(), connection_id.to_string());
         self.inner.runtime.spawn(async move {
-            let done = match app.run_batch(&tab, &connection, &statements, &tx, &cancel).await {
+            let done = match app.run_batch(&tab, slot, &connection, &statements, &tx, &cancel).await {
                 Ok(result_count) => RunEvent::Done { result_count, error: None },
                 Err(error) => RunEvent::Done { result_count: 0, error: Some(error) },
             };
@@ -78,12 +73,13 @@ impl BarApp {
     async fn run_batch(
         &self,
         tab_id: &str,
+        slot: Slot,
         connection_id: &str,
         statements: &[String],
         events: &async_channel::Sender<RunEvent>,
         cancel: &Cancel,
     ) -> Result<usize, QueryError> {
-        let mut slot = self.tab_session(tab_id, connection_id).await?;
+        let mut slot = self.tab_session(tab_id, slot, connection_id, cancel).await?;
         let session = slot.session.as_mut().expect("tab session");
         let (inner_tx, inner_rx) = async_channel::bounded(RUN_CHANNEL);
         let run = async move {
@@ -229,7 +225,7 @@ impl BarApp {
             return Err(QueryError::message("transaction already active on this tab"));
         }
         self.guard_execute(connection_id, "BEGIN")?;
-        let mut slot = self.tab_session(tab_id, connection_id).await?;
+        let mut slot = self.tab_session(tab_id, self.inner.tabs.slot(tab_id), connection_id, &Cancel::new()).await?;
         let session = slot.session.as_mut().expect("tab session");
         if session.in_transaction() {
             self.sync_transaction(tab_id, &mut slot);
@@ -264,6 +260,11 @@ impl BarApp {
         self.inner.tabs.in_transaction(tab_id)
     }
 
+    // Whether quitting would roll back a transaction. Reads no tab's slot, so it answers at once while runs go on.
+    pub fn any_transaction_open(&self) -> bool {
+        self.inner.tabs.any_in_transaction()
+    }
+
     // A measured plan of a write runs in a transaction that is always rolled back. A tab with an open
     // transaction explains inside it instead.
     pub async fn explain_query(
@@ -285,7 +286,7 @@ impl BarApp {
                 let mut session = self.engine(connection_id).await?.session().await?;
                 return explain_in(&mut session, &cfg.driver, &stmt, analyze, &cancel).await;
             }
-            let mut slot = self.tab_session(tab_id, connection_id).await?;
+            let mut slot = self.tab_session(tab_id, self.inner.tabs.slot(tab_id), connection_id, &cancel).await?;
             let session = slot.session.as_mut().expect("tab session");
             let result = explain_in(session, &cfg.driver, &stmt, analyze, &cancel).await;
             self.sync_transaction(tab_id, &mut slot);

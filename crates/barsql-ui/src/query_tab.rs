@@ -710,16 +710,18 @@ impl QueryTab {
         let start = state::spawn(cx, async move { bar.execute_query_stream(&connection_id, &tab_id, &sql).await });
         let results = self.results.downgrade();
         let work = cx.spawn_in(window, async move |this, cx| {
+            let mut failed = false;
             match start.await {
                 Some(Ok(handle)) => {
                     while let Ok(event) = handle.events.recv().await {
                         let done = matches!(event, RunEvent::Done { .. });
-                        let Ok(failed) = results.update_in(cx, |results, window, cx| results.apply(event, window, cx))
+                        let Ok(outcome) = results.update_in(cx, |results, window, cx| results.apply(event, window, cx))
                         else {
                             return;
                         };
-                        if let Some(failed) = failed {
-                            let _ = this.update(cx, |this, _| this.track_statement(failed));
+                        if let Some(outcome) = outcome {
+                            failed |= outcome;
+                            let _ = this.update(cx, |this, _| this.track_statement(outcome));
                         }
                         if done {
                             break;
@@ -731,7 +733,7 @@ impl QueryTab {
                 }
                 None => {}
             }
-            let _ = this.update(cx, |this, cx| this.finish_run(cx));
+            let _ = this.update(cx, |this, cx| this.finish_run(failed, cx));
         });
         self.start_running(work, cx);
     }
@@ -749,8 +751,9 @@ impl QueryTab {
         cx.notify();
     }
 
-    fn finish_run(&mut self, cx: &mut Context<Self>) {
+    fn finish_run(&mut self, failed: bool, cx: &mut Context<Self>) {
         self.running = None;
+        self.sync_transaction(failed, cx);
         cx.emit(QueryTabEvent::RunFinished);
         // A tab opened while the server was down gets its schema once a run gets through.
         schema::ensure_loaded(&self.connection.id, self.connection.driver.clone(), cx);
@@ -761,6 +764,17 @@ impl QueryTab {
         if self.txn != TxnState::Idle {
             self.txn = if failed { TxnState::Error } else { TxnState::Active };
         }
+    }
+
+    // A run stops at its first failure, so when it opened the transaction, `failed` means a statement in it failed.
+    fn sync_transaction(&mut self, failed: bool, cx: &mut Context<Self>) {
+        let open = state::bar(cx).transaction_status(&self.id);
+        self.txn = match (open, self.txn) {
+            (false, _) => TxnState::Idle,
+            (true, TxnState::Idle) if failed => TxnState::Error,
+            (true, TxnState::Idle) => TxnState::Active,
+            (true, state) => state,
+        };
     }
 
     fn cancel(&mut self, cx: &mut Context<Self>) {
@@ -787,12 +801,7 @@ impl QueryTab {
         cx.spawn_in(window, async move |this, cx| {
             let Some(result) = work.await else { return };
             let _ = this.update(cx, |this, cx| {
-                // Commit and rollback end the transaction whether or not they succeed.
-                match (control, &result) {
-                    (TxnControl::Begin, Ok(())) => this.txn = TxnState::Active,
-                    (TxnControl::Begin, Err(_)) => {}
-                    _ => this.txn = TxnState::Idle,
-                }
+                this.sync_transaction(false, cx);
                 let message = match control {
                     TxnControl::Begin => "results.txnBegin",
                     TxnControl::Commit => "results.txnCommit",

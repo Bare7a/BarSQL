@@ -1,5 +1,6 @@
 use barsql_core::SqlDialect;
 use barsql_db::Cell;
+use barsql_sql::dml::{is_bit_column, is_bit_string};
 use barsql_sql::{Dialect, quote_ident_in, quote_literal_in};
 use serde_json::Value as Json;
 
@@ -65,6 +66,8 @@ pub struct Exporter {
     format: ExportFormat,
     columns: Vec<String>,
     json_columns: Vec<bool>,
+    // MySQL reads a quoted literal into a BIT column as bytes, so its digits go as a b'1010' literal instead.
+    bit_columns: Vec<bool>,
     sql_prefix: String,
     // SQL INSERTs are written for this dialect, or as ANSI SQL without one.
     dialect: Option<SqlDialect>,
@@ -106,10 +109,13 @@ impl Exporter {
         let json_columns = (0..columns.len())
             .map(|i| column_types.get(i).is_some_and(|t| t.to_ascii_lowercase().contains("json")))
             .collect();
+        let bit_columns =
+            (0..columns.len()).map(|i| column_types.get(i).is_some_and(|t| is_bit_column(dialect, t))).collect();
         Self {
             format,
             columns: columns.to_vec(),
             json_columns,
+            bit_columns,
             sql_prefix,
             dialect,
             pending: header,
@@ -172,7 +178,11 @@ impl Exporter {
                 )
             }
             ExportFormat::Sql => {
-                let values = cells.iter().map(|c| sql_literal(*c, self.dialect)).collect::<Vec<_>>();
+                let values = cells
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| sql_literal(*c, self.dialect, self.bit_columns.get(i) == Some(&true)))
+                    .collect::<Vec<_>>();
                 format!("{}{});", self.sql_prefix, values.join(", "))
             }
             ExportFormat::Json => {
@@ -247,9 +257,10 @@ fn md_cell(s: &str) -> String {
     s.replace('|', "\\|").replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
-fn sql_literal(cell: Cell<'_>, dialect: Option<SqlDialect>) -> String {
+pub fn sql_literal(cell: Cell<'_>, dialect: Option<SqlDialect>, bit_column: bool) -> String {
     match (cell, dialect) {
         (Cell::Null, _) => "NULL".into(),
+        (Cell::Text(s), _) if bit_column && is_bit_string(s) => format!("b'{s}'"),
         // T-SQL has no TRUE or FALSE, and its bit columns take 1 and 0.
         (Cell::Bool(b), Some(SqlDialect::TSql)) => if b { "1" } else { "0" }.into(),
         (Cell::Bool(true), _) => "TRUE".into(),
@@ -512,7 +523,7 @@ mod tests {
             ),
             (
                 SqlDialect::MySql,
-                "INSERT INTO `t` (`note`, `flag`, `n`, `gone`) VALUES (CONVERT(X'6974277320615C62' USING utf8mb4), TRUE, 2, NULL);",
+                "INSERT INTO `t` (`note`, `flag`, `n`, `gone`) VALUES (_utf8mb4 X'6974277320615C62', TRUE, 2, NULL);",
             ),
             (
                 SqlDialect::Sqlite,
@@ -527,6 +538,17 @@ mod tests {
         for (dialect, expected) in cases {
             assert_eq!(insert(dialect), expected, "{dialect:?}");
         }
+    }
+
+    #[test]
+    fn sql_export_writes_mysql_bits_as_bit_literals() {
+        let columns: Vec<String> = ["b", "n", "edited"].map(String::from).to_vec();
+        let types: Vec<String> = ["BIT", "INT", "BIT"].map(String::from).to_vec();
+        let row = || [vec![Cell::Text("0101"), Cell::Number("2"), Cell::Text("12")]];
+        let insert = |dialect| export_to_string(ExportFormat::Sql, &columns, &types, Some("t"), Some(dialect), row());
+        // A staged edit that isn't digits stays quoted, for the server to refuse.
+        assert_eq!(insert(SqlDialect::MySql), "INSERT INTO `t` (`b`, `n`, `edited`) VALUES (b'0101', 2, '12');");
+        assert_eq!(insert(SqlDialect::Postgres), r#"INSERT INTO "t" ("b", "n", "edited") VALUES ('0101', 2, '12');"#);
     }
 
     #[test]

@@ -129,13 +129,13 @@ impl SavedPanel {
             danger: true,
         };
         dialogs::confirm(confirm, window, cx, move |window, cx| {
-            if !state::bar(cx).delete_saved_query(&query.id) {
-                saved_queries::failed(
-                    t(cx, "errors.deleteQueryFailedDetail").into(),
-                    "errors.deleteQueryFailed",
-                    window,
-                    cx,
-                );
+            let detail = match state::bar(cx).delete_saved_query(&query.id) {
+                Ok(true) => None,
+                Ok(false) => Some(t(cx, "errors.deleteQueryFailedDetail").to_string()),
+                Err(error) => Some(error.message),
+            };
+            if let Some(detail) = detail {
+                saved_queries::failed(detail, "errors.deleteQueryFailed", window, cx);
             }
             saved_queries::refresh(cx);
         });

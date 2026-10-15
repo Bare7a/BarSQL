@@ -70,4 +70,13 @@ pub enum AppEvent {
     UpdateAvailable { version: String },
     // Another launch asked for the window.
     Activate,
+    // A write to `what` failed. Sent once until one of its writes gets through again.
+    NotSaved { what: Unsaved, error: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unsaved {
+    Settings,
+    Session,
+    History,
 }

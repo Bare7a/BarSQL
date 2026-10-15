@@ -2,11 +2,11 @@
 
 mod common;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use barsql_core::{MessageLevel, ObjectKind, ObjectRef};
-use barsql_db::{Cancel, ScriptEvent, Session};
-use common::{mssql_config, mssql_engine};
+use barsql_db::{Cancel, MAX_MESSAGES, ScriptEvent, Session};
+use common::{cancel_after, mssql_config, mssql_engine};
 
 // Each run's events.
 async fn run(session: &mut Session, batches: &[&str]) -> (Vec<ScriptEvent>, Result<usize, barsql_core::QueryError>) {
@@ -137,6 +137,71 @@ async fn a_batch_gives_each_result_set_and_its_messages() {
 }
 
 #[tokio::test]
+async fn variable_assignments_list_no_row_counts() {
+    let Some(cfg) = mssql_config() else { return };
+    let engine = mssql_engine(&cfg).await;
+    let mut session = engine.session().await.unwrap();
+    let (events, result) = run(
+        &mut session,
+        &["DECLARE @i int = 1, @n int;
+          WHILE @i <= 3 BEGIN SET @i += 1; SELECT @n = object_id FROM sys.objects END;
+          PRINT CONCAT('i = ', @i)"],
+    )
+    .await;
+    result.unwrap();
+    assert_eq!(messages(&events), [(0, MessageLevel::Notice, "i = 4".into())]);
+    let done = results(&events);
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].summary.as_ref().map(|s| s.message.as_str()), Some("Commands completed successfully."));
+
+    let (events, result) = run(&mut session, &["DECLARE @a int = 1; SET @a += 1; SELECT @a AS a"]).await;
+    assert_eq!(result.unwrap(), 1);
+    assert_eq!(cells(&events, 0), [[Some("2".into())]]);
+    assert!(messages(&events).is_empty(), "{events:?}");
+}
+
+// Left as is: tiberius doesn't pass on the DONE token's CurCmd that tells an assignment's count apart.
+#[tokio::test]
+async fn assignments_still_count_where_rows_can_change() {
+    let Some(cfg) = mssql_config() else { return };
+    let engine = mssql_engine(&cfg).await;
+    let mut session = engine.session().await.unwrap();
+    let setup = "DROP TABLE IF EXISTS #rows; CREATE TABLE #rows (id int); INSERT INTO #rows VALUES (1), (2)";
+    session.buffered(setup, &Cancel::new()).await.unwrap();
+    let (events, result) = run(&mut session, &["DECLARE @n int = 0; UPDATE #rows SET id = id WHERE id > @n"]).await;
+    result.unwrap();
+    let info = |text: &str| (0, MessageLevel::Info, text.to_string());
+    assert_eq!(messages(&events), [info("(1 row affected)"), info("(2 rows affected)")]);
+    assert_eq!(results(&events)[0].summary.as_ref().map(|s| s.affected_rows), Some(3));
+    session
+        .buffered("CREATE PROCEDURE #bump AS BEGIN DECLARE @a int = 1; SET @a += 1 END", &Cancel::new())
+        .await
+        .unwrap();
+    let (events, result) = run(&mut session, &["EXEC #bump"]).await;
+    result.unwrap();
+    assert_eq!(messages(&events), [info("(1 row affected)"), info("(1 row affected)")]);
+    assert_eq!(results(&events)[0].summary.as_ref().map(|s| s.affected_rows), Some(2));
+}
+
+#[tokio::test]
+async fn a_batch_keeps_its_first_messages_and_counts_the_rest() {
+    let Some(cfg) = mssql_config() else { return };
+    let engine = mssql_engine(&cfg).await;
+    let mut session = engine.session().await.unwrap();
+    let flood =
+        format!("DECLARE @i int = 1; WHILE @i <= {} BEGIN PRINT CONCAT('n', @i); SET @i += 1 END", MAX_MESSAGES + 500);
+    let (events, result) = run(&mut session, &[&flood, "PRINT 'next'"]).await;
+    result.unwrap();
+    let said = messages(&events);
+    let dropped: usize =
+        events.iter().map(|e| if let ScriptEvent::Messages { dropped, .. } = e { *dropped } else { 0 }).sum();
+    let first: Vec<_> = said.iter().filter(|(ix, ..)| *ix == 0).collect();
+    assert_eq!((first.len(), dropped), (MAX_MESSAGES, 500));
+    assert_eq!(first[0].2, "n1");
+    assert_eq!(said.last().map(|(ix, _, text)| (*ix, text.as_str())), Some((1, "next")), "a new count per batch");
+}
+
+#[tokio::test]
 async fn errors_carry_their_number_and_line() {
     let Some(cfg) = mssql_config() else { return };
     let engine = mssql_engine(&cfg).await;
@@ -184,31 +249,12 @@ async fn transactions_follow_the_server() {
     assert!(!session.in_transaction(), "XACT_ABORT rolled it back: {}", session.in_transaction());
 }
 
-async fn cancel_after(session: &mut Session, batch: &str, after: Duration) -> (Vec<ScriptEvent>, Duration) {
-    let cancel = Cancel::new();
-    let trigger = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(after).await;
-        trigger.cancel();
-    });
-    let started = Instant::now();
-    let (tx, rx) = async_channel::unbounded();
-    let result = session.run_script(&[batch.to_string()], &tx, &cancel).await;
-    assert!(result.unwrap_err().cancelled);
-    drop(tx);
-    let mut events = Vec::new();
-    while let Ok(event) = rx.try_recv() {
-        events.push(event);
-    }
-    (events, started.elapsed())
-}
-
 #[tokio::test]
 async fn a_cancel_stops_a_running_statement_at_once() {
     let Some(cfg) = mssql_config() else { return };
     let engine = mssql_engine(&cfg).await;
     let mut session = engine.session().await.unwrap();
-    let (events, took) =
+    let (_, events, took) =
         cancel_after(&mut session, "WAITFOR DELAY '00:00:10'; SELECT 1", Duration::from_millis(300)).await;
     assert!(took < Duration::from_secs(5), "{took:?}");
     // tiberius can't take the server's acknowledgement of this one, so the tab moves to a new connection.
@@ -228,7 +274,7 @@ async fn a_cancel_while_rows_stream_keeps_the_connection() {
     let engine = mssql_engine(&cfg).await;
     let mut session = engine.session().await.unwrap();
     let rows = "SELECT TOP (5000000) a.object_id, b.name FROM sys.all_columns a CROSS JOIN sys.all_columns b";
-    let (_, took) = cancel_after(&mut session, rows, Duration::from_millis(500)).await;
+    let (_, _, took) = cancel_after(&mut session, rows, Duration::from_millis(500)).await;
     assert!(took < Duration::from_secs(5), "{took:?}");
     eprintln!("broken after a streaming cancel: {}", session.is_broken());
     if !session.is_broken() {

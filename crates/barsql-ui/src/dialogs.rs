@@ -125,12 +125,21 @@ pub struct Confirm {
     pub danger: bool,
 }
 
+// The latest confirmation's title and detail.
+#[cfg(test)]
+pub struct Asked(pub SharedString, pub Option<SharedString>);
+
+#[cfg(test)]
+impl Global for Asked {}
+
 pub fn confirm(
     confirm: Confirm,
     window: &mut Window,
     cx: &mut App,
     on_confirm: impl Fn(&mut Window, &mut App) + 'static,
 ) {
+    #[cfg(test)]
+    cx.set_global(Asked(confirm.title.clone(), confirm.detail.clone()));
     let on_confirm = Rc::new(on_confirm);
     let scroll = ScrollHandle::new();
     window.open_dialog(cx, move |dialog, window, cx| {
@@ -171,7 +180,16 @@ pub fn confirm(
     });
 }
 
+// The latest alert's title and message.
+#[cfg(test)]
+pub struct Alerted(pub SharedString, pub SharedString);
+
+#[cfg(test)]
+impl Global for Alerted {}
+
 pub fn alert(title: SharedString, message: SharedString, window: &mut Window, cx: &mut App) {
+    #[cfg(test)]
+    cx.set_global(Alerted(title.clone(), message.clone()));
     window.open_dialog(cx, move |dialog, window, cx| {
         let content = v_flex().child(modal::body().child(modal::description(message.clone(), cx))).child(
             modal::footer(cx).child(

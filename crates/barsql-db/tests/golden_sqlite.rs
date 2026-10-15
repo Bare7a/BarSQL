@@ -2,7 +2,10 @@ mod common;
 
 use barsql_core::DriverType;
 use barsql_db::Engine;
-use common::{Report, assert_matches, compare_probes, fixture, run_all, schema_snapshot, sqlite_config, strings};
+use common::{
+    Report, assert_matches, check_probes, fixture, golden_write, run_all, schema_snapshot, sqlite_config, strings,
+    write_fixture,
+};
 
 // A trigger body runs as part of its CREATE TRIGGER instead of being split at its first `;`.
 const DEVIATIONS: &[&str] = &["trigger_body_split"];
@@ -18,18 +21,22 @@ async fn sqlite_values_and_errors_match_the_fixtures() {
     let lite = DriverType::Sqlite;
     let mut report = Report::default();
 
-    let values = fixture("values/sqlite.json");
+    let mut values = fixture("values/sqlite.json");
     let engine = fresh(&dir, "values.db").await;
     let mut session = engine.session().await.unwrap();
     run_all(&mut session, &strings(&values["setup"])).await;
-    compare_probes(&mut session, &lite, &values["probes"], "values", DEVIATIONS, &mut report).await;
-    compare_probes(&mut session, &lite, &values["localProbes"], "local", DEVIATIONS, &mut report).await;
+    check_probes(&mut session, &lite, &mut values, "probes", "values", DEVIATIONS, &mut report).await;
+    check_probes(&mut session, &lite, &mut values, "localProbes", "local", DEVIATIONS, &mut report).await;
 
-    let errors = fixture("errors/sqlite.json");
+    let mut errors = fixture("errors/sqlite.json");
     let engine = fresh(&dir, "errors.db").await;
     let mut session = engine.session().await.unwrap();
     run_all(&mut session, &strings(&errors["setup"])).await;
-    compare_probes(&mut session, &lite, &errors["probes"], "errors", DEVIATIONS, &mut report).await;
+    check_probes(&mut session, &lite, &mut errors, "probes", "errors", DEVIATIONS, &mut report).await;
+    if golden_write() {
+        write_fixture("values/sqlite.json", &values);
+        write_fixture("errors/sqlite.json", &errors);
+    }
     report.assert_clean("sqlite");
 }
 

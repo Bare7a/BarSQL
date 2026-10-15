@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.0.9"
+version = "1.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
@@ -32,6 +32,8 @@ interprocess = "2"
 jiff = "0.2"
 libc = "0.2"
 lsp-types = "=0.97.0"
+# macOS only. Adds applicationShouldTerminate: to GPUI Kit's app delegate, which lacks it. GPUI's own version.
+objc2 = "0.6"
 regex = "1"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 roxmltree = "0.21"

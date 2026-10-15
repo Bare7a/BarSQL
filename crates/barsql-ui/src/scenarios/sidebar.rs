@@ -6,6 +6,7 @@ use super::driver::{Driver, open, selector};
 use crate::history_panel::HistoryPanel;
 use crate::saved_panel::SavedPanel;
 use crate::saved_queries;
+use crate::toast::{self, ToastKind};
 
 // Newest first. SELECTs only, since Env's seed is in the history too.
 fn history(app: &mut Driver) -> Vec<String> {
@@ -72,6 +73,40 @@ fn a_history_entry_is_deleted_from_its_hover_button(cx: &mut TestAppContext) {
     app.hover("history-row-0");
     app.click("history-delete-0");
     assert!(history(&mut app).is_empty());
+}
+
+#[gpui_kit::test]
+fn a_history_entry_the_store_cannot_delete_stays(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 778 AS hist_kept;");
+    show_recent(&mut app);
+    app.env.block_writes("query_history.json");
+    app.hover("history-row-0");
+    app.click("history-delete-0");
+    assert_eq!(history(&mut app), ["SELECT 778 AS hist_kept"]);
+    let toasts = app.cx.update(|_, cx| toast::messages(cx));
+    let failed = |(kind, text): &(ToastKind, String)| *kind == ToastKind::Error && text.contains("history entry");
+    assert!(toasts.iter().any(failed) && toasts.len() == 1, "{toasts:?}");
+}
+
+#[gpui_kit::test]
+fn queries_the_history_cannot_record_say_so_once(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.env.block_writes("query_history.json");
+    app.run("SELECT 1 AS lost;");
+    let shown = app.error_toasts();
+    assert!(shown.len() == 1 && shown[0].starts_with("Query history could not be saved"), "{shown:?}");
+    app.run("SELECT 2 AS lost; SELECT 3 AS lost;");
+    assert_eq!(app.error_toasts().len(), 1, "once while recording keeps failing");
+    app.env.unblock_writes("query_history.json");
+    app.run("SELECT 4 AS kept;");
+    app.env.block_writes("query_history.json");
+    app.run("SELECT 5 AS lost;");
+    assert_eq!(app.error_toasts().len(), 2, "again once a query was recorded in between");
+    show_recent(&mut app);
+    assert_eq!(history(&mut app), ["SELECT 4 AS kept"]);
 }
 
 #[gpui_kit::test]
@@ -180,6 +215,22 @@ fn a_saved_query_is_deleted_after_confirming(cx: &mut TestAppContext) {
     assert!(app.dialog_open());
     app.confirm_dialog();
     assert!(saved(&mut app).is_empty());
+}
+
+#[gpui_kit::test]
+fn a_saved_query_the_store_cannot_delete_stays(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    save_as(&mut app, "SELECT 3 AS d;", "Kept query");
+    app.env.block_writes("saved_queries.json");
+    app.click("sidebar.saved");
+    app.hover("saved-row-0");
+    app.click("saved-delete-0");
+    app.confirm_dialog();
+    let (title, message) = app.alerted().expect("an alert");
+    assert_eq!(title, "Could not delete query");
+    assert_ne!(message, "The saved query is no longer in the library.");
+    assert_eq!(names(saved(&mut app)), ["Kept query"]);
 }
 
 #[gpui_kit::test]

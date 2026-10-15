@@ -34,7 +34,8 @@ pub(crate) fn tables(src: &mut dyn LiteSource) -> Result<Vec<TableInfo>, QueryEr
 // table's hidden column, which SELECT * leaves out too. A column in several foreign keys takes the first.
 pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
     let rows = src.query(
-        "SELECT x.name, x.type, x.\"notnull\", x.dflt_value, x.pk, x.hidden, f.\"table\", f.\"to\"
+        "SELECT x.name, x.type, x.\"notnull\", x.dflt_value, x.pk, x.hidden, f.\"table\", f.\"to\",
+            EXISTS (SELECT 1 FROM pragma_index_list(?1) WHERE origin = 'pk')
         FROM pragma_table_xinfo(?1) x
         LEFT JOIN pragma_foreign_key_list(?1) f ON f.\"from\" = x.name
         ORDER BY x.cid, f.id, f.seq",
@@ -61,8 +62,10 @@ pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Colum
             ..Default::default()
         });
     }
-    // A lone INTEGER PRIMARY KEY is an alias for the rowid, which SQLite fills in.
-    if let [key] = out.iter_mut().filter(|c| c.is_primary).collect::<Vec<_>>().as_mut_slice() {
+    // A lone INTEGER PRIMARY KEY is an alias for the rowid, which SQLite fills in. In a WITHOUT ROWID table, or
+    // declared INTEGER PRIMARY KEY DESC, it's an ordinary column that SQLite keeps in an index of origin "pk".
+    let key_index = rows.rows.first().is_some_and(|r| r.int(8) == 1);
+    if !key_index && let [key] = out.iter_mut().filter(|c| c.is_primary).collect::<Vec<_>>().as_mut_slice() {
         key.is_identity = key.data_type.eq_ignore_ascii_case("integer");
     }
     Ok(out)

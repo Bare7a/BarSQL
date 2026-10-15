@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use barsql_core::{ConnectionConfig, DriverType};
 use barsql_sql::plan::NOTE_NO_METRICS;
+use barsql_sql::quote_literal_in;
 use barsql_sql::system_views::{SystemView, ViewScope, views};
 use gpui_kit::{Entity, Modifiers, TestAppContext};
 
@@ -136,11 +137,17 @@ fn prepare_mssql(config: &ConnectionConfig) {
     });
 }
 
-// Tables outlive a run on a server, so each gets a fresh name.
+// Parallel runs share the servers, and a killed run leaves its objects behind, so each gets a fresh name.
 fn unique(prefix: &str) -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let micros = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros() % 1_000_000_000;
     format!("{prefix}_{micros}_{}", SEQ.fetch_add(1, Ordering::Relaxed))
+}
+
+fn temp(app: &Driver, kind: &str, prefix: &str) -> String {
+    let name = unique(prefix);
+    app.defer(format!("DROP {kind} IF EXISTS {name}"));
+    name
 }
 
 fn open_on(cx: &mut TestAppContext, engine: Engine) -> Driver<'_> {
@@ -167,9 +174,20 @@ fn column(app: &mut Driver, col: usize) -> Vec<Option<String>> {
     app.cx.update(|_, cx| (0..grid.read(cx).rows_shown()).map(|row| grid.read(cx).text_at(row, col)).collect())
 }
 
+// Other runs' tables on the server can push the row out of view, so it's revealed first.
+fn tree_row(app: &mut Driver, id: &str) -> &'static str {
+    let sidebar = app.sidebar();
+    let tree = app.cx.update(|_, cx| sidebar.read(cx).panels().0);
+    app.settle(|cx| cx.update(|_, cx| tree.read(cx).listed().iter().any(|(row, ..)| row == id)));
+    app.cx.update(|_, cx| tree.update(cx, |tree, cx| tree.reveal(id, cx)));
+    selector(format!("tree:{id}"))
+}
+
 fn browse(app: &mut Driver, name: &str) {
     let schema = app.schema_name();
-    app.hover(selector(format!("tree:t:{schema}.{name}")));
+    let row = table(app, name);
+    let row = tree_row(app, &row);
+    app.hover(row);
     app.click(selector(format!("browse-{schema}-{name}")));
     view(app);
 }
@@ -211,7 +229,7 @@ fn simple_query(cx: &mut TestAppContext, engine: Engine) {
 
 fn explain(cx: &mut TestAppContext, engine: Engine) {
     let mut app = open_on(cx, engine);
-    let name = unique("plan");
+    let name = temp(&app, "TABLE", "plan");
     app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice'), (2, 'Bob')"));
     app.connect();
     app.set_sql(&format!("SELECT * FROM {name} WHERE id = 1;"));
@@ -231,7 +249,7 @@ fn typed_explain(cx: &mut TestAppContext, engine: Engine) {
         return;
     }
     let mut app = open_on(cx, engine);
-    let name = unique("plan_typed");
+    let name = temp(&app, "TABLE", "plan_typed");
     app.seed(&format!(
         "CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice')"
     ));
@@ -245,7 +263,7 @@ fn typed_explain(cx: &mut TestAppContext, engine: Engine) {
 
 fn transactions(cx: &mut TestAppContext, engine: Engine) {
     let mut app = open_on(cx, engine);
-    let name = unique("e2e_txn");
+    let name = temp(&app, "TABLE", "e2e_txn");
     app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50))"));
     let tab = app.connect();
     // Turso can't hold a transaction between runs, so the toolbar leaves the buttons out.
@@ -274,12 +292,13 @@ fn transactions(cx: &mut TestAppContext, engine: Engine) {
 
 fn created_table(cx: &mut TestAppContext, engine: Engine) {
     let mut app = open_on(cx, engine);
-    let name = unique("e2e_schema");
+    let name = temp(&app, "TABLE", "e2e_schema");
     app.connect();
     app.run(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50));"));
     app.refresh_schema();
     let row = table(&mut app, &name);
-    app.click(selector(format!("tree:{row}")));
+    let row = tree_row(&mut app, &row);
+    app.click(row);
     let schema = app.schema_name();
     let sidebar = app.sidebar();
     let tree = app.cx.update(|_, cx| sidebar.read(cx).panels().0);
@@ -289,7 +308,7 @@ fn created_table(cx: &mut TestAppContext, engine: Engine) {
 
 fn browse_rows(cx: &mut TestAppContext, engine: Engine) {
     let mut app = open_on(cx, engine);
-    let name = unique("e2e_tv");
+    let name = temp(&app, "TABLE", "e2e_tv");
     app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice'), (2, 'Bob')"));
     app.connect();
     app.refresh_schema();
@@ -313,7 +332,7 @@ fn server_views(cx: &mut TestAppContext, engine: Engine) {
 fn table_views(cx: &mut TestAppContext, engine: Engine) {
     let Some(first) = views(&engine.driver(), ViewScope::Table).next() else { return };
     let mut app = open_on(cx, engine);
-    let name = unique("e2e_stats");
+    let name = temp(&app, "TABLE", "e2e_stats");
     app.seed(&format!(
         "CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice')"
     ));
@@ -321,7 +340,8 @@ fn table_views(cx: &mut TestAppContext, engine: Engine) {
     app.refresh_schema();
     let (tabs, title) = (app.titles().len(), format!("{}: {name}", label(&mut app, first)));
     let row = table(&mut app, &name);
-    app.context_submenu(selector(format!("tree:{row}")), SYSTEM_VIEWS, 0);
+    let row = tree_row(&mut app, &row);
+    app.context_submenu(row, SYSTEM_VIEWS, 0);
     ran_in_new_tab(&mut app, tabs, &title);
 }
 
@@ -350,7 +370,8 @@ fn foreign_key(cx: &mut TestAppContext, engine: Engine) {
         return;
     }
     let mut app = open_on(cx, engine);
-    let (parent, child) = (unique("e2e_fk_parent"), unique("e2e_fk_child"));
+    // Drops run newest first, so the child goes before the parent its key points at.
+    let (parent, child) = (temp(&app, "TABLE", "e2e_fk_parent"), temp(&app, "TABLE", "e2e_fk_child"));
     app.seed(&format!(
         "CREATE TABLE {parent} (id INTEGER PRIMARY KEY, name VARCHAR(50));
          INSERT INTO {parent} VALUES (1, 'Alice'), (2, 'Bob');
@@ -371,6 +392,32 @@ fn foreign_key(cx: &mut TestAppContext, engine: Engine) {
     let workspace = app.workspace.clone();
     app.settle(|cx| cx.update(|_, cx| workspace.read(cx).active_title(cx) == parent));
     assert_eq!(column(&mut app, 1), [Some("Bob".into())]);
+}
+
+// MySQL would read `\i` as `i` and find the decoy row. The COLLATE is a non-default one, as Laravel's columns use.
+fn text_foreign_key(cx: &mut TestAppContext, engine: Engine) {
+    if !engine.driver().capabilities().catalog.constraints {
+        return;
+    }
+    let mut app = open_on(cx, engine);
+    let (parent, child) = (temp(&app, "TABLE", "e2e_fkt_parent"), temp(&app, "TABLE", "e2e_fkt_child"));
+    let key = quote_literal_in(engine.driver().dialect().expect("a dialect"), r"C:\it's");
+    let collate = if engine.driver() == DriverType::MySql { " COLLATE utf8mb4_unicode_ci" } else { "" };
+    app.seed(&format!(
+        "CREATE TABLE {parent} (code VARCHAR(20){collate} PRIMARY KEY, name VARCHAR(50));
+         INSERT INTO {parent} VALUES ({key}, 'Slash'), ('C:it''s', 'Plain');
+         CREATE TABLE {child} (id INTEGER PRIMARY KEY, code VARCHAR(20){collate}, FOREIGN KEY (code) REFERENCES {parent} (code));
+         INSERT INTO {child} VALUES (1, {key})"
+    ));
+    app.connect();
+    app.refresh_schema();
+    browse(&mut app, &child);
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.jump_point(0, 1));
+    app.click_at(at, Modifiers::none());
+    let workspace = app.workspace.clone();
+    app.settle(|cx| cx.update(|_, cx| workspace.read(cx).active_title(cx) == parent));
+    assert_eq!(column(&mut app, 1), [Some("Slash".into())]);
 }
 
 fn dialog(cx: &mut TestAppContext, engine: Engine) {
@@ -488,6 +535,7 @@ per_engine! {
     a_created_table_shows_in_the_schema_browser => created_table;
     browsing_a_table_shows_its_rows => browse_rows;
     a_foreign_key_cell_jumps_to_the_referenced_row => foreign_key;
+    a_text_foreign_key_with_a_backslash_finds_its_row => text_foreign_key;
     a_server_view_opens_in_a_tab_and_runs => server_views;
     a_tables_system_view_opens_in_a_tab_and_runs => table_views;
     an_array_cell_opens_as_json => array_cells;
@@ -499,12 +547,12 @@ mod postgres_only {
     use barsql_core::DriverType;
     use barsql_sql::system_views::{ViewScope, views};
 
-    use super::{Engine, analyzed, drop_item, label, open_on, plan_rows, ran_in_new_tab, unique};
+    use super::{Engine, analyzed, drop_item, label, open_on, plan_rows, ran_in_new_tab, temp, tree_row, unique};
     use crate::scenarios::driver::{Driver, selector};
 
     fn seeded(cx: &mut TestAppContext) -> (Driver<'_>, String) {
         let mut app = open_on(cx, Engine::Postgres);
-        let name = unique("plan_pg");
+        let name = temp(&app, "TABLE", "plan_pg");
         app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50)); INSERT INTO {name} VALUES (1, 'Alice'), (2, 'Bob')"));
         app.connect();
         (app, name)
@@ -536,11 +584,12 @@ mod postgres_only {
     #[gpui_kit::test]
     fn a_blocked_drop_goes_through_with_cascade(cx: &mut TestAppContext) {
         let mut app = open_on(cx, Engine::Postgres);
-        let (name, view) = (unique("cascade_pg"), unique("cascade_pg_v"));
+        let (name, view) = (temp(&app, "TABLE", "cascade_pg"), temp(&app, "VIEW", "cascade_pg_v"));
         app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY); CREATE VIEW {view} AS SELECT id FROM {name}"));
         app.connect();
         app.refresh_schema();
-        app.context_menu(selector(format!("tree:t:public.{name}")), drop_item(Engine::Postgres));
+        let row = tree_row(&mut app, &format!("t:public.{name}"));
+        app.context_menu(row, drop_item(Engine::Postgres));
         app.click("change-confirm");
         app.settle(|cx| cx.debug_bounds("change-error").is_some());
         app.click("change-cascade");
@@ -643,6 +692,7 @@ mod postgres_only {
     fn schema_functions_are_listed_under_routines(cx: &mut TestAppContext) {
         let mut app = open_on(cx, Engine::Postgres);
         let function = unique("e2e_ddl_fn");
+        app.defer(format!("DROP FUNCTION IF EXISTS {function}(int)"));
         app.seed(&format!("CREATE FUNCTION {function}(a int) RETURNS int LANGUAGE sql AS 'SELECT a'"));
         app.connect();
         app.refresh_schema();
@@ -652,7 +702,6 @@ mod postgres_only {
         app.click(selector("tree:g:public:routines".into()));
         let wanted = function.clone();
         app.settle(|cx| cx.update(|_, cx| tree.read(cx).listed().iter().any(|(_, label, _)| label.contains(&wanted))));
-        app.seed(&format!("DROP FUNCTION {function}(int)"));
     }
 }
 
@@ -660,8 +709,7 @@ mod sqlserver_only {
     use barsql_core::MessageLevel;
     use gpui_kit::TestAppContext;
 
-    use super::{Engine, open_on, table, unique};
-    use crate::scenarios::driver::selector;
+    use super::{Engine, open_on, table, temp, tree_row};
 
     // A batch of PRINTs returns no rows, so the run opens on its Messages.
     #[gpui_kit::test]
@@ -686,12 +734,13 @@ mod sqlserver_only {
             return;
         }
         let mut app = open_on(cx, Engine::SqlServer);
-        let name = unique("e2e_top");
+        let name = temp(&app, "TABLE", "e2e_top");
         app.seed(&format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY); INSERT INTO {name} VALUES (1)"));
         app.connect();
         app.refresh_schema();
         let row = table(&mut app, &name);
-        app.context_menu(selector(format!("tree:{row}")), 1);
+        let row = tree_row(&mut app, &row);
+        app.context_menu(row, 1);
         let sql = app.sql();
         assert!(sql.starts_with("SELECT TOP (100) "), "{sql}");
         app.dispatch(crate::actions::RunAll);

@@ -1,7 +1,9 @@
-use barsql_core::{ConnectionConfig, RowDelete, RowUpdate, Value};
+use std::time::{Duration, Instant};
+
+use barsql_core::{ConnectionConfig, QueryError, RowDelete, RowUpdate, Value};
 
 use crate::harness::{Kind, row, run_error, unique_table};
-use crate::support::rows;
+use crate::support::{collect, rows};
 
 each_engine!(async fn connectivity(e) {
     let status = e.app.connection_status(&e.id).await.unwrap();
@@ -116,4 +118,33 @@ each_engine!(async fn sessions_use_the_configured_schema(e) {
     assert!(run_error(&e.run_on(&id, "tab-a", switch).await).is_none());
     assert_eq!(rows(&e.run_on(&id, "tab-a", current).await, 0), [[Some("information_schema".to_string())]]);
     assert_eq!(rows(&e.run_on(&id, "tab-b", current).await, 0), [[Some(schema.clone())]], "tab A's state leaked");
+});
+
+// Each open tab keeps one of the pool's 10 connections, so an eleventh finds it full. The HTTP engines have no pool.
+each_engine!(async fn a_full_pool_stops_and_says_so(e) {
+    if e.is_lite() || e.is_clickhouse() {
+        return;
+    }
+    for tab in 0..10 {
+        e.exec_on_tab(&format!("tab-pool-{tab}"), "SELECT 1").await;
+    }
+    let waiting = e.app.execute_query_stream(&e.id, "tab-pool-stop", "SELECT 1").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let stopped = Instant::now();
+    assert!(e.app.cancel_query("tab-pool-stop"));
+    let error = run_error(&collect(waiting).await).expect("the stopped run reports the cancel");
+    assert!(error.cancelled && stopped.elapsed() < Duration::from_secs(5), "{error:?} after {:?}", stopped.elapsed());
+
+    let schema = e.schema();
+    let (run, tables, bundle) = tokio::join!(
+        e.run_on_tab("tab-pool-full", "SELECT 1"),
+        e.app.list_tables(&e.id, &schema),
+        e.app.load_schema_data(&e.id),
+    );
+    let busy = |error: Option<QueryError>| error.is_some_and(|e| e.message.contains("pool is busy"));
+    assert!(busy(run_error(&run)), "{run:?}");
+    assert!(busy(tables.err()) && busy(bundle.err()), "the sidebar reports the full pool");
+
+    e.app.cleanup_tab("tab-pool-0").await;
+    assert!(run_error(&e.run_on_tab("tab-pool-full", "SELECT 2").await).is_none(), "a closed tab frees its connection");
 });

@@ -1,5 +1,5 @@
 use barsql_app::ImportResult;
-use barsql_core::Value;
+use barsql_core::{SqlDialect, Value};
 use barsql_io::{ExportFormat, export_to_string};
 
 use crate::harness::{E2e, Kind, names, run, unique_table};
@@ -54,6 +54,41 @@ each_engine!(async fn round_trip_export_then_import(e) {
     assert_eq!(result.skipped, 0, "rows were rejected: {}", first_error(&result));
     let (before, after) = (e.query(&select(&src)).await, e.query(&select(&dst)).await);
     assert_eq!(after.rows, before.rows, "the round trip changed the rows\n{exported}");
+});
+
+each_engine!(async fn bit_columns_round_trip_through_csv_and_sql_inserts(e) {
+    if !e.is_mysql() {
+        return;
+    }
+    let (src, dst) = fresh_tables(&e, "rt_bits", "id INT, b1 BIT(1), b4 BIT(4), b64 BIT(64)").await;
+    let rows = "(1, b'1', b'1010', b'1'), (2, b'0', b'0000', ~0), (3, NULL, NULL, NULL)";
+    e.exec(&format!("INSERT INTO {src} (id, b1, b4, b64) VALUES {rows}")).await;
+    let cols = names(&["id", "b1", "b4", "b64"]);
+    let select = |table: &str| format!("SELECT {}, BIN(b4), HEX(b64) FROM {table} ORDER BY id", cols.join(", "));
+    let shown = e.stream(&format!("SELECT {} FROM {src} ORDER BY id", cols.join(", "))).await;
+    let exported = shown.export(ExportFormat::Csv);
+    assert!(exported.contains(&format!("2,0,0000,{}", "1".repeat(64))), "{exported}");
+    let result = e.import_csv(&dst, &cols, &write_csv(&e, &exported)).await;
+    assert_eq!(result.skipped, 0, "rows were rejected: {}", first_error(&result));
+    let (before, after) = (e.query(&select(&src)).await, e.query(&select(&dst)).await);
+    assert_eq!(after.rows, before.rows, "the round trip changed the bits\n{exported}");
+
+    e.exec(&format!("DELETE FROM {dst}")).await;
+    let mysql = Some(SqlDialect::MySql);
+    let inserts = export_to_string(ExportFormat::Sql, &cols, &shown.types, Some(&dst), mysql, shown.rows());
+    for insert in inserts.lines() {
+        e.exec(insert).await;
+    }
+    assert_eq!(e.query(&select(&dst)).await.rows, before.rows, "the SQL INSERTs changed the bits\n{inserts}");
+
+    e.exec(&format!("DELETE FROM {dst}")).await;
+    let path = e.write("bad_bits.csv", "id,b4\n1,0110\n2,12\n3,1\n");
+    let result = e.import_csv(&dst, &names(&["id", "b4"]), &path).await;
+    assert_eq!((result.inserted, result.skipped), (2, 1));
+    assert_eq!(first_error(&result), r#"column "b4" takes binary digits like 1010, got "12""#);
+    let loaded = e.query(&format!("SELECT id, BIN(b4) FROM {dst} ORDER BY id")).await;
+    let loaded: Vec<Vec<String>> = loaded.rows.iter().map(|r| r.iter().map(text).collect()).collect();
+    assert_eq!(loaded, [["1", "110"], ["3", "1"]]);
 });
 
 // One column per case, so a failure names the value shape that broke.

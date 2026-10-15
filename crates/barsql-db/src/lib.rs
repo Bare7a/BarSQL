@@ -10,6 +10,7 @@ pub(crate) mod http;
 pub mod lite;
 pub mod mssql;
 pub mod mysql;
+mod pool;
 pub mod postgres;
 pub mod result;
 mod script;

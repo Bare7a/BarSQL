@@ -2,7 +2,9 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use barsql_app::{BackupOutcome, BackupRequest, CsvImportRequest, CsvOptions, RunEvent, SqlImportRequest};
+use barsql_app::{
+    AppEvent, BackupOutcome, BackupRequest, CsvImportRequest, CsvOptions, RunEvent, SqlImportRequest, Unsaved,
+};
 use barsql_core::{DriverType, ObjectKind, Row, RowDelete, RowUpdate, SavedQuery, TableDataRequest, Value};
 use barsql_sql::alter;
 use support::{Fixture, collect, import_outcome, results, rows};
@@ -31,7 +33,7 @@ async fn connection_crud_and_lifecycle() {
     assert!(status.connected);
     f.app.disconnect(&id).await;
     assert!(!f.app.is_connected(&id));
-    assert!(f.app.delete_connection(&id).await);
+    assert!(f.app.delete_connection(&id).await.unwrap());
     assert!(f.app.list_connections().is_empty());
     assert!(f.app.connect("nope").await.is_err());
 }
@@ -80,8 +82,55 @@ async fn saved_queries_round_trip() {
         .unwrap();
     assert!(!saved.id.is_empty());
     assert_eq!(f.app.list_saved_queries("").len(), 1);
-    assert!(f.app.delete_saved_query(&saved.id));
+    assert!(f.app.delete_saved_query(&saved.id).unwrap());
+    assert!(!f.app.delete_saved_query(&saved.id).unwrap(), "already gone");
     assert!(f.app.list_saved_queries("").is_empty());
+}
+
+#[tokio::test]
+async fn store_writes_that_fail_come_back_as_errors() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    let folder = |name: &str| barsql_app::ConnectionFolder { name: name.into(), ..Default::default() };
+    let prod = f.app.save_folder(folder("Prod")).unwrap();
+    let saved = f.app.save_saved_query(SavedQuery { name: "q".into(), ..Default::default() }).unwrap();
+    f.exec(&id, "SELECT 1").await;
+    let entry = f.app.query_history(&id, 1)[0].id.clone();
+    for file in ["connections.json", "saved_queries.json", "query_history.json", "settings.json"] {
+        f.block_writes(file);
+    }
+    assert!(f.app.delete_connection(&id).await.is_err());
+    assert!(f.app.reorder_connections(std::slice::from_ref(&id)).is_err());
+    assert!(f.app.save_folder(folder("Dev")).is_err());
+    assert!(f.app.delete_folder(&prod.id).is_err());
+    assert!(f.app.delete_saved_query(&saved.id).is_err());
+    assert!(f.app.delete_query_history_entry(&entry).is_err());
+    assert!(f.app.set_setting("k", "v").is_err());
+    let kept = (f.app.list_connections().len(), f.app.list_folders().len(), f.app.list_saved_queries("").len());
+    assert_eq!(kept, (1, 1, 1), "nothing looks deleted or added");
+    assert_eq!(f.app.query_history(&id, 10).len(), 1);
+}
+
+#[tokio::test]
+async fn history_that_cannot_be_saved_is_reported_once_per_run_of_failures() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    let events = f.app.events();
+    f.block_writes("query_history.json");
+    collect(f.app.execute_query_stream(&id, "tab", "SELECT 1; SELECT 2").await.unwrap()).await;
+    f.exec(&id, "SELECT 3").await;
+    assert!(matches!(events.try_recv(), Ok(AppEvent::NotSaved { what: Unsaved::History, error }) if !error.is_empty()));
+    assert!(events.try_recv().is_err(), "once while history keeps failing");
+    std::fs::remove_dir(f.dir.path().join("data").join("query_history.json")).unwrap();
+    f.exec(&id, "SELECT 4").await;
+    f.block_writes("query_history.json");
+    f.exec(&id, "SELECT 5").await;
+    assert!(
+        matches!(events.try_recv(), Ok(AppEvent::NotSaved { what: Unsaved::History, .. })),
+        "again after a query was added"
+    );
+    let kept: Vec<String> = f.app.query_history(&id, 10).into_iter().map(|e| e.sql).collect();
+    assert_eq!(kept, ["SELECT 4"]);
 }
 
 #[tokio::test]
@@ -191,13 +240,16 @@ async fn transactions_commit_roll_back_and_guard() {
     let id = f.sqlite().await;
     f.exec(&id, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").await;
     assert!(f.app.begin_transaction(&id, "").await.is_err());
+    assert!(!f.app.any_transaction_open());
 
     f.app.begin_transaction(&id, "tab").await.unwrap();
     assert!(f.app.transaction_status("tab"));
+    assert!(f.app.any_transaction_open(), "quitting would roll it back");
     assert!(f.app.begin_transaction(&id, "tab").await.is_err(), "one transaction per tab");
     collect(f.app.execute_query_stream(&id, "tab", "INSERT INTO t (name) VALUES ('a')").await.unwrap()).await;
     f.app.rollback_transaction("tab").await.unwrap();
     assert!(!f.app.transaction_status("tab"));
+    assert!(!f.app.any_transaction_open());
     assert_eq!(f.query(&id, "SELECT count(*) FROM t").await, [["0"]]);
 
     f.app.begin_transaction(&id, "tab").await.unwrap();
@@ -215,14 +267,16 @@ async fn transactions_commit_roll_back_and_guard() {
     // A typed BEGIN is tracked too, so the toolbar shows the open transaction.
     collect(f.app.execute_query_stream(&id, "typed", "BEGIN; INSERT INTO t (name) VALUES ('c')").await.unwrap()).await;
     assert!(f.app.transaction_status("typed"));
+    assert!(f.app.any_transaction_open());
     f.app.rollback_transaction("typed").await.unwrap();
+    assert!(!f.app.any_transaction_open());
 }
 
 #[tokio::test]
 async fn cancel_stops_a_running_statement_promptly() {
     let f = Fixture::new();
     let id = f.sqlite().await;
-    let slow = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+    let slow = ENDLESS;
     let handle = f.app.execute_query_stream(&id, "tab", slow).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     let started = Instant::now();
@@ -242,7 +296,7 @@ async fn cancel_stops_a_running_statement_promptly() {
 async fn a_new_run_on_the_tab_supersedes_the_old_one() {
     let f = Fixture::new();
     let id = f.sqlite().await;
-    let slow = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+    let slow = ENDLESS;
     let first = f.app.execute_query_stream(&id, "tab", slow).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     let second = f.app.execute_query_stream(&id, "tab", "SELECT 9").await.unwrap();
@@ -250,6 +304,125 @@ async fn a_new_run_on_the_tab_supersedes_the_old_one() {
     let first_events = collect(first).await;
     assert!(results(&first_events)[0].error.as_ref().is_some_and(|e| e.cancelled));
     assert_eq!(rows(&collect(second).await, 0), [[Some("9".to_string())]]);
+}
+
+#[tokio::test]
+async fn disconnecting_waits_only_for_its_own_tabs() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    let mut other = f.sqlite_config();
+    other.file_path = f.path("other.db");
+    let other = f.app.save_connection(other).await.unwrap().id;
+    f.exec(&id, "CREATE TABLE t (a INTEGER)").await;
+    f.app.begin_transaction(&id, "tab").await.unwrap();
+    collect(f.app.execute_query_stream(&id, "tab", "INSERT INTO t VALUES (1)").await.unwrap()).await;
+    let slow = ENDLESS;
+    let long = f.app.execute_query_stream(&other, "tab-other", slow).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let events = f.app.events();
+    let disconnected = tokio::time::timeout(Duration::from_secs(5), f.app.disconnect(&id)).await.is_ok();
+    // Stopped before asserting, since the runtime can't shut down under an endless statement.
+    assert!(f.app.cancel_query("tab-other"), "the other connection's run is still going");
+    assert!(results(&collect(long).await)[0].error.as_ref().is_some_and(|e| e.cancelled));
+    assert!(disconnected, "the disconnect waited for the other connection's run");
+    assert_eq!(events.try_recv(), Ok(AppEvent::TransactionsEnded { tab_ids: vec!["tab".into()] }));
+    assert_eq!(f.query(&id, "SELECT count(*) FROM t").await, [["0"]], "its own tab was rolled back");
+}
+
+#[tokio::test]
+async fn stop_ends_a_run_waiting_behind_another_tabs_transaction() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE t (a INTEGER)").await;
+    f.app.begin_transaction(&id, "tab").await.unwrap();
+    collect(f.app.execute_query_stream(&id, "tab", "INSERT INTO t VALUES (1)").await.unwrap()).await;
+    let waiting = f.app.execute_query_stream(&id, "tab-waiting", "SELECT count(*) FROM t").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(f.app.cancel_query("tab-waiting"));
+    let events = tokio::time::timeout(Duration::from_secs(5), collect(waiting)).await.expect("Stop ends the wait");
+    assert!(results(&events)[0].error.as_ref().is_some_and(|e| e.cancelled), "{events:?}");
+    f.app.commit_transaction("tab").await.unwrap();
+    assert_eq!(f.query(&id, "SELECT count(*) FROM t").await, [["1"]], "the other tab's transaction was untouched");
+}
+
+#[tokio::test]
+async fn stop_ends_a_run_waiting_behind_another_tabs_statement() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    let slow = ENDLESS;
+    let running = f.app.execute_query_stream(&id, "tab", slow).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let waiting = f.app.execute_query_stream(&id, "tab-waiting", "SELECT 1").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(f.app.cancel_query("tab-waiting"));
+    let stopped = tokio::time::timeout(Duration::from_secs(5), collect(waiting)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Stopped before asserting, since the runtime can't shut down under an endless statement.
+    let still_running = f.app.cancel_query("tab");
+    let running = collect(running).await;
+    let stopped = stopped.expect("Stop ends the wait");
+    assert!(results(&stopped)[0].error.as_ref().is_some_and(|e| e.cancelled), "{stopped:?}");
+    assert!(still_running, "stopping the waiting run interrupted the running one: {running:?}");
+    assert!(results(&running)[0].error.as_ref().is_some_and(|e| e.cancelled));
+}
+
+#[tokio::test]
+async fn disconnecting_ends_tabs_waiting_behind_a_transaction() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE t (a INTEGER)").await;
+    f.app.begin_transaction(&id, "tab").await.unwrap();
+    collect(f.app.execute_query_stream(&id, "tab", "INSERT INTO t VALUES (1)").await.unwrap()).await;
+    let mut runs = Vec::new();
+    for run in 0..3 {
+        runs.push(f.app.execute_query_stream(&id, &format!("tab-run-{run}"), "SELECT 1").await.unwrap());
+    }
+    let begins = begin_on_other_tabs(&f, &id);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let events = f.app.events();
+    let disconnected = tokio::time::timeout(Duration::from_secs(5), f.app.disconnect(&id)).await;
+    assert!(disconnected.is_ok(), "the disconnect waited on a tab that waits for the connection");
+    for run in runs {
+        assert!(results(&collect(run).await)[0].error.as_ref().is_some_and(|e| e.cancelled));
+    }
+    for begin in begins {
+        let _ = begin.await.unwrap();
+    }
+    let Ok(AppEvent::TransactionsEnded { tab_ids }) = events.try_recv() else { panic!("no transactions ended") };
+    assert!(tab_ids.contains(&"tab".to_string()), "{tab_ids:?}");
+    assert!((0..4).all(|begin| !f.app.transaction_status(&format!("tab-begin-{begin}"))));
+    assert_eq!(f.query(&id, "SELECT count(*) FROM t").await, [["0"]]);
+}
+
+#[tokio::test]
+async fn shutdown_ends_tabs_waiting_behind_a_transaction() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.app.begin_transaction(&id, "tab").await.unwrap();
+    let begins = begin_on_other_tabs(&f, &id);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let shut = tokio::time::timeout(Duration::from_secs(5), f.app.shutdown()).await;
+    assert!(shut.is_ok(), "the shutdown waited on a tab that waits for the connection");
+    for begin in begins {
+        let _ = begin.await.unwrap();
+    }
+    assert!(!f.app.transaction_status("tab"));
+    assert!((0..4).all(|begin| !f.app.transaction_status(&format!("tab-begin-{begin}"))));
+}
+
+// Runs until it's stopped.
+const ENDLESS: &str = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+
+// Four tabs whose Begin waits for the connection another tab's transaction keeps.
+fn begin_on_other_tabs(f: &Fixture, id: &str) -> Vec<tokio::task::JoinHandle<Result<(), barsql_core::QueryError>>> {
+    (0..4)
+        .map(|begin| {
+            let (app, id) = (f.app.clone(), id.to_string());
+            tokio::spawn(async move { app.begin_transaction(&id, &format!("tab-begin-{begin}")).await })
+        })
+        .collect()
 }
 
 async fn explain_fixture(read_only: bool) -> (Fixture, String) {

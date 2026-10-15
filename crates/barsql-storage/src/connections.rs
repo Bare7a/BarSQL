@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use barsql_core::ConnectionConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::{load_json_file, save_json_file};
+use crate::{load_json_file, update};
 
 pub const DEFAULT_COLOR: &str = "#3b82f6";
 
@@ -60,19 +60,16 @@ impl ConnectionStore {
         if cfg.color.is_empty() {
             cfg.color = DEFAULT_COLOR.into();
         }
-        upsert(&mut state.connections, cfg.clone(), |c| &c.id);
-        save_json_file(&self.path, &*state)?;
+        update(&self.path, &mut *state, |next| upsert(&mut next.connections, cfg.clone(), |c| &c.id))?;
         Ok(cfg)
     }
 
     pub fn delete(&self, id: &str) -> io::Result<bool> {
         let mut state = self.lock();
-        let before = state.connections.len();
-        state.connections.retain(|c| c.id != id);
-        if state.connections.len() == before {
+        if !state.connections.iter().any(|c| c.id == id) {
             return Ok(false);
         }
-        save_json_file(&self.path, &*state)?;
+        update(&self.path, &mut *state, |next| next.connections.retain(|c| c.id != id))?;
         Ok(true)
     }
 
@@ -92,8 +89,7 @@ impl ConnectionStore {
             }
         }
         reordered.extend(state.connections.iter().filter(|c| !seen.contains(c.id.as_str())).cloned());
-        state.connections = reordered;
-        save_json_file(&self.path, &*state)
+        update(&self.path, &mut *state, |next| next.connections = reordered)
     }
 
     pub fn folders(&self) -> Vec<ConnectionFolder> {
@@ -105,18 +101,17 @@ impl ConnectionStore {
         if folder.id.is_empty() {
             folder.id = uuid::Uuid::new_v4().to_string();
         }
-        upsert(&mut state.folders, folder.clone(), |f| &f.id);
-        save_json_file(&self.path, &*state)?;
+        update(&self.path, &mut *state, |next| upsert(&mut next.folders, folder.clone(), |f| &f.id))?;
         Ok(folder)
     }
 
     pub fn delete_folder(&self, id: &str) -> io::Result<()> {
-        let mut state = self.lock();
-        state.folders.retain(|f| f.id != id);
-        for c in state.connections.iter_mut().filter(|c| c.folder_id == id) {
-            c.folder_id.clear();
-        }
-        save_json_file(&self.path, &*state)
+        update(&self.path, &mut *self.lock(), |next| {
+            next.folders.retain(|f| f.id != id);
+            for c in next.connections.iter_mut().filter(|c| c.folder_id == id) {
+                c.folder_id.clear();
+            }
+        })
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ConnectionsFile> {
@@ -269,5 +264,24 @@ mod tests {
         store.delete_folder(&folder.id).unwrap();
         assert!(store.folders().is_empty());
         assert_eq!(store.get("c").unwrap().folder_id, "");
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_store_as_the_file_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = ConnectionStore::open(tmp.path()).unwrap();
+        for id in ["a", "b"] {
+            store.save(named(id)).unwrap();
+        }
+        let folder = store.save_folder(ConnectionFolder { name: "Work".into(), ..Default::default() }).unwrap();
+        store.save(ConnectionConfig { folder_id: folder.id.clone(), ..named("a") }).unwrap();
+        let before = (store.list(), store.folders());
+        crate::block_writes(tmp.path(), "connections.json");
+        assert!(store.save(named("c")).is_err());
+        assert!(store.delete("a").is_err());
+        assert!(store.reorder(&["b".into(), "a".into()]).is_err());
+        assert!(store.save_folder(ConnectionFolder { name: "Home".into(), ..Default::default() }).is_err());
+        assert!(store.delete_folder(&folder.id).is_err());
+        assert_eq!((store.list(), store.folders()), before);
     }
 }

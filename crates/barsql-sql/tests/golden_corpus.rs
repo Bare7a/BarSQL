@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use barsql_core::{DriverType, Row, Value};
+use barsql_core::{ColumnInfo, DriverType, Row, Value};
 use barsql_sql::dml::{build_delete, build_insert, build_update};
 use barsql_sql::{
     PlanRows, assert_read_only, detect_plan_request, is_read_only, parse_plan, qualified_table, quote_ident,
@@ -198,6 +199,12 @@ fn strings(v: &Json) -> Vec<String> {
     serde_json::from_value(v.clone()).expect("strings")
 }
 
+fn catalog(v: &Json) -> Vec<ColumnInfo> {
+    let types: BTreeMap<String, String> =
+        if v.is_null() { BTreeMap::new() } else { serde_json::from_value(v.clone()).expect("column types") };
+    types.into_iter().map(|(name, data_type)| ColumnInfo { name, data_type, ..Default::default() }).collect()
+}
+
 #[test]
 fn row_edit_sql_matches() {
     let all = fixture("corpus/row_edit_sql.json");
@@ -217,6 +224,7 @@ fn row_edit_sql_matches() {
             let i = &edit["input"];
             let schema = i["schema"].as_str().expect("schema");
             let table = i["table"].as_str().expect("table");
+            let columns = catalog(&i["columnTypes"]);
             let built = match edit["kind"].as_str().expect("kind") {
                 "update" => build_update(
                     driver,
@@ -225,9 +233,10 @@ fn row_edit_sql_matches() {
                     &json_row(&i["changes"]),
                     &json_row(&i["pk"]),
                     &strings(&i["pkCols"]),
+                    &columns,
                 ),
-                "delete" => build_delete(driver, schema, table, &strings(&i["pkCols"]), &json_row(&i["pk"])),
-                "insert" => build_insert(driver, schema, table, &json_row(&i["values"])),
+                "delete" => build_delete(driver, schema, table, &strings(&i["pkCols"]), &json_row(&i["pk"]), &columns),
+                "insert" => build_insert(driver, schema, table, &json_row(&i["values"]), &columns),
                 other => panic!("unknown edit kind {other}"),
             };
             let mut got = json!({ "kind": edit["kind"], "input": edit["input"] });

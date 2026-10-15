@@ -7,6 +7,10 @@ use crate::sql_text::to_upper;
 
 pub type Statement = (String, Vec<Value>);
 
+// MySQL reads text into a BIT column as bytes, so bit values go as binary digits through CONV. `{}` is the placeholder.
+pub const MYSQL_BITS: &str = "CAST(CONV({}, 2, 10) AS UNSIGNED)";
+
+// `columns` is the table's catalog, for values that need converting like MySQL's BIT. Missing columns go as they are.
 pub fn build_update(
     driver: &DriverType,
     schema: &str,
@@ -14,6 +18,7 @@ pub fn build_update(
     changes: &Row,
     pk_values: &Row,
     pk_cols: &[String],
+    columns: &[ColumnInfo],
 ) -> Result<Statement, String> {
     if changes.is_empty() {
         return Err("no changes to apply".into());
@@ -23,13 +28,13 @@ pub fn build_update(
     let mut args = Vec::with_capacity(changes.len() + pk_cols.len());
     let mut sets = Vec::with_capacity(changes.len());
     for (col, value) in changes {
-        args.push(value.clone());
-        sets.push(format!("{} = {}", quote_ident(driver, col), placeholder(driver, args.len())));
+        let mark = bind(driver, columns, col, value, &mut args)?;
+        sets.push(format!("{} = {mark}", quote_ident(driver, col)));
     }
     let mut filters = Vec::with_capacity(pk_cols.len());
     for pk in pk_cols {
-        args.push(pk_values[pk].clone());
-        filters.push(format!("{} = {}", quote_ident(driver, pk), placeholder(driver, args.len())));
+        let mark = bind(driver, columns, pk, &pk_values[pk], &mut args)?;
+        filters.push(format!("{} = {mark}", quote_ident(driver, pk)));
     }
     let sql =
         format!("UPDATE {} SET {} WHERE {}", table_ref(driver, schema, table), sets.join(", "), filters.join(" AND "));
@@ -42,28 +47,83 @@ pub fn build_delete(
     table: &str,
     pk_cols: &[String],
     pk_row: &Row,
+    columns: &[ColumnInfo],
 ) -> Result<Statement, String> {
     require_row_edits(driver)?;
     require_pk_values(pk_cols, pk_row)?;
     let mut args = Vec::with_capacity(pk_cols.len());
     let mut filters = Vec::with_capacity(pk_cols.len());
     for pk in pk_cols {
-        args.push(pk_row[pk].clone());
-        filters.push(format!("{} = {}", quote_ident(driver, pk), placeholder(driver, args.len())));
+        let mark = bind(driver, columns, pk, &pk_row[pk], &mut args)?;
+        filters.push(format!("{} = {mark}", quote_ident(driver, pk)));
     }
     Ok((format!("DELETE FROM {} WHERE {}", table_ref(driver, schema, table), filters.join(" AND ")), args))
 }
 
 // Callers append any driver-specific suffix such as RETURNING *.
-pub fn build_insert(driver: &DriverType, schema: &str, table: &str, values: &Row) -> Result<Statement, String> {
+pub fn build_insert(
+    driver: &DriverType,
+    schema: &str,
+    table: &str,
+    values: &Row,
+    columns: &[ColumnInfo],
+) -> Result<Statement, String> {
     if values.is_empty() {
         return Err("no column values provided".into());
     }
     let cols: Vec<String> = values.keys().map(|c| quote_ident(driver, c)).collect();
-    let marks: Vec<String> = (1..=values.len()).map(|i| placeholder(driver, i)).collect();
+    let mut args = Vec::with_capacity(values.len());
+    let mut marks = Vec::with_capacity(values.len());
+    for (col, value) in values {
+        marks.push(bind(driver, columns, col, value, &mut args)?);
+    }
     let sql =
         format!("INSERT INTO {} ({}) VALUES ({})", table_ref(driver, schema, table), cols.join(", "), marks.join(", "));
-    Ok((sql, values.values().cloned().collect()))
+    Ok((sql, args))
+}
+
+fn bind(
+    driver: &DriverType,
+    columns: &[ColumnInfo],
+    column: &str,
+    value: &Value,
+    args: &mut Vec<Value>,
+) -> Result<String, String> {
+    let bits =
+        columns.iter().any(|c| c.name.eq_ignore_ascii_case(column) && is_bit_column(driver.dialect(), &c.data_type));
+    args.push(if bits { bit_digits(column, value)? } else { value.clone() });
+    let mark = placeholder(driver, args.len());
+    Ok(if bits { MYSQL_BITS.replace("{}", &mark) } else { mark })
+}
+
+// Only MySQL's BIT needs its digits converted. SQL Server's is a boolean.
+pub fn is_bit_column(dialect: Option<SqlDialect>, data_type: &str) -> bool {
+    dialect == Some(SqlDialect::MySql)
+        && data_type.split('(').next().is_some_and(|t| t.trim().eq_ignore_ascii_case("bit"))
+}
+
+pub fn is_bit_string(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b == b'0' || b == b'1')
+}
+
+// Numbers keep their value, as MySQL stores them in a BIT column, a negative one as its 64-bit two's complement.
+pub fn bit_digits(column: &str, value: &Value) -> Result<Value, String> {
+    let text = match value {
+        Value::Null => return Ok(Value::Null),
+        Value::Bool(b) => return Ok(Value::Text(u8::from(*b).to_string())),
+        Value::Int(n) => return Ok(Value::Text(format!("{:b}", *n as u64))),
+        Value::Float(f) => return Err(format!("column {column:?} takes binary digits like 1010, got {f}")),
+        Value::Text(s) => s.trim(),
+    };
+    if !is_bit_string(text) {
+        return Err(format!("column {column:?} takes binary digits like 1010, got {text:?}"));
+    }
+    // CONV saturates past 64 bits, the most a BIT column holds.
+    let significant = text.trim_start_matches('0').len();
+    if significant > 64 {
+        return Err(format!("column {column:?} holds at most 64 bits, got {significant}"));
+    }
+    Ok(Value::Text(text.to_string()))
 }
 
 // ClickHouse keys aren't unique, so a key can't pick out the one row to change.
@@ -125,10 +185,6 @@ pub fn preview_select(driver: &DriverType, schema: &str, table: &str, limit: i64
         Preview::Limit => format!("SELECT * FROM {target} LIMIT {limit};"),
         Preview::Top => format!("SELECT TOP ({limit}) * FROM {target};"),
     }
-}
-
-pub fn first_integer_primary_key(cols: &[ColumnInfo]) -> Option<&str> {
-    cols.iter().find(|c| c.is_primary && c.data_type.to_lowercase().contains("int")).map(|c| c.name.as_str())
 }
 
 pub const IMPORT_BOOL: &str = "bool";
@@ -286,27 +342,82 @@ mod tests {
     fn update_and_delete_require_every_key() {
         let pg = DriverType::Postgres;
         let id = cols(&["id"]);
-        assert!(build_update(&pg, "public", "t", &Row::new(), &row(&[("id", 1.into())]), &id).is_err());
-        assert!(build_update(&pg, "public", "t", &row(&[("name", "x".into())]), &Row::new(), &id).is_err());
+        assert!(build_update(&pg, "public", "t", &Row::new(), &row(&[("id", 1.into())]), &id, &[]).is_err());
+        assert!(build_update(&pg, "public", "t", &row(&[("name", "x".into())]), &Row::new(), &id, &[]).is_err());
         let (sql, args) =
-            build_update(&pg, "public", "t", &row(&[("name", "x".into())]), &row(&[("id", 1.into())]), &id).unwrap();
+            build_update(&pg, "public", "t", &row(&[("name", "x".into())]), &row(&[("id", 1.into())]), &id, &[])
+                .unwrap();
         assert!(!sql.is_empty() && args.len() == 2);
-        assert!(build_delete(&pg, "public", "t", &id, &Row::new()).is_err());
-        assert!(build_delete(&pg, "public", "t", &[], &row(&[("id", 1.into())])).is_err());
-        assert!(build_delete(&pg, "public", "t", &id, &row(&[("id", 1.into())])).is_ok());
-        assert!(build_insert(&pg, "public", "t", &Row::new()).is_err());
-        assert!(build_insert(&pg, "public", "t", &row(&[("name", "x".into())])).is_ok());
+        assert!(build_delete(&pg, "public", "t", &id, &Row::new(), &[]).is_err());
+        assert!(build_delete(&pg, "public", "t", &[], &row(&[("id", 1.into())]), &[]).is_err());
+        assert!(build_delete(&pg, "public", "t", &id, &row(&[("id", 1.into())]), &[]).is_ok());
+        assert!(build_insert(&pg, "public", "t", &Row::new(), &[]).is_err());
+        assert!(build_insert(&pg, "public", "t", &row(&[("name", "x".into())]), &[]).is_ok());
     }
 
     #[test]
     fn generated_sql_is_deterministic() {
         let pg = DriverType::Postgres;
         let values = row(&[("b", 2.into()), ("a", 1.into()), ("c", 3.into())]);
-        let (sql, _) = build_insert(&pg, "public", "t", &values).unwrap();
+        let (sql, _) = build_insert(&pg, "public", "t", &values, &[]).unwrap();
         assert_eq!(sql, r#"INSERT INTO "public"."t" ("a", "b", "c") VALUES ($1, $2, $3)"#);
-        let (sql, args) = build_update(&pg, "public", "t", &values, &row(&[("id", 9.into())]), &cols(&["id"])).unwrap();
+        let (sql, args) =
+            build_update(&pg, "public", "t", &values, &row(&[("id", 9.into())]), &cols(&["id"]), &[]).unwrap();
         assert_eq!(sql, r#"UPDATE "public"."t" SET "a" = $1, "b" = $2, "c" = $3 WHERE "id" = $4"#);
         assert_eq!(args, vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(9)]);
+    }
+
+    #[test]
+    fn mysql_bit_columns_take_their_digits_through_conv() {
+        let columns = [
+            ColumnInfo { name: "id".into(), data_type: "int".into(), is_primary: true, ..Default::default() },
+            ColumnInfo { name: "Flags".into(), data_type: "bit".into(), ..Default::default() },
+            ColumnInfo { name: "mask".into(), data_type: "BIT(64)".into(), is_primary: true, ..Default::default() },
+        ];
+        let my = DriverType::MySql;
+        let keys = cols(&["id", "mask"]);
+        let key = row(&[("id", 1.into()), ("mask", "0101".into())]);
+        let (sql, args) =
+            build_update(&my, "s", "t", &row(&[("flags", " 1010 ".into())]), &key, &keys, &columns).unwrap();
+        assert_eq!(
+            sql,
+            "UPDATE `s`.`t` SET `flags` = CAST(CONV(?, 2, 10) AS UNSIGNED) \
+             WHERE `id` = ? AND `mask` = CAST(CONV(?, 2, 10) AS UNSIGNED)"
+        );
+        assert_eq!(args, vec![Value::from("1010"), Value::Int(1), Value::from("0101")]);
+        let (sql, args) = build_delete(&my, "s", "t", &keys, &key, &columns).unwrap();
+        assert_eq!(sql, "DELETE FROM `s`.`t` WHERE `id` = ? AND `mask` = CAST(CONV(?, 2, 10) AS UNSIGNED)");
+        assert_eq!(args, vec![Value::Int(1), Value::from("0101")]);
+        let values = row(&[("id", 2.into()), ("flags", Value::Null), ("mask", Value::Int(-1)), ("note", "1".into())]);
+        let (sql, args) = build_insert(&my, "s", "t", &values, &columns).unwrap();
+        assert_eq!(
+            sql,
+            "INSERT INTO `s`.`t` (`flags`, `id`, `mask`, `note`) VALUES (CAST(CONV(?, 2, 10) AS UNSIGNED), ?, \
+             CAST(CONV(?, 2, 10) AS UNSIGNED), ?)"
+        );
+        assert_eq!(args, vec![Value::Null, Value::Int(2), Value::from("1".repeat(64).as_str()), Value::from("1")]);
+
+        // CONV would read these as 1 and 0 without a word, and saturate past 64 bits.
+        for bad in ["12", "abc", "", "0x0A", "b'1010'"] {
+            let err = build_update(&my, "s", "t", &row(&[("flags", bad.into())]), &key, &keys, &columns).unwrap_err();
+            assert_eq!(err, format!("column \"flags\" takes binary digits like 1010, got {:?}", bad), "{bad:?}");
+        }
+        let long = format!("000{}", "1".repeat(65));
+        let err = build_insert(&my, "s", "t", &row(&[("flags", long.as_str().into())]), &columns).unwrap_err();
+        assert_eq!(err, "column \"flags\" holds at most 64 bits, got 65");
+        assert_eq!(
+            bit_digits("b", &format!("000{}", "1".repeat(64)).into()),
+            Ok(format!("000{}", "1".repeat(64)).into())
+        );
+        assert_eq!(bit_digits("b", &Value::Bool(true)), Ok("1".into()));
+        assert_eq!(bit_digits("b", &Value::Int(10)), Ok("1010".into()));
+        assert!(bit_digits("b", &Value::Float(2.5)).is_err());
+
+        for driver in [DriverType::Postgres, DriverType::SqlServer] {
+            let (sql, args) = build_insert(&driver, "s", "t", &row(&[("flags", "1".into())]), &columns).unwrap();
+            assert!(!sql.contains("CONV"), "{sql}");
+            assert_eq!(args, vec![Value::from("1")]);
+        }
     }
 
     #[test]
@@ -356,6 +467,7 @@ mod tests {
             &row(&[("a", 1.into())]),
             &row(&[("id", 1.into())]),
             &cols(&["id"]),
+            &[],
         );
         assert!(edit.is_err());
         assert_eq!(build_truncate(&DriverType::ClickHouse, "db", "t"), "TRUNCATE TABLE `db`.`t`");

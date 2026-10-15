@@ -4,12 +4,13 @@ use std::time::{Duration, Instant};
 
 use barsql_core::{DriverType, MessageLevel, QueryError, ResultSummary, ServerMessage, Value};
 use barsql_sql::lang::tokens::{TokenKind, tokenize};
+use barsql_sql::strip_leading_comments;
 use futures_util::TryStreamExt;
 use tiberius::{ColumnData, ColumnType, QueryItem, ToSql};
 
 use super::capture::{DONE_COUNT, DONE_ERROR, DONE_SERVER_ERROR, Token, captured};
 use super::{MsLease, ms_error, values};
-use crate::event::{ScriptEvent, Sink, StatementResult, emit};
+use crate::event::{MessageBuffer, ScriptEvent, Sink, StatementResult, emit};
 use crate::script::{
     self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows, touches_transaction,
 };
@@ -270,7 +271,7 @@ impl StatementRunner for MsSession {
             self.in_transaction = false;
         }
         // Every batch ends with a DONE. None seen means the tokens weren't captured, so the count is asked for.
-        if out.dones == 0 && ended.is_ok() && !out.produced() {
+        if out.dones == 0 && ended.is_ok() && !out.produced() && touches_rows(stmt) {
             let count = Box::pin(self.scalar("SELECT @@ROWCOUNT")).await;
             out.affected = count.ok().flatten().map(|n| n.max(0) as u64);
         }
@@ -293,7 +294,7 @@ struct Batch<'s> {
     counts: Vec<u64>,
     affected: Option<u64>,
     dones: usize,
-    messages: Vec<ServerMessage>,
+    messages: MessageBuffer,
     errors: Vec<(u32, String)>,
     // Where the batch left the transaction: Some(true) after a BEGIN, Some(false) after its end.
     transaction: Option<bool>,
@@ -321,7 +322,7 @@ impl<'s> Batch<'s> {
             counts: Vec::new(),
             affected: None,
             dones: 0,
-            messages: Vec::new(),
+            messages: MessageBuffer::default(),
             errors: Vec::new(),
             transaction: None,
         }
@@ -362,9 +363,8 @@ impl<'s> Batch<'s> {
     }
 
     async fn send_messages(&mut self, result_index: usize) {
-        if !self.messages.is_empty() {
-            let messages = std::mem::take(&mut self.messages);
-            emit(self.sink, ScriptEvent::Messages { result_index, messages, dropped: 0 }).await;
+        if let Some(event) = self.messages.take(result_index) {
+            emit(self.sink, event).await;
         }
     }
 
@@ -445,6 +445,10 @@ impl<'s> Batch<'s> {
         if let Some(set) = self.set.take() {
             self.close(set).await;
         }
+        // Without rows to change, the counts are the batch's variable assignments.
+        if !self.counts.is_empty() && !touches_rows(self.sql) {
+            self.counts.clear();
+        }
         let affected = self.affected.or_else(|| (!self.counts.is_empty()).then(|| self.counts.iter().sum()));
         // One count needs no list, since the result says it.
         if self.counts.len() > 1 {
@@ -482,6 +486,42 @@ impl<'s> Batch<'s> {
         self.result(summary, error.clone()).await;
         StatementRun { sets: self.index - self.first_index, error }
     }
+}
+
+// The server counts each variable assignment's rows too. SSMS drops those by the DONE token's CurCmd, which tiberius
+// doesn't pass on, so a batch without any of these words changes no rows. Mixed batches still count assignments.
+const ROW_WORDS: &[&str] = &["insert", "update", "delete", "merge", "into", "exec", "execute"];
+
+// A batch's first statement may run a procedure without EXEC, so one opening with anything else may change rows.
+const OPENERS: &[&str] = &[
+    "alter",
+    "begin",
+    "create",
+    "declare",
+    "drop",
+    "if",
+    "print",
+    "raiserror",
+    "select",
+    "set",
+    "throw",
+    "truncate",
+    "use",
+    "waitfor",
+    "while",
+    "with",
+];
+
+// Longer batches are dumps and scripts, which keep their counts rather than being tokenized whole.
+const SCANNED: usize = 1 << 20;
+
+pub(crate) fn touches_rows(batch: &str) -> bool {
+    let rest = strip_leading_comments(batch);
+    let first = &rest[..rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(rest.len())];
+    if !OPENERS.iter().any(|opener| first.eq_ignore_ascii_case(opener)) || batch.len() > SCANNED {
+        return true;
+    }
+    tokenize(batch, Some(&MS)).iter().any(|t| t.kind == TokenKind::Ident && ROW_WORDS.contains(&t.lower.as_str()))
 }
 
 fn meta(columns: &[(String, ColumnType)], first: &[&ColumnData<'_>]) -> Arc<[ColumnMeta]> {

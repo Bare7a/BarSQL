@@ -3,8 +3,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
-use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef};
+use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError};
 use barsql_db::{Cancel, Cell, Engine, ScriptEvent, Session};
 use barsql_sql::split_statement_texts;
 use serde_json::{Map, Value as Json, json};
@@ -13,6 +14,40 @@ use serde_json::{Map, Value as Json, json};
 pub async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     LOCK.lock().await
+}
+
+// Runs `sql` and cancels it after `after`. Returns its error, the events it sent and how long it took.
+pub async fn cancel_after(
+    session: &mut Session,
+    sql: &str,
+    after: Duration,
+) -> (QueryError, Vec<ScriptEvent>, Duration) {
+    let cancel = Cancel::new();
+    let trigger = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(after).await;
+        trigger.cancel();
+    });
+    let started = Instant::now();
+    let (tx, rx) = async_channel::unbounded();
+    let error = session.run_script(&[sql.to_string()], &tx, &cancel).await.expect_err("cancelled");
+    assert!(error.cancelled, "{error:?}");
+    drop(tx);
+    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    (error, events, started.elapsed())
+}
+
+// The rows the grid got, and the row count their result gave.
+pub fn rows_and_count(events: &[ScriptEvent]) -> (usize, Option<i64>) {
+    let (mut sent, mut counted) = (0, None);
+    for event in events {
+        match event {
+            ScriptEvent::Rows { chunk, .. } => sent += chunk.rows(),
+            ScriptEvent::Result(result) => counted = result.summary.as_ref().map(|s| s.row_count),
+            _ => {}
+        }
+    }
+    (sent, counted)
 }
 
 pub fn env_or(key: &str, default: &str) -> String {
@@ -168,6 +203,33 @@ pub async fn snapshot_probes(session: &mut Session, driver: &DriverType, templat
     Json::Array(out)
 }
 
+// Every probe runs, so later ones see the state earlier ones leave, but deviations keep what the fixture says.
+pub async fn rewrite_probes(session: &mut Session, driver: &DriverType, probes: &Json, listed: &[&str]) -> Json {
+    let fresh = snapshot_probes(session, driver, probes).await;
+    let kept = probes.as_array().expect("probes").iter().zip(fresh.as_array().unwrap()).map(|(old, new)| {
+        let name = old["name"].as_str().unwrap();
+        if listed.contains(&name) || undeliverable(old) { old.clone() } else { new.clone() }
+    });
+    Json::Array(kept.collect())
+}
+
+// Compares the fixture's probes under `key`, or with BARSQL_GOLDEN_WRITE=1 rewrites them for `write_fixture`.
+pub async fn check_probes(
+    session: &mut Session,
+    driver: &DriverType,
+    fixture: &mut Json,
+    key: &str,
+    label: &str,
+    listed: &[&str],
+    report: &mut Report,
+) {
+    if golden_write() {
+        fixture[key] = rewrite_probes(session, driver, &fixture[key], listed).await;
+    } else {
+        compare_probes(session, driver, &fixture[key], label, listed, report).await;
+    }
+}
+
 pub fn sqlite_config(path: &std::path::Path) -> ConnectionConfig {
     ConnectionConfig {
         id: "golden-sqlite".into(),
@@ -206,10 +268,15 @@ impl Report {
 }
 
 pub async fn run_all(session: &mut Session, statements: &[String]) {
+    let _ = run_error(session, statements).await;
+}
+
+pub async fn run_error(session: &mut Session, statements: &[String]) -> Option<QueryError> {
     let (tx, rx) = async_channel::unbounded();
-    let _ = session.run_script(statements, &tx, &Cancel::new()).await;
+    let result = session.run_script(statements, &tx, &Cancel::new()).await;
     drop(tx);
     while rx.try_recv().is_ok() {}
+    result.err()
 }
 
 // One entry per result set, in stream order.

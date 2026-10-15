@@ -68,7 +68,7 @@ const MOD: &str = "ctrl";
 
 // Quit isn't remappable. Remappable shortcuts and their menu accelerators come from `shortcuts`.
 pub fn init(cx: &mut App) {
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Quit, cx| crate::workspace::quit(cx));
     cx.on_action(|_: &HideApp, cx| cx.hide());
     cx.on_action(|_: &HideOtherApps, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAllApps, cx| cx.unhide_other_apps());

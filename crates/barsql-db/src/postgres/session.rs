@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use barsql_core::{DriverType, QueryError, Value};
+use barsql_core::{DriverType, QueryError, ResultSummary, Value};
 use barsql_sql::quote_ident;
 use bytes::BytesMut;
 use futures_util::{StreamExt, pin_mut};
@@ -160,12 +160,13 @@ impl StatementRunner for PgSession {
         let local = self.lease.engine().options.local.clone();
         // Ones raised by the session's own setup and probes.
         self.lease.notices().reset();
-        let fail = |error: QueryError| async move {
+        let fail = |error: QueryError, summary: Option<ResultSummary>| async move {
             emit(
                 sink,
                 ScriptEvent::Result(Box::new(StatementResult {
                     result_index: first_index,
                     statement: stmt.into(),
+                    summary,
                     error: Some(error.clone()),
                     ..Default::default()
                 })),
@@ -179,7 +180,7 @@ impl StatementRunner for PgSession {
             Ok(prepared) => prepared.columns().iter().map(|c| c.type_().oid()).collect(),
             Err(err) if err.as_db_error().is_some() || self.lease.client().is_closed() => {
                 self.send_notices(first_index, sink).await;
-                return fail(mark_cancelled(pg_error(&err), cancel)).await;
+                return fail(mark_cancelled(pg_error(&err), cancel), None).await;
             }
             Err(_) => Vec::new(),
         };
@@ -187,7 +188,7 @@ impl StatementRunner for PgSession {
             Ok(stream) => stream,
             Err(err) => {
                 self.send_notices(first_index, sink).await;
-                return fail(mark_cancelled(pg_error(&err), cancel)).await;
+                return fail(mark_cancelled(pg_error(&err), cancel), None).await;
             }
         };
         pin_mut!(stream);
@@ -214,8 +215,9 @@ impl StatementRunner for PgSession {
                         Ok(message) => message,
                         Err(_) => {
                             self.broken = true;
+                            let summary = close_set(set.take(), first_index, sink, started).await;
                             self.send_notices(first_index, sink).await;
-                            return fail(QueryError::cancelled()).await;
+                            return fail(QueryError::cancelled(), summary).await;
                         }
                     }
                 }
@@ -251,17 +253,8 @@ impl StatementRunner for PgSession {
                     }
                 }
                 Some(Ok(SimpleQueryMessage::CommandComplete(affected))) => {
-                    let summary = match set.take() {
-                        Some((columns, _, builder, rows)) => {
-                            if !builder.is_empty() {
-                                emit(
-                                    sink,
-                                    ScriptEvent::Rows { result_index: first_index, chunk: Arc::new(builder.finish()) },
-                                )
-                                .await;
-                            }
-                            summary_for_rows(&columns, rows, started)
-                        }
+                    let summary = match close_set(set.take(), first_index, sink, started).await {
+                        Some(summary) => summary,
                         None => summary_for_exec(affected, started),
                     };
                     self.send_notices(first_index, sink).await;
@@ -279,21 +272,9 @@ impl StatementRunner for PgSession {
                 }
                 Some(Ok(_)) => {}
                 Some(Err(err)) => {
-                    let error = mark_cancelled(pg_error(&err), cancel);
-                    let summary = set.map(|(columns, _, _, rows)| summary_for_rows(&columns, rows, started));
+                    let summary = close_set(set.take(), first_index, sink, started).await;
                     self.send_notices(first_index, sink).await;
-                    emit(
-                        sink,
-                        ScriptEvent::Result(Box::new(StatementResult {
-                            result_index: first_index,
-                            statement: stmt.into(),
-                            summary,
-                            error: Some(error.clone()),
-                            ..Default::default()
-                        })),
-                    )
-                    .await;
-                    return StatementRun { sets: 1, error: Some(error) };
+                    return fail(mark_cancelled(pg_error(&err), cancel), summary).await;
                 }
                 None => return StatementRun { sets: 0, error: None },
             }
@@ -302,6 +283,15 @@ impl StatementRunner for PgSession {
 }
 
 type SetState = (Arc<[ColumnMeta]>, Vec<Decoder>, ChunkBuilder, usize);
+
+// Rows that came before an error or a cancel still show, so the count matches the grid.
+async fn close_set(set: Option<SetState>, result_index: usize, sink: &Sink, started: Instant) -> Option<ResultSummary> {
+    let (columns, _, builder, rows) = set?;
+    if !builder.is_empty() {
+        emit(sink, ScriptEvent::Rows { result_index, chunk: Arc::new(builder.finish()) }).await;
+    }
+    Some(summary_for_rows(&columns, rows, started))
+}
 
 #[derive(PartialEq, Eq)]
 enum TxState {

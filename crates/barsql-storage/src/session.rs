@@ -82,8 +82,9 @@ impl SessionStore {
 
     pub fn save(&self, session: EditorSession) -> io::Result<()> {
         let mut current = self.lock();
+        save_json_file(&self.path, &session)?;
         *current = session;
-        save_json_file(&self.path, &*current)
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, EditorSession> {
@@ -144,5 +145,16 @@ mod tests {
         fs::write(tmp.path().join("editor_session.json"), r#"{"tabs":null,"activeTab":"x"}"#).unwrap();
         let loaded = SessionStore::open(tmp.path()).unwrap().get();
         assert_eq!((loaded.tabs.len(), loaded.active_tab.as_str()), (0, "x"));
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_store_as_the_file_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        let kept = EditorSession { active_tab: "kept".into(), ..Default::default() };
+        store.save(kept.clone()).unwrap();
+        crate::block_writes(tmp.path(), "editor_session.json");
+        assert!(store.save(EditorSession { active_tab: "new".into(), ..Default::default() }).is_err());
+        assert_eq!(store.get(), kept);
     }
 }

@@ -54,10 +54,11 @@ pub fn quote_literal_in(dialect: SqlDialect, text: &str) -> String {
         SqlDialect::Postgres if text.contains('\\') => {
             format!("E'{}'", text.replace('\\', "\\\\").replace('\'', "''"))
         }
-        // A backslash escapes unless NO_BACKSLASH_ESCAPES is set, and a hex string means the same either way.
+        // A backslash escapes unless NO_BACKSLASH_ESCAPES is set, and a hex string means the same either way. With the
+        // introducer it compares in the column's collation, where CONVERT(… USING utf8mb4) fails on utf8mb4_unicode_ci.
         SqlDialect::MySql if text.contains('\\') => {
             let hex: String = text.bytes().map(|b| format!("{b:02X}")).collect();
-            format!("CONVERT(X'{hex}' USING utf8mb4)")
+            format!("_utf8mb4 X'{hex}'")
         }
         SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite => quote_literal(text),
         // Without the N, text outside the database's code page is lost.
@@ -84,7 +85,7 @@ mod tests {
             (SqlDialect::Postgres, "it's", "'it''s'"),
             (SqlDialect::Postgres, r"a\b'", r"E'a\\b'''"),
             (SqlDialect::MySql, "it's", "'it''s'"),
-            (SqlDialect::MySql, r"a\b", "CONVERT(X'615C62' USING utf8mb4)"),
+            (SqlDialect::MySql, r"a\b", "_utf8mb4 X'615C62'"),
             (SqlDialect::Sqlite, r"a\b'", r"'a\b'''"),
             (SqlDialect::TSql, r"a\b'ü", r"N'a\b''ü'"),
             (SqlDialect::ClickHouse, r"a\b'", r"'a\\b\''"),

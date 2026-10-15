@@ -81,7 +81,17 @@
     "databaseHintSqlServer": "База данни за свързване. Оставете празно за базата по подразбиране на акаунта.",
     "sslStrict": "Стриктно (TDS 8.0)",
     "confirmChanges": "Питай преди промени",
-    "confirmChangesHint": "За продукционни бази: потвърждава INSERT, UPDATE, DELETE, DDL и записи от таблицата, преди да се изпълнят."
+    "confirmChangesHint": "За продукционни бази: потвърждава INSERT, UPDATE, DELETE, DDL и записи от таблицата, преди да се изпълнят.",
+    "hostRequired": "Хостът е задължителен.",
+    "usernameRequired": "Потребителското име е задължително.",
+    "urlScheme": "URL адресът на базата данни трябва да започва с libsql://, https://, http://, wss:// или ws://.",
+    "sshHostRequired": "SSH хостът е задължителен.",
+    "sshUsernameRequired": "SSH потребителят е задължителен.",
+    "sshPortRange": "SSH портът трябва да е между 1 и 65535.",
+    "sshKeyRequired": "Файлът с частния SSH ключ е задължителен.",
+    "sshAuthUnsupported": "Неподдържан метод за SSH удостоверяване: {{method}}.",
+    "driverUnsupported": "Неподдържан драйвер: {{driver}}.",
+    "driverNotInBuild": "{{driver}} не е наличен в тази версия."
   },
   "results": {
     "messages": "Съобщения",
@@ -192,7 +202,15 @@
     "duplicate": "Дублирай",
     "rename": "Преименувай…",
     "renameTitle": "Преименувай раздела",
-    "copySql": "Копирай SQL"
+    "copySql": "Копирай SQL",
+    "rollbackTitle": "Отмяна и затваряне?",
+    "rollbackDescription_one": "Този раздел има отворена транзакция. При затваряне тя се отменя и промените в нея се губят.",
+    "rollbackDescription_other": "{{count}} раздела имат отворени транзакции. При затваряне те се отменят и промените в тях се губят.",
+    "rollbackConfirm": "Отмени и затвори",
+    "quitTitle": "Отмяна и изход?",
+    "quitDescription_one": "Един раздел има отворена транзакция. При изход тя се отменя и промените в нея се губят.",
+    "quitDescription_other": "{{count}} раздела имат отворени транзакции. При изход те се отменят и промените в тях се губят.",
+    "quitConfirm": "Отмени и излез"
   },
   "common": {
     "undo": "Отмени"
@@ -221,7 +239,15 @@
   },
   "errors": {
     "deleteQueryFailed": "Заявката не можа да бъде изтрита",
-    "deleteQueryFailedDetail": "Запазената заявка вече не е в библиотеката."
+    "deleteQueryFailedDetail": "Запазената заявка вече не е в библиотеката.",
+    "deleteConnectionFailed": "Връзката не можа да бъде изтрита",
+    "reorderConnectionsFailed": "Редът на връзките не можа да бъде запазен",
+    "saveFolderFailed": "Папката не можа да бъде запазена",
+    "deleteFolderFailed": "Папката не можа да бъде изтрита",
+    "deleteHistoryFailed": "Записът от историята не можа да бъде изтрит",
+    "settingsNotSaved": "Настройките не можаха да бъдат запазени: {{error}}. Промяната важи до затварянето на BarSQL.",
+    "sessionNotSaved": "Отворените раздели не можаха да бъдат запазени: {{error}}. BarSQL може да не ги отвори отново такива, каквито са сега.",
+    "historyNotSaved": "Историята на заявките не можа да бъде запазена: {{error}}. Новите заявки няма да се появят в „Скорошни“, докато запазването не проработи."
   },
   "status": {
     "caret": "Ред {{line}}, колона {{column}}",

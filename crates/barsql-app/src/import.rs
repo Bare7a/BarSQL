@@ -8,8 +8,8 @@ use barsql_db::{Cancel, ScriptEvent, Session};
 use barsql_io::csv_import::open_error;
 use barsql_io::{CsvField, CsvOptions, ImportPreview, count_rows, new_reader, preview_file};
 use barsql_sql::dml::{
-    IMPORT_BOOL, IMPORT_DATE, IMPORT_TEXT, IMPORT_TIMESTAMP, accepts_empty_string, build_batch_insert_with,
-    build_import_create_table, build_truncate,
+    IMPORT_BOOL, IMPORT_DATE, IMPORT_TEXT, IMPORT_TIMESTAMP, MYSQL_BITS, accepts_empty_string, bit_digits,
+    build_batch_insert_with, build_import_create_table, build_truncate, is_bit_column,
 };
 use barsql_sql::{Dialect, READ_ONLY_ERROR, split_statement_texts};
 use serde::{Deserialize, Serialize};
@@ -276,12 +276,16 @@ impl BarApp {
             let record = match reader.read() {
                 Ok(Some(record)) => conv.build_values(record, sources),
                 Ok(None) => break,
+                Err(err) => Err(err.to_string()),
+            };
+            let record = match record {
+                Ok(record) => record,
                 Err(err) => {
                     if req.stop_on_error {
-                        return Err(QueryError::message(err.to_string()));
+                        return Err(QueryError::message(err));
                     }
                     result.skipped += 1;
-                    result.report([err.to_string()]);
+                    result.report([err]);
                     continue;
                 }
             };
@@ -402,6 +406,9 @@ impl BarApp {
             }
             if tsql && matches!(upper.split('(').next(), Some("BINARY" | "VARBINARY" | "IMAGE")) {
                 conv.hex_cols.insert(i);
+            }
+            if data_type.is_some_and(|t| is_bit_column(driver.dialect(), t)) {
+                conv.bit_cols.insert(i, target.clone());
             }
         }
         conv
@@ -545,6 +552,8 @@ struct ValueConverter {
     day_cols: HashSet<usize>,
     // SQL Server binary columns. Text won't convert to binary there, so these go as 0x hex through CONVERT.
     hex_cols: HashSet<usize>,
+    // MySQL BIT columns, with their names for errors. Their values go as binary digits through CONV.
+    bit_cols: HashMap<usize, String>,
     // Columns that accept ''. Elsewhere a quoted empty field is still NULL.
     text_cols: HashSet<usize>,
     null_literal: String,
@@ -554,45 +563,57 @@ struct ValueConverter {
 
 impl ValueConverter {
     // A quoted empty field is '' and a bare one is NULL, matching Postgres COPY csv.
-    fn build_values(&self, record: &[CsvField], sources: &[usize]) -> Vec<Value> {
+    fn build_values(&self, record: &[CsvField], sources: &[usize]) -> Result<Vec<Value>, String> {
         sources
             .iter()
             .enumerate()
             .map(|(i, &src)| {
-                let Some(field) = record.get(src) else { return Value::Null };
-                let v = if self.trim { field.value.trim() } else { field.value.as_str() };
-                if !self.null_literal.is_empty() && v == self.null_literal {
-                    return Value::Null;
-                }
-                if v.is_empty() {
-                    return if field.quoted && self.text_cols.contains(&i) {
-                        Value::Text(String::new())
-                    } else {
-                        Value::Null
-                    };
-                }
-                let v = undefuse_formula(v);
-                if self.bool_cols.contains(&i) {
-                    normalize_bool(v, self.bool_as_bool)
-                } else if self.bool_int_cols.contains(&i) {
-                    normalize_bool(v, false)
-                } else if self.date_cols.contains(&i) {
-                    Value::Text(mysql_datetime(v))
-                } else if self.day_cols.contains(&i) {
-                    Value::Text(day_part(v).to_string())
-                } else if self.hex_cols.contains(&i) {
-                    Value::Text(hex_literal(v))
-                } else {
-                    Value::Text(v.to_string())
+                let value = self.value(i, record.get(src));
+                match self.bit_cols.get(&i) {
+                    Some(column) => bit_digits(column, &value),
+                    None => Ok(value),
                 }
             })
             .collect()
+    }
+
+    fn value(&self, i: usize, field: Option<&CsvField>) -> Value {
+        let Some(field) = field else { return Value::Null };
+        let v = if self.trim { field.value.trim() } else { field.value.as_str() };
+        if !self.null_literal.is_empty() && v == self.null_literal {
+            return Value::Null;
+        }
+        if v.is_empty() {
+            return if field.quoted && self.text_cols.contains(&i) { Value::Text(String::new()) } else { Value::Null };
+        }
+        let v = undefuse_formula(v);
+        if self.bool_cols.contains(&i) {
+            normalize_bool(v, self.bool_as_bool)
+        } else if self.bool_int_cols.contains(&i) {
+            normalize_bool(v, false)
+        } else if self.date_cols.contains(&i) {
+            Value::Text(mysql_datetime(v))
+        } else if self.day_cols.contains(&i) {
+            Value::Text(day_part(v).to_string())
+        } else if self.hex_cols.contains(&i) {
+            Value::Text(hex_literal(v))
+        } else {
+            Value::Text(v.to_string())
+        }
     }
 }
 
 impl ValueConverter {
     fn wraps(&self, columns: usize) -> Vec<Option<&'static str>> {
-        (0..columns).map(|i| self.hex_cols.contains(&i).then_some("CONVERT(varbinary(max), {}, 1)")).collect()
+        (0..columns)
+            .map(|i| {
+                if self.hex_cols.contains(&i) {
+                    Some("CONVERT(varbinary(max), {}, 1)")
+                } else {
+                    self.bit_cols.contains_key(&i).then_some(MYSQL_BITS)
+                }
+            })
+            .collect()
     }
 }
 

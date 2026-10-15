@@ -15,6 +15,7 @@ pub mod update;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use barsql_core::{ConnectionConfig, QueryError};
@@ -25,7 +26,9 @@ pub use backup::{BackupOutcome, BackupRequest};
 pub use barsql_db::tls::install_default_provider;
 pub use barsql_io::{CsvOptions, ImportPreview};
 pub use barsql_storage::{ConnectionFolder, EditorSession, EditorTab, TableViewRef};
-pub use events::{AppEvent, ImportDone, ImportEvent, ImportHandle, ImportProgress, RunEvent, RunHandle, RunResult};
+pub use events::{
+    AppEvent, ImportDone, ImportEvent, ImportHandle, ImportProgress, RunEvent, RunHandle, RunResult, Unsaved,
+};
 pub use files::{find_sqlite_arg, is_sqlite_file, path_from_file_url, sqlite_file_payload};
 pub use import::{CsvImportRequest, ImportResult, SqlImportRequest};
 pub use info::{AppInfo, PathDefaults, app_info, path_defaults};
@@ -52,6 +55,8 @@ struct Inner {
     jobs: jobs::Jobs,
     events: (async_channel::Sender<AppEvent>, async_channel::Receiver<AppEvent>),
     pending_file: Mutex<Option<String>>,
+    // Per Unsaved store, set while its writes fail, so a run of failures is reported once.
+    unsaved: [AtomicBool; 3],
 }
 
 #[derive(Clone)]
@@ -73,6 +78,7 @@ impl BarApp {
                 jobs: jobs::Jobs::default(),
                 events: async_channel::unbounded(),
                 pending_file: Mutex::new(None),
+                unsaved: Default::default(),
             }),
         };
         app.spawn_idle_sweep();
@@ -109,13 +115,11 @@ impl BarApp {
         self.inner.stores.connections.get(connection_id).ok_or_else(|| QueryError::message("connection not found"))
     }
 
-    // Rolls back open transactions before the pools close.
+    // Rolls back open transactions before the pools close. All tabs at once, as in close_tab_sessions.
     pub async fn shutdown(&self) {
         self.inner.jobs.cancel_all();
         let tab_ids = self.inner.tabs.ids();
-        for tab_id in tab_ids {
-            self.cleanup_tab(&tab_id).await;
-        }
+        futures_util::future::join_all(tab_ids.iter().map(|tab_id| self.cleanup_tab(tab_id))).await;
         let engines: Vec<Engine> =
             self.inner.engines.lock().unwrap_or_else(|e| e.into_inner()).drain().map(|(_, p)| p.engine).collect();
         for engine in engines {

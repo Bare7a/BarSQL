@@ -19,6 +19,13 @@ impl Fixture {
         Self { app, dir }
     }
 
+    // A directory where the store's file goes, so its writes fail as on a full disk or a read-only folder.
+    pub fn block_writes(&self, file: &str) {
+        let path = self.dir.path().join("data").join(file);
+        let _ = std::fs::remove_file(&path);
+        std::fs::create_dir(&path).unwrap();
+    }
+
     pub fn path(&self, name: &str) -> String {
         self.dir.path().join(name).display().to_string()
     }

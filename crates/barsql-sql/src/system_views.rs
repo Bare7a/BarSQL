@@ -333,7 +333,7 @@ mod tests {
         assert!(sql.ends_with("WHERE schemaname = 'it''s' AND relname = E'a\\\\b'"), "{sql}");
         let view = MYSQL.iter().find(|view| view.id == "tableStatus").unwrap();
         let sql = view.sql(&DriverType::MySql, "db", "a\\b");
-        assert!(sql.ends_with("TABLE_SCHEMA = 'db' AND TABLE_NAME = CONVERT(X'615C62' USING utf8mb4)"), "{sql}");
+        assert!(sql.ends_with("TABLE_SCHEMA = 'db' AND TABLE_NAME = _utf8mb4 X'615C62'"), "{sql}");
         let view = TSQL.iter().find(|view| view.id == "indexUsage").unwrap();
         let sql = view.sql(&DriverType::SqlServer, "dbo", "it's");
         assert!(sql.contains("OBJECT_ID(QUOTENAME(N'dbo') + N'.' + QUOTENAME(N'it''s'))"), "{sql}");
