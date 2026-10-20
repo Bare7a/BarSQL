@@ -1,4 +1,5 @@
 mod docs_images;
+mod icons;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -9,6 +10,7 @@ usage: cargo xtask lint
        cargo xtask e2e [up | down | logs | all]
        cargo xtask screenshots
        cargo xtask docs-images
+       cargo xtask icons
        cargo xtask package
        cargo xtask version
        cargo xtask bump-version [--dry-run] (--major | --minor | --patch | <version>)
@@ -23,7 +25,10 @@ screenshots
            fixtures/screenshots/data, and makes the landing page's images from them (docs-images).
 docs-images
            The landing page's images in docs/: each README screenshot as a full-size lossless WebP plus 640, 800
-           and 1280px copies, a 1200 × 630 link preview, and the app icon.
+           and 1280px copies, and a 1200 × 630 link preview.
+icons      Every icon file from packaging/icon.svg: the macOS .icns on Apple's grid, the Windows .ico and the Linux
+           PNGs from the stack without its tile, the About dialog's and the landing page's copies, and the title
+           bar's dark and light marks.
 package    This OS's release packages, in target/package/dist.
 
 The version lives in [workspace.package] in Cargo.toml; Cargo.lock repeats it for every workspace
@@ -43,6 +48,7 @@ fn main() -> ExitCode {
         Some("e2e") => e2e(args.get(1).map(String::as_str)),
         Some("screenshots") => screenshots(),
         Some("docs-images") => docs_images::run(&workspace()),
+        Some("icons") => icons::run(&workspace()),
         Some("package") => package(),
         Some("bump-version") => bump_version(&args[1..]),
         Some("version") => current(&workspace()).map(|version| println!("{version}")),
@@ -215,6 +221,11 @@ fn read(path: &Path) -> Result<String, String> {
 
 fn write(path: &Path, text: &str) -> Result<(), String> {
     fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn report(path: &Path) {
+    let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or_default();
+    println!("{} ({} KB)", path.display(), size.div_ceil(1024));
 }
 
 #[derive(Debug, PartialEq)]

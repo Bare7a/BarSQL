@@ -537,7 +537,7 @@ Run the workflow by hand with the version left empty to build the packages witho
 - **macOS:** a `lipo` universal `.app` for macOS 12 and later with an ad-hoc signature; the dmg adds an `Applications` link. `BARSQL_NATIVE_ONLY=1` builds this Mac's architecture alone.
 - **Windows:** `crates/barsql/build.rs` embeds the icon and the version block. `packaging/windows/installer.nsi` installs the app with the `SQLite Database` file class for `.db`, `.sqlite`, `.sqlite3`, `.s3db` and `.sl3`.
 - **Linux:** [`cargo-deb`](https://crates.io/crates/cargo-deb) and [`cargo-generate-rpm`](https://crates.io/crates/cargo-generate-rpm) build the deb and rpm from `crates/barsql/Cargo.toml`, and `makepkg` builds the Arch package from `packaging/linux/PKGBUILD`. Each installs `/usr/bin/BarSQL` and a desktop entry that opens SQLite files; the deb and rpm work out their library dependencies from the binary. The window's app id is `BarSQL`, so Wayland docks match it to `BarSQL.desktop`.
-- The icon's source is `packaging/icon.svg`.
+- The icon's source is `packaging/icon.svg`. The macOS `.icns` sets it on Apple's icon grid (an 824px body on a 1024px canvas, with a shadow). Windows and Linux show the stack without its tile, since their taskbars and docks are mostly dark and the dark tile would disappear there, leaving the stack looking small. The title bar shows the stack too, in a dark and a light version (`crates/barsql-ui/images/barsql-mark-*.png`). `cargo xtask icons` regenerates the set from it: the Linux PNGs, `icon.ico`, `icons.icns`, the marks, the About dialog's icon and the copies in `docs/`, each size rendered from the vector.
 
 ---
 
@@ -557,7 +557,7 @@ Run the workflow by hand with the version left empty to build the packages witho
 │   ├── barsql-sql/        # statement splitting, quoting, DDL, the SQL language service
 │   ├── barsql-storage/    # the JSON files in BarSQL-data
 │   └── barsql-ui/         # the GPUI views, locales and whole-window scenarios
-├── xtask/                 # cargo xtask: lint, e2e, screenshots, docs-images, package, bump-version
+├── xtask/                 # cargo xtask: lint, e2e, screenshots, docs-images, icons, package, bump-version
 ├── docs/                  # the landing page at barsql.bare7a.eu (GitHub Pages)
 ├── fixtures/
 │   ├── golden/            # per-engine expectations for the E2E suites

@@ -83,15 +83,23 @@ pub fn load_fonts(cx: &mut gpui_kit::App) {
     let _ = cx.text_system().add_fonts(FONTS.iter().map(|bytes| Cow::Borrowed(*bytes)).collect());
 }
 
+// The app icon, and its stack without the tile for the title bar, in tones that hold up on the dark and the light
+// bar. Rendered from packaging/icon.svg.
 pub const LOGO: &str = "images/barsql-icon.png";
-const LOGO_BYTES: &[u8] = include_bytes!("../images/barsql-icon.png");
+pub const MARK_DARK: &str = "images/barsql-mark-dark.png";
+pub const MARK_LIGHT: &str = "images/barsql-mark-light.png";
+const IMAGES: [(&str, &[u8]); 3] = [
+    (LOGO, include_bytes!("../images/barsql-icon.png")),
+    (MARK_DARK, include_bytes!("../images/barsql-mark-dark.png")),
+    (MARK_LIGHT, include_bytes!("../images/barsql-mark-light.png")),
+];
 
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        if path == LOGO {
-            return Ok(Some(Cow::Borrowed(LOGO_BYTES)));
+        if let Some((_, bytes)) = IMAGES.iter().find(|(image, _)| *image == path) {
+            return Ok(Some(Cow::Borrowed(*bytes)));
         }
         match ExtraIcons.load(path)? {
             Some(bytes) => Ok(Some(bytes)),

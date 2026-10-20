@@ -7,3 +7,5 @@ publish.workspace = true
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+resvg = { version = "0.45.1", default-features = false }
+tiny-skia = { version = "0.11.4", features = ["png-format"] }

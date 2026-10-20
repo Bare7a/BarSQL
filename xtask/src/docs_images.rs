@@ -1,5 +1,5 @@
-// Landing page images from the README screenshots and the app icon. The page picks a scaled copy to fit the
-// screen; the lightbox opens a lossless WebP at the screenshot's native size.
+// Landing page images from the README screenshots; the icons command writes the app icon's copies. The page picks
+// a scaled copy to fit the screen; the lightbox opens a lossless WebP at the screenshot's native size.
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -8,6 +8,8 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::imageops;
 use image::{ExtendedColorType, RgbImage};
+
+use crate::report;
 
 // A phone's 2x screen needs 800 and a 1x laptop's hero 1280, where 640 alone sent the full-size image instead.
 const WIDTHS: [u32; 3] = [640, 800, 1280];
@@ -51,11 +53,6 @@ pub fn run(root: &Path) -> Result<(), String> {
             report(&out);
         }
     }
-    for (icon, copy) in [("packaging/icon.svg", "icon.svg"), ("packaging/linux/barsql-256.png", "icon.png")] {
-        let out = docs.join(copy);
-        fs::copy(root.join(icon), &out).map_err(|e| format!("{icon}: {e}"))?;
-        report(&out);
-    }
     Ok(())
 }
 
@@ -73,9 +70,4 @@ fn scale(image: &RgbImage, width: u32) -> RgbImage {
 
 fn create(path: &Path) -> Result<BufWriter<File>, String> {
     File::create(path).map(BufWriter::new).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn report(path: &Path) {
-    let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or_default();
-    println!("{} ({} KB)", path.display(), size.div_ceil(1024));
 }
