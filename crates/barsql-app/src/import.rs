@@ -424,8 +424,9 @@ impl BarApp {
         // Read in full because the splitter needs the whole script to track quoting.
         let path = Path::new(&req.path);
         let data = std::fs::read(path).map_err(|e| QueryError::message(open_error(path, &e)))?;
+        let script = sql_text(path, data)?;
         let engine = self.engine(connection_id).await?;
-        let statements = split_statement_texts(&engine.driver(), &String::from_utf8_lossy(&data));
+        let statements = split_statement_texts(&engine.driver(), &script);
         let total = statements.len() as i64;
         let mut session = engine.session().await?;
         let mut result = ImportResult::default();
@@ -452,6 +453,17 @@ impl BarApp {
         }
         Ok(result)
     }
+}
+
+// Refused when not UTF-8, since every byte it can't read would load as U+FFFD. A BOM isn't SQL.
+fn sql_text(path: &Path, data: Vec<u8>) -> Result<String, QueryError> {
+    let text = String::from_utf8(data).map_err(|_| {
+        QueryError::message(format!("{} isn't UTF-8 text. Save it as UTF-8 and import it again.", path.display()))
+    })?;
+    Ok(match text.strip_prefix('\u{feff}') {
+        Some(rest) => rest.to_string(),
+        None => text,
+    })
 }
 
 // Discards rows since the import only reports counts.
@@ -625,10 +637,12 @@ fn hex_literal(v: &str) -> String {
     }
 }
 
-// Undoes the export's formula guard, a ' prefixed to values starting with = + - or @.
+// Undoes the export's formula guard, a ' prefixed to values starting with = + - or @, also behind tabs and CRs.
 fn undefuse_formula(v: &str) -> &str {
-    let b = v.as_bytes();
-    if b.len() >= 2 && b[0] == b'\'' && matches!(b[1], b'=' | b'+' | b'-' | b'@') { &v[1..] } else { v }
+    match v.strip_prefix('\'') {
+        Some(rest) if rest.trim_start_matches(['\t', '\r']).starts_with(['=', '+', '-', '@']) => rest,
+        _ => v,
+    }
 }
 
 // Unrecognised text passes through so the engine reports it instead of us rewriting data.
@@ -720,6 +734,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sql_scripts_must_be_utf8_and_lose_their_bom() {
+        let path = Path::new("dump.sql");
+        assert_eq!(sql_text(path, b"\xef\xbb\xbfSELECT 1;".to_vec()).unwrap(), "SELECT 1;");
+        assert_eq!(sql_text(path, "SELECT 'é';".as_bytes().to_vec()).unwrap(), "SELECT 'é';");
+        let latin1 = sql_text(path, b"SELECT 'caf\xe9';".to_vec()).unwrap_err();
+        assert!(latin1.message.contains("isn't UTF-8"), "{}", latin1.message);
+    }
+
+    #[test]
     fn mapping_resolution() {
         let mapping: Vec<String> = ["id", "", "name", "  "].map(String::from).to_vec();
         assert_eq!(resolve_mapping(&mapping).unwrap(), (vec!["id".to_string(), "name".to_string()], vec![0, 2]));
@@ -753,5 +776,7 @@ mod tests {
         assert_eq!(undefuse_formula("'=1+1"), "=1+1");
         assert_eq!(undefuse_formula("'plain"), "'plain");
         assert_eq!(undefuse_formula("'"), "'");
+        assert_eq!(undefuse_formula("'\t=x"), "\t=x");
+        assert_eq!(undefuse_formula("'\tx"), "'\tx");
     }
 }

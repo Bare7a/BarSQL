@@ -243,7 +243,7 @@ pub(crate) struct MsLease {
     client: Option<MsClient>,
     _permit: OwnedSemaphorePermit,
     pub(crate) reusable: bool,
-    // Out of step with the server, after an I/O or protocol error or a cancel that didn't settle.
+    // Out of step with the server, after an I/O or protocol error, a cancel that didn't settle, or an unread answer.
     pub(crate) broken: bool,
 }
 

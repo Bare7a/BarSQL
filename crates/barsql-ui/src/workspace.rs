@@ -655,11 +655,18 @@ impl Workspace {
 
     fn app_event(&mut self, event: AppEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
+            // Closing and quitting ask first, so only a forced rollback lands here.
             AppEvent::TransactionsEnded { tab_ids } => {
+                let mut ended = Vec::new();
                 for tab in self.query_tabs() {
                     if tab_ids.contains(&tab.read(cx).id) {
+                        ended.push(tab.read(cx).title.to_string());
                         tab.update(cx, |tab, cx| tab.set_transaction_ended(cx));
                     }
+                }
+                if !ended.is_empty() {
+                    let tabs = ended.join(", ");
+                    toast::info(t_count(cx, "tabs.rolledBack", ended.len() as i64, &[("tabs", &tabs)]), cx);
                 }
             }
             AppEvent::OpenSqlite { file_path, name } => self.open_sqlite(file_path, name, window, cx),

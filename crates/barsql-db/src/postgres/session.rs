@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use barsql_core::{DriverType, QueryError, ResultSummary, Value};
-use barsql_sql::quote_ident;
+use barsql_sql::{first_keyword, quote_ident, strip_leading_comments};
 use bytes::BytesMut;
 use futures_util::{StreamExt, pin_mut};
 use tokio_postgres::SimpleQueryMessage;
@@ -53,7 +53,8 @@ impl PgSession {
         self.lease.engine().read_only()
     }
 
-    // Inside a transaction each run gets a savepoint, so a cancel undoes just that run, not the transaction.
+    // Inside a transaction each run gets a savepoint, so a cancel undoes just that run, not the transaction. It stays
+    // when the run moves savepoints itself: RELEASE drops later ones, and a failing one aborts the transaction.
     pub async fn run_script(
         &mut self,
         statements: &[String],
@@ -63,10 +64,13 @@ impl PgSession {
         let guarded = self.in_transaction && self.simple(&format!("SAVEPOINT {RUN_SAVEPOINT}")).await.is_ok();
         let result = script::run_script(self, statements, sink, cancel).await;
         if guarded {
-            if cancel.is_cancelled() {
-                let _ = self.simple(&format!("ROLLBACK TO SAVEPOINT {RUN_SAVEPOINT}")).await;
+            let kept = !statements.iter().any(|s| moves_savepoints(s));
+            // An aborted transaction recovers only this way, so try even if the savepoint may be gone.
+            let rewind = cancel.is_cancelled() && (kept || self.transaction_state().await == TxState::Aborted);
+            let rewound = rewind && self.simple(&format!("ROLLBACK TO SAVEPOINT {RUN_SAVEPOINT}")).await.is_ok();
+            if kept || rewound {
+                let _ = self.simple(&format!("RELEASE SAVEPOINT {RUN_SAVEPOINT}")).await;
             }
-            let _ = self.simple(&format!("RELEASE SAVEPOINT {RUN_SAVEPOINT}")).await;
         }
         if self.in_transaction || statements.iter().any(|s| touches_transaction(s)) {
             self.probe_transaction().await;
@@ -300,6 +304,14 @@ enum TxState {
     Aborted,
 }
 
+// Statements that may drop RUN_SAVEPOINT, or add savepoints its RELEASE would drop.
+fn moves_savepoints(stmt: &str) -> bool {
+    matches!(
+        first_keyword(strip_leading_comments(stmt)).as_str(),
+        "SAVEPOINT" | "RELEASE" | "ROLLBACK" | "ABORT" | "COMMIT" | "END" | "BEGIN" | "START" | "PREPARE"
+    )
+}
+
 pub(crate) fn mark_cancelled(mut error: QueryError, cancel: &Cancel) -> QueryError {
     if cancel.is_cancelled() {
         error.cancelled = true;
@@ -360,6 +372,26 @@ pub(crate) fn pg_literal(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn savepoints_and_transaction_ends_keep_the_run_savepoint() {
+        for stmt in [
+            "SAVEPOINT a",
+            "release a",
+            "ROLLBACK TO SAVEPOINT a",
+            "COMMIT",
+            "-- note\nBEGIN",
+            "end",
+            "ABORT",
+            "START TRANSACTION",
+            "PREPARE TRANSACTION 'x'",
+        ] {
+            assert!(moves_savepoints(stmt), "{stmt}");
+        }
+        for stmt in ["SELECT 1", "UPDATE t SET a = 1", "CALL p()", "DO $$ BEGIN NULL; END $$"] {
+            assert!(!moves_savepoints(stmt), "{stmt}");
+        }
+    }
 
     #[test]
     fn literals_are_quoted_safely() {

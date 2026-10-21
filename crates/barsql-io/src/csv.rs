@@ -13,23 +13,28 @@ pub fn csv_values(fields: &[CsvField]) -> Vec<String> {
     fields.iter().map(|f| f.value.clone()).collect()
 }
 
-// An invalid UTF-8 byte decodes as U+FFFD.
+// An invalid UTF-8 byte decodes as U+FFFD, and is counted.
 pub(crate) struct Source<R> {
     inner: R,
     buf: Vec<u8>,
     pos: usize,
     eof: bool,
     consumed: u64,
+    replaced: u64,
 }
 
 impl<R: Read> Source<R> {
     pub(crate) fn new(inner: R) -> Self {
-        Self { inner, buf: Vec::with_capacity(BUFFER_SIZE), pos: 0, eof: false, consumed: 0 }
+        Self { inner, buf: Vec::with_capacity(BUFFER_SIZE), pos: 0, eof: false, consumed: 0, replaced: 0 }
     }
 
     // Counts bytes read from `inner`, including ones still buffered.
     pub(crate) fn bytes_read(&self) -> u64 {
         self.consumed
+    }
+
+    pub(crate) fn replaced(&self) -> u64 {
+        self.replaced
     }
 
     pub(crate) fn peek(&mut self, n: usize) -> io::Result<&[u8]> {
@@ -87,6 +92,7 @@ impl<R: Read> Source<R> {
             }
             None => {
                 self.discard(1);
+                self.replaced += 1;
                 Ok(Some('\u{fffd}'))
             }
         }
@@ -133,6 +139,11 @@ impl<R: Read> CsvReader<R> {
 
     pub fn bytes_read(&self) -> u64 {
         self.src.bytes_read()
+    }
+
+    // Bytes so far that weren't UTF-8.
+    pub fn replaced(&self) -> u64 {
+        self.src.replaced()
     }
 
     // Skips blank lines.
@@ -294,5 +305,8 @@ mod tests {
     fn invalid_utf8_reads_as_replacement_characters() {
         let records = read_all(b"\xff\xfe,x\n");
         assert_eq!(records[0][0].value, "\u{fffd}\u{fffd}");
+        let mut reader = CsvReader::from_source(Source::new(&b"caf\xe9,x\nok,\xc3\xa9\n"[..]), ',', false);
+        while reader.read().unwrap().is_some() {}
+        assert_eq!(reader.replaced(), 1, "Windows-1252's é is one bad byte, and UTF-8's é none");
     }
 }

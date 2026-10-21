@@ -1,7 +1,4 @@
-use std::sync::LazyLock;
-
 use barsql_core::{DriverType, SqlDialect};
-use regex::Regex;
 
 use crate::dialect::Dialect;
 use crate::lex::LexRules;
@@ -9,10 +6,6 @@ use crate::lex::boundary::{Boundary, Mode, boundaries, is_word_start, quoted_spa
 use crate::lex::prim::{block_comment_end, dash_comment_at, hash_comment_at, line_comment_end};
 
 pub const READ_ONLY_ERROR: &str = "connection is read-only: only read queries (SELECT, EXPLAIN, etc.) are allowed";
-
-static PRAGMA_WITH_ARGUMENT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)^[\t\n\f\r ]*pragma[\t\n\f\r ]+(?:[0-9A-Za-z_]+\.)?([0-9A-Za-z_]+)[\t\n\f\r ]*(?:=|\()").unwrap()
-});
 
 const READ_ONLY_PRAGMAS: &[&str] = &[
     "table_info",
@@ -413,11 +406,11 @@ pub fn unbounded_writes(driver: &DriverType, sql: &str) -> Vec<&'static str> {
         .collect()
 }
 
-fn is_read_only_pragma(stmt: &str) -> bool {
-    match PRAGMA_WITH_ARGUMENT.captures(stmt) {
-        None => true,
-        Some(caps) => READ_ONLY_PRAGMAS.contains(&caps[1].to_lowercase().as_str()),
-    }
+// With an argument only an inspection pragma reads. A quoted name is masked away, so it counts as a write.
+fn is_read_only_pragma(masked: &str) -> bool {
+    let Some(argument) = masked.find(['=', '(']) else { return true };
+    let name = masked[..argument].trim_end().rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next();
+    name.is_some_and(|name| READ_ONLY_PRAGMAS.contains(&name.to_ascii_lowercase().as_str()))
 }
 
 #[cfg(test)]
@@ -535,9 +528,30 @@ mod tests {
             ("PRAGMA foreign_keys(0)", false),
             ("PRAGMA journal_mode(WAL)", false),
             ("PRAGMA incremental_vacuum(10)", false),
+            ("PRAGMA main.table_info(users)", true),
+            ("PRAGMA main.query_only = 0", false),
         ];
         for (sql, want) in cases {
             assert_eq!(ro(sql), want, "{sql}");
+        }
+    }
+
+    #[test]
+    fn quoted_pragma_names_with_arguments_are_writes() {
+        for driver in [DriverType::Sqlite, DriverType::Turso, DriverType::Unset] {
+            for sql in [
+                r#"PRAGMA "query_only" = 0"#,
+                "PRAGMA 'query_only' = 0",
+                "PRAGMA [query_only] = 0",
+                "PRAGMA `query_only` = 0",
+                r#"PRAGMA main."user_version" = 42"#,
+                r#"PRAGMA "main".query_only = 0"#,
+                r#"PRAGMA "table_info"(t)"#,
+            ] {
+                assert!(!is_read_only(&driver, sql), "{driver:?}: {sql}");
+            }
+            assert!(is_read_only(&driver, r#"PRAGMA table_info("users")"#), "{driver:?}");
+            assert!(is_read_only(&driver, r#"PRAGMA "query_only""#), "{driver:?}");
         }
     }
 

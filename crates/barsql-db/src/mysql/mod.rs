@@ -242,10 +242,11 @@ impl MySession {
         result
     }
 
+    // An UPDATE counts the rows it matched, not changed, as on the other engines.
     pub async fn execute_params(&mut self, sql: &str, params: &[Value]) -> Result<u64, QueryError> {
         let params: Vec<MyValue> = params.iter().map(my_value).collect();
         self.lease.conn.exec_drop(sql, params).await.map_err(my_error)?;
-        Ok(self.lease.conn.affected_rows())
+        Ok(matched_rows(&self.lease.conn.info()).unwrap_or_else(|| self.lease.conn.affected_rows()))
     }
 
     pub(crate) fn conn(&mut self) -> &mut Conn {
@@ -284,6 +285,11 @@ fn may_set_time_zone(stmt: &str) -> bool {
         "SELECT" | "WITH" | "TABLE" | "VALUES" | "INSERT" | "REPLACE" | "UPDATE" | "DELETE" | "LOAD" => false,
         _ => stmt.as_bytes().windows(9).any(|word| word.eq_ignore_ascii_case(b"time_zone")),
     }
+}
+
+// An UPDATE's info line, "Rows matched: 1  Changed: 0  Warnings: 0".
+fn matched_rows(info: &str) -> Option<u64> {
+    info.strip_prefix("Rows matched:")?.split_whitespace().next()?.parse().ok()
 }
 
 // @@time_zone is an offset like +05:00, a name from the server's time zone tables, or SYSTEM, the server OS's zone.
@@ -564,6 +570,14 @@ mod tests {
         ] {
             assert!(!may_set_time_zone(stmt), "{stmt}");
         }
+    }
+
+    #[test]
+    fn updates_count_the_rows_they_matched() {
+        assert_eq!(matched_rows("Rows matched: 1  Changed: 0  Warnings: 0"), Some(1));
+        assert_eq!(matched_rows("Rows matched: 12  Changed: 3  Warnings: 1"), Some(12));
+        assert_eq!(matched_rows("Records: 3  Duplicates: 0  Warnings: 0"), None);
+        assert_eq!(matched_rows(""), None);
     }
 
     #[test]

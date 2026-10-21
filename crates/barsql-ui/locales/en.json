@@ -183,7 +183,9 @@
     "markRows": "Mark {{count}} row for delete",
     "markRows_other": "Mark {{count}} rows for delete",
     "unmarkRows": "Unmark {{count}} row for delete",
-    "unmarkRows_other": "Unmark {{count}} rows for delete"
+    "unmarkRows_other": "Unmark {{count}} rows for delete",
+    "deletesNotFound": "One row to delete wasn't found. It may have been deleted already, or changed since it was loaded.",
+    "deletesNotFound_other": "{{count}} rows to delete weren't found. They may have been deleted already, or changed since they were loaded."
   },
   "shortcuts": {
     "items": {
@@ -210,7 +212,9 @@
     "quitTitle": "Roll back and quit?",
     "quitDescription_one": "One tab has an open transaction. Quitting rolls it back, and the changes made in it are lost.",
     "quitDescription_other": "{{count}} tabs have open transactions. Quitting rolls them back, and the changes made in them are lost.",
-    "quitConfirm": "Roll back and quit"
+    "quitConfirm": "Roll back and quit",
+    "rolledBack_one": "The connection closed, so the open transaction in {{tabs}} was rolled back.",
+    "rolledBack_other": "The connection closed, so the open transactions in {{count}} tabs were rolled back: {{tabs}}."
   },
   "common": {
     "undo": "Undo"
@@ -271,6 +275,9 @@
   "params": {
     "title": "Query parameters",
     "description": "Each value goes into the query as SQL, so put text in quotes: 'Ann'. An empty value runs as NULL."
+  },
+  "import": {
+    "notUtf8": "This file isn't UTF-8 text, so characters it can't read will import as �. Save it as UTF-8 and choose it again."
   },
   "safety": {
     "everyRowTitle": "Change every row?",

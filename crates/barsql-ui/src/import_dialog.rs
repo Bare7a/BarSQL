@@ -637,6 +637,19 @@ impl ImportDialog {
                     .child(t(cx, "import.columnsHeading"))
                     .child(div().text_size(TEXT_2XS).text_color(theme.muted_foreground).child(meta)),
             )
+            .when(preview.not_utf8, |el| {
+                el.child(
+                    div()
+                        .debug_selector(|| "import-not-utf8".into())
+                        .px(rems(0.615))
+                        .py(rems(0.385))
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .text_size(TEXT_XS)
+                        .text_color(theme.warning)
+                        .child(t(cx, "import.notUtf8")),
+                )
+            })
             .child(header)
             .children(rows)
             .into_any_element()
@@ -941,6 +954,25 @@ mod tests {
             rows,
             [vec![Value::Text("ann".into()), Value::Int(31)], vec![Value::Text("bob".into()), Value::Null]]
         );
+    }
+
+    // Excel saves CSV in Windows-1252, where é is one byte that isn't UTF-8.
+    #[gpui_kit::test]
+    fn a_csv_that_isnt_utf8_says_so_in_the_preview(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cafes.csv");
+        std::fs::write(&path, b"name\ncaf\xe9\n").unwrap();
+        let (view, cx) = open(&env, cx, Rc::new(Cell::new(0)));
+        view.update_in(cx, |dialog, window, cx| {
+            dialog.path = path.display().to_string();
+            dialog.load_preview(window, cx);
+        });
+        settle(cx, |cx| view.read_with(cx, |d, _| d.preview.is_some()));
+        assert!(view.read_with(cx, |d, _| d.preview.as_ref().is_some_and(|p| p.not_utf8)));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("import-not-utf8").is_some(), "the preview warns");
     }
 
     #[gpui_kit::test]

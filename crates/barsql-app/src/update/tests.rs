@@ -278,13 +278,15 @@ mod install {
         zip.finish().unwrap().into_inner()
     }
 
+    // Unix only: Windows needs admin rights or Developer Mode to make a symlink.
     fn bundle() -> Vec<u8> {
+        let links: &[(&str, &str)] = if cfg!(unix) { &[("BarSQL.app/Contents/Current", "MacOS")] } else { &[] };
         app_zip(
             &[
                 ("BarSQL.app/Contents/MacOS/BarSQL", b"#!/bin/sh\necho new\n", 0o755),
                 ("BarSQL.app/Contents/Info.plist", b"<plist/>", 0o644),
             ],
-            &[("BarSQL.app/Contents/Current", "MacOS")],
+            links,
         )
     }
 

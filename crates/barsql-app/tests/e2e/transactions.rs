@@ -69,6 +69,32 @@ each_engine!(async fn transactions_are_concurrent_per_tab(e) {
     assert_eq!(res.rows, [[Value::from("a")]], "only the committed row survives");
 });
 
+// The savepoint the app wraps each run in must not take the user's own with it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn savepoints_made_in_a_run_outlive_it() {
+    run(Kind::Postgres, |e| async move {
+        let table = temp_table(&e, "txn_savepoint").await;
+        let tab = format!("tab-savepoint-{table}");
+        e.app.begin_transaction(&e.id, &tab).await.unwrap();
+        e.exec_on_tab(&tab, &insert(&e, &table, "kept")).await;
+        e.exec_on_tab(&tab, &format!("SAVEPOINT before_mistake; {}", insert(&e, &table, "mistake"))).await;
+        e.exec_on_tab(&tab, "SELECT 1").await;
+        e.exec_on_tab(&tab, "ROLLBACK TO SAVEPOINT before_mistake").await;
+        e.exec_on_tab(&tab, &format!("{}; RELEASE SAVEPOINT before_mistake", insert(&e, &table, "fixed"))).await;
+        e.app.commit_transaction(&tab).await.unwrap();
+        let names = e.query(&format!("SELECT name FROM {} ORDER BY name", e.qualified(&table))).await;
+        assert_eq!(names.rows, [[Value::from("fixed")], [Value::from("kept")]]);
+
+        // A run that ends the transaction and starts another leaves the new one healthy.
+        e.app.begin_transaction(&e.id, &tab).await.unwrap();
+        e.exec_on_tab(&tab, &format!("COMMIT; BEGIN; {}", insert(&e, &table, "next"))).await;
+        e.exec_on_tab(&tab, "SELECT 1").await;
+        e.app.commit_transaction(&tab).await.unwrap();
+        assert_eq!(e.count(&table).await, 3);
+    })
+    .await
+}
+
 // Postgres turns COMMIT of an aborted transaction into a silent rollback. The app reports it as an error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn commit_of_an_aborted_transaction_fails() {
@@ -145,9 +171,16 @@ each_engine!(async fn saving_or_disconnecting_ends_tab_transactions(e) {
     let tab = format!("tab-saved-{table}");
     e.app.begin_transaction(&e.id, &tab).await.unwrap();
     e.exec_on_tab(&tab, &insert(&e, &table, "discarded")).await;
-    e.app.save_connection(barsql_core::ConnectionConfig { name: format!("{} renamed", saved.name), ..saved }).await.unwrap();
+    // A new name keeps the connection, and the transaction on it.
+    let renamed = barsql_core::ConnectionConfig { name: format!("{} renamed", saved.name), ..saved };
+    e.app.save_connection(renamed.clone()).await.unwrap();
+    assert!(events.try_recv().is_err(), "a rename rolled the transaction back");
+    assert!(e.app.transaction_status(&tab));
+    // A change to how it connects closes it.
+    e.app.save_connection(barsql_core::ConnectionConfig { read_only: true, ..renamed.clone() }).await.unwrap();
     assert_eq!(events.try_recv(), Ok(AppEvent::TransactionsEnded { tab_ids: vec![tab.clone()] }));
     assert!(!e.app.transaction_status(&tab));
+    e.app.save_connection(renamed).await.unwrap();
 
     let tab = format!("tab-disconnected-{table}");
     e.app.begin_transaction(&e.id, &tab).await.unwrap();

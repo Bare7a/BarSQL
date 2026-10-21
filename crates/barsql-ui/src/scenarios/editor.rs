@@ -489,6 +489,24 @@ fn a_failed_commit_keeps_the_transaction_badge(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_rollback_the_connection_forces_is_said(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("BEGIN; DELETE FROM things WHERE id > 10;");
+    let (bar, connection) = (app.env.bar.clone(), app.env.connection.clone());
+    let folder = bar.save_folder(barsql_app::ConnectionFolder { id: String::new(), name: "Work".into() }).unwrap();
+    let moved = ConnectionConfig { folder_id: folder.id, ..connection.clone() };
+    app.env.runtime.block_on(bar.save_connection(moved)).unwrap();
+    app.pause();
+    assert_eq!(txn(&mut app), TxnState::Active, "a folder is no reason to roll back");
+
+    app.env.runtime.block_on(bar.disconnect(&connection.id));
+    let said = |text: &String| text.contains("rolled back");
+    app.settle(|cx| cx.update(|_, cx| crate::toast::messages(cx).iter().any(|(_, text)| said(text))));
+    assert_eq!(txn(&mut app), TxnState::Idle);
+}
+
+#[gpui_kit::test]
 fn closing_a_tab_with_an_open_transaction_asks_first(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();

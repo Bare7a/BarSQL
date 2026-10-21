@@ -11,20 +11,37 @@ pub(crate) fn storage_error(err: std::io::Error) -> QueryError {
     QueryError::message(err.to_string())
 }
 
+pub(crate) fn history_entry(
+    connection_id: &str,
+    sql: &str,
+    duration_ms: i64,
+    error: Option<&QueryError>,
+) -> HistoryEntry {
+    HistoryEntry {
+        connection_id: connection_id.to_string(),
+        sql: sql.to_string(),
+        duration_ms,
+        success: error.is_none(),
+        error: error.map(|e| e.message.clone()).unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
 impl BarApp {
     pub fn query_history(&self, connection_id: &str, limit: usize) -> Vec<HistoryEntry> {
         self.inner.stores.history.list(connection_id, limit)
     }
 
     pub(crate) fn record_history(&self, connection_id: &str, sql: &str, duration_ms: i64, error: Option<&QueryError>) {
-        let added = self.inner.stores.history.add(HistoryEntry {
-            connection_id: connection_id.to_string(),
-            sql: sql.to_string(),
-            duration_ms,
-            success: error.is_none(),
-            error: error.map(|e| e.message.clone()).unwrap_or_default(),
-            ..Default::default()
-        });
+        self.record_history_all(vec![history_entry(connection_id, sql, duration_ms, error)]);
+    }
+
+    pub(crate) fn record_history_all(&self, entries: Vec<HistoryEntry>) {
+        // Else report() would mark a failing store as saved.
+        if entries.is_empty() {
+            return;
+        }
+        let added = self.inner.stores.history.add_all(entries);
         let _ = self.report(Unsaved::History, added);
     }
 

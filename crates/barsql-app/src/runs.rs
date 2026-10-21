@@ -1,6 +1,7 @@
 use std::time::Instant;
 
-use barsql_core::{DriverType, QueryError, SqlDialect, TableDataRequest, Value};
+use barsql_core::clock::now_rfc3339;
+use barsql_core::{DriverType, HistoryEntry, QueryError, SqlDialect, TableDataRequest, Value};
 use barsql_db::{Cancel, ScriptEvent, Session};
 use barsql_sql::plan::{NOTE_ROLLED_BACK, NOTE_TAB_TRANSACTION};
 use barsql_sql::{
@@ -10,6 +11,7 @@ use barsql_sql::{
 
 use crate::BarApp;
 use crate::events::{RunEvent, RunHandle, RunResult};
+use crate::stores::history_entry;
 use crate::tabs::Slot;
 
 const RUN_CHANNEL: usize = 16;
@@ -90,6 +92,7 @@ impl BarApp {
         let forward = async {
             let mut history = Vec::new();
             let mut result_count = 0;
+            let mut reported = false;
             while let Ok(event) = inner_rx.recv().await {
                 let event = match event {
                     ScriptEvent::Meta { result_index, columns } => {
@@ -101,8 +104,10 @@ impl BarApp {
                     }
                     ScriptEvent::Result(result) => {
                         result_count = result.result_index + 1;
+                        reported |= result.error.is_some();
                         let duration = result.summary.as_ref().map_or(0, |s| s.duration_ms);
-                        history.push((result.statement.clone(), duration, result.error.clone()));
+                        let entry = history_entry(connection_id, &result.statement, duration, result.error.as_ref());
+                        history.push(HistoryEntry { executed_at: now_rfc3339(), ..entry });
                         RunEvent::Result(Box::new(RunResult {
                             result_index: result.result_index,
                             summary: result.summary,
@@ -117,15 +122,21 @@ impl BarApp {
                     cancel.cancel();
                 }
             }
-            (result_count, history)
+            (result_count, history, reported)
         };
-        let (_, (result_count, history)) = tokio::join!(run, forward);
+        let (ran, (mut result_count, history, reported)) = tokio::join!(run, forward);
         self.sync_transaction(tab_id, &mut slot);
         drop(slot);
-        // After the script, so storage writes stay off the connection.
-        for (statement, duration, error) in history {
-            self.record_history(connection_id, &statement, duration, error.as_ref());
+        // A failure no result carried, like a panicked worker, gets its own result: Done's error would hide the others.
+        if let Err(error) = ran
+            && !reported
+        {
+            let result = RunResult { result_index: result_count, error: Some(error), ..Default::default() };
+            result_count += 1;
+            let _ = events.send(RunEvent::Result(Box::new(result))).await;
         }
+        // After the script, so storage writes stay off the connection.
+        self.record_history_all(history);
         Ok(result_count)
     }
 
@@ -151,7 +162,8 @@ impl BarApp {
         let app = self.clone();
         let (tab, connection) = (tab_id.to_string(), connection_id.to_string());
         self.inner.runtime.spawn(async move {
-            let done = match app.engine(&connection).await {
+            // So Stop works while the connection is still opening.
+            let done = match app.engine_unless_cancelled(&connection, &cancel).await {
                 Err(error) => RunEvent::Done { result_count: 0, error: Some(error) },
                 Ok(engine) => {
                     if let Err(error) = app.stream_table_page(&engine, &req, &tx, &cancel).await {

@@ -57,6 +57,22 @@ fn a_top_level_format_asks_for_raw_output() {
     assert_eq!(output_format("SELECT 1 FORMAT Pretty;"), Some("Pretty".into()));
 }
 
+#[test]
+fn ports_default_by_tls_and_must_be_in_range() {
+    let config = |port: i64, ssl_mode: &str| ConnectionConfig {
+        driver: DriverType::ClickHouse,
+        host: "h".into(),
+        port,
+        ssl_mode: ssl_mode.into(),
+        ..Default::default()
+    };
+    assert_eq!(ChOptions::from_config(&config(0, "disable")).unwrap().port, 8123);
+    assert_eq!(ChOptions::from_config(&config(0, "require")).unwrap().port, 8443);
+    assert_eq!(ChOptions::from_config(&config(9000, "")).unwrap().port, 9000);
+    let error = ChOptions::from_config(&config(81234, "")).unwrap_err();
+    assert_eq!(error.message, "invalid port 81234");
+}
+
 fn options(port: u16) -> ChOptions {
     let config = ConnectionConfig {
         driver: DriverType::ClickHouse,

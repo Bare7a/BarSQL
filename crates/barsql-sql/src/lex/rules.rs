@@ -43,6 +43,8 @@ pub struct LexRules {
     pub trigger_bodies: bool,
     // T-SQL: `;` inside BEGIN ... END doesn't end an editor statement, and a CREATE PROCEDURE runs to GO.
     pub block_depth: bool,
+    // Postgres: `;` inside a routine's BEGIN ATOMIC ... END doesn't end it.
+    pub atomic_bodies: bool,
     // `->` is one operator (ClickHouse lambdas).
     pub arrow_op: bool,
 }
@@ -68,10 +70,12 @@ impl LexRules {
         batch_separators: false,
         trigger_bodies: false,
         block_depth: false,
+        atomic_bodies: false,
         arrow_op: false,
     };
 
-    pub const POSTGRES: Self = Self { nested_block_comments: true, dollar_in_words: true, ..Self::COMMON };
+    pub const POSTGRES: Self =
+        Self { nested_block_comments: true, dollar_in_words: true, atomic_bodies: true, ..Self::COMMON };
 
     pub const MYSQL: Self = Self {
         hash_comments: HashComment::Always,

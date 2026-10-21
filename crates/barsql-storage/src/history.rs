@@ -24,21 +24,34 @@ impl HistoryStore {
         Ok(Self { path, entries: Mutex::new(entries) })
     }
 
-    pub fn add(&self, mut entry: HistoryEntry) -> io::Result<HistoryEntry> {
+    pub fn add(&self, entry: HistoryEntry) -> io::Result<HistoryEntry> {
+        Ok(self.add_all(vec![entry])?.remove(0))
+    }
+
+    // A whole run in one write, since each write saves the whole file. It saves a borrowed view, not a copy.
+    pub fn add_all(&self, added: Vec<HistoryEntry>) -> io::Result<Vec<HistoryEntry>> {
         let mut entries = self.lock();
-        if entry.id.is_empty() {
-            entry.id = uuid::Uuid::new_v4().to_string();
+        let added: Vec<HistoryEntry> = added
+            .into_iter()
+            .map(|mut entry| {
+                if entry.id.is_empty() {
+                    entry.id = uuid::Uuid::new_v4().to_string();
+                }
+                if entry.executed_at.is_empty() {
+                    entry.executed_at = now_rfc3339();
+                }
+                entry
+            })
+            .collect();
+        if added.is_empty() {
+            return Ok(added);
         }
-        if entry.executed_at.is_empty() {
-            entry.executed_at = now_rfc3339();
-        }
-        // Runs once per statement, so it writes a borrowed view instead of a copy of the whole history.
-        let skip = (entries.len() + 1).saturating_sub(HISTORY_LIMIT);
-        let next: Vec<&HistoryEntry> = entries[skip..].iter().chain([&entry]).collect();
+        let skip = (entries.len() + added.len()).saturating_sub(HISTORY_LIMIT);
+        let next: Vec<&HistoryEntry> = entries.iter().chain(&added).skip(skip).collect();
         save_json_file(&self.path, &next)?;
-        entries.push(entry.clone());
+        entries.extend(added.iter().cloned());
         trim(&mut entries);
-        Ok(entry)
+        Ok(added)
     }
 
     pub fn list(&self, connection_id: &str, limit: usize) -> Vec<HistoryEntry> {
@@ -155,6 +168,23 @@ mod tests {
         assert!(!first.id.is_empty() && !first.executed_at.is_empty());
         assert!(h.delete(&first.id).unwrap());
         assert!(!h.delete(&first.id).unwrap());
+    }
+
+    #[test]
+    fn a_run_is_added_in_one_write_and_still_trimmed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let h = HistoryStore::open(tmp.path()).unwrap();
+        h.add(entry("c1", "SELECT 0")).unwrap();
+        let run: Vec<HistoryEntry> = (1..=HISTORY_LIMIT).map(|i| entry("c1", &format!("SELECT {i}"))).collect();
+        let added = h.add_all(run).unwrap();
+        assert_eq!(added.len(), HISTORY_LIMIT);
+        assert!(added.iter().all(|e| !e.id.is_empty() && !e.executed_at.is_empty()));
+        let listed = h.list("c1", HISTORY_LIMIT + 1);
+        assert_eq!(listed.len(), HISTORY_LIMIT, "the oldest one went");
+        assert_eq!((listed[0].sql.as_str(), listed[HISTORY_LIMIT - 1].sql.as_str()), ("SELECT 500", "SELECT 1"));
+        let reloaded = HistoryStore::open(tmp.path()).unwrap().list("c1", HISTORY_LIMIT);
+        assert_eq!(reloaded, listed);
+        assert!(h.add_all(Vec::new()).unwrap().is_empty());
     }
 
     #[test]

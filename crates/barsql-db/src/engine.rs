@@ -6,7 +6,7 @@ use barsql_core::{
     ObjectRef, QueryError, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest, TableInfo,
     TriggerInfo, Value,
 };
-use barsql_sql::dml::{build_delete, build_insert, build_table_select, build_update};
+use barsql_sql::dml::{build_delete, build_insert, build_insert_with, build_table_select, build_update};
 use barsql_sql::{
     ExplainStrategy, PlanRows, READ_ONLY_ERROR, assert_read_only, quote_ident, table_ref, validate_table_filter,
 };
@@ -302,17 +302,44 @@ impl Engine {
     }
 
     pub async fn update_row(&self, update: &RowUpdate) -> Result<(), QueryError> {
+        self.update_rows(std::slice::from_ref(update)).await
+    }
+
+    // A key that matches no row is an error, else the edit would vanish silently. A failure keeps the rows already
+    // updated.
+    pub async fn update_rows(&self, updates: &[RowUpdate]) -> Result<(), QueryError> {
         self.require_writable()?;
-        let schema = self.schema_or(&update.schema);
-        let columns = self.list_columns(&schema, &update.table).await?;
-        let pks = primary_keys(&columns);
-        if pks.is_empty() {
-            return Err(QueryError::message("table has no primary key"));
+        if updates.is_empty() {
+            return Ok(());
         }
-        let (sql, args) =
-            build_update(&self.driver(), &schema, &update.table, &update.changes, &update.primary_key, &pks, &columns)
-                .map_err(QueryError::message)?;
-        self.execute_params(&sql, &args).await.map(|_| ())
+        let mut session = self.pooled_session().await?;
+        let mut catalog: Option<(String, String, Vec<ColumnInfo>)> = None;
+        for update in updates {
+            let schema = self.schema_or(&update.schema);
+            if !catalog.as_ref().is_some_and(|(s, t, _)| *s == schema && *t == update.table) {
+                catalog =
+                    Some((schema.clone(), update.table.clone(), self.list_columns(&schema, &update.table).await?));
+            }
+            let Some((_, _, columns)) = &catalog else { unreachable!("read above") };
+            let pks = primary_keys(columns);
+            if pks.is_empty() {
+                return Err(QueryError::message("table has no primary key"));
+            }
+            let (sql, args) = build_update(
+                &self.driver(),
+                &schema,
+                &update.table,
+                &update.changes,
+                &update.primary_key,
+                &pks,
+                columns,
+            )
+            .map_err(QueryError::message)?;
+            if session.execute_params(&sql, &args).await? == 0 {
+                return Err(row_not_found(&update.primary_key));
+            }
+        }
+        Ok(())
     }
 
     // One statement per key. A failure keeps the rows already deleted.
@@ -329,13 +356,17 @@ impl Engine {
         if pks.is_empty() {
             return (0, Some(QueryError::message("table has no primary key")));
         }
+        let mut session = match self.pooled_session().await {
+            Ok(session) => session,
+            Err(err) => return (0, Some(err)),
+        };
         let mut total = 0;
         for key in &delete.primary_keys {
             let (sql, args) = match build_delete(&self.driver(), &schema, &delete.table, &pks, key, &columns) {
                 Ok(built) => built,
                 Err(err) => return (total, Some(QueryError::message(err))),
             };
-            match self.execute_params(&sql, &args).await {
+            match session.execute_params(&sql, &args).await {
                 Ok(n) => total += n as i64,
                 Err(err) => return (total, Some(err)),
             }
@@ -375,17 +406,18 @@ impl Engine {
                     None => Ok(Row::from([(identity.name, Value::Int(id as i64))])),
                 }
             }
-            // OUTPUT goes before VALUES. A table with triggers takes no plain OUTPUT (error 334), so an identity
-            // key finds the row instead, in the same scope as the insert.
+            // A table with triggers takes no plain OUTPUT (error 334), so an identity key finds the row instead, in
+            // the same scope as the insert.
             Self::SqlServer(engine) => {
                 let schema = self.schema_or(schema);
-                let (sql, args) = build_insert(&driver, &schema, table, values, &[]).map_err(QueryError::message)?;
+                let cols = self.list_columns(&schema, table).await.unwrap_or_default();
+                let (sql, args) = build_insert(&driver, &schema, table, values, &cols).map_err(QueryError::message)?;
+                let (output, _) = build_insert_with(&driver, &schema, table, values, &cols, Some("OUTPUT INSERTED.*"))
+                    .map_err(QueryError::message)?;
                 let mut session = engine.session().await?;
-                let output = sql.replacen(") VALUES (", ") OUTPUT INSERTED.* VALUES (", 1);
                 match session.query_params(&output, &args).await {
                     Ok(res) => Ok(first_row(&res)),
                     Err(error) if error.code == "334" => {
-                        let cols = self.list_columns(&schema, table).await.unwrap_or_default();
                         let Some(pk) = cols.iter().find(|c| c.is_primary && c.is_identity) else {
                             session.execute_params(&sql, &args).await?;
                             return Ok(Row::new());
@@ -409,7 +441,8 @@ impl Engine {
             }
             // libSQL has RETURNING, so the stored row comes back with the insert.
             Self::Turso(engine) => {
-                let (sql, args) = build_insert(&driver, schema, table, values, &[]).map_err(QueryError::message)?;
+                let cols = self.list_columns(schema, table).await.unwrap_or_default();
+                let (sql, args) = build_insert(&driver, schema, table, values, &cols).map_err(QueryError::message)?;
                 let mut session = engine.session().await?;
                 let res = session.buffered_params(&format!("{sql} RETURNING *"), &args).await?;
                 Ok(first_row(&res))
@@ -417,7 +450,8 @@ impl Engine {
             // The rowid finds the stored row. An insert through a view's trigger or into a WITHOUT ROWID table leaves
             // last_insert_rowid at an earlier insert's, so those rows are looked up by what was written.
             Self::Sqlite(engine) => {
-                let (sql, args) = build_insert(&driver, schema, table, values, &[]).map_err(QueryError::message)?;
+                let cols = self.list_columns(schema, table).await.unwrap_or_default();
+                let (sql, args) = build_insert(&driver, schema, table, values, &cols).map_err(QueryError::message)?;
                 let params: Vec<rusqlite::types::Value> = args.iter().map(crate::sqlite::lite_value).collect();
                 let name = table.to_string();
                 let rowid = engine
@@ -433,7 +467,6 @@ impl Engine {
                         Ok(has_rowid.unwrap_or(false).then(|| conn.last_insert_rowid()))
                     })
                     .await?;
-                let cols = self.list_columns(schema, table).await.unwrap_or_default();
                 let filters = match (rowid, rowid_name(&cols)) {
                     (Some(rowid), Some(name)) => vec![format!("{name} = {rowid}")],
                     _ => sqlite_written_filters(&cols, values),
@@ -536,6 +569,15 @@ impl Session {
     pub fn is_broken(&self) -> bool {
         dispatch_session!(self, s => s.is_broken())
     }
+}
+
+fn row_not_found(key: &Row) -> QueryError {
+    let key: Vec<String> =
+        key.iter().map(|(column, value)| format!("{column} = {}", crate::lite::literal(value))).collect();
+    QueryError::message(format!(
+        "no row matches {}; it may have been changed or deleted since it was loaded",
+        key.join(", ")
+    ))
 }
 
 fn first_row(res: &Buffered) -> Row {

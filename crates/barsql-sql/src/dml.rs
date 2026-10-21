@@ -68,6 +68,18 @@ pub fn build_insert(
     values: &Row,
     columns: &[ColumnInfo],
 ) -> Result<Statement, String> {
+    build_insert_with(driver, schema, table, values, columns, None)
+}
+
+// `output` goes before VALUES, like T-SQL's OUTPUT INSERTED.*.
+pub fn build_insert_with(
+    driver: &DriverType,
+    schema: &str,
+    table: &str,
+    values: &Row,
+    columns: &[ColumnInfo],
+    output: Option<&str>,
+) -> Result<Statement, String> {
     if values.is_empty() {
         return Err("no column values provided".into());
     }
@@ -77,8 +89,13 @@ pub fn build_insert(
     for (col, value) in values {
         marks.push(bind(driver, columns, col, value, &mut args)?);
     }
-    let sql =
-        format!("INSERT INTO {} ({}) VALUES ({})", table_ref(driver, schema, table), cols.join(", "), marks.join(", "));
+    let output = output.map(|clause| format!(" {clause}")).unwrap_or_default();
+    let sql = format!(
+        "INSERT INTO {} ({}){output} VALUES ({})",
+        table_ref(driver, schema, table),
+        cols.join(", "),
+        marks.join(", ")
+    );
     Ok((sql, args))
 }
 
@@ -89,11 +106,72 @@ fn bind(
     value: &Value,
     args: &mut Vec<Value>,
 ) -> Result<String, String> {
-    let bits =
-        columns.iter().any(|c| c.name.eq_ignore_ascii_case(column) && is_bit_column(driver.dialect(), &c.data_type));
-    args.push(if bits { bit_digits(column, value)? } else { value.clone() });
-    let mark = placeholder(driver, args.len());
-    Ok(if bits { MYSQL_BITS.replace("{}", &mark) } else { mark })
+    let info = columns
+        .iter()
+        .find(|c| c.name == column)
+        .or_else(|| columns.iter().find(|c| c.name.eq_ignore_ascii_case(column)));
+    let data_type = info.map(|c| c.data_type.as_str());
+    if data_type.is_some_and(|t| is_bit_column(driver.dialect(), t)) {
+        args.push(bit_digits(column, value)?);
+        return Ok(MYSQL_BITS.replace("{}", &placeholder(driver, args.len())));
+    }
+    if let (Value::Text(text), Some(data_type)) = (value, data_type)
+        && let Some(mark) = bind_bytes(driver, data_type, text, args)
+    {
+        return Ok(mark);
+    }
+    args.push(value.clone());
+    Ok(placeholder(driver, args.len()))
+}
+
+// Binary columns take bytes as the grid shows them: UTF-8 text, or \x and hex. SQLite types are only hints, so there
+// \x reads as bytes in any column without text affinity.
+fn bind_bytes(driver: &DriverType, data_type: &str, text: &str, args: &mut Vec<Value>) -> Option<String> {
+    let dialect = driver.dialect();
+    let hex = match dialect {
+        Some(SqlDialect::Sqlite) if !text_affinity(data_type) => hex_digits(text)?.to_ascii_uppercase(),
+        Some(SqlDialect::Sqlite) => return None,
+        _ if is_binary_type(dialect, data_type) => match hex_digits(text) {
+            Some(hex) => hex.to_ascii_uppercase(),
+            None => text.bytes().map(|b| format!("{b:02X}")).collect(),
+        },
+        _ => return None,
+    };
+    let mut param = |value: String| {
+        args.push(Value::Text(value));
+        placeholder(driver, args.len())
+    };
+    Some(match dialect {
+        Some(SqlDialect::Postgres) => param(format!("\\x{hex}")),
+        Some(SqlDialect::MySql) => format!("UNHEX({})", param(hex)),
+        Some(SqlDialect::TSql) => format!("CONVERT(varbinary(max), {}, 1)", param(format!("0x{hex}"))),
+        // Some libSQL servers predate unhex(). The digits are checked.
+        Some(SqlDialect::Sqlite) => format!("X'{hex}'"),
+        Some(SqlDialect::ClickHouse) | None => return None,
+    })
+}
+
+fn hex_digits(text: &str) -> Option<&str> {
+    text.strip_prefix("\\x")
+        .filter(|hex| !hex.is_empty() && hex.len().is_multiple_of(2) && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+// SQLite's rule: INT first, then CHAR, CLOB or TEXT.
+fn text_affinity(data_type: &str) -> bool {
+    let t = data_type.to_ascii_uppercase();
+    !t.contains("INT") && ["CHAR", "CLOB", "TEXT"].iter().any(|k| t.contains(k))
+}
+
+fn is_binary_type(dialect: Option<SqlDialect>, data_type: &str) -> bool {
+    let base = data_type.split('(').next().unwrap_or_default().trim().to_ascii_lowercase();
+    match dialect {
+        Some(SqlDialect::Postgres) => base == "bytea",
+        Some(SqlDialect::MySql) => {
+            matches!(base.as_str(), "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob")
+        }
+        Some(SqlDialect::TSql) => matches!(base.as_str(), "binary" | "varbinary" | "image"),
+        Some(SqlDialect::Sqlite | SqlDialect::ClickHouse) | None => false,
+    }
 }
 
 // Only MySQL's BIT needs its digits converted. SQL Server's is a boolean.
@@ -418,6 +496,63 @@ mod tests {
             assert!(!sql.contains("CONV"), "{sql}");
             assert_eq!(args, vec![Value::from("1")]);
         }
+    }
+
+    #[test]
+    fn binary_columns_take_bytes_as_the_grid_shows_them() {
+        let column =
+            |data_type: &str| ColumnInfo { name: "id".into(), data_type: data_type.into(), ..Default::default() };
+        let cases: [(DriverType, &str, &str, &str, Option<&str>); 11] = [
+            (DriverType::MySql, "binary", r"\xdeadbeef", "DELETE FROM `s`.`t` WHERE `id` = UNHEX(?)", Some("DEADBEEF")),
+            (DriverType::MySql, "varbinary", "abc", "DELETE FROM `s`.`t` WHERE `id` = UNHEX(?)", Some("616263")),
+            (DriverType::MySql, "varchar", r"\xdead", "DELETE FROM `s`.`t` WHERE `id` = ?", Some(r"\xdead")),
+            (DriverType::Postgres, "bytea", r"a\b", r#"DELETE FROM "s"."t" WHERE "id" = $1"#, Some(r"\x615C62")),
+            (
+                DriverType::SqlServer,
+                "varbinary(max)",
+                r"\xdead",
+                "DELETE FROM [s].[t] WHERE [id] = CONVERT(varbinary(max), @P1, 1)",
+                Some("0xDEAD"),
+            ),
+            (DriverType::Sqlite, "BLOB", r"\xDEADbeef", r#"DELETE FROM "t" WHERE "id" = X'DEADBEEF'"#, None),
+            (DriverType::Turso, "", r"\xdeadbeef", r#"DELETE FROM "t" WHERE "id" = X'DEADBEEF'"#, None),
+            (DriverType::Sqlite, "UUID", r"\x0102", r#"DELETE FROM "t" WHERE "id" = X'0102'"#, None),
+            (DriverType::Sqlite, "BLOB", "abc", r#"DELETE FROM "t" WHERE "id" = ?"#, Some("abc")),
+            (DriverType::Sqlite, "VARCHAR(10)", r"\xdead", r#"DELETE FROM "t" WHERE "id" = ?"#, Some(r"\xdead")),
+            (DriverType::Sqlite, "TEXT", r"\xnot hex", r#"DELETE FROM "t" WHERE "id" = ?"#, Some(r"\xnot hex")),
+        ];
+        for (driver, data_type, shown, want, arg) in cases {
+            let (sql, args) =
+                build_delete(&driver, "s", "t", &cols(&["id"]), &row(&[("id", shown.into())]), &[column(data_type)])
+                    .unwrap();
+            assert_eq!(sql, want, "{driver} {data_type} {shown}");
+            assert_eq!(args, arg.map(|a| vec![Value::from(a)]).unwrap_or_default(), "{driver} {data_type} {shown}");
+        }
+        let (sql, args) = build_update(
+            &DriverType::MySql,
+            "s",
+            "t",
+            &row(&[("id", r"\x0102".into())]),
+            &row(&[("id", "x".into())]),
+            &cols(&["id"]),
+            &[column("blob")],
+        )
+        .unwrap();
+        assert_eq!(sql, "UPDATE `s`.`t` SET `id` = UNHEX(?) WHERE `id` = UNHEX(?)");
+        assert_eq!(args, vec![Value::from("0102"), Value::from("78")]);
+        let (sql, args) =
+            build_insert(&DriverType::Sqlite, "main", "t", &row(&[("id", r"\xdead".into())]), &[]).unwrap();
+        assert_eq!((sql.as_str(), args), (r#"INSERT INTO "t" ("id") VALUES (?)"#, vec![Value::from(r"\xdead")]));
+    }
+
+    #[test]
+    fn insert_clauses_go_between_the_columns_and_values() {
+        let values = row(&[("x) VALUES (", 1.into())]);
+        let (sql, _) =
+            build_insert_with(&DriverType::SqlServer, "dbo", "t", &values, &[], Some("OUTPUT INSERTED.*")).unwrap();
+        assert_eq!(sql, "INSERT INTO [dbo].[t] ([x) VALUES (]) OUTPUT INSERTED.* VALUES (@P1)");
+        let (plain, _) = build_insert(&DriverType::SqlServer, "dbo", "t", &values, &[]).unwrap();
+        assert_eq!(plain, "INSERT INTO [dbo].[t] ([x) VALUES (]) VALUES (@P1)");
     }
 
     #[test]

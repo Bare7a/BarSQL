@@ -176,26 +176,22 @@ pub(crate) fn parse_float(v: &str) -> bool {
 
 // Blanks become col1..colN and repeats gain a suffix, so a CREATE TABLE cannot collide.
 pub fn unique_column_names(header: &[String]) -> Vec<String> {
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut taken = std::collections::HashSet::new();
     header
         .iter()
         .enumerate()
         .map(|(i, raw)| {
-            let mut name = raw.trim().to_string();
-            if name.is_empty() {
-                name = format!("col{}", i + 1);
+            let base = match raw.trim() {
+                "" => format!("col{}", i + 1),
+                name => name.to_string(),
+            };
+            let mut name = base.clone();
+            let mut n = 1;
+            while !taken.insert(name.to_lowercase()) {
+                n += 1;
+                name = format!("{base}_{n}");
             }
-            let lower = name.to_lowercase();
-            match seen.get(&lower).copied() {
-                Some(n) => {
-                    seen.insert(lower, n + 1);
-                    format!("{name}_{}", n + 1)
-                }
-                None => {
-                    seen.insert(lower, 1);
-                    name
-                }
-            }
+            name
         })
         .collect()
 }
@@ -218,6 +214,9 @@ pub struct ImportPreview {
     pub truncated: bool,
     // 0 when the file was too large to count.
     pub total_rows: u64,
+    // Some bytes weren't UTF-8 and read as U+FFFD. A file too large to count is checked only in the sample.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub not_utf8: bool,
 }
 
 pub fn preview_file(path: &Path, driver: &DriverType, opts: &CsvOptions) -> Result<ImportPreview, String> {
@@ -226,7 +225,7 @@ pub fn preview_file(path: &Path, driver: &DriverType, opts: &CsvOptions) -> Resu
     }
     let mut file = File::open(path).map_err(|e| open_error(path, &e))?;
     let total_bytes = file.metadata().map(|m| m.len()).unwrap_or(0);
-    let total_rows = count_rows(&mut file, opts, total_bytes);
+    let scanned = scan(&mut file, opts, total_bytes);
     let mut reader = new_reader(file, opts)?;
     let Sample { columns, rows, truncated } = read_sample(&mut reader, opts.has_header, PREVIEW_ROW_LIMIT)?;
     if columns.is_empty() {
@@ -244,7 +243,8 @@ pub fn preview_file(path: &Path, driver: &DriverType, opts: &CsvOptions) -> Resu
         delimiter: reader.comma().to_string(),
         total_bytes,
         truncated,
-        total_rows,
+        total_rows: scanned.map_or(0, |scan| scan.rows),
+        not_utf8: scanned.is_some_and(|scan| scan.not_utf8) || reader.replaced() > 0,
     })
 }
 
@@ -261,7 +261,18 @@ pub fn open_error(path: &Path, err: &io::Error) -> String {
 // Uses the import's own reader settings. 0 when the file is too big to scan twice or a read fails part-way.
 // Always rewinds the file.
 pub fn count_rows(file: &mut File, opts: &CsvOptions, total_bytes: u64) -> u64 {
-    let count = (|| -> Option<u64> {
+    scan(file, opts, total_bytes).map_or(0, |scan| scan.rows)
+}
+
+#[derive(Clone, Copy)]
+struct Scan {
+    rows: u64,
+    not_utf8: bool,
+}
+
+// count_rows' pass, which also notes bytes that weren't UTF-8. None where count_rows gives 0.
+fn scan(file: &mut File, opts: &CsvOptions, total_bytes: u64) -> Option<Scan> {
+    let scanned = (|| -> Option<Scan> {
         if total_bytes > MAX_ROW_COUNT_BYTES {
             return None;
         }
@@ -274,13 +285,13 @@ pub fn count_rows(file: &mut File, opts: &CsvOptions, total_bytes: u64) -> u64 {
         loop {
             match reader.read() {
                 Ok(Some(_)) => rows += 1,
-                Ok(None) => return Some(rows),
+                Ok(None) => return Some(Scan { rows, not_utf8: reader.replaced() > 0 }),
                 Err(_) => return None,
             }
         }
     })();
     let _ = file.seek(SeekFrom::Start(0));
-    count.unwrap_or(0)
+    scanned
 }
 
 struct Sample {
@@ -412,6 +423,8 @@ mod tests {
     fn unique_and_positional_names() {
         let header: Vec<String> = ["id", "name", "", "name", "NAME", "  spaced  "].map(String::from).to_vec();
         assert_eq!(unique_column_names(&header), ["id", "name", "col3", "name_2", "NAME_3", "spaced"]);
+        let header: Vec<String> = ["a", "a", "a_2", "", "col4"].map(String::from).to_vec();
+        assert_eq!(unique_column_names(&header), ["a", "a_2", "a_2_2", "col4", "col4_2"]);
         assert_eq!(positional_header(3), ["col1", "col2", "col3"]);
         assert!(positional_header(0).is_empty());
     }

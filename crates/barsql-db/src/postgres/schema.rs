@@ -4,13 +4,14 @@ use std::sync::Arc;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
-    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, SqlDialect, TableInfo,
+    TriggerInfo,
 };
 use barsql_sql::ddl::{
     DdlColumn, compose_create_table, join_ddl, render_constraint, render_create_index, terminate_statement,
     unsupported_ddl,
 };
-use barsql_sql::{qualified_table, quote_ident, quote_literal};
+use barsql_sql::{qualified_table, quote_ident, quote_literal_in};
 use tokio_postgres::Row;
 use tokio_postgres::types::ToSql;
 
@@ -616,7 +617,7 @@ impl PgEngine {
                 } else {
                     format!("COLUMN {qualified}.{}", quote_ident(&PG, &column))
                 };
-                format!("COMMENT ON {target} IS {};", quote_literal(&r.get::<_, String>(1)))
+                format!("COMMENT ON {target} IS {};", quote_literal_in(SqlDialect::Postgres, &r.get::<_, String>(1)))
             })
             .collect::<Vec<_>>()
             .join("\n"))

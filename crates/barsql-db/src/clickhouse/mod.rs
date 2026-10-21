@@ -61,7 +61,7 @@ impl ChOptions {
         let or = |value: &str, default: &str| if value.is_empty() { default.to_string() } else { value.to_string() };
         Ok(Self {
             host: cfg.host.clone(),
-            port: u16::try_from(cfg.port).ok().filter(|p| *p != 0).unwrap_or(default_port),
+            port: crate::postgres::port_or(cfg.port, default_port)?,
             tls,
             user: or(&cfg.username, "default"),
             password: cfg.password.clone(),

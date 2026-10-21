@@ -27,11 +27,18 @@ impl BarApp {
         self.inner.stores.connections.list()
     }
 
+    // Only a change to how it connects closes the connection, so a rename keeps its tabs' transactions.
     pub async fn save_connection(&self, mut cfg: ConnectionConfig) -> Result<ConnectionConfig, QueryError> {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
+        let before = self.inner.stores.connections.get(&cfg.id).map(|mut old| {
+            old.normalize();
+            old.fingerprint()
+        });
         let saved = self.inner.stores.connections.save(cfg).map_err(storage_error)?;
-        self.disconnect(&saved.id).await;
+        if before.is_some_and(|before| before != saved.fingerprint()) {
+            self.disconnect(&saved.id).await;
+        }
         Ok(saved)
     }
 
@@ -221,7 +228,7 @@ pub(crate) mod tests {
     use barsql_core::{ConnectionConfig, DriverType};
     use barsql_db::Engine;
 
-    use crate::events::RunEvent;
+    use crate::events::{AppEvent, RunEvent};
     use crate::{BarApp, PooledEngine, lock};
 
     fn same(a: &Engine, b: &Engine) -> bool {
@@ -280,6 +287,29 @@ pub(crate) mod tests {
         app.inner.stores.connections.save(cfg).unwrap();
         assert!(!same(&first, &app.engine(&id).await.unwrap()), "a new file reconnects");
         assert!(run_error(&app, &id, "tab", "SELECT * FROM t").await.is_some(), "the old tab session was closed");
+    }
+
+    #[tokio::test]
+    async fn saving_a_new_name_or_folder_keeps_the_connection_and_its_transactions() {
+        let (app, id, dir) = setup().await;
+        let first = app.engine(&id).await.unwrap();
+        app.begin_transaction(&id, "tab").await.unwrap();
+        assert_eq!(run_error(&app, &id, "tab", "CREATE TABLE kept (a INTEGER)").await, None);
+        let events = app.events();
+
+        let folder = app.save_folder(barsql_storage::ConnectionFolder { id: String::new(), name: "Work".into() });
+        let moved =
+            ConnectionConfig { name: "renamed".into(), folder_id: folder.unwrap().id, ..app.config(&id).unwrap() };
+        app.save_connection(moved).await.unwrap();
+        assert!(same(&first, &app.engine(&id).await.unwrap()), "the engine stays");
+        assert!(app.transaction_status("tab"), "the transaction stays open");
+        assert!(events.try_recv().is_err(), "nothing was rolled back");
+
+        let changed =
+            ConnectionConfig { file_path: dir.path().join("b.db").display().to_string(), ..app.config(&id).unwrap() };
+        app.save_connection(changed).await.unwrap();
+        assert!(!app.transaction_status("tab"), "a new file closes the connection");
+        assert_eq!(events.try_recv(), Ok(AppEvent::TransactionsEnded { tab_ids: vec!["tab".into()] }));
     }
 
     #[tokio::test]

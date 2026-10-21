@@ -99,10 +99,6 @@ impl ResultChunk {
     pub fn display(&self, row: usize, col: usize) -> Option<&str> {
         self.cell(row, col).display()
     }
-
-    pub fn heap_bytes(&self) -> usize {
-        self.text.capacity() + self.ends.capacity() * 4 + self.kinds.capacity() * 8
-    }
 }
 
 pub struct ChunkBuilder {
@@ -213,10 +209,6 @@ impl ResultSet {
 
     pub fn display(&self, row: usize, col: usize) -> Option<&str> {
         self.cell(row, col).display()
-    }
-
-    pub fn heap_bytes(&self) -> usize {
-        self.chunks.iter().map(|c| c.heap_bytes()).sum()
     }
 }
 

@@ -9,8 +9,12 @@ impl BarApp {
     }
 
     pub async fn update_row(&self, connection_id: &str, update: &RowUpdate) -> Result<(), QueryError> {
+        self.update_rows(connection_id, std::slice::from_ref(update)).await
+    }
+
+    pub async fn update_rows(&self, connection_id: &str, updates: &[RowUpdate]) -> Result<(), QueryError> {
         self.require_writable(connection_id)?;
-        self.engine(connection_id).await?.update_row(update).await
+        self.engine(connection_id).await?.update_rows(updates).await
     }
 
     // Deletes key by key. On failure the count still covers the rows already deleted.

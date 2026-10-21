@@ -183,7 +183,9 @@
     "markRows": "{{count}} Zeile zum Löschen markieren",
     "markRows_other": "{{count}} Zeilen zum Löschen markieren",
     "unmarkRows": "Löschmarkierung von {{count}} Zeile entfernen",
-    "unmarkRows_other": "Löschmarkierung von {{count}} Zeilen entfernen"
+    "unmarkRows_other": "Löschmarkierung von {{count}} Zeilen entfernen",
+    "deletesNotFound": "Eine zu löschende Zeile wurde nicht gefunden. Vielleicht wurde sie schon gelöscht oder seit dem Laden geändert.",
+    "deletesNotFound_other": "{{count}} zu löschende Zeilen wurden nicht gefunden. Vielleicht wurden sie schon gelöscht oder seit dem Laden geändert."
   },
   "shortcuts": {
     "items": {
@@ -210,7 +212,9 @@
     "quitTitle": "Zurückrollen und beenden?",
     "quitDescription_one": "Ein Tab hat eine offene Transaktion. Beim Beenden wird sie zurückgerollt, und die Änderungen darin gehen verloren.",
     "quitDescription_other": "{{count}} Tabs haben offene Transaktionen. Beim Beenden werden sie zurückgerollt, und die Änderungen darin gehen verloren.",
-    "quitConfirm": "Zurückrollen und beenden"
+    "quitConfirm": "Zurückrollen und beenden",
+    "rolledBack_one": "Die Verbindung wurde geschlossen, daher wurde die offene Transaktion in {{tabs}} zurückgerollt.",
+    "rolledBack_other": "Die Verbindung wurde geschlossen, daher wurden die offenen Transaktionen in {{count}} Tabs zurückgerollt: {{tabs}}."
   },
   "common": {
     "undo": "Rückgängig"
@@ -271,6 +275,9 @@
   "params": {
     "title": "Abfrageparameter",
     "description": "Jeder Wert wird als SQL in die Abfrage eingesetzt, Text also in Anführungszeichen: 'Ann'. Ein leerer Wert läuft als NULL."
+  },
+  "import": {
+    "notUtf8": "Diese Datei ist kein UTF-8-Text, daher werden Zeichen, die sich nicht lesen lassen, als � importiert. Speichern Sie sie als UTF-8 und wählen Sie sie erneut."
   },
   "safety": {
     "everyRowTitle": "Jede Zeile ändern?",

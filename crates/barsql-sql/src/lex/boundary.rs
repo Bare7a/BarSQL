@@ -33,6 +33,7 @@ pub(crate) fn boundaries(sql: &str, rules: &LexRules, mode: Mode) -> Vec<Boundar
     let mut delimiter = ";";
     let mut trigger = Complete::Start;
     let mut blocks = Blocks::default();
+    let mut body = Body::default();
     let semicolons = !(rules.batch_separators && mode == Mode::ExecutionUnits);
     let mut i = 0;
     while i < n {
@@ -78,10 +79,12 @@ pub(crate) fn boundaries(sql: &str, rules: &LexRules, mode: Mode) -> Vec<Boundar
             trigger = trigger.next(CompleteToken::Semi);
             let inside_trigger = rules.trigger_bodies && trigger != Complete::Start;
             let inside_block = rules.block_depth && mode == Mode::Statements && !blocks.ends_at_semicolon();
-            if !inside_trigger && !inside_block {
+            let inside_body = rules.atomic_bodies && body.is_open();
+            if !inside_trigger && !inside_block && !inside_body {
                 out.push(Boundary::Terminator { at: i, len: delimiter.len(), custom: delimiter != ";" });
                 trigger = Complete::Start;
                 blocks = Blocks::default();
+                body = Body::default();
             }
             i += delimiter.len();
             continue;
@@ -89,11 +92,17 @@ pub(crate) fn boundaries(sql: &str, rules: &LexRules, mode: Mode) -> Vec<Boundar
         if words_matter(rules) && is_word_start(c, rules) {
             let end = word_end(b, i, rules);
             track(&mut trigger, &mut blocks, rules, Some(&b[i..end]));
+            if rules.atomic_bodies {
+                body.word(&b[i..end]);
+            }
             i = end;
             continue;
         }
         if !c.is_ascii_whitespace() {
             track(&mut trigger, &mut blocks, rules, None);
+            if rules.atomic_bodies {
+                body.punct(c);
+            }
         }
         i += 1;
     }
@@ -129,10 +138,10 @@ pub(crate) fn quoted_span_end(b: &[u8], i: usize, rules: &LexRules) -> Option<Op
     })
 }
 
-// Words are read whole for SQLite's trigger state, T-SQL's blocks, and where `$` inside a word mustn't open a
-// dollar quote.
+// Words are read whole for SQLite's trigger state, T-SQL's blocks, Postgres's routine bodies, and where `$` inside
+// a word mustn't open a dollar quote.
 pub(crate) fn words_matter(rules: &LexRules) -> bool {
-    rules.trigger_bodies || rules.block_depth || (rules.dollar_in_words && rules.dollar_quotes)
+    rules.trigger_bodies || rules.block_depth || rules.atomic_bodies || (rules.dollar_in_words && rules.dollar_quotes)
 }
 
 pub(crate) fn is_word_start(c: u8, rules: &LexRules) -> bool {
@@ -272,6 +281,54 @@ fn starts_module(lead: &[String]) -> bool {
         ["CREATE", "OR", "ALTER", kind, ..] => MODULES.contains(kind),
         _ => false,
     }
+}
+
+// As psql reads a CREATE [OR REPLACE] FUNCTION or PROCEDURE: BEGIN ... END and CASE ... END nest outside
+// parentheses.
+#[derive(Default)]
+struct Body {
+    lead: Vec<String>,
+    routine: bool,
+    parens: u32,
+    depth: u32,
+}
+
+impl Body {
+    fn is_open(&self) -> bool {
+        self.depth > 0
+    }
+
+    fn word(&mut self, word: &[u8]) {
+        if self.lead.len() < 4 {
+            self.lead.push(String::from_utf8_lossy(word).to_ascii_uppercase());
+            self.routine = defines_routine(&self.lead);
+        }
+        if self.parens > 0 || !self.routine {
+            return;
+        }
+        let is = |keyword: &[u8]| word.eq_ignore_ascii_case(keyword);
+        if is(b"BEGIN") || (is(b"CASE") && self.depth > 0) {
+            self.depth += 1;
+        } else if is(b"END") {
+            self.depth = self.depth.saturating_sub(1);
+        }
+    }
+
+    fn punct(&mut self, c: u8) {
+        match c {
+            b'(' => self.parens += 1,
+            b')' => self.parens = self.parens.saturating_sub(1),
+            _ => {}
+        }
+    }
+}
+
+fn defines_routine(lead: &[String]) -> bool {
+    let words: Vec<&str> = lead.iter().map(String::as_str).collect();
+    matches!(
+        words.as_slice(),
+        ["CREATE", "FUNCTION" | "PROCEDURE", ..] | ["CREATE", "OR", "REPLACE", "FUNCTION" | "PROCEDURE", ..]
+    )
 }
 
 #[cfg(test)]

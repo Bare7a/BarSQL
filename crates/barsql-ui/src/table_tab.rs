@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use barsql_app::{EditorTab, RunEvent, TableViewRef};
-use barsql_core::{ConnectionConfig, QueryError, Row, RowDelete, RowUpdate, TableDataRequest, Value};
+use barsql_core::{ConnectionConfig, Row, RowDelete, RowUpdate, TableDataRequest, Value};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputMode, InputState};
@@ -617,22 +617,27 @@ impl TableTab {
         let bar = state::bar(cx);
         let connection = self.connection.id.clone();
         let work = state::spawn(cx, async move {
+            let mut missing = 0;
             if !deletes.is_empty() {
+                let keys = deletes.len() as i64;
                 let delete = RowDelete { schema, table, primary_keys: deletes };
-                if let (_, Some(error)) = bar.delete_rows(&connection, &delete).await {
-                    return Err(error);
+                match bar.delete_rows(&connection, &delete).await {
+                    (_, Some(error)) => return Err(error),
+                    (deleted, None) => missing = (keys - deleted).max(0),
                 }
             }
-            for update in &updates {
-                bar.update_row(&connection, update).await?;
-            }
-            Ok::<(), QueryError>(())
+            bar.update_rows(&connection, &updates).await.map(|()| missing)
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = work.await;
             this.update_in(cx, |this, window, cx| {
                 match result {
-                    Some(Ok(())) => this.staging.clear(),
+                    Some(Ok(missing)) => {
+                        this.staging.clear();
+                        if missing > 0 {
+                            toast::info(t_count(cx, "tableView.deletesNotFound", missing, &[]), cx);
+                        }
+                    }
                     Some(Err(error)) => dialogs::alert(t(cx, "errors.generic"), error.message.into(), window, cx),
                     None => {}
                 }

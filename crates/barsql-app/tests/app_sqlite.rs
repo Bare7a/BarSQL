@@ -165,6 +165,62 @@ async fn row_mutations_return_the_stored_row() {
     assert_eq!((deleted, err), (1, None));
 }
 
+// The table view keys edits by what the grid shows, like \x and hex for a BLOB.
+#[tokio::test]
+async fn row_edits_find_blob_keys_and_say_when_a_key_matches_nothing() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE b (id BLOB PRIMARY KEY, v TEXT)").await;
+    f.exec(&id, "INSERT INTO b VALUES (x'deadbeef', 'old'), (x'0102', 'gone')").await;
+    let shown = f.app.execute_query(&id, "SELECT id FROM b WHERE v = 'old'").await.unwrap().rows[0][0].clone();
+    assert_eq!(shown, Value::from(r"\xdeadbeef"));
+    let key = |shown: &str| row(&[("id", shown.into())]);
+    let edit = |key: Row, v: &str| RowUpdate {
+        schema: "main".into(),
+        table: "b".into(),
+        primary_key: key,
+        changes: row(&[("v", v.into())]),
+    };
+    f.app.update_rows(&id, &[edit(key(r"\xdeadbeef"), "new")]).await.unwrap();
+    assert_eq!(f.query(&id, "SELECT v FROM b WHERE id = x'deadbeef'").await, [["new"]]);
+
+    let missing = f.app.update_row(&id, &edit(key(r"\xffff"), "x")).await.unwrap_err();
+    assert!(missing.message.starts_with(r"no row matches id = '\xffff'"), "{}", missing.message);
+    let delete =
+        RowDelete { schema: "main".into(), table: "b".into(), primary_keys: vec![key(r"\xffff"), key(r"\x0102")] };
+    assert_eq!(f.app.delete_rows(&id, &delete).await, (1, None));
+    assert_eq!(f.query(&id, "SELECT count(*) FROM b").await, [["1"]]);
+
+    // A DATETIME key shows reformatted, so it can't find its row. That's an error, not a silent no-op.
+    f.exec(&id, "CREATE TABLE d (at DATETIME PRIMARY KEY, v TEXT)").await;
+    f.exec(&id, "INSERT INTO d VALUES ('2024-02-29 13:45:30', 'old')").await;
+    let shown = f.app.execute_query(&id, "SELECT at FROM d").await.unwrap().rows[0][0].clone();
+    let update = RowUpdate { table: "d".into(), primary_key: row(&[("at", shown)]), ..edit(Row::new(), "new") };
+    assert!(f.app.update_row(&id, &update).await.is_err());
+    assert_eq!(f.query(&id, "SELECT v FROM d").await, [["old"]]);
+}
+
+#[tokio::test]
+async fn statements_that_change_no_rows_count_none() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    let sql = "CREATE TABLE n (a INTEGER); INSERT INTO n VALUES (1), (2), (3); CREATE TABLE u (b INTEGER); \
+               CREATE INDEX ix ON n (a); UPDATE n SET a = a WHERE 0";
+    let events = collect(f.app.execute_query_stream(&id, "tab", sql).await.unwrap()).await;
+    let affected: Vec<i64> =
+        results(&events).iter().map(|r| r.summary.as_ref().map_or(-1, |s| s.affected_rows)).collect();
+    assert_eq!(affected, [0, 3, 0, 0, 0]);
+
+    let dump = f.write(
+        "dump.sql",
+        "\u{feff}CREATE TABLE d (a INTEGER);\nINSERT INTO d VALUES (1);\nINSERT INTO d VALUES (2);\nCREATE INDEX dx ON d (a);\n",
+    );
+    let request = SqlImportRequest { path: dump, stop_on_error: true };
+    let (_, done) = import_outcome(f.app.import_sql(&id, "import", request).await.unwrap()).await;
+    let result = done.result.unwrap_or_else(|| panic!("{}", done.error));
+    assert_eq!((result.inserted, result.statements), (2, 4), "the BOM is no statement and DDL inserts nothing");
+}
+
 #[tokio::test]
 async fn streamed_runs_deliver_every_result_set_and_record_history() {
     let f = Fixture::new();

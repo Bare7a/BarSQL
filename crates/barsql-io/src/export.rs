@@ -245,9 +245,10 @@ pub fn escape_csv(cell: &str) -> String {
     if needs_quote { format!("\"{}\"", cell.replace('"', "\"\"")) } else { cell.to_string() }
 }
 
-// Defuses formula injection in cells starting with = + - @, but leaves plain numbers like -5 alone.
+// Defuses formula injection in cells starting with = + - @, also behind tabs and carriage returns, but leaves plain
+// numbers like -5 alone.
 pub fn defuse_csv_formula(s: &str) -> String {
-    if !s.starts_with(['=', '+', '-', '@']) || number_is_finite(s) {
+    if !s.trim_start_matches(['\t', '\r']).starts_with(['=', '+', '-', '@']) || number_is_finite(s) {
         return s.to_string();
     }
     format!("'{s}")
@@ -265,9 +266,24 @@ pub fn sql_literal(cell: Cell<'_>, dialect: Option<SqlDialect>, bit_column: bool
         (Cell::Bool(b), Some(SqlDialect::TSql)) => if b { "1" } else { "0" }.into(),
         (Cell::Bool(true), _) => "TRUE".into(),
         (Cell::Bool(false), _) => "FALSE".into(),
+        (Cell::Number(s @ ("NaN" | "Infinity" | "-Infinity")), dialect) => non_finite_literal(s, dialect),
         (Cell::Number(s), _) => s.to_string(),
         (Cell::Text(s), Some(dialect)) => quote_literal_in(dialect, s),
         (Cell::Text(s), None) => format!("'{}'", s.replace('\'', "''")),
+    }
+}
+
+// NaN and ±Infinity aren't SQL. Postgres takes them quoted, ClickHouse as nan and inf, and SQLite stores NaN as NULL
+// and reads 9e999 as infinity.
+fn non_finite_literal(shown: &str, dialect: Option<SqlDialect>) -> String {
+    match (dialect, shown) {
+        (Some(SqlDialect::ClickHouse), "NaN") => "nan".into(),
+        (Some(SqlDialect::ClickHouse), "Infinity") => "inf".into(),
+        (Some(SqlDialect::ClickHouse), _) => "-inf".into(),
+        (Some(SqlDialect::Sqlite), "NaN") => "NULL".into(),
+        (Some(SqlDialect::Sqlite), "Infinity") => "9e999".into(),
+        (Some(SqlDialect::Sqlite), _) => "-9e999".into(),
+        _ => format!("'{shown}'"),
     }
 }
 
@@ -369,10 +385,12 @@ impl JsonValue {
         }
     }
 
+    // Integers keep every digit, since an f64 rounds a bigint id past 2^53.
     pub(crate) fn from_json(json: Json) -> Self {
         match json {
             Json::Null => Self::Null,
             Json::Bool(b) => Self::Bool(b),
+            Json::Number(n) if n.is_i64() || n.is_u64() => Self::NumberText(n.to_string()),
             Json::Number(n) => Self::Number(n.as_f64().unwrap_or(f64::NAN)),
             Json::String(s) => Self::String(s),
             Json::Array(items) => Self::Array(items.into_iter().map(Self::from_json).collect()),
@@ -499,6 +517,40 @@ mod tests {
     }
 
     #[test]
+    fn json_keeps_whole_integers_past_2_pow_53() {
+        assert_eq!(
+            restringify_json(
+                r#"{"id": 9007199254740993, "n": -9223372036854775808, "u": 18446744073709551615}"#,
+                false
+            )
+            .unwrap(),
+            r#"{"id":9007199254740993,"n":-9223372036854775808,"u":18446744073709551615}"#
+        );
+        let out = export_to_string(
+            ExportFormat::Json,
+            &["doc".into()],
+            &["jsonb".into()],
+            None,
+            None,
+            [vec![Cell::Text(r#"{"tweet_id": 1234567890123456789, "ratio": 0.5}"#)]],
+        );
+        assert!(out.contains(r#""tweet_id": 1234567890123456789"#) && out.contains(r#""ratio": 0.5"#), "{out}");
+    }
+
+    #[test]
+    fn sql_export_writes_floats_that_arent_finite_as_each_dialect_reads_them() {
+        let insert = |dialect, shown| sql_literal(Cell::Number(shown), dialect, false);
+        assert_eq!(insert(Some(SqlDialect::Postgres), "NaN"), "'NaN'");
+        assert_eq!(insert(Some(SqlDialect::Postgres), "-Infinity"), "'-Infinity'");
+        assert_eq!(insert(Some(SqlDialect::ClickHouse), "Infinity"), "inf");
+        assert_eq!(insert(Some(SqlDialect::ClickHouse), "NaN"), "nan");
+        assert_eq!(insert(Some(SqlDialect::Sqlite), "Infinity"), "9e999");
+        assert_eq!(insert(Some(SqlDialect::Sqlite), "NaN"), "NULL");
+        assert_eq!(insert(None, "Infinity"), "'Infinity'");
+        assert_eq!(insert(Some(SqlDialect::Postgres), "1.5"), "1.5");
+    }
+
+    #[test]
     fn sql_export_doubles_quotes_in_identifiers() {
         let out = export_to_string(
             ExportFormat::Sql,
@@ -581,6 +633,10 @@ mod tests {
             ("- 5", "'- 5"),
             ("-5 ", "-5 "),
             ("-", "'-"),
+            ("\t=cmd", "'\t=cmd"),
+            ("\r@x", "'\r@x"),
+            ("\t-5", "\t-5"),
+            ("\tx", "\tx"),
         ];
         for (input, want) in cases {
             assert_eq!(defuse_csv_formula(input), want, "{input:?}");

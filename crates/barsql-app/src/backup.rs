@@ -27,7 +27,7 @@ pub struct BackupRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BackupOutcome {
     pub rows: usize,
-    // When set, the file holds only the first `rows` rows.
+    // When set, the backup stopped after `rows` rows and wrote no file.
     pub cancelled: bool,
 }
 

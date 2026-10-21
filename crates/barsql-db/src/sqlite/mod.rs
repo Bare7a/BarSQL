@@ -278,12 +278,13 @@ fn stream_statement(
     };
     let width = prepared.column_count();
     if width == 0 {
+        let before = conn.total_changes();
         return match prepared.raw_execute() {
             Ok(_) => {
                 emit(ScriptEvent::Result(Box::new(StatementResult {
                     result_index: index,
                     statement: stmt.into(),
-                    summary: Some(summary_for_exec(conn.changes(), started)),
+                    summary: Some(summary_for_exec(changes_since(conn, before), started)),
                     ..Default::default()
                 })));
                 StatementRun { sets: 1, error: None }
@@ -335,6 +336,11 @@ fn stream_statement(
         ..Default::default()
     })));
     StatementRun { sets: 1, error: None }
+}
+
+// changes() keeps the last INSERT, UPDATE or DELETE's count through DDL, so it counts only if total_changes() moved.
+fn changes_since(conn: &Connection, before: u64) -> u64 {
+    if conn.total_changes() == before { 0 } else { conn.changes() }
 }
 
 const PROGRESS_OPS: i32 = 1000;

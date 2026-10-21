@@ -203,6 +203,32 @@ mod tests {
                 &["CREATE TRIGGER t AFTER INSERT ON x BEGIN SELECT 1", "END"],
             ),
             (
+                "postgres: a BEGIN ATOMIC body keeps its semicolons",
+                DriverType::Postgres,
+                "CREATE FUNCTION add(a int, b int) RETURNS int LANGUAGE sql\nBEGIN ATOMIC\n  SELECT a + b;\nEND;\nSELECT add(1, 2);",
+                &[
+                    "CREATE FUNCTION add(a int, b int) RETURNS int LANGUAGE sql\nBEGIN ATOMIC\n  SELECT a + b;\nEND",
+                    "SELECT add(1, 2)",
+                ],
+            ),
+            (
+                "postgres: CASE … END inside a body, and an argument named begin",
+                DriverType::Postgres,
+                "create or replace procedure p(begin int) language sql begin atomic select case when 1 > 0 then 1 end; \
+                 insert into t values (2); end; select 3",
+                &[
+                    "create or replace procedure p(begin int) language sql begin atomic select case when 1 > 0 then 1 \
+                     end; insert into t values (2); end",
+                    "select 3",
+                ],
+            ),
+            (
+                "postgres: a transaction's BEGIN still splits",
+                DriverType::Postgres,
+                "BEGIN; SELECT 1; END; SELECT 2",
+                &["BEGIN", "SELECT 1", "END", "SELECT 2"],
+            ),
+            (
                 "mysql: DELIMITER only counts at the start of a line",
                 DriverType::MySql,
                 "SELECT delimiter FROM t; SELECT 2",

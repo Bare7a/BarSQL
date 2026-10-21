@@ -45,12 +45,17 @@ impl MsEngine {
     // Every value as text, on a pooled connection.
     pub(crate) async fn rows(self: &Arc<Self>, sql: &str, params: &[&str]) -> Result<Vec<TextRow>, QueryError> {
         let mut lease = self.lease().await?;
+        // Until the answer is read, so a timeout that drops this future doesn't pool a half-read connection.
+        lease.broken = true;
         let params: Vec<&dyn ToSql> = params.iter().map(|p| p as &dyn ToSql).collect();
         let mut tokens = Vec::new();
         let client = lease.client();
         let read = async move { client.query(sql, &params).await?.into_first_result().await };
         let rows = match captured(&mut tokens, read).await {
-            Ok(rows) => rows,
+            Ok(rows) => {
+                lease.broken = false;
+                rows
+            }
             Err(error) => {
                 lease.broken = !matches!(error, tiberius::error::Error::Server(_));
                 return Err(ms_error(error, sql));

@@ -147,26 +147,6 @@ impl SshTunnel {
     pub async fn open(&self, host: &str, port: u16) -> Result<ChannelStream<Msg>, QueryError> {
         open_channel(&self.handle, host, port).await
     }
-
-    // Loopback-only listener for drivers that can't take a custom stream, like mysql_async.
-    pub async fn forward(&self, host: &str, port: u16) -> Result<Forward, QueryError> {
-        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|err| QueryError::message(err.to_string()))?;
-        let addr = listener.local_addr().map_err(|err| QueryError::message(err.to_string()))?;
-        let handle = self.handle.clone();
-        let host = host.to_string();
-        let task = tokio::spawn(async move {
-            while let Ok((mut local, _)) = listener.accept().await {
-                let handle = handle.clone();
-                let host = host.clone();
-                tokio::spawn(async move {
-                    if let Ok(mut remote) = open_channel(&handle, &host, port).await {
-                        let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
-                    }
-                });
-            }
-        });
-        Ok(Forward { addr, task })
-    }
 }
 
 // A dead bastion connection is replaced the next time a connection is opened.

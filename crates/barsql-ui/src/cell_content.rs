@@ -113,7 +113,7 @@ pub fn detect(raw: &str) -> Kind {
     Kind::Text
 }
 
-// Reformatting reads numbers as f64, so a 16+ digit integer like a bigint id would lose digits.
+// Reformatting reads decimals and integers past 64 bits as f64, so a long run of digits could lose some.
 fn unsafe_int(text: &str) -> bool {
     text.as_bytes().split(|b| !b.is_ascii_digit()).any(|run| run.len() >= 16)
 }
