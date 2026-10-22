@@ -28,6 +28,25 @@
       "install": "Installieren"
     }
   },
+  "app": {
+    "statusRunning": "Läuft… {{seconds}} s",
+    "statusStreaming_one": "Lädt… {{count}} Zeile · {{seconds}} s",
+    "statusStreaming_other": "Lädt… {{count}} Zeilen · {{seconds}} s",
+    "statusRows_one": "{{count}} Zeile · {{ms}} ms",
+    "statusRows_other": "{{count}} Zeilen · {{ms}} ms",
+    "statusAffected_one": "{{count}} betroffene Zeile · {{ms}} ms",
+    "statusAffected_other": "{{count}} betroffene Zeilen · {{ms}} ms",
+    "newQuery": "Neue Abfrage",
+    "openSqlite": "SQLite-Datei öffnen…",
+    "welcomeDrop": "oder eine SQLite-Datei irgendwo ins Fenster ziehen"
+  },
+  "export": {
+    "summary": "Export von {{rows}} × {{cols}} als {{format}}",
+    "rowCount_one": "{{count}} Zeile",
+    "rowCount_other": "{{count}} Zeilen",
+    "columnCount_one": "{{count}} Spalte",
+    "columnCount_other": "{{count}} Spalten"
+  },
   "editor": {
     "sql": {
       "columnsCount_one": "{{count}} Spalte",
@@ -116,7 +135,15 @@
     "copyAllRows": "Alle Zeilen kopieren",
     "copyError": "Fehler kopieren",
     "copyStatement": "Anweisung kopieren",
-    "copyMessage": "Meldung kopieren"
+    "copyMessage": "Meldung kopieren",
+    "metaRows_one": "{{count}} Zeile · {{ms}} ms",
+    "metaRows_other": "{{count}} Zeilen · {{ms}} ms",
+    "metaRowsShort_one": "{{ms}} ms · {{count}} Zeile",
+    "metaRowsShort_other": "{{ms}} ms · {{count}} Zeilen",
+    "copyAs": "Kopieren als {{format}}",
+    "planShowQuiet_one": "1 weiteres anzeigen (0 oder false)",
+    "planShowQuiet_other": "{{count}} weitere anzeigen (0 oder false)",
+    "planHideQuiet": "0 und false ausblenden"
   },
   "sidebar": {
     "serverViews": "Serveransichten",
@@ -185,7 +212,16 @@
     "unmarkRows": "Löschmarkierung von {{count}} Zeile entfernen",
     "unmarkRows_other": "Löschmarkierung von {{count}} Zeilen entfernen",
     "deletesNotFound": "Eine zu löschende Zeile wurde nicht gefunden. Vielleicht wurde sie schon gelöscht oder seit dem Laden geändert.",
-    "deletesNotFound_other": "{{count}} zu löschende Zeilen wurden nicht gefunden. Vielleicht wurden sie schon gelöscht oder seit dem Laden geändert."
+    "deletesNotFound_other": "{{count}} zu löschende Zeilen wurden nicht gefunden. Vielleicht wurden sie schon gelöscht oder seit dem Laden geändert.",
+    "rowCount_one": "{{rows}} Zeile geladen",
+    "rowCount_other": "{{rows}} Zeilen geladen",
+    "rowsAll_one": "{{rows}} Zeile",
+    "rowsAll_other": "{{rows}} Zeilen",
+    "rowsOf_one": "{{loaded}} von {{total}} Zeile",
+    "rowsOf_other": "{{loaded}} von {{total}} Zeilen",
+    "countRows": "Alle zählen",
+    "countRowsTooltip": "Die Zeilen zählen, die der Filter durchlässt",
+    "counting": "Wird gezählt…"
   },
   "shortcuts": {
     "items": {
@@ -220,9 +256,13 @@
     "undo": "Rückgängig"
   },
   "toast": {
-    "historyDeleted": "Verlaufseintrag gelöscht"
+    "historyDeleted": "Verlaufseintrag gelöscht",
+    "exportStopped_one": "Export abgebrochen - {{fileName}} enthält nur die erste Zeile",
+    "exportStopped_other": "Export abgebrochen - {{fileName}} enthält nur die ersten {{count}} Zeilen"
   },
   "menu": {
+    "toggleSidebar": "Seitenleiste",
+    "toggleJsonPanel": "JSON-Viewer",
     "undo": "Widerrufen",
     "redo": "Wiederholen",
     "cut": "Ausschneiden",
@@ -251,7 +291,9 @@
     "deleteHistoryFailed": "Verlaufseintrag konnte nicht gelöscht werden",
     "settingsNotSaved": "Einstellungen konnten nicht gespeichert werden: {{error}}. Die Änderung gilt bis zum Beenden von BarSQL.",
     "sessionNotSaved": "Offene Tabs konnten nicht gespeichert werden: {{error}}. BarSQL öffnet sie eventuell nicht so wieder, wie sie jetzt sind.",
-    "historyNotSaved": "Der Abfrageverlauf konnte nicht gespeichert werden: {{error}}. Neue Abfragen erscheinen erst wieder unter „Zuletzt“, wenn das Speichern gelingt."
+    "historyNotSaved": "Der Abfrageverlauf konnte nicht gespeichert werden: {{error}}. Neue Abfragen erscheinen erst wieder unter „Zuletzt“, wenn das Speichern gelingt.",
+    "code": "Code {{code}}",
+    "didYouMean": "Meinten Sie {{name}}?"
   },
   "status": {
     "caret": "Zeile {{line}}, Spalte {{column}}",
@@ -265,6 +307,8 @@
     "protected": "Fragt vor Änderungen"
   },
   "theme": {
+    "dark": "Dunkel",
+    "light": "Hell",
     "system": "Wie System"
   },
   "commandPalette": {
@@ -277,7 +321,15 @@
     "description": "Jeder Wert wird als SQL in die Abfrage eingesetzt, Text also in Anführungszeichen: 'Ann'. Ein leerer Wert läuft als NULL."
   },
   "import": {
-    "notUtf8": "Diese Datei ist kein UTF-8-Text, daher werden Zeichen, die sich nicht lesen lassen, als � importiert. Speichern Sie sie als UTF-8 und wählen Sie sie erneut."
+    "notUtf8": "Diese Datei ist kein UTF-8-Text, daher werden Zeichen, die sich nicht lesen lassen, als � importiert. Speichern Sie sie als UTF-8 und wählen Sie sie erneut.",
+    "fileRows_one": "{{rows}} Zeile",
+    "fileRows_other": "{{rows}} Zeilen",
+    "doneRows_one": "{{rows}} Zeile importiert, {{skipped}} übersprungen",
+    "doneRows_other": "{{rows}} Zeilen importiert, {{skipped}} übersprungen",
+    "doneStatements_one": "{{statements}} Anweisung ausgeführt, {{skipped}} übersprungen",
+    "doneStatements_other": "{{statements}} Anweisungen ausgeführt, {{skipped}} übersprungen",
+    "notAColumn": "{{table}} hat keine Spalte {{column}}",
+    "mismatch": "Werte, die nach {{kind}} aussehen, passen womöglich nicht in {{type}}"
   },
   "safety": {
     "everyRowTitle": "Jede Zeile ändern?",
@@ -308,6 +360,8 @@
     "countBy": "Anzahl von {{values}} nach {{label}}",
     "averageBy": "Durchschnitt von {{values}} nach {{label}}",
     "rowsBy": "Zeilen nach {{label}}",
+    "valuesBy": "{{values}} nach {{label}}",
+    "nothingToCombine": "Jedes Label hat nur eine Zeile, es gibt also nichts zusammenzufassen",
     "rowCount_one": "{{count}} Zeile",
     "rowCount_other": "{{count}} Zeilen",
     "cappedTop": "die größten {{shown}} von {{total}} Beschriftungen",

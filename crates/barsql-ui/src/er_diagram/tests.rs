@@ -2,7 +2,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use barsql_core::ColumnInfo;
+use barsql_core::{ColumnInfo, ConnectionConfig};
 use gpui_kit::component::Root;
 use gpui_kit::{
     AppContext as _, Bounds, Entity, Modifiers, MouseButton, PinchEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
@@ -58,7 +58,8 @@ fn diagram(cx: &mut TestAppContext, tables: Tables) -> (Entity<ErDiagram>, Opene
     let (out, record) = (slot.clone(), opened.clone());
     let window = cx.add_window(move |window, cx| {
         let on_open: super::OnOpen = Rc::new(move |name, _, _| record.borrow_mut().push(name));
-        let view = cx.new(|cx| ErDiagram::new("c".into(), "main".into(), on_open, window, cx));
+        let connection = ConnectionConfig { id: "c".into(), ..Default::default() };
+        let view = cx.new(|cx| ErDiagram::new("er".into(), connection, "main".into(), on_open, window, cx));
         *out.borrow_mut() = Some(view.clone());
         Root::new(view, window, cx)
     });

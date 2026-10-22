@@ -381,15 +381,21 @@ pub fn build_batch_insert_with(
     Ok((sql, args))
 }
 
-// SQL Server's COUNT stops at 2^31 - 1, so it counts in bigint there.
-pub fn build_count(driver: &DriverType, schema: &str, table: &str) -> String {
+// SQL Server's COUNT stops at 2^31 - 1, so it counts in bigint there. `filter` is a validated WHERE condition, or
+// empty for every row.
+pub fn build_count(driver: &DriverType, schema: &str, table: &str, filter: &str) -> String {
     let count = match Dialect::for_driver(driver).id {
         Some(SqlDialect::TSql) => "COUNT_BIG(*)",
         Some(SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite | SqlDialect::ClickHouse) | None => {
             "COUNT(*)"
         }
     };
-    format!("SELECT {count} FROM {}", table_ref(driver, schema, table))
+    let mut sql = format!("SELECT {count} FROM {}", table_ref(driver, schema, table));
+    if !filter.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(filter);
+    }
+    sql
 }
 
 // DELETE, because SQLite has no TRUNCATE and elsewhere it needs extra privileges. ClickHouse's DELETE is a

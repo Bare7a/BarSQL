@@ -13,7 +13,7 @@ pub use history::{HISTORY_LIMIT, HistoryStore};
 pub(crate) use json_file::update;
 pub use json_file::{load_json_file, save_json_file, write_file_atomic};
 pub use saved_queries::SavedQueriesStore;
-pub use session::{EditorSession, EditorTab, SessionStore, TableViewRef};
+pub use session::{DiagramRef, EditorSession, EditorTab, SessionStore, TableViewRef};
 pub use settings::SettingsStore;
 
 pub struct Stores {

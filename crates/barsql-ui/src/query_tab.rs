@@ -32,7 +32,7 @@ use crate::editor_commands::{self, CopyLine, CutLine, PasteLine, SelectAllOccurr
 use crate::form::ToolButton;
 use crate::grid::{RowRef, copy};
 use crate::hover_card::HoverCard;
-use crate::i18n::{I18n, t, t_with};
+use crate::i18n::{I18n, t, t_count, t_with};
 use crate::occurrences::{self, OccurrenceMarks};
 use crate::results::{ResultStatus, ResultsEvent, ResultsPanel};
 use crate::saved_queries;
@@ -55,13 +55,33 @@ const RESULTS_SHARE: (f32, f32, f32) = (40., 15., 70.);
 // Room left of the line numbers for the run glyphs.
 const GLYPH_MARGIN_REM: f32 = 1.077;
 
+// How far either side of the splitter's line a double click still lands on it, as its grab band does.
+const SPLITTER_GRAB: Pixels = px(4.);
+
 // Shared by every query tab and kept for the session only.
 struct ResultsShare(f32);
 
 impl Global for ResultsShare {}
 
+// Where the results go back to after a double click on the splitter maximized them.
+struct ResultsRestore(f32);
+
+impl Global for ResultsRestore {}
+
 fn results_share(cx: &App) -> f32 {
     cx.try_global::<ResultsShare>().map_or(RESULTS_SHARE.0, |share| share.0)
+}
+
+// The results take all the room they may, or go back to where they were.
+fn toggle_results_maximized(cx: &mut App) {
+    let (share, max) = (results_share(cx), RESULTS_SHARE.2);
+    let next = if share >= max {
+        cx.try_global::<ResultsRestore>().map_or(RESULTS_SHARE.0, |restore| restore.0)
+    } else {
+        cx.set_global(ResultsRestore(share));
+        max
+    };
+    cx.set_global(ResultsShare(next.clamp(RESULTS_SHARE.1, RESULTS_SHARE.2)));
 }
 
 #[cfg(feature = "snapshot")]
@@ -167,9 +187,11 @@ impl QueryTab {
         let occurrences = cx.new(|cx| OccurrenceMarks::new(&editor, cx));
         let flash = editor.update(cx, |state, cx| state.create_range_decorations_collection(Vec::new(), cx));
         let dialect = connection.driver.dialect();
+        let (connection_id, driver) = (connection.id.clone(), connection.driver.clone());
         let results = cx.new(|_| {
             let mut results = ResultsPanel::default();
             results.set_dialect(dialect);
+            results.set_connection(connection_id, driver);
             results
         });
         let subscriptions = vec![
@@ -250,6 +272,7 @@ impl QueryTab {
             saved_query_id: self.saved_query_id.clone(),
             saved_sql_baseline: self.saved_sql_baseline.clone(),
             table_view: None,
+            diagram: None,
             // The workspace knows.
             pinned: false,
         }
@@ -880,7 +903,7 @@ impl QueryTab {
             let seconds = format!("{:.1}", running.started.elapsed().as_secs_f64());
             return status(match result {
                 ResultStatus::Streaming(rows) if rows > 0 => {
-                    t_with(cx, "app.statusStreaming", &[("count", &rows.to_string()), ("seconds", &seconds)])
+                    t_count(cx, "app.statusStreaming", rows as i64, &[("seconds", &seconds)])
                 }
                 _ => t_with(cx, "app.statusRunning", &[("seconds", &seconds)]),
             });
@@ -888,10 +911,10 @@ impl QueryTab {
         match result {
             ResultStatus::Error(message) => TabStatus { text: message, error: true },
             ResultStatus::Rows { count, ms } => {
-                status(t_with(cx, "app.statusRows", &[("count", &count.to_string()), ("ms", &ms.to_string())]))
+                status(t_count(cx, "app.statusRows", count, &[("ms", &ms.to_string())]))
             }
             ResultStatus::Affected { count, ms } => {
-                status(t_with(cx, "app.statusAffected", &[("count", &count.to_string()), ("ms", &ms.to_string())]))
+                status(t_count(cx, "app.statusAffected", count, &[("ms", &ms.to_string())]))
             }
             ResultStatus::Empty | ResultStatus::Streaming(_) => status(t(cx, "app.statusReady")),
         }
@@ -1197,8 +1220,33 @@ impl Render for QueryTab {
                             cx.stop_propagation();
                             cx.new(|_| drag.as_ref().clone())
                         },
-                    )),
+                    ))
+                    .child(self.splitter_double_click(cx)),
             )
+    }
+}
+
+impl QueryTab {
+    // The splitter's handle takes no clicks of its own and occludes what's under it, so a double click on it is
+    // caught on the window. `bounds` are the results pane's, whose top edge the splitter sits on.
+    fn splitter_double_click(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let this = cx.entity().downgrade();
+        canvas(
+            |_, _, _| {},
+            move |bounds, _, window, _| {
+                let this = this.clone();
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+                    let on_line = (event.position.y - bounds.top()).abs() <= SPLITTER_GRAB
+                        && (bounds.left()..=bounds.right()).contains(&event.position.x);
+                    if phase == DispatchPhase::Capture && event.click_count == 2 && on_line {
+                        toggle_results_maximized(cx);
+                        let _ = this.update(cx, |_, cx| cx.notify());
+                    }
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
     }
 }
 

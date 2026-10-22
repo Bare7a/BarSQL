@@ -4,6 +4,7 @@ mod plot;
 use std::rc::Rc;
 use std::time::Duration;
 
+use barsql_sql::display_type;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::plot::label::measure_text_width;
@@ -255,7 +256,15 @@ impl ChartView {
     }
 
     // Bars or Line and the aggregate, then the label column, then the value columns, filtered once there are many.
-    fn panel(&self, columns: &[Column], profiles: &[Profile], window: &mut Window, cx: &mut Context<Self>) -> Div {
+    // `combines` says whether rows share labels. Without that the aggregate has nothing to do, so it's greyed out.
+    fn panel(
+        &self,
+        columns: &[Column],
+        profiles: &[Profile],
+        combines: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = cx.theme().clone();
         let settings = &self.settings;
         let numeric: Vec<usize> =
@@ -304,9 +313,10 @@ impl ChartView {
             (Aggregate::Average, "chart-average", "chart.average"),
         ];
         let aggregates = form::toggle_group().children(choices.map(|(choice, id, key)| {
-            form::toggle(id, t(cx, key), aggregate == choice)
+            form::toggle(id, t(cx, key), combines && aggregate == choice)
                 .debug_selector(move || id.into())
-                .disabled(choice != Aggregate::Count && numeric.is_empty())
+                .disabled(!combines || (choice != Aggregate::Count && numeric.is_empty()))
+                .when(!combines, |button| button.tooltip(t(cx, "chart.nothingToCombine")))
                 .on_click(cx.listener(move |this, _, _, cx| this.edit(cx, |s| s.aggregate = choice)))
         }));
         let hint = match numeric.is_empty() {
@@ -402,12 +412,13 @@ impl ChartView {
 impl Render for ChartView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (profiles, data) = self.sync(cx);
-        let set = self.grid.read(cx).set();
+        let grid = self.grid.read(cx);
+        let (set, dialect) = (grid.set(), grid.dialect());
         let rows = set.rows();
         let columns: Vec<Column> = set
             .columns
             .iter()
-            .map(|c| Column { name: c.name.clone().into(), type_name: c.type_name.to_lowercase().into() })
+            .map(|c| Column { name: c.name.clone().into(), type_name: display_type(dialect, &c.type_name).into() })
             .collect();
         h_flex()
             .size_full()
@@ -415,7 +426,7 @@ impl Render for ChartView {
             .child(
                 div().flex_1().min_w_0().h_full().child(self.plot_area(rows, &columns, &profiles, &data, window, cx)),
             )
-            .child(self.panel(&columns, &profiles, window, cx))
+            .child(self.panel(&columns, &profiles, data.combines(), window, cx))
     }
 }
 
@@ -502,7 +513,8 @@ fn how_to(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-// "Sum of revenue, cost by region", or "Rows by region" when rows are counted.
+// "Sum of revenue, cost by region", or "Rows by region" when rows are counted. When no label repeats there is no
+// sum to speak of: "revenue, cost by region".
 fn title(settings: &Settings, data: &ChartData, columns: &[Column], cx: &App) -> SharedString {
     let label = columns.get(settings.label).map(|column| column.name.to_string()).unwrap_or_default();
     let values: Vec<&str> = data
@@ -511,11 +523,12 @@ fn title(settings: &Settings, data: &ChartData, columns: &[Column], cx: &App) ->
         .filter_map(|series| columns.get(series.column?))
         .map(|column| column.name.as_ref())
         .collect();
-    let key = match (values.is_empty(), settings.aggregate) {
-        (true, _) => "chart.rowsBy",
-        (false, Aggregate::Sum) => "chart.sumBy",
-        (false, Aggregate::Count) => "chart.countBy",
-        (false, Aggregate::Average) => "chart.averageBy",
+    let key = match (values.is_empty(), data.combines(), settings.aggregate) {
+        (true, ..) => "chart.rowsBy",
+        (false, false, _) => "chart.valuesBy",
+        (false, true, Aggregate::Sum) => "chart.sumBy",
+        (false, true, Aggregate::Count) => "chart.countBy",
+        (false, true, Aggregate::Average) => "chart.averageBy",
     };
     t_with(cx, key, &[("values", &values.join(", ")), ("label", &label)])
 }

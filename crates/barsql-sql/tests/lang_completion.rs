@@ -608,6 +608,26 @@ fn column_details_carry_key_and_null_hints() {
     assert_eq!(detail("name").as_deref(), Some("text"));
 }
 
+// The same short spelling the schema tree and grid headers show.
+#[test]
+fn column_details_show_types_as_the_tree_does() {
+    let setup = Setup::new(
+        PG,
+        tables(&["users"]),
+        columns(&[(
+            "public.users",
+            vec![
+                col("email", "character varying(255)", false, false),
+                col("seen", "timestamp with time zone", true, false),
+            ],
+        )]),
+    );
+    let items = setup.items("SELECT * FROM users WHERE ");
+    let detail = |l: &str| items.iter().find(|i| i.label == l).and_then(|i| i.detail.clone());
+    assert_eq!(detail("email").as_deref(), Some("varchar(255) · not null"));
+    assert_eq!(detail("seen").as_deref(), Some("timestamptz"));
+}
+
 fn ambiguous_labels(text: &str) -> Vec<String> {
     let setup = Setup::new(
         PG,

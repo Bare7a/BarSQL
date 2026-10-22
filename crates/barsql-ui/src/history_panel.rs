@@ -3,20 +3,21 @@ use std::time::Duration;
 
 use barsql_core::{ConnectionConfig, HistoryEntry};
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use jiff::civil::Date;
 use jiff::{Timestamp, Zoned};
 
 use crate::dialogs::{self, Confirm};
 use crate::form;
 use crate::i18n::{I18n, t, t_with};
 use crate::list_nav::{self, LIST_INSET, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp, ROW_INSET};
-use crate::relative_time::{format_relative_time, one_line_preview, time_bucket};
+use crate::relative_time::{TimeBucket, format_relative_time, one_line_preview, time_bucket};
 use crate::saved_queries;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state;
@@ -36,16 +37,26 @@ pub enum Scope {
     All,
 }
 
+// A row of the list: a day's caption, or entry `entry` at place `ix` among the runs shown.
+#[derive(Clone, Copy)]
+enum Row {
+    Day(TimeBucket),
+    Entry { entry: usize, ix: usize },
+}
+
 // Shown as the Recent tab. Newest runs first, grouped by day.
 pub struct HistoryPanel {
     connection_id: Option<String>,
     connections: Vec<ConnectionConfig>,
     scope: Scope,
     entries: Vec<HistoryEntry>,
+    // The runs the filter lets through, under their days as of `day`. The list builds only the rows on screen.
+    rows: Vec<Row>,
+    day: Date,
     filter: Entity<InputState>,
     needle: String,
     filter_task: Task<()>,
-    nav: ListNav,
+    nav: ListNav<ListState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -63,6 +74,7 @@ impl HistoryPanel {
                         cx.background_executor().timer(FILTER_DEBOUNCE).await;
                         let _ = this.update(cx, |this, cx| {
                             this.needle = value;
+                            this.rebuild();
                             cx.notify();
                         });
                     });
@@ -78,10 +90,13 @@ impl HistoryPanel {
             connections: Vec::new(),
             scope: Scope::Connection,
             entries: Vec::new(),
+            rows: Vec::new(),
+            day: Zoned::now().date(),
             filter,
             needle: String::new(),
             filter_task: Task::ready(()),
-            nav: ListNav::new(cx),
+            // Measuring every row once a change lays them out sizes the bar right from the start.
+            nav: ListNav::with_scroll(ListState::new(0, ListAlignment::Top, px(200.)).measure_all(), cx),
             _subscriptions: subscriptions,
         }
     }
@@ -101,6 +116,7 @@ impl HistoryPanel {
             _ => String::new(),
         };
         self.entries = state::bar(cx).query_history(&id, HISTORY_LIMIT);
+        self.rebuild();
         cx.notify();
     }
 
@@ -109,15 +125,37 @@ impl HistoryPanel {
         self.reload(cx);
     }
 
-    fn visible(&self) -> Vec<&HistoryEntry> {
-        self.entries
-            .iter()
-            .filter(|e| {
-                self.needle.is_empty()
-                    || e.sql.to_lowercase().contains(&self.needle)
-                    || e.error.to_lowercase().contains(&self.needle)
-            })
-            .collect()
+    // Lays out the runs the filter lets through under their days, and keeps the list where it was.
+    fn rebuild(&mut self) {
+        self.rebuild_as_of(Zoned::now());
+    }
+
+    fn rebuild_as_of(&mut self, now: Zoned) {
+        self.day = now.date();
+        let needle = &self.needle;
+        let shown = self.entries.iter().enumerate().filter(|(_, e)| {
+            needle.is_empty() || e.sql.to_lowercase().contains(needle) || e.error.to_lowercase().contains(needle)
+        });
+        let (mut rows, mut last) = (Vec::new(), None);
+        for (ix, (entry, e)) in shown.enumerate() {
+            let bucket = time_bucket(&e.executed_at, &now);
+            if last != Some(bucket) {
+                last = Some(bucket);
+                rows.push(Row::Day(bucket));
+            }
+            rows.push(Row::Entry { entry, ix });
+        }
+        self.rows = rows;
+        let top = self.nav.scroll.logical_scroll_top();
+        self.nav.scroll.reset(self.rows.len());
+        self.nav.scroll.scroll_to(top);
+    }
+
+    fn visible(&self) -> impl Iterator<Item = &HistoryEntry> {
+        self.rows.iter().filter_map(|row| match *row {
+            Row::Entry { entry, .. } => Some(&self.entries[entry]),
+            Row::Day(_) => None,
+        })
     }
 
     // At once, with an Undo on the toast.
@@ -247,20 +285,14 @@ impl HistoryPanel {
         }
     }
 
-    // Entry ids with their child index in the list. Day headers count as children.
+    // Entry ids with their row in the list. Day captions count as rows.
     fn nav_rows(&self) -> Vec<(String, usize)> {
-        let now = Zoned::now();
-        let (mut rows, mut child, mut last) = (Vec::new(), 0, None);
-        for entry in self.visible() {
-            let bucket = time_bucket(&entry.executed_at, &now);
-            if last != Some(bucket) {
-                last = Some(bucket);
-                child += 1;
-            }
-            rows.push((entry.id.clone(), child));
-            child += 1;
-        }
-        rows
+        let rows = self.rows.iter().enumerate();
+        rows.filter_map(|(row, kind)| match *kind {
+            Row::Entry { entry, .. } => Some((self.entries[entry].id.clone(), row)),
+            Row::Day(_) => None,
+        })
+        .collect()
     }
 
     #[cfg(test)]
@@ -270,13 +302,14 @@ impl HistoryPanel {
 
     #[cfg(test)]
     pub(crate) fn listed(&self) -> Vec<String> {
-        self.visible().into_iter().map(|entry| entry.sql.clone()).collect()
+        self.visible().map(|entry| entry.sql.clone()).collect()
     }
 
     #[cfg(test)]
     pub fn show_entries(&mut self, entries: Vec<HistoryEntry>, cx: &mut Context<Self>) {
         self.scope = Scope::All;
         self.entries = entries;
+        self.rebuild();
         cx.notify();
     }
 
@@ -288,7 +321,29 @@ impl HistoryPanel {
 
     fn nav_entry(&self) -> Option<HistoryEntry> {
         let id = self.nav.cursor()?;
-        self.visible().into_iter().find(|entry| entry.id == id).cloned()
+        self.visible().find(|entry| entry.id == id).cloned()
+    }
+
+    // Row `row` of the list, padded at its sides as the list's own padding would: a `list` pads only its ends.
+    fn render_row(
+        &self,
+        row: usize,
+        now_ms: i64,
+        clearance: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let element = match self.rows.get(row) {
+            Some(Row::Day(bucket)) => {
+                form::caption(t(cx, bucket.label_key()), cx).px_2().pt_2().pb_1().into_any_element()
+            }
+            Some(&Row::Entry { entry, ix }) => {
+                self.render_entry(ix, &self.entries[entry], now_ms, clearance, window, cx)
+            }
+            None => return div().into_any_element(),
+        };
+        let last = row + 1 == self.rows.len();
+        div().px(LIST_INSET).when(last, |el| el.pb(LIST_INSET)).child(element).into_any_element()
     }
 
     fn render_entry(
@@ -296,13 +351,14 @@ impl HistoryPanel {
         ix: usize,
         entry: &HistoryEntry,
         now_ms: i64,
+        clearance: Pixels,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let ring = self.nav.ringed(&entry.id, window);
         let theme = cx.theme().clone();
         let lang = cx.global::<I18n>().lang();
-        let mut meta = format!("{} · {}ms", format_relative_time(&entry.executed_at, lang, now_ms), entry.duration_ms);
+        let mut meta = format!("{} · {} ms", format_relative_time(&entry.executed_at, lang, now_ms), entry.duration_ms);
         if self.scope == Scope::All
             && let Some(connection) = self.connections.iter().find(|c| c.id == entry.connection_id)
         {
@@ -350,12 +406,10 @@ impl HistoryPanel {
                     .children(error.map(|e| div().truncate().text_size(TEXT_2XS).text_color(theme.danger).child(e))),
             )
             .child(
-                self.nav
-                    .hover_actions("history-row", ROW_INSET, LIST_INSET, window, cx)
+                list_nav::hover_actions("history-row", ROW_INSET, cx)
+                    .pr(clearance)
                     .child(
-                        Button::new(SharedString::from(format!("history-save-{ix}")))
-                            .small()
-                            .icon(Icon::new(Lucide::BookmarkPlus))
+                        list_nav::row_button(SharedString::from(format!("history-save-{ix}")), Lucide::BookmarkPlus)
                             .tooltip(t(cx, "sidebar.saveAsQuery"))
                             .on_click(move |_, window, cx| {
                                 cx.stop_propagation();
@@ -363,12 +417,10 @@ impl HistoryPanel {
                             }),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("history-delete-{ix}")))
-                            .small()
+                        list_nav::row_button(SharedString::from(format!("history-delete-{ix}")), Lucide::Trash)
                             .danger()
                             .outline()
                             .debug_selector(move || format!("history-delete-{ix}"))
-                            .icon(Icon::new(Lucide::Trash))
                             .tooltip(t(cx, "tooltip.deleteHistory"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();
@@ -408,35 +460,29 @@ impl Render for HistoryPanel {
             .debug_selector(|| "history-filter".into())
             .child(form::filter_input(&self.filter, window, cx).cleanable(true));
         let filter_bar = form::filter_bar(field, cx).child(self.options_menu(cx));
-        let visible_len = self.visible().len();
+        // The captions go by today's date, so rows laid out before midnight are laid out again.
+        if Zoned::now().date() != self.day {
+            self.rebuild();
+        }
         let body = if self.entries.is_empty() {
             form::empty_state(Some(Icon::new(Lucide::Clock)), t(cx, "sidebar.noQueryHistory"), cx).into_any_element()
-        } else if visible_len == 0 {
+        } else if self.rows.is_empty() {
             form::empty_state(None, t(cx, "sidebar.noMatches"), cx).into_any_element()
         } else {
             let now_ms = Timestamp::now().as_millisecond();
-            let now = Zoned::now();
-            let entries: Vec<HistoryEntry> = self.visible().into_iter().cloned().collect();
-            let mut rows: Vec<AnyElement> = Vec::new();
-            let mut last = None;
-            for (ix, entry) in entries.iter().enumerate() {
-                let bucket = time_bucket(&entry.executed_at, &now);
-                if last != Some(bucket) {
-                    last = Some(bucket);
-                    rows.push(form::caption(t(cx, bucket.label_key()), cx).px_2().pt_2().pb_1().into_any_element());
-                }
-                rows.push(self.render_entry(ix, entry, now_ms, window, cx));
-            }
-            let list = v_flex()
-                .id("history-list")
+            // Read now: the list can't be read while it builds its rows.
+            let clearance = self.nav.clearance(ROW_INSET, LIST_INSET, window);
+            let rows = list(
+                self.nav.scroll.clone(),
+                cx.processor(move |this, row, window, cx| this.render_row(row, now_ms, clearance, window, cx)),
+            )
+            .size_full();
+            div()
                 .debug_selector(|| "history-list".into())
                 .key_context(list_nav::CONTEXT)
                 .track_focus(&self.nav.focus)
-                .track_scroll(&self.nav.scroll)
+                .relative()
                 .size_full()
-                .px(LIST_INSET)
-                .pb(LIST_INSET)
-                .overflow_y_scroll()
                 .on_action(cx.listener(|this, _: &NavUp, _, cx| this.step(-1, cx)))
                 .on_action(cx.listener(|this, _: &NavDown, _, cx| this.step(1, cx)))
                 .on_action(cx.listener(|this, _: &NavFirst, _, cx| this.step(isize::MIN, cx)))
@@ -451,15 +497,51 @@ impl Render for HistoryPanel {
                         this.delete(&entry.id, cx);
                     }
                 }))
-                .children(rows);
-            div()
-                .relative()
-                .size_full()
-                .child(list)
+                .child(rows)
                 .child(self.nav.clearance.watch(self.nav.scroll.clone()))
                 .hover_scrollbar(&self.nav.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };
         v_flex().size_full().child(filter_bar).child(div().flex_1().min_h_0().child(body))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use barsql_core::HistoryEntry;
+    use gpui_kit::{App, TestAppContext};
+    use jiff::Zoned;
+
+    use super::{HistoryPanel, Row};
+    use crate::relative_time::TimeBucket;
+    use crate::test_support::{Env, in_root};
+
+    // A list laid out before midnight is laid out again when it next draws, so its captions say what day it is.
+    #[gpui_kit::test]
+    fn the_day_captions_move_on_at_midnight(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let (panel, cx) = in_root(cx, HistoryPanel::new);
+        let yesterday = Zoned::now().yesterday().unwrap();
+        let entry = HistoryEntry {
+            id: "h1".into(),
+            connection_id: env.connection.id.clone(),
+            sql: "SELECT 1".into(),
+            executed_at: yesterday.timestamp().to_string(),
+            success: true,
+            ..Default::default()
+        };
+        let days = |panel: &HistoryPanel, _: &App| -> Vec<TimeBucket> {
+            panel.rows.iter().filter_map(|row| if let Row::Day(day) = row { Some(*day) } else { None }).collect()
+        };
+        // Read before the update ends, since the window draws then.
+        let before = panel.update(cx, |panel, cx| {
+            panel.show_entries(vec![entry], cx);
+            panel.rebuild_as_of(yesterday);
+            days(panel, cx)
+        });
+        assert_eq!(before, [TimeBucket::Today], "laid out the day before");
+        panel.update(cx, |_, cx| cx.notify());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(panel.read_with(cx, days), [TimeBucket::Yesterday]);
     }
 }

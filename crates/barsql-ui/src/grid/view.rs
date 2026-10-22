@@ -5,6 +5,7 @@ use std::sync::Arc;
 use barsql_core::SqlDialect;
 use barsql_db::{ColumnMeta, ResultChunk, ResultSet};
 use barsql_io::ExportFormat;
+use barsql_sql::display_type;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::input::{Copy, Input, InputState, Paste, Redo, SelectAll, Undo};
@@ -13,7 +14,7 @@ use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::*;
 
 use super::copy::{self, CopyTarget, Staged};
-use super::layout::{SAMPLE_ROWS, auto_width_ch, row_height};
+use super::layout::{SAMPLE_ROWS, auto_width_ch, fraction_len, row_height};
 use super::range::{self, CellCoord};
 use super::scroll::{GridScroll, LANE};
 use super::selection::{Arrow, GUTTER, Selection, View};
@@ -280,6 +281,8 @@ pub struct Grid {
     hidden: BTreeSet<usize>,
     columns: Vec<usize>,
     widths: Vec<Width>,
+    // Each column's longest fraction among the sampled numbers, from the point, which the rest are padded to.
+    fractions: Vec<usize>,
     sampled: Option<usize>,
     user_sized: BTreeSet<usize>,
     col_x: Vec<Pixels>,
@@ -325,6 +328,7 @@ impl Grid {
             hidden: BTreeSet::new(),
             columns: (0..count).collect(),
             widths: vec![Width::Ch(0); count],
+            fractions: vec![0; count],
             sampled: None,
             user_sized: BTreeSet::new(),
             col_x: Vec::new(),
@@ -461,18 +465,35 @@ impl Grid {
         cx.notify();
     }
 
-    // Widths come from the first SAMPLE_ROWS display rows. More rows re-fit only the undragged columns.
+    // Widths come from the first SAMPLE_ROWS display rows. More rows re-fit only the undragged columns. Numbers
+    // count with their fraction padded to the column's longest, as they're drawn.
     fn sync_widths(&mut self) {
         let want = self.set.rows().min(SAMPLE_ROWS);
         if self.sampled.is_some_and(|sampled| sampled >= want) {
             return;
         }
         let keep_dragged = self.sampled.is_some();
+        let rows: Vec<usize> = (0..want).filter_map(|d| self.order.global_at(d)).collect();
         for column in 0..self.set.columns.len() {
+            let numbers = rows.iter().filter_map(|&row| match self.set.cell(row, column) {
+                barsql_db::Cell::Number(text) => Some(fraction_len(text)),
+                _ => None,
+            });
+            let fraction = numbers.max().unwrap_or(0);
+            self.fractions[column] = fraction;
             if keep_dragged && self.user_sized.contains(&column) {
                 continue;
             }
-            let sample = (0..want).filter_map(|d| self.order.global_at(d)).map(|row| self.set.display(row, column));
+            let sample: Vec<Option<Cow<str>>> = rows
+                .iter()
+                .map(|&row| match self.set.cell(row, column) {
+                    barsql_db::Cell::Number(text) => {
+                        Some(Cow::Owned(format!("{text}{}", " ".repeat(fraction.saturating_sub(fraction_len(text))))))
+                    }
+                    cell => cell.display().map(Cow::Borrowed),
+                })
+                .collect();
+            let sample = sample.iter().map(|text| text.as_deref());
             self.widths[column] = Width::Ch(auto_width_ch(&self.set.columns[column].name, sample));
         }
         self.sampled = Some(want);
@@ -1114,9 +1135,10 @@ struct Colors {
     selected_hover: Hsla,
     head_selected: Hsla,
     handle: Hsla,
-    // Type names in the header, and primary key icons.
+    // Type names in the header, and key icons: a gold key, a blue link, as in the tree and the ER diagram.
     faint: Hsla,
     key: Hsla,
+    link: Hsla,
     staged: Hsla,
     staged_border: Hsla,
     deleted: Hsla,
@@ -1152,6 +1174,7 @@ impl Colors {
             handle: accent.opacity(0.5),
             faint: theme.muted_foreground.opacity(0.75),
             key: theme.warning,
+            link: accent,
             staged: mix(theme.warning, background, 0.22),
             staged_border: theme.warning.opacity(0.55),
             deleted: theme.danger.opacity(0.22),
@@ -1215,6 +1238,10 @@ impl Shaper {
     fn new(font: Font, size: Pixels, window: &Window) -> Self {
         let wrapper = window.text_system().line_wrapper(font.clone(), size);
         Self { font, size, wrapper }
+    }
+
+    fn fits(&mut self, text: &str, width: Pixels) -> bool {
+        self.wrapper.should_truncate_line(text, width, "…", TruncateFrom::End).is_none()
     }
 
     // Cut with an ellipsis to fit `width`.
@@ -1326,9 +1353,12 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                 Some(text) => plain.shape(&display_text(text), colors.text, text_width, window),
                 None => italic.shape(&null, colors.muted, text_width, window),
             };
-            // Numbers line up on their last digit, as in a spreadsheet.
+            // Numbers line up on their decimal point, as in a spreadsheet: a shorter fraction leaves room on the right.
             let x = match value {
-                barsql_db::Cell::Number(_) => left + m.cell_pad_x + (text_width - line.width).max(px(0.)),
+                barsql_db::Cell::Number(text) => {
+                    let pad = m.ch * grid.fractions[column].saturating_sub(fraction_len(text)) as f32;
+                    left + m.cell_pad_x + (text_width - line.width - pad).max(px(0.))
+                }
                 _ => left + m.cell_pad_x,
             };
             cells.texts.push((line, point(x, top + m.cell_pad_y)));
@@ -1467,7 +1497,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         let mut title_left = left + m.cell_pad_x;
         if let Some(icon) = key {
             let top = cell.top() + (m.header_height - px(1.) - m.icon) / 2.;
-            let color = if icon == Lucide::KeyRound { colors.key } else { colors.muted };
+            let color = if icon == Lucide::KeyRound { colors.key } else { colors.link };
             header.icons.push((Bounds::new(point(title_left, top), size(m.icon, m.icon)), icon.path(), color));
             title_left += m.icon + m.gap;
         }
@@ -1476,10 +1506,11 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         let meta = &grid.set.columns[column];
         let line = bold.shape(&display_text(&meta.name), title_color, title_width, window);
         let title_top = cell.top() + (m.header_height - px(1.) - m.line_height) / 2.;
-        // The type follows faintly, where the name leaves room for a few characters of it.
+        // The type follows faintly, when the name leaves room for all of it. A cut `var…` says nothing.
         let room = title_width - line.width - m.gap;
-        if !meta.type_name.is_empty() && room > m.ch * 4. {
-            let type_name = plain.shape(&meta.type_name.to_lowercase(), colors.faint, room, window);
+        let type_name = display_type(grid.dialect, &meta.type_name);
+        if !type_name.is_empty() && room > px(0.) && plain.fits(&type_name, room) {
+            let type_name = plain.shape(&type_name, colors.faint, room, window);
             header.texts.push((type_name, point(title_left + line.width + m.gap, title_top)));
         }
         header.texts.push((line, point(title_left, title_top)));
@@ -1491,20 +1522,24 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         if hover == Some(Zone::Sort) {
             header.quads.push(quad(chevron, m.radius, colors.hover, px(0.), transparent_black(), BorderStyle::Solid));
         }
-        let icon = match (sorted, desc) {
-            (true, false) => Lucide::ChevronUp,
-            (true, true) => Lucide::ChevronDown,
-            (false, _) => Lucide::ChevronsUpDown,
-        };
-        let icon_color = if sorted {
-            colors.accent
-        } else if hover == Some(Zone::Sort) {
-            colors.text
-        } else {
-            colors.muted
-        };
-        let icon_bounds = Bounds::new(chevron.center() - point(m.icon / 2., m.icon / 2.), size(m.icon, m.icon));
-        header.icons.push((icon_bounds, icon.path(), icon_color));
+        // An unsorted column shows its sort button only under the pointer, so a wide result isn't a row of chevrons.
+        // The space stays reserved, so names don't shift as the pointer moves.
+        if sorted || hover.is_some() {
+            let icon = match (sorted, desc) {
+                (true, false) => Lucide::ChevronUp,
+                (true, true) => Lucide::ChevronDown,
+                (false, _) => Lucide::ChevronsUpDown,
+            };
+            let icon_color = if sorted {
+                colors.accent
+            } else if hover == Some(Zone::Sort) {
+                colors.text
+            } else {
+                colors.muted
+            };
+            let icon_bounds = Bounds::new(chevron.center() - point(m.icon / 2., m.icon / 2.), size(m.icon, m.icon));
+            header.icons.push((icon_bounds, icon.path(), icon_color));
+        }
         if selected {
             header.quads.push(fill(
                 Bounds::from_corners(

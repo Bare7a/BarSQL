@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use barsql_core::ColumnInfo;
+use barsql_core::{ColumnInfo, DriverType};
 use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
 use super::{SchemaTree, SchemaTreeEvent, column_matches, table_matches};
@@ -32,13 +32,22 @@ fn connect(tree: &Entity<SchemaTree>, cx: &mut VisualTestContext) {
 
 #[test]
 fn search_matches_names_and_column_types() {
+    let sqlite = DriverType::Sqlite;
     let column = ColumnInfo { name: "created_at".into(), data_type: "timestamp".into(), ..Default::default() };
-    assert!(column_matches(&column, "created"));
-    assert!(column_matches(&column, "timest"));
-    assert!(!column_matches(&column, "name"));
-    assert!(table_matches("Things", None, "thin"));
-    assert!(table_matches("t", Some(std::slice::from_ref(&column)), "stamp"));
-    assert!(!table_matches("t", Some(&[column]), "zzz"));
+    assert!(column_matches(&sqlite, &column, "created"));
+    assert!(column_matches(&sqlite, &column, "timest"));
+    assert!(!column_matches(&sqlite, &column, "name"));
+    assert!(table_matches(&sqlite, "Things", None, "thin"));
+    assert!(table_matches(&sqlite, "t", Some(std::slice::from_ref(&column)), "stamp"));
+    assert!(!table_matches(&sqlite, "t", Some(&[column]), "zzz"));
+}
+
+// The tree shows `varchar(50)`, so searching for what's shown finds it, as does the catalog's own spelling.
+#[test]
+fn search_matches_the_type_as_shown() {
+    let column = ColumnInfo { name: "email".into(), data_type: "character varying(50)".into(), ..Default::default() };
+    assert!(column_matches(&DriverType::Postgres, &column, "varchar"));
+    assert!(column_matches(&DriverType::Postgres, &column, "character var"));
 }
 
 #[gpui_kit::test]

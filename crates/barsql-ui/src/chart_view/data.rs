@@ -162,6 +162,11 @@ pub struct ChartData {
 }
 
 impl ChartData {
+    // Whether rows share a label, which is when Sum, Count and Average plot different bars.
+    pub fn combines(&self) -> bool {
+        self.groups < self.rows
+    }
+
     // The values' range, from zero for bars so they stand on it.
     pub fn range(&self, kind: Kind) -> Option<(f64, f64)> {
         let values = self.series.iter().flat_map(|s| s.values.iter().flatten().copied());
@@ -185,7 +190,8 @@ pub struct Series {
 }
 
 // Rows that share a label make one bar or point, by the full label text. Sum and Average skip NULLs, and Count
-// counts the values that aren't NULL, or the rows when no value is picked.
+// counts the values that aren't NULL, or the rows when no value is picked. When no label repeats, the values plot
+// as they are.
 pub fn compute(set: &ResultSet, profiles: &[Profile], settings: &Settings) -> ChartData {
     let rows = set.rows().min(MAX_ROWS);
     let mut picked: Vec<(usize, Option<usize>)> = settings.picked().map(|(slot, c)| (slot, Some(c))).collect();
@@ -217,7 +223,9 @@ pub fn compute(set: &ResultSet, profiles: &[Profile], settings: &Settings) -> Ch
             }
         }
     }
-    let value = |(sum, count): (f64, usize)| match settings.aggregate {
+    // With one row per label nothing combines, so each bar is its row's own value, whatever the panel kept.
+    let aggregate = if labels.len() < rows { settings.aggregate } else { Aggregate::Sum };
+    let value = |(sum, count): (f64, usize)| match aggregate {
         Aggregate::Count => Some(count as f64),
         _ if count == 0 => None,
         Aggregate::Sum => Some(sum),
@@ -435,6 +443,29 @@ mod tests {
 
     fn values(settings: &Settings) -> Vec<usize> {
         settings.picked().map(|(_, column)| column).collect()
+    }
+
+    // A GROUP BY result has one row per label, so Sum, Count and Average all plot the same bars.
+    #[test]
+    fn only_labels_that_repeat_have_rows_to_combine() {
+        let columns = [("region", "TEXT"), ("units", "INTEGER")];
+        let chart = |rows| {
+            let set = set(&columns, rows);
+            let profiles = profile(&set);
+            compute(&set, &profiles, &defaults(&profiles))
+        };
+        assert!(!chart(vec![vec![t("North"), n(3)], vec![t("South"), n(4)]]).combines());
+        assert!(chart(vec![vec![t("North"), n(3)], vec![t("North"), n(4)], vec![t("South"), n(1)]]).combines());
+    }
+
+    // The aggregate a used panel kept from an earlier result doesn't apply: Count would draw a bar of 1 per label.
+    #[test]
+    fn labels_that_dont_repeat_plot_their_own_values() {
+        let set =
+            set(&[("region", "TEXT"), ("units", "INTEGER")], vec![vec![t("North"), n(3)], vec![t("South"), n(4)]]);
+        let profiles = profile(&set);
+        let settings = Settings { aggregate: Aggregate::Count, ..defaults(&profiles) };
+        assert_eq!(compute(&set, &profiles, &settings).series[0].values, [Some(3.), Some(4.)]);
     }
 
     #[test]

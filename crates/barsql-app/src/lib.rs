@@ -25,7 +25,7 @@ use barsql_storage::Stores;
 pub use backup::{BackupOutcome, BackupRequest};
 pub use barsql_db::tls::install_default_provider;
 pub use barsql_io::{CsvOptions, ImportPreview};
-pub use barsql_storage::{ConnectionFolder, EditorSession, EditorTab, TableViewRef};
+pub use barsql_storage::{ConnectionFolder, DiagramRef, EditorSession, EditorTab, TableViewRef};
 pub use events::{
     AppEvent, ImportDone, ImportEvent, ImportHandle, ImportProgress, RunEvent, RunHandle, RunResult, Unsaved,
 };

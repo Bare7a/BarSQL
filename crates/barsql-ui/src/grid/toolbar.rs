@@ -1,10 +1,11 @@
 use barsql_io::{EXPORT_FORMATS, ExportFormat};
+use barsql_sql::display_type;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, Selectable, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -26,11 +27,12 @@ pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
     t(cx, key)
 }
 
-// `extra` goes first among the buttons, like the results' chart toggle. Without `grid_tools`, as under a chart, only
-// Export follows it.
+// `action` follows the row count, like a table view's Count. `extra` goes first among the buttons, like the results'
+// chart toggle. Without `grid_tools`, as under a chart, only Export follows it.
 pub fn toolbar(
     grid: &Entity<Grid>,
     meta: SharedString,
+    action: Option<AnyElement>,
     extra: Option<AnyElement>,
     grid_tools: bool,
     cx: &mut App,
@@ -61,7 +63,8 @@ pub fn toolbar(
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .child(meta)
-                .children(count.map(|count| div().text_color(accent).child(count))),
+                .children(count.map(|count| div().text_color(accent).child(count)))
+                .children(action),
         )
         .child(
             h_flex()
@@ -82,12 +85,9 @@ pub fn toolbar(
         )
 }
 
-// Fit columns, the column picker, the copy format and Copy.
+// Fit columns, the column picker, then Copy with its format.
 fn grid_tools_buttons(grid: &Entity<Grid>, cx: &mut App) -> Vec<AnyElement> {
-    let format = copy_format(cx);
     let fit = grid.clone();
-    let copy = grid.clone();
-    let formats = grid.downgrade();
     vec![
         Button::new("fit-columns")
             .tool(Icon::new(Lucide::Columns3), ICON_XS, t(cx, "results.fitColumns"))
@@ -95,13 +95,35 @@ fn grid_tools_buttons(grid: &Entity<Grid>, cx: &mut App) -> Vec<AnyElement> {
             .on_click(move |_, _, cx| fit.update(cx, |grid, cx| grid.fit_columns(cx)))
             .into_any_element(),
         column_picker(grid, cx).into_any_element(),
-        crate::screenshots::probe(
+        copy_button(grid, cx),
+    ]
+}
+
+// "Copy as CSV", with a caret for the format, which exports start from too. One split button, so the format
+// reads as Copy's.
+fn copy_button(grid: &Entity<Grid>, cx: &mut App) -> AnyElement {
+    let format = copy_format(cx);
+    let copy = grid.clone();
+    let formats = grid.downgrade();
+    let label = t_with(cx, "results.copyAs", &[("format", &format_label(format, cx))]);
+    h_flex()
+        .child(
+            Button::new("copy-results")
+                .debug_selector(|| "copy-results".into())
+                .tool(Icon::new(Lucide::ClipboardCopy), ICON_XS, label)
+                .tooltip(t(cx, "tooltip.copyResults"))
+                .rounded_tr(px(0.))
+                .rounded_br(px(0.))
+                .on_click(move |_, window, cx| copy.update(cx, |grid, cx| grid.copy(false, window, cx))),
+        )
+        .child(crate::screenshots::probe(
             Button::new("copy-format")
-                .small()
-                .h(rems(1.692))
-                .px(rems(0.615))
-                .label(format_label(format, cx))
-                .dropdown_caret(true)
+                .debug_selector(|| "copy-format".into())
+                .tool_icon(Icon::new(IconName::ChevronDown), ICON_XS)
+                .px(rems(0.308))
+                .rounded_tl(px(0.))
+                .rounded_bl(px(0.))
+                .border_l_0()
                 .tooltip(t(cx, "tooltip.copyFormat"))
                 .dropdown_menu(move |mut menu: PopupMenu, _, cx| {
                     for option in EXPORT_FORMATS {
@@ -117,14 +139,8 @@ fn grid_tools_buttons(grid: &Entity<Grid>, cx: &mut App) -> Vec<AnyElement> {
                     menu
                 }),
             "copy-format",
-        )
-        .into_any_element(),
-        Button::new("copy-results")
-            .tool(Icon::new(Lucide::ClipboardCopy), ICON_XS, t(cx, "common.copy"))
-            .tooltip(t(cx, "tooltip.copyResults"))
-            .on_click(move |_, window, cx| copy.update(cx, |grid, cx| grid.copy(false, window, cx)))
-            .into_any_element(),
-    ]
+        ))
+        .into_any_element()
 }
 
 fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
@@ -154,12 +170,13 @@ fn column_picker(grid: &Entity<Grid>, cx: &mut App) -> impl IntoElement {
         })
         .content(move |_, window, cx| {
             let state = grid.read(cx);
+            let dialect = state.dialect();
             let names: Vec<(usize, String, String, bool)> = state
                 .set()
                 .columns
                 .iter()
                 .enumerate()
-                .map(|(ix, meta)| (ix, meta.name.clone(), meta.type_name.to_lowercase(), !state.is_hidden(ix)))
+                .map(|(ix, meta)| (ix, meta.name.clone(), display_type(dialect, &meta.type_name), !state.is_hidden(ix)))
                 .collect();
             let (hidden, total, scroll) = (state.hidden_count(), names.len(), state.picker_scroll.clone());
             // About 13 rows, or half the window when that is shorter.

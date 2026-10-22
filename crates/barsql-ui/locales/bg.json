@@ -28,6 +28,25 @@
       "install": "инсталирането"
     }
   },
+  "app": {
+    "statusRunning": "Изпълнява се… {{seconds}} s",
+    "statusStreaming_one": "Зареждане… {{count}} ред · {{seconds}} s",
+    "statusStreaming_other": "Зареждане… {{count}} реда · {{seconds}} s",
+    "statusRows_one": "{{count}} ред · {{ms}} ms",
+    "statusRows_other": "{{count}} реда · {{ms}} ms",
+    "statusAffected_one": "{{count}} засегнат ред · {{ms}} ms",
+    "statusAffected_other": "{{count}} засегнати реда · {{ms}} ms",
+    "newQuery": "Нова заявка",
+    "openSqlite": "Отвори SQLite файл…",
+    "welcomeDrop": "или пуснете SQLite файл където и да е в прозореца"
+  },
+  "export": {
+    "summary": "Експорт на {{rows}} × {{cols}} като {{format}}",
+    "rowCount_one": "{{count}} ред",
+    "rowCount_other": "{{count}} реда",
+    "columnCount_one": "{{count}} колона",
+    "columnCount_other": "{{count}} колони"
+  },
   "editor": {
     "sql": {
       "columnsCount_one": "{{count}} колона",
@@ -116,7 +135,15 @@
     "copyAllRows": "Копирай всички редове",
     "copyError": "Копирай грешката",
     "copyStatement": "Копирай заявката",
-    "copyMessage": "Копирай съобщението"
+    "copyMessage": "Копирай съобщението",
+    "metaRows_one": "{{count}} ред · {{ms}} ms",
+    "metaRows_other": "{{count}} реда · {{ms}} ms",
+    "metaRowsShort_one": "{{ms}} ms · {{count}} ред",
+    "metaRowsShort_other": "{{ms}} ms · {{count}} реда",
+    "copyAs": "Копирай като {{format}}",
+    "planShowQuiet_one": "Покажи още 1 (0 или false)",
+    "planShowQuiet_other": "Покажи още {{count}} (0 или false)",
+    "planHideQuiet": "Скрий 0 и false"
   },
   "sidebar": {
     "serverViews": "Изгледи на сървъра",
@@ -185,7 +212,16 @@
     "unmarkRows": "Премахни маркировката за изтриване от {{count}} ред",
     "unmarkRows_other": "Премахни маркировката за изтриване от {{count}} реда",
     "deletesNotFound": "Един ред за изтриване не беше намерен. Може вече да е изтрит или променен след зареждането.",
-    "deletesNotFound_other": "{{count}} реда за изтриване не бяха намерени. Може вече да са изтрити или променени след зареждането."
+    "deletesNotFound_other": "{{count}} реда за изтриване не бяха намерени. Може вече да са изтрити или променени след зареждането.",
+    "rowCount_one": "{{rows}} зареден ред",
+    "rowCount_other": "{{rows}} заредени реда",
+    "rowsAll_one": "{{rows}} ред",
+    "rowsAll_other": "{{rows}} реда",
+    "rowsOf_one": "{{loaded}} от {{total}} ред",
+    "rowsOf_other": "{{loaded}} от {{total}} реда",
+    "countRows": "Преброй всички",
+    "countRowsTooltip": "Преброй редовете, които филтърът пропуска",
+    "counting": "Брои се…"
   },
   "shortcuts": {
     "items": {
@@ -220,9 +256,13 @@
     "undo": "Отмени"
   },
   "toast": {
-    "historyDeleted": "Записът от историята е изтрит"
+    "historyDeleted": "Записът от историята е изтрит",
+    "exportStopped_one": "Експортирането е спряно - {{fileName}} съдържа само първия ред",
+    "exportStopped_other": "Експортирането е спряно - {{fileName}} съдържа само първите {{count}} реда"
   },
   "menu": {
+    "toggleSidebar": "Странична лента",
+    "toggleJsonPanel": "JSON преглед",
     "undo": "Отмени",
     "redo": "Повтори",
     "cut": "Изрежи",
@@ -251,7 +291,9 @@
     "deleteHistoryFailed": "Записът от историята не можа да бъде изтрит",
     "settingsNotSaved": "Настройките не можаха да бъдат запазени: {{error}}. Промяната важи до затварянето на BarSQL.",
     "sessionNotSaved": "Отворените раздели не можаха да бъдат запазени: {{error}}. BarSQL може да не ги отвори отново такива, каквито са сега.",
-    "historyNotSaved": "Историята на заявките не можа да бъде запазена: {{error}}. Новите заявки няма да се появят в „Скорошни“, докато запазването не проработи."
+    "historyNotSaved": "Историята на заявките не можа да бъде запазена: {{error}}. Новите заявки няма да се появят в „Скорошни“, докато запазването не проработи.",
+    "code": "Код {{code}}",
+    "didYouMean": "Имахте предвид {{name}}?"
   },
   "status": {
     "caret": "Ред {{line}}, колона {{column}}",
@@ -265,6 +307,8 @@
     "protected": "Пита преди промени"
   },
   "theme": {
+    "dark": "Тъмна",
+    "light": "Светла",
     "system": "Като системата"
   },
   "commandPalette": {
@@ -277,7 +321,15 @@
     "description": "Всяка стойност влиза в заявката като SQL, затова поставете текста в кавички: 'Ann'. Празна стойност се изпълнява като NULL."
   },
   "import": {
-    "notUtf8": "Този файл не е UTF-8 текст, затова знаците, които не могат да се прочетат, ще се импортират като �. Запазете го като UTF-8 и го изберете отново."
+    "notUtf8": "Този файл не е UTF-8 текст, затова знаците, които не могат да се прочетат, ще се импортират като �. Запазете го като UTF-8 и го изберете отново.",
+    "fileRows_one": "{{rows}} ред",
+    "fileRows_other": "{{rows}} реда",
+    "doneRows_one": "Импортиран {{rows}} ред, пропуснати {{skipped}}",
+    "doneRows_other": "Импортирани {{rows}} реда, пропуснати {{skipped}}",
+    "doneStatements_one": "Изпълнена {{statements}} заявка, пропуснати {{skipped}}",
+    "doneStatements_other": "Изпълнени {{statements}} заявки, пропуснати {{skipped}}",
+    "notAColumn": "{{table}} няма колона {{column}}",
+    "mismatch": "Стойности, които изглеждат като {{kind}}, може да не се заредят в {{type}}"
   },
   "safety": {
     "everyRowTitle": "Промяна на всеки ред?",
@@ -308,6 +360,8 @@
     "countBy": "Брой на {{values}} по {{label}}",
     "averageBy": "Средно на {{values}} по {{label}}",
     "rowsBy": "Редове по {{label}}",
+    "valuesBy": "{{values}} по {{label}}",
+    "nothingToCombine": "Всеки етикет има само един ред, така че няма какво да се обединява",
     "rowCount_one": "{{count}} ред",
     "rowCount_other": "{{count}} реда",
     "cappedTop": "най-големите {{shown}} от {{total}} етикета",

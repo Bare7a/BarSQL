@@ -8,6 +8,7 @@ use super::labels::{SqlLabels, fill};
 use super::query::QueryTableRef;
 use super::quoting::{column_cache_key, format_sql_identifier};
 use super::statements::trim_spaces;
+use crate::type_name::display_type;
 
 pub struct CompletionContext<'a> {
     pub catalog: &'a Catalog,
@@ -232,19 +233,20 @@ pub fn rank(tier: u8, score: u8, label: &str) -> String {
     out
 }
 
-pub fn column_detail(c: &ColumnInfo, labels: &SqlLabels) -> String {
+pub fn column_detail(c: &ColumnInfo, dialect: Option<SqlDialect>, labels: &SqlLabels) -> String {
+    let data_type = display_type(dialect, &c.data_type);
     if c.is_primary || c.is_foreign {
         let tags = match (c.is_primary, c.is_foreign) {
             (true, true) => format!("{} · {}", labels.pk, labels.fk),
             (true, false) => labels.pk.clone(),
             _ => labels.fk.clone(),
         };
-        return format!("{} · {tags}", c.data_type);
+        return format!("{data_type} · {tags}");
     }
     if !c.is_nullable {
-        return format!("{} · {}", c.data_type, labels.not_null);
+        return format!("{data_type} · {}", labels.not_null);
     }
-    c.data_type.clone()
+    data_type
 }
 
 // Unknown kinds from the catalog pass through as is.
@@ -294,7 +296,7 @@ fn push_column_items(
         items.push(CompletionItem {
             label: c.name.clone(),
             kind: ItemKind::Field,
-            detail: Some(column_detail(c, ctx.labels)),
+            detail: Some(column_detail(c, ctx.driver().dialect(), ctx.labels)),
             insert_text: format_sql_identifier(&c.name, ctx.driver()),
             filter_text: None,
             label_detail: None,
@@ -504,7 +506,7 @@ pub fn suggest_columns_in_scope(
                     sort_text: rank(0, score, &label),
                     label,
                     kind: ItemKind::Field,
-                    detail: Some(column_detail(c, ctx.labels)),
+                    detail: Some(column_detail(c, ctx.driver().dialect(), ctx.labels)),
                     insert_text: format!(
                         "{}.{}",
                         format_sql_identifier(qualifier, ctx.driver()),
@@ -524,7 +526,7 @@ pub fn suggest_columns_in_scope(
                 items.push(CompletionItem {
                     label: c.name.clone(),
                     kind: ItemKind::Field,
-                    detail: Some(column_detail(c, ctx.labels)),
+                    detail: Some(column_detail(c, ctx.driver().dialect(), ctx.labels)),
                     insert_text: format_sql_identifier(&c.name, ctx.driver()),
                     filter_text: None,
                     label_detail: None,

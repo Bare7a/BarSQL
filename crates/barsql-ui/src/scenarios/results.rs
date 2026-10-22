@@ -48,7 +48,7 @@ fn the_export_summary_follows_the_format_and_offers_no_selection_yet(cx: &mut Te
         })
     };
     let (summary, (selectable, _), (scopes, active)) = read(&mut app);
-    assert!(summary.contains("2 row"), "{summary}");
+    assert!(summary.contains("2 rows × 2 columns"), "{summary}");
     assert!(!selectable, "Selected is disabled without a selection");
     assert_eq!((scopes, active), (vec!["all", "selected"], "all"), "no Visible while every column shows");
     app.menu_pick("export-format", 2);

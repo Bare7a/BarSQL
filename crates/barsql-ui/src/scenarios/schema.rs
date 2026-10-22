@@ -365,22 +365,23 @@ fn er_diagram(cx: &mut TestAppContext) -> Driver<'_> {
     app
 }
 
-// The schema menu's ER diagram draws its tables. A click picks one and its open button opens it. Enter in the search
-// steps through the matches and leaves the diagram open.
+// The schema menu's ER diagram opens in a tab and draws its tables. A click picks one and its open button opens it in
+// a tab of its own, beside the diagram. Enter in the search steps through the matches.
 #[gpui_kit::test]
 fn the_er_diagram_shows_the_schema_and_opens_a_table(cx: &mut TestAppContext) {
     let mut app = er_diagram(cx);
+    assert_eq!(app.titles().last().map(String::as_str), Some("ER diagram · main"));
     let (posts, users) = (app.bounds("er-table-0").unwrap(), app.bounds("er-table-1").unwrap());
     assert!(users.right() < posts.left(), "the referenced table stands left of the one referencing it");
     app.click("er-search");
     app.type_text("users");
     app.keys("enter");
-    assert!(app.dialog_open(), "Enter steps through the matches");
+    assert!(app.shown("er-diagram"), "Enter steps through the matches");
     app.click("er-table-0");
-    assert!(app.dialog_open(), "a click picks the table");
+    assert!(app.shown("er-diagram"), "a click picks the table");
     app.click("er-open-0");
-    assert!(!app.dialog_open());
     assert_eq!(app.titles().last().map(String::as_str), Some("e2e_posts"));
+    assert!(app.titles().iter().any(|title| title == "ER diagram · main"), "the diagram stays open");
 }
 
 #[gpui_kit::test]
@@ -388,8 +389,8 @@ fn a_double_click_in_the_er_diagram_opens_the_table(cx: &mut TestAppContext) {
     let mut app = er_diagram(cx);
     let users = app.bounds("er-table-1").unwrap().center();
     app.double_click_at(users);
-    assert!(!app.dialog_open());
     assert_eq!(app.titles().last().map(String::as_str), Some("e2e_users"));
+    assert!(app.titles().iter().any(|title| title == "ER diagram · main"), "the diagram stays open");
 }
 
 // Comparing with another database lists what differs, and its sync script opens in a tab of that database.

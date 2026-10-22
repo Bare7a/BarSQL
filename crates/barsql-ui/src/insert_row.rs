@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use barsql_core::{ColumnInfo, ConnectionConfig, Row, Value};
+use barsql_sql::display_type;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
@@ -314,7 +315,12 @@ impl InsertRowForm {
                             .gap(rems(0.385))
                             .min_w_0()
                             .child(div().text_size(TEXT_SM).font_medium().child(col.name.clone()))
-                            .child(div().text_size(TEXT_XS).text_color(muted).child(col.data_type.clone())),
+                            .child(
+                                div()
+                                    .text_size(TEXT_XS)
+                                    .text_color(muted)
+                                    .child(display_type(self.connection.driver.dialect(), &col.data_type)),
+                            ),
                     )
                     .child(
                         h_flex()

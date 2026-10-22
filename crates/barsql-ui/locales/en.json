@@ -28,6 +28,25 @@
       "install": "install"
     }
   },
+  "app": {
+    "statusRunning": "Running… {{seconds}} s",
+    "statusStreaming_one": "Streaming… {{count}} row · {{seconds}} s",
+    "statusStreaming_other": "Streaming… {{count}} rows · {{seconds}} s",
+    "statusRows_one": "{{count}} row · {{ms}} ms",
+    "statusRows_other": "{{count}} rows · {{ms}} ms",
+    "statusAffected_one": "{{count}} row affected · {{ms}} ms",
+    "statusAffected_other": "{{count}} rows affected · {{ms}} ms",
+    "newQuery": "New query",
+    "openSqlite": "Open SQLite file…",
+    "welcomeDrop": "or drop a SQLite file anywhere in the window"
+  },
+  "export": {
+    "summary": "Exporting {{rows}} × {{cols}} as {{format}}",
+    "rowCount_one": "{{count}} row",
+    "rowCount_other": "{{count}} rows",
+    "columnCount_one": "{{count}} column",
+    "columnCount_other": "{{count}} columns"
+  },
   "editor": {
     "sql": {
       "columnsCount_one": "{{count}} column",
@@ -116,7 +135,15 @@
     "copyAllRows": "Copy all rows",
     "copyError": "Copy error",
     "copyStatement": "Copy statement",
-    "copyMessage": "Copy message"
+    "copyMessage": "Copy message",
+    "metaRows_one": "{{count}} row · {{ms}} ms",
+    "metaRows_other": "{{count}} rows · {{ms}} ms",
+    "metaRowsShort_one": "{{ms}} ms · {{count}} row",
+    "metaRowsShort_other": "{{ms}} ms · {{count}} rows",
+    "copyAs": "Copy as {{format}}",
+    "planShowQuiet_one": "Show 1 more (0 or false)",
+    "planShowQuiet_other": "Show {{count}} more (0 or false)",
+    "planHideQuiet": "Hide 0 and false"
   },
   "sidebar": {
     "serverViews": "Server views",
@@ -185,7 +212,16 @@
     "unmarkRows": "Unmark {{count}} row for delete",
     "unmarkRows_other": "Unmark {{count}} rows for delete",
     "deletesNotFound": "One row to delete wasn't found. It may have been deleted already, or changed since it was loaded.",
-    "deletesNotFound_other": "{{count}} rows to delete weren't found. They may have been deleted already, or changed since they were loaded."
+    "deletesNotFound_other": "{{count}} rows to delete weren't found. They may have been deleted already, or changed since they were loaded.",
+    "rowCount_one": "{{rows}} row loaded",
+    "rowCount_other": "{{rows}} rows loaded",
+    "rowsAll_one": "{{rows}} row",
+    "rowsAll_other": "{{rows}} rows",
+    "rowsOf_one": "{{loaded}} of {{total}} row",
+    "rowsOf_other": "{{loaded}} of {{total}} rows",
+    "countRows": "Count all",
+    "countRowsTooltip": "Count the rows the filter lets through",
+    "counting": "Counting…"
   },
   "shortcuts": {
     "items": {
@@ -220,9 +256,13 @@
     "undo": "Undo"
   },
   "toast": {
-    "historyDeleted": "History entry deleted"
+    "historyDeleted": "History entry deleted",
+    "exportStopped_one": "Export stopped - {{fileName}} holds only the first row",
+    "exportStopped_other": "Export stopped - {{fileName}} holds only the first {{count}} rows"
   },
   "menu": {
+    "toggleSidebar": "Sidebar",
+    "toggleJsonPanel": "JSON viewer",
     "undo": "Undo",
     "redo": "Redo",
     "cut": "Cut",
@@ -251,7 +291,9 @@
     "deleteHistoryFailed": "Could not delete history entry",
     "settingsNotSaved": "Settings could not be saved: {{error}}. The change lasts until BarSQL quits.",
     "sessionNotSaved": "Open tabs could not be saved: {{error}}. BarSQL may not reopen them as they are now.",
-    "historyNotSaved": "Query history could not be saved: {{error}}. Recent won't list new queries until saving works again."
+    "historyNotSaved": "Query history could not be saved: {{error}}. Recent won't list new queries until saving works again.",
+    "code": "Code {{code}}",
+    "didYouMean": "Did you mean {{name}}?"
   },
   "status": {
     "caret": "Ln {{line}}, Col {{column}}",
@@ -265,6 +307,8 @@
     "protected": "Asks before changes"
   },
   "theme": {
+    "dark": "Dark",
+    "light": "Light",
     "system": "Match system"
   },
   "commandPalette": {
@@ -277,7 +321,15 @@
     "description": "Each value goes into the query as SQL, so put text in quotes: 'Ann'. An empty value runs as NULL."
   },
   "import": {
-    "notUtf8": "This file isn't UTF-8 text, so characters it can't read will import as �. Save it as UTF-8 and choose it again."
+    "notUtf8": "This file isn't UTF-8 text, so characters it can't read will import as �. Save it as UTF-8 and choose it again.",
+    "fileRows_one": "{{rows}} row",
+    "fileRows_other": "{{rows}} rows",
+    "doneRows_one": "Imported {{rows}} row, skipped {{skipped}}",
+    "doneRows_other": "Imported {{rows}} rows, skipped {{skipped}}",
+    "doneStatements_one": "Ran {{statements}} statement, skipped {{skipped}}",
+    "doneStatements_other": "Ran {{statements}} statements, skipped {{skipped}}",
+    "notAColumn": "{{table}} has no column {{column}}",
+    "mismatch": "Values that look like {{kind}} may not load into {{type}}"
   },
   "safety": {
     "everyRowTitle": "Change every row?",
@@ -308,6 +360,8 @@
     "countBy": "Count of {{values}} by {{label}}",
     "averageBy": "Average of {{values}} by {{label}}",
     "rowsBy": "Rows by {{label}}",
+    "valuesBy": "{{values}} by {{label}}",
+    "nothingToCombine": "Each label has one row, so there's nothing to combine",
     "rowCount_one": "{{count}} row",
     "rowCount_other": "{{count}} rows",
     "cappedTop": "the largest {{shown}} of {{total}} labels",

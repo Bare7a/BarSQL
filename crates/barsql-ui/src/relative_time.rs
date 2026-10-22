@@ -174,35 +174,27 @@ pub fn time_bucket(iso: &str, now: &Zoned) -> TimeBucket {
     }
 }
 
-// Collapses whitespace and cuts at `max` UTF-16 units, adding an ellipsis.
+// Collapses whitespace and cuts at `max` UTF-16 units, adding an ellipsis. Stops at the cut, so a long script costs
+// what a short query does.
 pub fn one_line_preview(sql: &str, max: usize) -> String {
     let mut out = String::with_capacity(sql.len().min(max * 4));
-    let mut pending_space = false;
+    let (mut units, mut pending_space) = (0, false);
     for c in sql.chars() {
         if is_space(c) {
             pending_space = !out.is_empty();
             continue;
         }
-        if pending_space {
-            out.push(' ');
-            pending_space = false;
+        let space = std::mem::take(&mut pending_space).then_some(' ');
+        for c in space.into_iter().chain([c]) {
+            units += c.len_utf16();
+            if units > max {
+                out.push('…');
+                return out;
+            }
+            out.push(c);
         }
-        out.push(c);
     }
-    if out.encode_utf16().count() <= max {
-        return out;
-    }
-    let mut units = 0;
-    let mut cut = String::new();
-    for c in out.chars() {
-        units += c.len_utf16();
-        if units > max {
-            break;
-        }
-        cut.push(c);
-    }
-    cut.push('…');
-    cut
+    out
 }
 
 #[cfg(test)]
@@ -257,5 +249,10 @@ mod tests {
         assert_eq!(one_line_preview("abc", 3), "abc");
         assert_eq!(one_line_preview("a🌍b", 2), "a…");
         assert_eq!(one_line_preview("", 5), "");
+        assert_eq!(one_line_preview("ab \n cd", 3), "ab …");
+        assert_eq!(one_line_preview("ab   ", 2), "ab");
+        assert_eq!(one_line_preview("abc", 0), "…");
+        let script = format!("SELECT 1;{}", "\n  SELECT 2;".repeat(100_000));
+        assert_eq!(one_line_preview(&script, 20), "SELECT 1; SELECT 2; …");
     }
 }

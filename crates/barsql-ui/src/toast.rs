@@ -1,8 +1,9 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::tokens::{RADIUS, TEXT_LG, TEXT_SM};
-use gpui_kit::component::ActiveTheme;
+use crate::tokens::{ICON_SM, RADIUS, TEXT_LG, TEXT_SM};
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::{ActiveTheme, Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -110,10 +111,11 @@ pub fn render(window: &Window, cx: &App) -> Option<AnyElement> {
     let max_width = (rem * 27.692).min(window.viewport_size().width - px(32.));
     let items = toasts.items.iter().map(|toast| {
         let id = toast.id;
-        let stripe = match toast.kind {
-            ToastKind::Info => theme.primary,
-            ToastKind::Success => theme.success,
-            ToastKind::Error => theme.danger,
+        // The icon tells the kinds apart by shape too, not by the stripe's colour alone.
+        let (stripe, icon) = match toast.kind {
+            ToastKind::Info => (theme.primary, Icon::new(IconName::Info)),
+            ToastKind::Success => (theme.success, Icon::new(IconName::CircleCheck)),
+            ToastKind::Error => (theme.danger, Icon::new(Lucide::CircleAlert)),
         };
         h_row()
             .id(("toast", id as usize))
@@ -129,6 +131,7 @@ pub fn render(window: &Window, cx: &App) -> Option<AnyElement> {
             .shadow_lg()
             .occlude()
             .child(div().w(px(3.)).h_full().absolute().left_0().top_0().bottom_0().rounded_l(RADIUS).bg(stripe))
+            .child(icon.size(ICON_SM).flex_none().text_color(stripe))
             .child(div().flex_1().min_w_0().child(toast.message.clone()))
             .when_some(toast.action.clone(), |el, action| {
                 el.child(

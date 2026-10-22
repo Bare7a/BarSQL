@@ -3,23 +3,23 @@ mod layout;
 mod tests;
 mod zoom;
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use barsql_core::ColumnInfo;
+use barsql_app::{DiagramRef, EditorTab};
+use barsql_core::{ColumnInfo, ConnectionConfig};
+use barsql_sql::display_type;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt, WindowExt, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use self::layout::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, arrange, find};
 use crate::form::{self, ToolButton};
 use crate::i18n::{I18n, t, t_with};
-use crate::modal::{self, Modal};
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
@@ -38,7 +38,7 @@ enum State {
     Failed(String),
 }
 
-type OnOpen = Rc<dyn Fn(String, &mut Window, &mut App)>;
+pub(crate) type OnOpen = Rc<dyn Fn(String, &mut Window, &mut App)>;
 
 // A drag on the diagram pans it. GPUI draws a dragged value, so this one draws nothing.
 struct Pan;
@@ -49,11 +49,14 @@ impl Render for Pan {
     }
 }
 
-// The tables of a schema and the keys between them. Drag to pan, ⌘ or Ctrl with the wheel, a pinch or the buttons
-// to zoom. Hovering a table previews its keys and a click keeps them lit; a double click opens it.
+// The tables of a schema and the keys between them, in a tab of their own. Drag to pan, ⌘ or Ctrl with the wheel, a
+// pinch or the buttons to zoom. Hovering a table previews its keys and a click keeps them lit; a double click opens
+// it.
 pub struct ErDiagram {
-    connection_id: String,
-    schema: String,
+    pub(crate) id: String,
+    pub(crate) connection: ConnectionConfig,
+    pub(crate) schema: String,
+    focus: FocusHandle,
     state: State,
     total: usize,
     keys_only: bool,
@@ -78,8 +81,9 @@ pub struct ErDiagram {
 }
 
 impl ErDiagram {
-    fn new(
-        connection_id: String,
+    pub(crate) fn new(
+        id: String,
+        connection: ConnectionConfig,
         schema: String,
         on_open: OnOpen,
         window: &mut Window,
@@ -105,8 +109,10 @@ impl ErDiagram {
             }),
         ];
         Self {
-            connection_id,
+            id,
+            connection,
             schema,
+            focus: cx.focus_handle(),
             state: State::Loading,
             total: 0,
             keys_only: false,
@@ -128,27 +134,71 @@ impl ErDiagram {
         }
     }
 
-    fn load(&mut self, cx: &mut Context<Self>) {
-        let load = schema::load_schema_columns(&self.connection_id, &self.schema, MAX_TABLES, cx);
+    pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
+        let load = schema::load_schema_columns(&self.connection.id, &self.schema, MAX_TABLES, cx);
         self._load = cx.spawn(async move |this, cx| {
             let loaded = load.await;
             let _ = this.update(cx, |this, cx| {
                 match loaded {
                     Err(error) => this.state = State::Failed(error),
                     Ok((_, tables)) if tables.is_empty() => this.state = State::Empty,
-                    Ok((total, tables)) => this.set_tables(total, tables),
+                    Ok((total, tables)) => {
+                        let (id, schema) = (&this.connection.id, &this.schema);
+                        let views = tables
+                            .iter()
+                            .filter(|(name, _)| schema::is_view(id, schema, name, cx))
+                            .map(|(name, _)| name.clone())
+                            .collect();
+                        this.set_tables_with_views(total, tables, views);
+                    }
                 }
                 cx.notify();
             });
         });
     }
 
+    #[cfg(test)]
     fn set_tables(&mut self, total: usize, tables: Vec<(String, Vec<ColumnInfo>)>) {
-        let tables: Vec<ErTable> = tables.into_iter().map(|(name, columns)| ErTable::new(name, columns)).collect();
+        self.set_tables_with_views(total, tables, HashSet::new());
+    }
+
+    fn set_tables_with_views(&mut self, total: usize, tables: Vec<(String, Vec<ColumnInfo>)>, views: HashSet<String>) {
+        let tables: Vec<ErTable> = tables
+            .into_iter()
+            .map(|(name, columns)| {
+                let view = views.contains(&name);
+                ErTable { view, ..ErTable::new(name, columns) }
+            })
+            .collect();
         self.total = total;
         self.state = State::Ready(Rc::new(tables));
         self.fitted = false;
         self.relayout();
+    }
+
+    pub(crate) fn title(&self, cx: &App) -> SharedString {
+        t_with(cx, "erDiagram.title", &[("schema", &self.schema)])
+    }
+
+    pub(crate) fn stored(&self, cx: &App) -> EditorTab {
+        EditorTab {
+            id: self.id.clone(),
+            connection_id: self.connection.id.clone(),
+            title: self.title(cx).to_string(),
+            color: self.connection.color.clone(),
+            diagram: Some(DiagramRef { schema: self.schema.clone() }),
+            ..Default::default()
+        }
+    }
+
+    // A renamed connection or new settings. The tables stay as drawn.
+    pub(crate) fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
+        self.connection = connection;
+        cx.notify();
+    }
+
+    pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus, cx);
     }
 
     fn relayout(&mut self) {
@@ -234,11 +284,12 @@ impl ErDiagram {
         cx.notify();
     }
 
+    // After this update ends: opening the table reads every tab, this one included.
     fn open(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let State::Ready(tables) = &self.state else { return };
         let Some(table) = tables.get(ix) else { return };
         let (name, on_open) = (table.name.clone(), self.on_open.clone());
-        on_open(name, window, cx);
+        window.defer(cx, move |window, cx| on_open(name, window, cx));
     }
 
     fn pan_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
@@ -261,10 +312,17 @@ impl ErDiagram {
             }
         };
         let percent = format!("{}%", (self.zoom * 100.).round());
-        let truncated = (self.total > MAX_TABLES).then(|| {
-            let (shown, total) = (MAX_TABLES.to_string(), self.total.to_string());
-            t_with(cx, "erDiagram.truncated", &[("shown", &shown), ("total", &total)])
-        });
+        // How to get around, in the room the toolbar has to spare, unless the tables were cut.
+        let note = match self.total > MAX_TABLES {
+            true => {
+                let (shown, total) = (MAX_TABLES.to_string(), self.total.to_string());
+                t_with(cx, "erDiagram.truncated", &[("shown", &shown), ("total", &total)])
+            }
+            false => {
+                let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
+                t_with(cx, "erDiagram.hint", &[("modifier", modifier)])
+            }
+        };
         h_flex()
             .flex_none()
             .gap(rems(0.462))
@@ -293,7 +351,7 @@ impl ErDiagram {
                     .text_right()
                     .text_size(TEXT_XS)
                     .text_color(theme.muted_foreground)
-                    .children(truncated),
+                    .child(note),
             )
             .child(
                 Button::new("er-keys-only")
@@ -420,7 +478,7 @@ impl ErDiagram {
                         .truncate()
                         .text_size(TEXT_XS)
                         .text_color(theme.muted_foreground)
-                        .child(column.data_type.to_lowercase()),
+                        .child(display_type(self.connection.driver.dialect(), &column.data_type)),
                 )
         });
         let border = match () {
@@ -436,7 +494,10 @@ impl ErDiagram {
             .bg(if focused { theme.primary.opacity(TINT) } else { theme.secondary })
             .border_b_1()
             .border_color(theme.border)
-            .child(Icon::new(Lucide::Table2).size(ICON_XS).text_color(theme.muted_foreground))
+            .child(match table.view {
+                true => Icon::new(Lucide::View).size(ICON_XS).text_color(theme.primary),
+                false => Icon::new(Lucide::Table2).size(ICON_XS).text_color(theme.muted_foreground),
+            })
             .child(div().flex_1().min_w_0().truncate().font_semibold().child(table.name.clone()))
             .when(focused, |el| {
                 el.child(
@@ -464,6 +525,7 @@ impl ErDiagram {
             .rounded(RADIUS)
             .border_1()
             .border_color(border)
+            .when(table.view, |el| el.border_dashed())
             .bg(theme.background)
             .when(faded, |el| el.opacity(FADED))
             .text_size(TEXT_SM)
@@ -493,7 +555,8 @@ impl ErDiagram {
 }
 
 // From the side facing the other box, with horizontal tangents. Both ends in the same column loop out on the right.
-// `only` draws just those edges, thicker and with arrowheads where they arrive.
+// A crow's foot marks the referencing column, the many end, and a bar the referenced one. `only` draws just those
+// edges, thicker and with arrowheads where they arrive.
 fn paint_edges(layout: &Layout, only: Option<&[usize]>, bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
     let rem = window.rem_size();
     let at = |x: f32, y: f32| point(bounds.left() + rem * x, bounds.top() + rem * y);
@@ -527,6 +590,16 @@ fn paint_edges(layout: &Layout, only: Option<&[usize]>, bounds: Bounds<Pixels>, 
         if let Ok(path) = path.build() {
             window.paint_path(path, color);
         }
+        // The prongs meet outside the box and spread to its side. A loop leaves to the right.
+        let (out, foot, half) = (if bend == 0. { 1. } else { bend }, 0.692, 0.346);
+        let mut crow = PathBuilder::stroke(width);
+        for dy in [-half, 0., half] {
+            crow.move_to(at(x1 + out * foot, y1));
+            crow.line_to(at(x1, y1 + dy));
+        }
+        if let Ok(crow) = crow.build() {
+            window.paint_path(crow, color);
+        }
         match only {
             Some(_) => {
                 let (back, half) = (x2 - inward * 0.692, 0.346);
@@ -540,8 +613,13 @@ fn paint_edges(layout: &Layout, only: Option<&[usize]>, bounds: Bounds<Pixels>, 
                 }
             }
             None => {
-                let dot = Bounds::centered_at(at(x2, y2), size(px(6.), px(6.)));
-                window.paint_quad(fill(dot, color).corner_radii(px(3.)));
+                let x = x2 - inward * 0.462;
+                let mut bar = PathBuilder::stroke(width);
+                bar.move_to(at(x, y2 - half));
+                bar.line_to(at(x, y2 + half));
+                if let Ok(bar) = bar.build() {
+                    window.paint_path(bar, color);
+                }
             }
         }
     }
@@ -620,7 +698,7 @@ impl Render for ErDiagram {
         )
         .absolute()
         .inset_0();
-        v_flex().size_full().child(self.toolbar(window, cx)).child(
+        v_flex().size_full().track_focus(&self.focus).bg(theme.background).child(self.toolbar(window, cx)).child(
             div()
                 .relative()
                 .flex_1()
@@ -630,35 +708,4 @@ impl Render for ErDiagram {
                 .hover_scrollbar(&self.scroll, ScrollbarAxis::Both),
         )
     }
-}
-
-// Opening a table closes the diagram and hands its name to `on_open`.
-pub fn open(
-    connection_id: String,
-    schema: String,
-    window: &mut Window,
-    cx: &mut App,
-    on_open: impl Fn(String, &mut Window, &mut App) + 'static,
-) {
-    let title = t_with(cx, "erDiagram.title", &[("schema", &schema)]);
-    let hint = t_with(cx, "erDiagram.hint", &[("modifier", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" })]);
-    let on_open: OnOpen = Rc::new(move |table, window, cx| {
-        window.close_dialog(cx);
-        on_open(table, window, cx);
-    });
-    let view = cx.new(|cx| {
-        let mut view = ErDiagram::new(connection_id, schema, on_open, window, cx);
-        view.load(cx);
-        view
-    });
-    window.open_dialog(cx, move |dialog, window, cx| {
-        let height = window.viewport_size().height * 0.85;
-        // Enter belongs to the search, which steps through its hits. Escape closes.
-        Modal::new("er-diagram", title.clone())
-            .extra(hint.clone())
-            .size(modal::Size::Rem(110.))
-            .height(height)
-            .build(dialog, view.clone(), window, cx)
-            .on_ok(|_, _, _| false)
-    });
 }
