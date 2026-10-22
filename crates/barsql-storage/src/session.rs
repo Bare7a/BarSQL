@@ -23,6 +23,14 @@ pub struct TableViewRef {
     pub hidden_columns: Vec<String>,
 }
 
+// An ER diagram tab, by the schema it draws.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramRef {
+    #[serde(default)]
+    pub schema: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorTab {
@@ -42,6 +50,8 @@ pub struct EditorTab {
     pub saved_sql_baseline: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub table_view: Option<TableViewRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram: Option<DiagramRef>,
     // Pinned tabs sit first and stay open through Close Others, To the Right and All.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
@@ -132,6 +142,27 @@ mod tests {
         store.save(session.clone()).unwrap();
         let body = fs::read_to_string(tmp.path().join("editor_session.json")).unwrap();
         assert!(body.contains("Query 1") && body.contains("\"orderBy\": \"name\""), "{body}");
+        assert_eq!(SessionStore::open(tmp.path()).unwrap().get(), session);
+    }
+
+    // An ER diagram tab comes back on its schema. Other tabs write nothing for it.
+    #[test]
+    fn a_diagram_tab_persists_its_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        let diagram = EditorTab {
+            id: "er1".into(),
+            connection_id: "c1".into(),
+            title: "ER diagram · public".into(),
+            diagram: Some(DiagramRef { schema: "public".into() }),
+            ..Default::default()
+        };
+        let query = EditorTab { id: "q1".into(), connection_id: "c1".into(), ..Default::default() };
+        let session = EditorSession { tabs: vec![diagram, query], active_tab: "er1".into() };
+        store.save(session.clone()).unwrap();
+        let body = fs::read_to_string(tmp.path().join("editor_session.json")).unwrap();
+        assert_eq!(body.matches("\"diagram\"").count(), 1, "{body}");
+        assert!(body.contains("\"schema\": \"public\""), "{body}");
         assert_eq!(SessionStore::open(tmp.path()).unwrap().get(), session);
     }
 

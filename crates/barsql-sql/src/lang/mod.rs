@@ -16,6 +16,7 @@ pub mod suggestions;
 pub mod text;
 pub mod tokens;
 pub mod transaction;
+pub mod unknown;
 
 pub use catalog::{Catalog, ColumnMap, OrderedMap, TableBinding};
 pub use completion::{bindings_needing_columns, build_completion_items, completion_replace_range};
@@ -33,3 +34,4 @@ pub use statements::{
 pub use suggestions::{CompletionContext, CompletionItem, ItemKind};
 pub use tokens::{Token, TokenKind, tokenize};
 pub use transaction::{TxnControl, detect_transaction_control};
+pub use unknown::{UnknownKind, closest, find_name, unknown_name};

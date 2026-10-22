@@ -17,6 +17,8 @@ pub struct Caret {
 
 pub struct StatusBarState {
     pub connection: Option<(SharedString, bool)>,
+    // The connection's colour, as its tabs show it.
+    pub color: Option<Hsla>,
     pub read_only: bool,
     // The connection asks before changes.
     pub protected: bool,
@@ -50,8 +52,19 @@ fn aggregate_label(total: Aggregate, cx: &App) -> String {
     format!("{count} · {sum} · {average}")
 }
 
+// A read-only or ask-first connection, usually a production one, tints the whole bar with its colour. It's hard to
+// miss without anything moving.
+fn guard_tint(state: &StatusBarState) -> Option<Hsla> {
+    state.color.filter(|_| state.read_only || state.protected)
+}
+
 pub fn render(state: StatusBarState, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
+    let tint = guard_tint(&state);
+    let (background, border) = match tint {
+        Some(color) => (theme.status_bar.blend(color.opacity(0.2)), color),
+        None => (theme.status_bar, theme.status_bar_border),
+    };
     let left = match state.connection {
         Some((label, connected)) => h_flex()
             .gap_1p5()
@@ -100,9 +113,9 @@ pub fn render(state: StatusBarState, cx: &App) -> impl IntoElement {
         .justify_between()
         .text_size(TEXT_XS)
         .text_color(theme.muted_foreground)
-        .bg(theme.status_bar)
+        .bg(background)
         .border_t_1()
-        .border_color(theme.status_bar_border)
+        .border_color(border)
         .child(left.flex_none())
         .child(
             h_flex()
@@ -120,4 +133,35 @@ pub fn render(state: StatusBarState, cx: &App) -> impl IntoElement {
                         .child(div().truncate().child(state.status)),
                 ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{Hsla, hsla};
+
+    use super::{StatusBarState, guard_tint};
+
+    fn state(read_only: bool, protected: bool, color: Option<Hsla>) -> StatusBarState {
+        StatusBarState {
+            connection: Some(("db".into(), true)),
+            color,
+            read_only,
+            protected,
+            transaction: None,
+            caret: None,
+            aggregate: None,
+            status: "".into(),
+            error: false,
+        }
+    }
+
+    // A read-only or ask-first connection, usually production, colours the bar. An ordinary one leaves it alone.
+    #[test]
+    fn only_a_guarded_connection_tints_the_bar() {
+        let red = hsla(0., 0.8, 0.6, 1.);
+        assert_eq!(guard_tint(&state(true, false, Some(red))), Some(red));
+        assert_eq!(guard_tint(&state(false, true, Some(red))), Some(red));
+        assert_eq!(guard_tint(&state(false, false, Some(red))), None);
+        assert_eq!(guard_tint(&state(true, true, None)), None);
+    }
 }

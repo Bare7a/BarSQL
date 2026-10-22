@@ -1052,6 +1052,22 @@ async fn a_failed_backup_keeps_the_older_file() {
     assert!(!leftovers.iter().any(|name| name.to_string_lossy().contains("barsql-partial")), "{leftovers:?}");
 }
 
+// A table view counts what its filter shows. The filter is checked as the page query checks it.
+#[tokio::test]
+async fn counting_follows_a_table_views_filter() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(
+        &id,
+        "CREATE TABLE n AS WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 40) SELECT i FROM s",
+    )
+    .await;
+    assert_eq!(f.app.count_matching(&id, "main", "n", "").await.unwrap(), 40);
+    assert_eq!(f.app.count_matching(&id, "main", "n", "i <= 15").await.unwrap(), 15);
+    assert!(f.app.count_matching(&id, "main", "n", "1=1; DELETE FROM n").await.is_err());
+    assert_eq!(f.app.count_rows(&id, "main", "n").await.unwrap(), 40, "nothing was deleted");
+}
+
 // Foreign keys are on, and a row can point at one restored after it.
 #[tokio::test]
 async fn a_self_referencing_table_restores_in_any_order() {

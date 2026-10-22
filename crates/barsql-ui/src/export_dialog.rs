@@ -14,7 +14,7 @@ use crate::form::{self, SelectMenu};
 use crate::grid::copy::{self, CopyTarget};
 use crate::grid::format_label;
 use crate::grid::{ExportSource, copy_format, set_copy_format};
-use crate::i18n::{count, t, t_with};
+use crate::i18n::{count, t, t_count, t_with};
 use crate::modal::{self, Modal};
 use crate::toast;
 use crate::tokens::TEXT_SM;
@@ -171,8 +171,7 @@ impl ExportDialog {
             }
             // A partial file stays on disk, so don't report it as a finished export.
             Ok(WriteOutcome { rows, cancelled: true }) => {
-                let message =
-                    t_with(cx, "toast.exportStopped", &[("fileName", file_name), ("count", &rows.to_string())]);
+                let message = t_count(cx, "toast.exportStopped", rows as i64, &[("fileName", file_name)]);
                 toast::error(message, cx);
             }
             Err(error) => {
@@ -300,15 +299,7 @@ impl Render for ExportDialog {
                 .mt(rems(0.308))
                 .text_size(TEXT_SM)
                 .text_color(cx.theme().muted_foreground)
-                .child(t_with(
-                    cx,
-                    "export.summary",
-                    &[
-                        ("rows", &target.rows.len().to_string()),
-                        ("cols", &target.columns.len().to_string()),
-                        ("format", &format_label(format, cx)),
-                    ],
-                ))
+                .child(summary(target.rows.len(), target.columns.len(), format, cx))
                 .into_any_element(),
             Some(done) => {
                 let total = target.rows.len();
@@ -328,6 +319,13 @@ impl Render for ExportDialog {
     }
 }
 
+// "Exporting 14 rows × 3 columns as CSV". Each count picks its own plural.
+fn summary(rows: usize, cols: usize, format: ExportFormat, cx: &App) -> SharedString {
+    let rows = t_count(cx, "export.rowCount", rows as i64, &[]);
+    let cols = t_count(cx, "export.columnCount", cols as i64, &[]);
+    t_with(cx, "export.summary", &[("rows", &rows), ("cols", &cols), ("format", &format_label(format, cx))])
+}
+
 // Last opened dialog, for scenarios to read.
 #[cfg(test)]
 pub(crate) struct Opened(pub WeakEntity<ExportDialog>);
@@ -339,9 +337,7 @@ impl Global for Opened {}
 impl ExportDialog {
     pub(crate) fn summary(&self, cx: &App) -> String {
         let target = self.target();
-        let format = format_label(copy_format(cx), cx);
-        let (rows, cols) = (target.rows.len().to_string(), target.columns.len().to_string());
-        t_with(cx, "export.summary", &[("rows", &rows), ("cols", &cols), ("format", &format)]).to_string()
+        summary(target.rows.len(), target.columns.len(), copy_format(cx), cx).to_string()
     }
 
     // Whether Selected can be picked, and whether it is.

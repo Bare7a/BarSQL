@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use barsql_app::{EditorSession, EditorTab, TableViewRef};
+use barsql_app::{DiagramRef, EditorSession, EditorTab, TableViewRef};
 use barsql_core::SavedQuery;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::{
@@ -50,6 +50,48 @@ fn end_of_text() -> &'static str {
 
 fn ids(session: &EditorSession) -> Vec<&str> {
     session.tabs.iter().map(|t| t.id.as_str()).collect()
+}
+
+// The ER diagram is a tab: the session brings it back, and opening it again goes to that tab.
+#[gpui_kit::test]
+fn the_er_diagram_is_a_tab_that_the_session_keeps(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let id = env.connection.id.clone();
+    let diagram = EditorTab {
+        id: "er".into(),
+        connection_id: id.clone(),
+        title: "ER diagram · main".into(),
+        diagram: Some(DiagramRef { schema: "main".into() }),
+        ..Default::default()
+    };
+    let session = EditorSession { tabs: vec![tab("a", &id, "SELECT 1"), diagram], active_tab: "er".into() };
+    env.bar.save_editor_session(session).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("er-diagram").is_some(), "the restored diagram is drawn");
+    let connection = env.connection.clone();
+    workspace.update_in(cx, |ws, window, cx| {
+        ws.activate(0, window, cx);
+        ws.open_diagram(connection, "main".into(), window, cx);
+    });
+    let (count, active) = cx.update(|_, cx| (workspace.read(cx).tabs.len(), workspace.read(cx).active));
+    assert_eq!((count, active), (2, 1), "opening it again goes back to its tab");
+    workspace.update(cx, |ws, cx| ws.save_session(cx));
+    let saved = env.bar.editor_session();
+    assert_eq!(saved.tabs[1].diagram.as_ref().map(|d| d.schema.as_str()), Some("main"));
+}
+
+// With no tab open, the main area is the way in: with a connection there, that's a query tab on it.
+#[gpui_kit::test]
+fn the_welcome_screen_opens_a_query_tab(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| workspace.read(cx).tabs.len()), 0);
+    let button = cx.debug_bounds("welcome-new-query").expect("the welcome screen offers a new query");
+    cx.simulate_click(button.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| workspace.read(cx).tabs.len()), 1);
 }
 
 #[gpui_kit::test]
@@ -146,8 +188,12 @@ fn saved_queries_open_linked_tabs_that_track_changes(cx: &mut TestAppContext) {
     cx.simulate_keystrokes(end_of_text());
     cx.simulate_input(" + 1");
     assert!(cx.update(|_, cx| tab.read(cx).is_dirty(cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("unsaved-tab-0").is_some(), "an unsaved tab shows a dot");
     cx.simulate_keystrokes(&format!("{}-s", modifier()));
     assert!(!cx.update(|_, cx| tab.read(cx).is_dirty(cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("unsaved-tab-0").is_none(), "saving clears it");
     assert_eq!(env.bar.list_saved_queries("")[0].sql, "SELECT 1 + 1");
     assert_eq!(cx.update(|_, cx| saved_queries::list(cx)[0].sql.clone()), "SELECT 1 + 1");
 
@@ -267,10 +313,10 @@ fn the_menus_tick_what_is_on(cx: &mut TestAppContext) {
     let (workspace, cx) = open(cx);
     let menus = |cx: &mut VisualTestContext| cx.update(|_, cx| cx.get_menus().unwrap_or_default());
     let current = menus(cx);
-    assert_eq!(checked(&current, "Dark theme"), Some(true));
+    assert_eq!(checked(&current, "Dark"), Some(true));
     assert_eq!(checked(&current, "English"), Some(true));
-    assert_eq!(checked(&current, "Toggle sidebar"), Some(true));
-    assert_eq!(checked(&current, "Toggle JSON viewer"), Some(false));
+    assert_eq!(checked(&current, "Sidebar"), Some(true));
+    assert_eq!(checked(&current, "JSON viewer"), Some(false));
 
     // Windows and Linux draw these in the title bar from GPUI Kit's copy.
     let drawn = |cx: &mut VisualTestContext| {
@@ -283,8 +329,8 @@ fn the_menus_tick_what_is_on(cx: &mut TestAppContext) {
 
     workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(crate::actions::ToggleSidebar), cx));
     cx.run_until_parked();
-    assert_eq!(checked(&menus(cx), "Toggle sidebar"), Some(false));
-    assert_eq!(checked(&drawn(cx), "Toggle sidebar"), Some(false));
+    assert_eq!(checked(&menus(cx), "Sidebar"), Some(false));
+    assert_eq!(checked(&drawn(cx), "Sidebar"), Some(false));
     if cfg!(target_os = "macos") {
         assert!(menus(cx).iter().any(|menu| menu.name.as_ref() == "Window"), "AppKit's Window menu");
     }
@@ -326,7 +372,7 @@ fn a_closed_table_view_reopens_with_its_filter_and_sort(cx: &mut TestAppContext)
     });
     let table = cx.update(|_, cx| match &workspace.read(cx).tabs.last().unwrap().view {
         super::TabView::Table(table) => table.clone(),
-        super::TabView::Query(_) => panic!("a table view"),
+        _ => panic!("a table view"),
     });
     crate::test_support::settle(cx, |cx| cx.update(|_, cx| table.read(cx).is_loaded()));
     table.update_in(cx, |table, window, cx| table.sort_by(1, window, cx));

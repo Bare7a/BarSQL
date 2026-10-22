@@ -15,6 +15,7 @@ pub mod schema_diff;
 pub mod split;
 pub mod sql_text;
 pub mod system_views;
+pub mod type_name;
 
 pub use dialect::Dialect;
 pub use explain::{
@@ -29,3 +30,4 @@ pub use quote::{
 pub use readonly::{READ_ONLY_ERROR, assert_read_only, is_read_only, unbounded_writes, validate_table_filter};
 pub use split::{Statement, split_statement_texts, split_statements};
 pub use sql_text::{first_keyword, strip_leading_comments, to_upper};
+pub use type_name::display_type;

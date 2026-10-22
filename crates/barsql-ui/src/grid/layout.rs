@@ -17,6 +17,15 @@ fn utf16_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
+// A plain decimal's point and the digits after it, so a column's numbers can line their points up. Zero for an
+// integer, or for a form like 1.5e-7 that doesn't end in its fraction.
+pub fn fraction_len(text: &str) -> usize {
+    match text.find('.') {
+        Some(dot) if text[dot + 1..].bytes().all(|b| b.is_ascii_digit()) => text.len() - dot,
+        _ => 0,
+    }
+}
+
 // Longest of the header plus chevron and the sampled values, padded and clamped to 8..=50 ch.
 pub fn auto_width_ch<'a>(header: &str, sample: impl IntoIterator<Item = Option<&'a str>>) -> usize {
     let mut longest = utf16_len(header) + COL_HEADER_ICON_CH;
@@ -40,6 +49,14 @@ mod tests {
         assert_eq!(auto_width_ch("col", [Some("x".repeat(200).as_str())]), 50);
         assert_eq!(auto_width_ch("hello", []), 12);
         assert_eq!(auto_width_ch("id", [None, None]), 9);
+    }
+
+    #[test]
+    fn a_fraction_runs_from_the_point_of_a_plain_decimal() {
+        let cases = [("133.28571428571428", 15), ("130", 0), ("0.5", 2), ("-12.25", 3), ("130.", 1), ("1.5e-7", 0)];
+        for (text, want) in cases {
+            assert_eq!(fraction_len(text), want, "{text}");
+        }
     }
 
     #[test]

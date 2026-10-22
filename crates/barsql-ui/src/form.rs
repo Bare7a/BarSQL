@@ -318,6 +318,65 @@ pub fn caption(text: impl Into<SharedString>, cx: &App) -> Div {
     div().text_size(TEXT_XS).font_semibold().text_color(cx.theme().muted_foreground).child(text.to_uppercase())
 }
 
+// A shortcut on a key cap, as the tips and the empty states show them.
+pub fn keycap(keys: impl Into<SharedString>, cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .flex_none()
+        .px(rems(0.615))
+        .py(rems(0.154))
+        .rounded(RADIUS_SM)
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .font_family(theme.mono_font_family.clone())
+        .text_size(TEXT_XS)
+        .text_center()
+        .child(keys.into())
+}
+
+// "Ctrl+Shift+P" is three keys, and "Ctrl++" two, the second the plus key. macOS glyphs like "⌘⇧P" stay as one.
+fn key_parts(shortcut: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut rest = shortcut;
+    while !rest.is_empty() {
+        // A + that starts what's left is the key itself, not a separator.
+        match rest.find('+').filter(|&ix| ix > 0) {
+            Some(ix) => {
+                parts.push(&rest[..ix]);
+                rest = &rest[ix + 1..];
+            }
+            None => {
+                parts.push(rest);
+                break;
+            }
+        }
+    }
+    parts
+}
+
+// Shortcuts under each other, for an empty pane where they are the next step, as an editor's empty page lists them:
+// what each does on the left, its keys on the right. A shortcut without keys is left out.
+pub fn shortcut_hints(hints: impl IntoIterator<Item = (String, SharedString)>, cx: &App) -> Div {
+    let hints: Vec<(String, SharedString)> = hints.into_iter().filter(|(keys, _)| !keys.is_empty()).collect();
+    let muted = cx.theme().muted_foreground;
+    // Both columns share a row height, so each label stays level with its keys.
+    let row = || h_flex().h(rems(1.846));
+    let keys = |shortcut: &str| {
+        row().gap(rems(0.308)).children(key_parts(shortcut).into_iter().enumerate().flat_map(|(ix, key)| {
+            let plus = (ix > 0).then(|| div().child("+").into_any_element());
+            plus.into_iter().chain([keycap(key.to_string(), cx).into_any_element()])
+        }))
+    };
+    h_flex()
+        .items_start()
+        .gap(rems(1.231))
+        .text_size(TEXT_SM)
+        .text_color(muted)
+        .child(v_flex().items_end().children(hints.iter().map(|(_, label)| row().child(label.clone()))))
+        .child(v_flex().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut))))
+}
+
 pub fn empty_state(icon: Option<Icon>, text: impl Into<SharedString>, cx: &App) -> Div {
     v_flex()
         .p_4()
@@ -338,8 +397,17 @@ mod tests {
         TestAppContext, Window, div, px,
     };
 
-    use super::SelectMenu;
+    use super::{SelectMenu, key_parts};
     use crate::test_support::Env;
+
+    #[test]
+    fn a_shortcut_splits_into_its_keys() {
+        assert_eq!(key_parts("Ctrl+Shift+P"), ["Ctrl", "Shift", "P"]);
+        assert_eq!(key_parts("Ctrl+Enter"), ["Ctrl", "Enter"]);
+        assert_eq!(key_parts("Ctrl++"), ["Ctrl", "+"], "the plus key itself");
+        assert_eq!(key_parts("F12"), ["F12"]);
+        assert_eq!(key_parts("⌘⇧P"), ["⌘⇧P"], "macOS glyphs stay one cap");
+    }
 
     struct WideSelect;
 

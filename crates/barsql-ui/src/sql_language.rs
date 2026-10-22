@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use barsql_core::DriverType;
+use barsql_sql::display_type;
 use barsql_sql::lang::quoting::{column_cache_key, format_sql_identifier};
 use barsql_sql::lang::suggestions::{match_score, rank};
 use barsql_sql::lang::{
@@ -232,7 +233,10 @@ impl CompletionProvider for FilterCompletion {
             .iter()
             .filter_map(|(name, data_type)| {
                 let score = match_score(name, &prefix)?;
-                let detail = if data_type.is_empty() { labels.column.clone() } else { data_type.clone() };
+                let detail = match data_type.is_empty() {
+                    true => labels.column.clone(),
+                    false => display_type(self.driver.dialect(), data_type),
+                };
                 let insert = format_sql_identifier(name, &self.driver);
                 Some(item(name, CompletionItemKind::FIELD, Some(detail), rank(0, score, name), insert))
             })

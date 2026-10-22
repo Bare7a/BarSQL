@@ -1,35 +1,20 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::form;
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::shortcuts::{self, Binding};
-use crate::tokens::{RADIUS_SM, TEXT_BASE, TEXT_XS};
+use crate::tokens::TEXT_BASE;
 
 fn tip(keys: Option<String>, text: SharedString, cx: &App) -> impl IntoElement + use<> {
-    let theme = cx.theme();
     h_flex()
         .items_start()
         .gap(rems(0.769))
         .py(rems(0.385))
         .text_size(TEXT_BASE)
-        .children(keys.map(|keys| {
-            div()
-                .flex_none()
-                .min_w(rems(4.5 * 0.846))
-                .px(rems(0.615))
-                .py(rems(0.154))
-                .rounded(RADIUS_SM)
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.background)
-                .font_family(theme.mono_font_family.clone())
-                .text_size(TEXT_XS)
-                .text_center()
-                .child(keys)
-        }))
+        .children(keys.map(|keys| form::keycap(keys, cx).min_w(rems(4.5 * 0.846))))
         .child(div().flex_1().min_w_0().child(text))
 }
 

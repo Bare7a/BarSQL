@@ -18,6 +18,8 @@ pub struct ErTable {
     pub name: String,
     // Keys first: primary, then foreign, then the rest in their own order.
     pub columns: Vec<ColumnInfo>,
+    // A view, drawn with its own icon and a dashed border.
+    pub view: bool,
 }
 
 impl ErTable {
@@ -27,7 +29,7 @@ impl ErTable {
             (false, true) => 1,
             _ => 2,
         });
-        Self { name, columns }
+        Self { name, columns, view: false }
     }
 
     // The columns its box lists: all of them, or only the keys.

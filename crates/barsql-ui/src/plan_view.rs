@@ -11,7 +11,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::form::{self, ToolButton as _};
-use crate::i18n::{I18n, t, t_with};
+use crate::i18n::{I18n, t, t_count, t_with};
 use crate::plan_tree::{
     Metric, PlanRow, available_metrics, collect_parent_keys, default_metric, flatten, format_cost, format_factor,
     format_ms, format_rows, is_estimate_off,
@@ -47,6 +47,8 @@ pub struct PlanView {
     collapsed: HashSet<String>,
     selected: Option<String>,
     raw: bool,
+    // Whether the details show the fields at zero or false too.
+    all_fields: bool,
     focus: FocusHandle,
     scroll: ScrollHandle,
     details_scroll: ScrollHandle,
@@ -62,6 +64,7 @@ impl PlanView {
             collapsed: HashSet::new(),
             selected: Some("0".into()),
             raw: false,
+            all_fields: false,
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             details_scroll: ScrollHandle::new(),
@@ -422,7 +425,7 @@ impl PlanView {
         .item(PopupMenuItem::new(t(cx, "results.planCopy")).on_click(run(Box::new(|view, cx| view.copy_raw(cx)))))
     }
 
-    fn details(&self, node: &PlanNode, cx: &App) -> AnyElement {
+    fn details(&self, node: &PlanNode, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let lang = cx.global::<I18n>().lang();
         let mut stats: Vec<(SharedString, String)> = Vec::new();
@@ -453,8 +456,28 @@ impl PlanView {
                     )
             }))
         };
-        let fields: Vec<(SharedString, String)> =
-            node.fields.iter().map(|field| (field.key.clone().into(), field.value.clone())).collect();
+        let fields: Vec<(SharedString, String)> = node
+            .fields
+            .iter()
+            .filter(|field| self.all_fields || !quiet(&field.value))
+            .map(|field| (field.key.clone().into(), field.value.clone()))
+            .collect();
+        let hidden = node.fields.iter().filter(|field| quiet(&field.value)).count();
+        let more = (hidden > 0).then(|| {
+            let label = match self.all_fields {
+                true => t(cx, "results.planHideQuiet"),
+                false => t_count(cx, "results.planShowQuiet", hidden as i64, &[]),
+            };
+            Button::new("plan-quiet-fields")
+                .debug_selector(|| "plan-quiet-fields".into())
+                .ghost()
+                .xsmall()
+                .label(label)
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.all_fields = !view.all_fields;
+                    cx.notify();
+                }))
+        });
         let details = v_flex()
             .id("plan-details")
             .debug_selector(|| "plan-details".into())
@@ -502,8 +525,17 @@ impl PlanView {
                 )
             })
             .when(!stats.is_empty(), |el| el.child(grid(stats, false)))
-            .when(!fields.is_empty(), |el| {
-                el.child(div().pt(rems(0.769)).border_t_1().border_color(theme.border).child(grid(fields, true)))
+            .when(!fields.is_empty() || more.is_some(), |el| {
+                el.child(
+                    v_flex()
+                        .items_start()
+                        .gap(rems(0.462))
+                        .pt(rems(0.769))
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .child(grid(fields, true))
+                        .children(more),
+                )
             });
         div()
             .relative()
@@ -514,6 +546,16 @@ impl PlanView {
             .hover_scrollbar(&self.details_scroll, ScrollbarAxis::Vertical)
             .into_any_element()
     }
+}
+
+// A field that only says nothing happened: no blocks hit, a feature off. They wait behind Show more, so the few that
+// matter stand out.
+fn quiet(value: &str) -> bool {
+    let value = value.trim();
+    // 0, 0.0 or 0.000: nothing but zeros and one point.
+    let zero =
+        value.starts_with('0') && value.bytes().all(|b| b == b'0' || b == b'.') && value.matches('.').count() <= 1;
+    value.is_empty() || value == "false" || zero
 }
 
 #[cfg(test)]
@@ -682,8 +724,18 @@ mod tests {
     use barsql_sql::plan::PlanNode;
     use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
-    use super::{PlanView, Step};
+    use super::{PlanView, Step, quiet};
     use crate::test_support::Env;
+
+    #[test]
+    fn fields_that_only_say_nothing_happened_are_quiet() {
+        for value in ["0", "0.0", "0.000", "false", "", " "] {
+            assert!(quiet(value), "{value:?}");
+        }
+        for value in ["24", "0.038", "Inner", "(score > 10)", "true", "-1", "00:01"] {
+            assert!(!quiet(value), "{value:?}");
+        }
+    }
 
     fn plan() -> QueryPlan {
         let node =

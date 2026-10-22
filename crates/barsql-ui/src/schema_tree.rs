@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, ObjectKind, ObjectRef, TableInfo};
 use barsql_sql::alter::ConstraintKind;
+use barsql_sql::display_type;
 use barsql_sql::dml::preview_select;
 use barsql_sql::lang::quoting::build_qualified_table;
 use barsql_sql::system_views::{ViewScope, views};
@@ -59,6 +60,8 @@ pub enum SchemaTreeEvent {
     // `run` runs it as soon as its tab opens, as the system views do.
     OpenQuery { sql: String, title: String, run: bool },
     Browse { schema: String, table: String },
+    // The ER diagram of a schema, in its own tab.
+    OpenDiagram { schema: String },
     // SQL for another connection, like a schema comparison's sync script. Opens without running.
     OpenScript { connection: Box<ConnectionConfig>, sql: String, title: String },
     // Connect button succeeded for this connection id, so land in a tab for it.
@@ -75,12 +78,15 @@ pub enum TableChange {
     Altered,
 }
 
-pub fn column_matches(column: &ColumnInfo, needle: &str) -> bool {
-    format!("{} {}", column.name, column.data_type).to_lowercase().contains(needle)
+// The type as shown and as the catalog spells it, so `varchar` and `character varying` both find a column.
+pub fn column_matches(driver: &DriverType, column: &ColumnInfo, needle: &str) -> bool {
+    let shown = display_type(driver.dialect(), &column.data_type);
+    format!("{} {} {shown}", column.name, column.data_type).to_lowercase().contains(needle)
 }
 
-pub fn table_matches(name: &str, columns: Option<&[ColumnInfo]>, needle: &str) -> bool {
-    name.to_lowercase().contains(needle) || columns.is_some_and(|cols| cols.iter().any(|c| column_matches(c, needle)))
+pub fn table_matches(driver: &DriverType, name: &str, columns: Option<&[ColumnInfo]>, needle: &str) -> bool {
+    name.to_lowercase().contains(needle)
+        || columns.is_some_and(|cols| cols.iter().any(|c| column_matches(driver, c, needle)))
 }
 
 enum GroupState {
@@ -454,8 +460,8 @@ impl SchemaTree {
                 .iter()
                 .filter(|t| {
                     let schema_name = if t.schema.is_empty() { &sch.name } else { &t.schema };
-                    needle.is_empty()
-                        || table_matches(&t.name, data.columns(schema_name, &t.name).map(|c| c.as_slice()), needle)
+                    let columns = data.columns(schema_name, &t.name).map(|c| c.as_slice());
+                    needle.is_empty() || table_matches(&conn.driver, &t.name, columns, needle)
                 })
                 .collect();
             if !needle.is_empty() && visible.is_empty() && !loading {
@@ -504,7 +510,8 @@ impl SchemaTree {
         let loading = data.is_some_and(|d| d.columns_loading(schema_name, &table.name));
         let needle = self.needle.as_str();
         let name_matches = needle.is_empty() || table.name.to_lowercase().contains(needle);
-        let column_hit = !needle.is_empty() && columns.is_some_and(|c| c.iter().any(|col| column_matches(col, needle)));
+        let matches = |column: &ColumnInfo| column_matches(&conn.driver, column, needle);
+        let column_hit = !needle.is_empty() && columns.is_some_and(|c| c.iter().any(matches));
         let tk = format!("{}:{schema_name}:{}", conn.id, table.name);
         let expanded = self.expanded_tables.get(&tk) == Some(&true)
             || (!needle.is_empty() && !name_matches && (column_hit || loading));
@@ -519,7 +526,7 @@ impl SchemaTree {
         }
         let shown: Vec<&ColumnInfo> = match columns {
             Some(cols) if name_matches => cols.iter().collect(),
-            Some(cols) => cols.iter().filter(|c| column_matches(c, needle)).collect(),
+            Some(cols) => cols.iter().filter(|c| matches(c)).collect(),
             None => Vec::new(),
         };
         if loading {
@@ -536,7 +543,7 @@ impl SchemaTree {
                     depth: 2,
                     kind: RowKind::Column {
                         column: column.clone(),
-                        matched: !needle.is_empty() && column_matches(column, needle),
+                        matched: !needle.is_empty() && matches(column),
                         schema: schema_name.to_string(),
                         table: table.name.clone(),
                         view,
@@ -800,8 +807,8 @@ impl SchemaTree {
             };
             let diagram = {
                 let (this, name) = (this.clone(), name.clone());
-                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let _ = this.update(cx, |tree, cx| tree.open_er_diagram(name.clone(), window, cx));
+                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    let _ = this.update(cx, |tree, cx| tree.open_er_diagram(name.clone(), cx));
                 }
             };
             let compare = {
@@ -820,15 +827,11 @@ impl SchemaTree {
         }
     }
 
-    // A table picked in the diagram opens as a table view.
-    pub(crate) fn open_er_diagram(&mut self, schema: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(connection) = &self.connection else { return };
-        let this = cx.entity().downgrade();
-        let name = schema.clone();
-        crate::er_diagram::open(connection.id.clone(), schema, window, cx, move |table, _, cx| {
-            let schema = name.clone();
-            let _ = this.update(cx, |_, cx| cx.emit(SchemaTreeEvent::Browse { schema, table }));
-        });
+    // The diagram opens in a tab of its own, on the workspace's side.
+    pub(crate) fn open_er_diagram(&mut self, schema: String, cx: &mut Context<Self>) {
+        if self.connection.is_some() {
+            cx.emit(SchemaTreeEvent::OpenDiagram { schema });
+        }
     }
 
     // The sync script opens in a tab of the compared connection.
@@ -1191,9 +1194,16 @@ impl SchemaTree {
             RowKind::Column { column, matched, schema, table, view } => {
                 let menu = self.column_menu(schema, table, column.name.clone(), view, column.is_primary, cx);
                 let insert = column.name.clone();
+                let dialect = self.connection.as_ref().and_then(|c| c.driver.dialect());
+                // Keys look as they do in the ER diagram and the grid's headers: a gold key, a blue link.
+                let (key_icon, key_color) = match (column.is_primary, column.is_foreign) {
+                    (true, _) => (Lucide::KeyRound, theme.warning),
+                    (false, true) => (Lucide::Link, theme.primary),
+                    _ => (Lucide::Columns3, muted),
+                };
                 column_row(clickable(base))
                     .when(matched, |el| el.bg(theme.primary.opacity(TINT)))
-                    .child(icon(Lucide::Columns3))
+                    .child(Icon::new(key_icon).size(ICON_SM).text_color(key_color))
                     .child(
                         mono(div())
                             .flex_1()
@@ -1202,10 +1212,12 @@ impl SchemaTree {
                             .text_color(if matched { theme.primary } else { theme.foreground })
                             .child(column.name.clone()),
                     )
-                    .when(column.is_primary, |el| el.child(badge(t(cx, "sidebar.pk"), theme.primary)))
-                    .when(column.is_foreign, |el| el.child(badge(t(cx, "sidebar.fk"), theme.warning)))
                     .child(
-                        mono(div()).flex_none().text_size(TEXT_2XS).text_color(muted).child(column.data_type.clone()),
+                        mono(div())
+                            .flex_none()
+                            .text_size(TEXT_2XS)
+                            .text_color(muted)
+                            .child(display_type(dialect, &column.data_type)),
                     )
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(SchemaTreeEvent::Insert(insert.clone()))))
                     .context_menu(menu)
@@ -1225,8 +1237,8 @@ impl SchemaTree {
             RowKind::Object { row, group, schema, table } => {
                 let menu = self.object_menu(&row, schema, table, cx);
                 let badge_color = match row.badge {
-                    Some(Badge::Pk) => theme.primary,
-                    Some(Badge::Fk | Badge::Check) => theme.warning,
+                    Some(Badge::Pk) => theme.warning,
+                    Some(Badge::Fk) => theme.primary,
                     Some(Badge::Unique) => theme.success,
                     _ => muted,
                 };

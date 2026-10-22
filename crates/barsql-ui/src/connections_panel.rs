@@ -8,7 +8,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -475,31 +475,30 @@ impl ConnectionsPanel {
                 self.nav
                     .hover_actions(group, LIST_INSET, rems(0.), window, cx)
                     .child(
-                        Button::new(SharedString::from(format!("connect-{}", connection.id)))
-                            .small()
-                            .debug_selector({
-                                let id = connection.id.clone();
-                                move || format!("connect-{id}")
-                            })
-                            .icon(Icon::new(if connected { Lucide::Unplug } else { Lucide::Plug }))
-                            .tooltip(t(cx, if connected { "tooltip.disconnect" } else { "tooltip.connect" }))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                if connected {
-                                    this.disconnect(toggle.clone(), cx)
-                                } else {
-                                    this.connect(toggle.clone(), window, cx)
-                                }
-                            })),
+                        list_nav::row_button(
+                            SharedString::from(format!("connect-{}", connection.id)),
+                            if connected { Lucide::Unplug } else { Lucide::Plug },
+                        )
+                        .debug_selector({
+                            let id = connection.id.clone();
+                            move || format!("connect-{id}")
+                        })
+                        .tooltip(t(cx, if connected { "tooltip.disconnect" } else { "tooltip.connect" }))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            if connected {
+                                this.disconnect(toggle.clone(), cx)
+                            } else {
+                                this.connect(toggle.clone(), window, cx)
+                            }
+                        })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("edit-{}", connection.id)))
-                            .small()
+                        list_nav::row_button(SharedString::from(format!("edit-{}", connection.id)), Lucide::SquarePen)
                             .debug_selector({
                                 let id = connection.id.clone();
                                 move || format!("edit-{id}")
                             })
-                            .icon(Icon::new(Lucide::SquarePen))
                             .tooltip(t(cx, "common.edit"))
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 cx.stop_propagation();
@@ -507,15 +506,13 @@ impl ConnectionsPanel {
                             })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("delete-{}", connection.id)))
-                            .small()
+                        list_nav::row_button(SharedString::from(format!("delete-{}", connection.id)), Lucide::Trash)
                             .danger()
                             .outline()
                             .debug_selector({
                                 let id = connection.id.clone();
                                 move || format!("delete-{id}")
                             })
-                            .icon(Icon::new(Lucide::Trash))
                             .tooltip(t(cx, "common.delete"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();

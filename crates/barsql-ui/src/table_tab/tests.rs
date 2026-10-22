@@ -4,7 +4,7 @@ use std::rc::Rc;
 use barsql_app::{EditorTab, TableViewRef};
 use barsql_core::Value;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext};
+use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
 
 use super::{TableTab, TableTabEvent};
 use crate::grid::GridEvent;
@@ -75,6 +75,42 @@ fn tables_load_a_page_then_more_on_request(cx: &mut TestAppContext) {
     settle(cx, idle(&view));
     assert_eq!(rows(&view, cx), 200);
     assert_eq!(cell(&view, 150, 0, cx).as_deref(), Some("151"));
+}
+
+fn label(view: &Entity<TableTab>, cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| view.read(cx).status(cx).0.to_string())
+}
+
+// A table that loaded whole says how many rows it has. One with more pages offers to count them, filter and all,
+// and a new filter forgets the count.
+#[gpui_kit::test]
+fn the_row_count_says_how_big_the_table_is(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    assert_eq!(label(&view, cx), "100 rows loaded");
+    cx.run_until_parked();
+    let link = cx.debug_bounds("count-rows").expect("a table with more pages offers Count all");
+    cx.simulate_click(link.center(), Modifiers::none());
+    settle(cx, |cx| label(&view, cx) != "100 rows loaded");
+    assert_eq!(label(&view, cx), "100 of 3,000 rows");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("count-rows").is_none(), "a counted table doesn't offer it again");
+
+    view.update_in(cx, |view, window, cx| {
+        view.filter.update(cx, |state, cx| state.set_value("id > 2960", window, cx));
+        view.apply_filter(window, cx);
+    });
+    settle(cx, idle(&view));
+    assert_eq!(label(&view, cx), "40 rows", "all of them are loaded");
+    view.update_in(cx, |view, window, cx| {
+        view.filter.update(cx, |state, cx| state.set_value("id > 2800", window, cx));
+        view.apply_filter(window, cx);
+    });
+    settle(cx, idle(&view));
+    assert_eq!(label(&view, cx), "100 rows loaded", "a new filter forgets the count");
+    view.update(cx, |view, cx| view.count_total(cx));
+    settle(cx, |cx| label(&view, cx) != "100 rows loaded");
+    assert_eq!(label(&view, cx), "100 of 200 rows");
 }
 
 #[gpui_kit::test]

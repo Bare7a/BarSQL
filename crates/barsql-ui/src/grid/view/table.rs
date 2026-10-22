@@ -27,6 +27,10 @@ impl Grid {
         self.dialect = dialect;
     }
 
+    pub fn dialect(&self) -> Option<barsql_core::SqlDialect> {
+        self.dialect
+    }
+
     pub(super) fn staged(&self) -> Option<Staged> {
         self.overlay.as_ref().map(|overlay| overlay.staged.clone())
     }
@@ -59,6 +63,7 @@ impl Grid {
             self.hidden.clear();
             self.columns = (0..count).collect();
             self.widths = vec![Width::Ch(0); count];
+            self.fractions = vec![0; count];
             self.user_sized.clear();
             self.sampled = None;
             self.selection = Default::default();

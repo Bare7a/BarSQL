@@ -192,13 +192,19 @@ impl BarApp {
         within(SCHEMA_TIMEOUT, engine.object_ddl(object)).await
     }
 
-    // Own session and no deadline, since counting a big table takes a while. A disconnect cancels it.
     pub async fn count_rows(&self, id: &str, schema: &str, table: &str) -> Result<i64, QueryError> {
+        self.count_matching(id, schema, table, "").await
+    }
+
+    // Own session and no deadline, since counting a big table takes a while. A disconnect cancels it. `filter` is a
+    // table view's WHERE condition, checked as its page query checks it.
+    pub async fn count_matching(&self, id: &str, schema: &str, table: &str, filter: &str) -> Result<i64, QueryError> {
         let key = format!("count:{id}:{schema}.{table}");
         let (job, cancel) = self.inner.jobs.start(&key, id);
         let result = async {
             let engine = self.engine(id).await?;
-            let sql = barsql_sql::dml::build_count(&engine.driver(), schema, table);
+            barsql_sql::validate_table_filter(&engine.driver(), filter).map_err(QueryError::message)?;
+            let sql = barsql_sql::dml::build_count(&engine.driver(), schema, table, filter);
             let mut session = engine.session().await?;
             let result = session.buffered(&sql, &cancel).await?;
             result.text(0, 0).and_then(|count| count.parse().ok()).ok_or_else(|| QueryError::message("no row count"))

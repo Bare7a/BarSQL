@@ -97,7 +97,7 @@ fn a_csv_loads_into_an_existing_table_counting_rows_against_the_file(cx: &mut Te
     browse(&mut app, &path);
     let state = shown(&mut app);
     assert_eq!((state.path.as_str(), state.preview_rows), (path.to_str().unwrap(), Some(1200)));
-    assert_eq!(import(&mut app), (1200, 0), "Imported 1,200 row(s), skipped 0");
+    assert_eq!(import(&mut app), (1200, 0), "Imported 1,200 rows, skipped 0");
     assert!(shown(&mut app).can_run, "Import is enabled again");
     assert_eq!(app.query("SELECT count(*) FROM e2e_import_run")[0][0], barsql_core::Value::Int(1200));
 }
