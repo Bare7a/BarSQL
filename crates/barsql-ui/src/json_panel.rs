@@ -22,8 +22,7 @@ use crate::tokens::{ICON_SM, TINT_BORDER};
 use crate::{theme, toast};
 
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
-// Showing a row lays out every line of its JSON again. After a row that took SLOW_SHOW or longer, the next ones wait
-// for the focus to rest for SETTLE, so a held arrow key moves the grid instead of queueing behind the viewer.
+// Rows wait for the focus to rest for SETTLE after one took SLOW_SHOW to lay out, so held arrow keys keep up.
 const SLOW_SHOW: Duration = Duration::from_millis(8);
 const SETTLE: Duration = Duration::from_millis(100);
 const HIDE_NULLS_KEY: &str = "barsql-json-hide-nulls";
@@ -31,7 +30,6 @@ const HIDE_NULLS_KEY: &str = "barsql-json-hide-nulls";
 // Filters by key or value. Wrapping the filter in slashes makes it a regex.
 pub struct JsonPanel {
     row: Option<RowRef>,
-    // The row asked for last while `settling`, shown when it ends.
     next: Option<Option<RowRef>>,
     settling: Option<Task<()>>,
     filter: Entity<InputState>,
@@ -43,7 +41,7 @@ pub struct JsonPanel {
     matched: bool,
     hide_nulls: bool,
     debounce: Option<Task<()>>,
-    // SLOW_SHOW, which tests lower.
+    // Tests lower it.
     slow_show: Duration,
     _subscriptions: Vec<Subscription>,
 }
@@ -92,7 +90,6 @@ impl JsonPanel {
         self.refresh(window, cx);
     }
 
-    // Each row asked for meanwhile starts the wait again, so only the one the focus rests on shows.
     fn settle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settling = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(SETTLE).await;
@@ -308,7 +305,7 @@ mod tests {
         RowRef { set, row: 0, columns: vec![0, 1], number: 1 }
     }
 
-    // Row `number` of three, each holding its own number as `id`.
+    // Row `number` of ids 1 to 3.
     fn numbered(number: usize) -> RowRef {
         let columns: Arc<[ColumnMeta]> = [ColumnMeta { name: "id".into(), type_name: "INT".into() }].into();
         let mut builder = ChunkBuilder::new(1, 3);
@@ -325,13 +322,11 @@ mod tests {
         panel.read_with(cx, |panel, _| panel.text().map(str::to_string))
     }
 
-    // An arrow key held down over wide rows: each row the focus passes would take longer to show than the key takes
-    // to repeat.
     #[gpui_kit::test]
     fn rows_after_a_slow_one_wait_for_the_focus_to_rest(cx: &mut TestAppContext) {
         let _env = Env::new(cx);
         let (panel, cx) = cx.add_window_view(JsonPanel::new);
-        // The test clock stands still while a row shows, so any time counts as slow.
+        // A show takes no time on the test clock, so only zero counts it as slow.
         panel.update(cx, |panel, _| panel.slow_show = Duration::ZERO);
         let show = |number, cx: &mut VisualTestContext| {
             panel.update_in(cx, |panel, window, cx| panel.show(Some(numbered(number)), window, cx))
