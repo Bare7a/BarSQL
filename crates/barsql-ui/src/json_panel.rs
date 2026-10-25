@@ -18,7 +18,7 @@ use crate::grid::RowRef;
 use crate::i18n::{I18n, count, t, t_with};
 use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::state::{set_setting_bool, setting_bool};
-use crate::tokens::{ICON_SM, TEXT_XS, TINT_BORDER};
+use crate::tokens::{ICON_SM, TINT_BORDER};
 use crate::{theme, toast};
 
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -147,13 +147,11 @@ impl Render for JsonPanel {
             .justify_between()
             .border_b_1()
             .border_color(theme.border)
-            .child(
-                h_flex().min_w_0().gap(rems(0.615)).child(form::caption(t(cx, "jsonViewer.title"), cx)).children(
-                    number.map(|number| {
-                        div().truncate().text_size(TEXT_XS).text_color(theme.muted_foreground).child(number)
-                    }),
-                ),
-            )
+            .child(h_flex().min_w_0().gap(rems(0.615)).child(form::caption(t(cx, "jsonViewer.title"), cx)).children(
+                number.map(|number| {
+                    form::badge(number.to_uppercase(), theme.foreground).font_family(theme.mono_font_family.clone())
+                }),
+            ))
             .child(
                 h_flex()
                     .flex_none()
