@@ -10,6 +10,11 @@ use barsql_db::{Cancel, Cell, Engine, ScriptEvent, Session};
 use barsql_sql::split_statement_texts;
 use serde_json::{Map, Value as Json, json};
 
+// "kind: like, love" for each column, so a test reads the values the catalog found at a glance.
+pub fn column_values(columns: &[barsql_core::ColumnInfo]) -> Vec<String> {
+    columns.iter().map(|c| format!("{}: {}", c.name, c.enum_values.join(", "))).collect()
+}
+
 // Fixtures share one schema per engine, so their tests take turns.
 pub async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

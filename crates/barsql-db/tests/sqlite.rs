@@ -154,6 +154,24 @@ async fn only_the_rowid_alias_is_an_identity() {
     }
 }
 
+// SQLite has no enum type, so a CHECK that lists the values stands in for one, on the column or the table.
+#[tokio::test]
+async fn a_check_that_lists_values_gives_the_column_its_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("checks.db"), false).await;
+    exec(
+        &engine,
+        "CREATE TABLE reactions (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('like', 'love')), \
+         stars INT, note TEXT CHECK (length(note) < 100), CONSTRAINT star_list CHECK (stars = 1 OR stars = 2))",
+    )
+    .await;
+    let columns = engine.list_columns("main", "reactions").await.unwrap();
+    assert_eq!(common::column_values(&columns), ["id: ", "kind: like, love", "stars: 1, 2", "note: "]);
+    exec(&engine, "CREATE VIEW reacted AS SELECT kind FROM reactions").await;
+    let columns = engine.list_columns("main", "reacted").await.unwrap();
+    assert_eq!(common::column_values(&columns), ["kind: "], "a view has no checks of its own");
+}
+
 // Earlier rows hold the values a wrong lookup would find, like a stale last_insert_rowid or a shadowed table's.
 #[tokio::test]
 async fn an_insert_returns_the_row_it_stored() {

@@ -286,15 +286,137 @@ fn a_cursor_added_below_types_on_both_lines(cx: &mut TestAppContext) {
     assert_eq!(app.sql(), "Xab\nXcd");
 }
 
+// The card says what failed, so the status bar doesn't repeat it.
 #[gpui_kit::test]
-fn a_failing_query_shows_its_error_card_and_marks_the_status_bar(cx: &mut TestAppContext) {
+fn a_failing_query_shows_its_error_card(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();
     app.run("SELECT * FROM definitely_missing_table_e2e;");
-    assert!(app.status_is_error());
     let error = app.error().expect("an error card");
     assert!(error.message.contains("definitely_missing_table_e2e"), "{}", error.message);
     assert!(error.info.is_some());
+    assert_eq!(app.status_bar().live, None);
+}
+
+// The status bar speaks for what has the focus: the editor's caret, or the grid's selection. Never both.
+#[gpui_kit::test]
+fn the_status_bar_follows_the_focus(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS n UNION ALL SELECT 2;");
+    let shown = |app: &mut Driver| {
+        let status = app.status_bar();
+        (status.caret.is_some(), status.aggregate.is_some())
+    };
+    let tab = app.tab();
+    let focus_editor =
+        |app: &mut Driver| app.cx.update(|window, cx| tab.update(cx, |tab, cx| tab.focus_editor(window, cx)));
+    focus_editor(&mut app);
+    assert_eq!(shown(&mut app), (true, false), "the editor");
+    let grid = app.grid().expect("a grid");
+    let header = app.grid_point(&grid, |grid| grid.header_point(0));
+    app.click_at(header, Modifiers::none());
+    assert_eq!(shown(&mut app), (false, true), "the grid");
+    focus_editor(&mut app);
+    assert_eq!(shown(&mut app), (true, false), "the editor again, though the column is still selected");
+}
+
+// Only what's happening now. Once a query is done, the results say how it went.
+#[gpui_kit::test]
+fn the_status_bar_shows_a_query_only_while_it_runs(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    assert_eq!(app.status_bar().live, None, "no Ready");
+    app.run("SELECT 1;");
+    assert_eq!(app.status_bar().live, None, "no row count, the results header has it");
+    app.set_sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n;");
+    app.dispatch(crate::actions::RunAll);
+    let live = app.status_bar().live.expect("a running query").to_string();
+    assert!(live.starts_with("Running"), "{live}");
+    app.click("stop");
+    app.wait_idle();
+    assert_eq!(app.status_bar().live, None);
+}
+
+// Ctrl+G asks for a line, or a line and a column, as VS Code's Go to Line does. So does a click on the caret's place.
+#[gpui_kit::test]
+fn go_to_line_moves_the_caret(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("SELECT 1;\nSELECT 2;\nSELECT 3;");
+    let tab = app.tab();
+    let caret = |app: &mut Driver| {
+        let at = app.cx.update(|_, cx| tab.read(cx).caret(cx));
+        (at.line, at.column)
+    };
+    app.keys("ctrl-g");
+    assert!(app.dialog_open(), "Ctrl+G asks for the line");
+    app.type_text("3:4");
+    app.keys("enter");
+    assert_eq!(caret(&mut app), (3, 4));
+    app.click("status-caret");
+    app.type_text("99");
+    app.keys("enter");
+    assert_eq!(caret(&mut app), (3, 1), "a line past the end goes to the last one");
+}
+
+// The connection opens the switcher, and the chip saying it asks first opens its settings.
+#[gpui_kit::test]
+fn the_status_bar_connection_opens_the_switcher_and_its_chip_the_settings(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { confirm_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    app.click("status-connection");
+    assert!(app.shown("connection-switcher-menu"));
+    app.keys("escape");
+    app.click("status-protected");
+    assert!(app.dialog_open(), "the connection's settings");
+}
+
+// A thin moving line along the top of the results says a run is going, and goes when it ends.
+#[gpui_kit::test]
+fn a_running_query_draws_a_progress_line(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    assert!(!app.shown("run-progress"));
+    app.set_sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n;");
+    app.dispatch(crate::actions::RunAll);
+    // Read before stopping: a run that never ends would keep the test from ending if it failed first.
+    let running = app.shown("run-progress");
+    app.click("stop");
+    app.wait_idle();
+    assert!(running, "drawn while the query runs");
+    assert!(!app.shown("run-progress"));
+}
+
+// Stop in the status bar ends the run, as the toolbar's does.
+#[gpui_kit::test]
+fn the_status_bar_stops_a_running_query(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n;");
+    app.dispatch(crate::actions::RunAll);
+    app.click("status-stop");
+    app.wait_idle();
+    assert_eq!(app.error().expect("a cancelled card").message.as_ref(), "Query cancelled.");
+}
+
+// The tab's connection and its engine. With no tab open, the sidebar's.
+#[gpui_kit::test]
+fn the_status_bar_names_the_connection_and_its_engine(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    // Seeding the test database connected it, and the tree's first load would connect it again.
+    app.wait_schema();
+    app.env.runtime.block_on(app.env.bar.disconnect(&app.connection.id));
+    let connection = |app: &mut Driver| {
+        let shown = app.status_bar().connection.expect("a connection");
+        (shown.name.to_string(), shown.engine.to_string(), shown.connected)
+    };
+    assert_eq!(connection(&mut app), ("Local".into(), "SQLite".into(), false), "the sidebar's, not connected");
+    app.connect();
+    assert_eq!(connection(&mut app), ("Local".into(), "SQLite".into(), true));
 }
 
 #[gpui_kit::test]
@@ -480,7 +602,8 @@ fn a_failed_commit_keeps_the_transaction_badge(cx: &mut TestAppContext) {
     app.settle(|cx| cx.update(|_, cx| tab.read(cx).in_transaction()));
     app.run("INSERT INTO children VALUES (42);");
     app.click("commit-txn");
-    app.settle(|cx| cx.update(|_, cx| tab.read(cx).status(cx).error));
+    let results = app.results();
+    app.settle(|cx| cx.update(|_, cx| results.read(cx).active_error().is_some()));
     assert_eq!(txn(&mut app), TxnState::Active);
     assert!(app.shown("commit-txn") && !app.shown("begin-txn"));
     app.click("rollback-txn");

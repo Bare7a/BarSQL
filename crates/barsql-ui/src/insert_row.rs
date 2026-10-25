@@ -10,7 +10,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Sizable, StyledExt, WindowEx
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::form;
+use crate::form::{self, SelectMenu as _};
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::state;
@@ -251,6 +251,44 @@ impl InsertRowForm {
         cx.notify();
     }
 
+    // Into the field's input, which the insert reads.
+    fn pick_value(&mut self, name: &str, value: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(input) = self.inputs.get(name) {
+            input.update(cx, |state, cx| state.set_value(value, window, cx));
+        }
+        self.invalid = None;
+        cx.notify();
+    }
+
+    // In place of the text field, for a column whose values come from a list.
+    fn value_select(
+        &self,
+        col: &ColumnInfo,
+        input: &Entity<InputState>,
+        placeholder: SharedString,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let value = input.read(cx).value().to_string();
+        let id = format!("insert-value-{}", col.name);
+        let select = match value.is_empty() {
+            true => form::select_placeholder(SharedString::from(id.clone()), placeholder, cx),
+            false => form::select(SharedString::from(id.clone()), value.clone(), cx),
+        };
+        let (this, name, values) = (cx.entity().downgrade(), col.name.clone(), col.enum_values.clone());
+        select.debug_selector(move || id).disabled(!enabled).select_menu(window, cx, move |mut menu, _, _| {
+            for option in &values {
+                let (this, name, option) = (this.clone(), name.clone(), option.clone());
+                let item = PopupMenuItem::new(option.clone()).checked(option == value);
+                menu = menu.item(item.on_click(move |_, window, cx| {
+                    this.update(cx, |form, cx| form.pick_value(&name, option.clone(), window, cx)).ok();
+                }));
+            }
+            menu
+        })
+    }
+
     fn field(&mut self, col: ColumnInfo, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mode = self.mode(&col);
         let hidden = auto_generated(&col);
@@ -264,10 +302,11 @@ impl InsertRowForm {
                 Mode::Default if col.is_nullable => t(cx, "tableView.addRowDialog.defaultOmitNullable"),
                 Mode::Default => t(cx, "tableView.addRowDialog.inputPlaceholderDefault"),
                 Mode::Null => t(cx, "tableView.addRowDialog.inputPlaceholderNull"),
+                Mode::Value if !col.enum_values.is_empty() => t(cx, "tableView.addRowDialog.choosePlaceholder"),
                 Mode::Value => t(cx, "tableView.addRowDialog.inputPlaceholderValue"),
             }
         };
-        input.update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
+        input.update(cx, |state, cx| state.set_placeholder(placeholder.clone(), window, cx));
         let enabled = !self.saving && !hidden && mode == Mode::Value;
         let theme = cx.theme();
         let badge = |text: SharedString, color: Hsla| form::badge(text, color);
@@ -302,6 +341,16 @@ impl InsertRowForm {
                 })
         });
         let (muted, warning) = (theme.muted_foreground, theme.warning);
+        let control = match col.enum_values.is_empty() {
+            true => div()
+                .debug_selector({
+                    let selector = format!("insert-field-{}", col.name);
+                    move || selector
+                })
+                .child(form::input(&input, window, cx).disabled(!enabled))
+                .into_any_element(),
+            false => self.value_select(&col, &input, placeholder, enabled, window, cx).into_any_element(),
+        };
         v_flex()
             .gap(rems(0.308))
             .child(
@@ -342,14 +391,7 @@ impl InsertRowForm {
                             .children(picker),
                     ),
             )
-            .child(
-                div()
-                    .debug_selector({
-                        let selector = format!("insert-field-{}", col.name);
-                        move || selector
-                    })
-                    .child(form::input(&input, window, cx).disabled(!enabled)),
-            )
+            .child(control)
     }
 }
 

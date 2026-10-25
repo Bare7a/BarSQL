@@ -197,7 +197,7 @@ fn typing_a_table_name_and_enter_opens_its_table_view(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     let title = cx.update(|_, cx| workspace.read(cx).active_title(cx));
-    assert_eq!(title, "Query 2 - Local", "numbered among the plain query tabs, not the table view");
+    assert_eq!(title, "Query 2 · Local", "numbered among the plain query tabs, not the table view");
 }
 
 #[gpui_kit::test]
@@ -215,7 +215,7 @@ fn arrows_pick_a_connection_and_its_new_tab_takes_the_keyboard(cx: &mut TestAppC
         let workspace = workspace.read(cx);
         (workspace.tab_count(), workspace.active_title(cx))
     });
-    assert_eq!((count, title.as_str()), (2, "Query 2 - Local"));
+    assert_eq!((count, title.as_str()), (2, "Query 2 · Local"));
 
     cx.simulate_input("SELECT 9");
     cx.run_until_parked();

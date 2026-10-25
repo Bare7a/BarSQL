@@ -5,7 +5,7 @@ use barsql_core::{
     FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{DdlColumn, compose_create_table, join_ddl, render_constraint, unsupported_ddl};
-use barsql_sql::{qualified_table, quote_ident, quote_ident_list};
+use barsql_sql::{enum_values, qualified_table, quote_ident, quote_ident_list};
 use tiberius::ToSql;
 
 use super::capture::captured;
@@ -123,12 +123,14 @@ impl MsEngine {
         Ok(rows.iter().map(|r| TableInfo { schema: schema.clone(), name: string(r, 0), kind: string(r, 1) }).collect())
     }
 
+    // One row per check that may list a column's values: its own, or a table check naming it, which SQL Server writes
+    // as [name].
     pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
         let schema = self.schema_or(schema);
         let sql = format!(
             "SELECT c.name, {COLUMN_TYPE}, CAST(c.is_nullable AS int), COALESCE(dc.definition, ''),
                 IIF(pk.column_id IS NULL, 0, 1), COALESCE(fk.ref_table, ''), COALESCE(fk.ref_column, ''),
-                CAST(c.is_identity AS int), CAST(c.is_computed AS int)
+                CAST(c.is_identity AS int), CAST(c.is_computed AS int), ck.definition
             FROM sys.columns c
             LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
             OUTER APPLY (
@@ -142,16 +144,20 @@ impl MsEngine {
                 FROM sys.foreign_key_columns fkc
                 WHERE fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
             ) fk
+            LEFT JOIN sys.check_constraints ck ON ck.parent_object_id = c.object_id
+                AND (ck.parent_column_id = c.column_id
+                    OR (ck.parent_column_id = 0 AND CHARINDEX(QUOTENAME(c.name), ck.definition) > 0))
             WHERE c.object_id = {TABLE_ID}
-            ORDER BY c.column_id"
+            ORDER BY c.column_id, ck.name"
         );
         let rows = self.rows(&sql, &[schema, table]).await?;
-        Ok(rows
-            .iter()
-            .map(|r| {
+        let mut out: Vec<(ColumnInfo, Vec<String>)> = Vec::new();
+        for r in &rows {
+            let name = string(r, 0);
+            if out.last().is_none_or(|(column, _)| column.name != name) {
                 let foreign_table = string(r, 5);
-                ColumnInfo {
-                    name: string(r, 0),
+                let column = ColumnInfo {
+                    name,
                     data_type: string(r, 1),
                     is_nullable: flag(r, 2),
                     default_val: string(r, 3),
@@ -161,7 +167,19 @@ impl MsEngine {
                     foreign_column: string(r, 6),
                     is_identity: flag(r, 7),
                     is_computed: flag(r, 8),
-                }
+                    enum_values: Vec::new(),
+                };
+                out.push((column, Vec::new()));
+            }
+            if let (Some(check), Some((_, checks))) = (r.get(9).cloned().flatten(), out.last_mut()) {
+                checks.push(check);
+            }
+        }
+        Ok(out
+            .into_iter()
+            .map(|(mut column, checks)| {
+                column.enum_values = enum_values::from_checks(&column.name, &checks, &MS);
+                column
             })
             .collect())
     }

@@ -204,6 +204,13 @@ impl Sidebar {
         }
     }
 
+    // From the status bar.
+    pub(crate) fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.switcher_open {
+            self.toggle_switcher(window, cx);
+        }
+    }
+
     // A click outside closes it, but not one on a popup the panel opened. A row's context menu acts on
     // mouse-up, after this handler. The panel shrinks to the height cap, and its list scrolls.
     fn switcher_menu(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -292,7 +299,12 @@ impl Sidebar {
         self.edit_connection(None, window, cx);
     }
 
-    fn edit_connection(&mut self, config: Option<ConnectionConfig>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn edit_connection(
+        &mut self,
+        config: Option<ConnectionConfig>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let this = cx.entity().downgrade();
         connection_dialog::open(config, window, cx, move |_, _, cx| {
             let _ = this.update(cx, |sidebar, cx| sidebar.reload_connections(cx));

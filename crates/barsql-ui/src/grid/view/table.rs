@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use super::super::copy::{self, Staged};
 use super::super::sort::RowOrder;
+use super::picker::Picker;
 use super::{Editing, Grid, GridEvent, SortState, TableOverlay, Width};
 use crate::table_edits::{paste_cells, text_cells};
 
@@ -35,8 +36,39 @@ impl Grid {
         self.overlay.as_ref().map(|overlay| overlay.staged.clone())
     }
 
-    fn editable(&self) -> bool {
+    pub(super) fn editable(&self) -> bool {
         self.overlay.as_ref().is_some_and(|overlay| overlay.editable)
+    }
+
+    // Stages the flip as the column holds it: 1/0 where it holds numbers, as SQLite does, true/false otherwise.
+    pub(super) fn toggle(&mut self, row: usize, column: usize, cx: &mut Context<Self>) {
+        if !self.editable() || self.is_deleted(row) {
+            return;
+        }
+        let Some(on) = copy::flag(self.shown(row, column), &self.set.columns[column].type_name) else { return };
+        let digits = match self.set.cell(row, column) {
+            Cell::Number(_) => true,
+            Cell::Null => self.dialect == Some(barsql_core::SqlDialect::Sqlite),
+            _ => false,
+        };
+        let value = match (on, digits) {
+            (true, true) => "0",
+            (false, true) => "1",
+            (true, false) => "false",
+            (false, false) => "true",
+        };
+        cx.emit(GridEvent::EditCell { row, column, value: Some(value.into()) });
+        cx.notify();
+    }
+
+    // Space on a boolean.
+    pub(super) fn toggle_focused(&mut self, cx: &mut Context<Self>) {
+        match self.focused_data_cell() {
+            Some((display, row, column)) if self.checkable(display, self.selection.focus_col as usize) => {
+                self.toggle(row, column, cx)
+            }
+            _ => cx.propagate(),
+        }
     }
 
     // A staged value wins over the loaded one.
@@ -130,7 +162,11 @@ impl Grid {
             return;
         }
         if self.editable() {
-            if let Some((_, row, column)) = self.focused_data_cell() {
+            if let Some((display, row, column)) = self.focused_data_cell() {
+                // A boolean flips, where anything else opens its editor.
+                if self.checkable(display, self.selection.focus_col as usize) {
+                    return self.toggle(row, column, cx);
+                }
                 self.selection.clear();
                 self.start_edit(row, column, window, cx);
             }
@@ -193,42 +229,71 @@ impl Grid {
     }
 
     pub(super) fn start_edit(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let value = self.shown(row, column).display().unwrap_or_default().to_string();
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
+        let held = self.shown(row, column).display().map(str::to_string);
+        let picker = self
+            .overlay
+            .as_ref()
+            .and_then(|overlay| overlay.choices.get(&column))
+            .map(|choices| Picker::new(choices.clone(), held.as_deref()));
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(held.unwrap_or_default()));
         let subscription = cx.subscribe_in(&input, window, |grid, input, event: &InputEvent, window, cx| match event {
             // Its own right-click menu took the focus, and the edit carries on once that closes.
             InputEvent::Blur if input.read(cx).has_selection_focus(window, cx) => {}
-            InputEvent::PressEnter { .. } | InputEvent::Blur => grid.commit_edit(window, cx),
+            InputEvent::PressEnter { .. } => grid.commit_edit(window, cx),
+            InputEvent::Blur => grid.blur_edit(window, cx),
+            InputEvent::Change => grid.narrow_choices(cx),
             _ => {}
         });
+        // A picker's text narrows its values, so the first key typed replaces it.
+        let replace = picker.is_some();
         input.update(cx, |state, cx| {
             let end = state.value().len();
-            state.set_selected_range(end..end, cx);
+            state.set_selected_range(if replace { 0 } else { end }..end, cx);
             state.focus(window, cx);
         });
         if let Some(display) = self.order.display_of(row) {
             let col = self.columns.iter().position(|&c| c == column).map_or(0, |p| p as isize);
             self.reveal(display, col);
         }
-        self.editing = Some(Editing { row, column, input, _subscription: subscription });
+        self.editing = Some(Editing { row, column, input, picker, _subscription: subscription });
         cx.notify();
     }
 
-    // A blank editor stages NULL. The owner drops the edit if the value matches the original.
+    // Enter: a picker takes its highlighted value, and a blank editor stages NULL. The owner drops unchanged values.
     fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editing) = self.editing.take() else { return };
-        let text = editing.input.read(cx).value().to_string();
-        let value = (!text.is_empty()).then_some(text);
-        window.focus(&self.focus_handle, cx);
-        cx.emit(GridEvent::EditCell { row: editing.row, column: editing.column, value });
-        cx.notify();
+        let Some(editing) = &self.editing else { return };
+        let value = match editing.picker.as_ref().and_then(Picker::highlighted) {
+            Some(value) => value,
+            None => Some(editing.input.read(cx).value().to_string()).filter(|text| !text.is_empty()),
+        };
+        self.finish_edit(Some(value), window, cx);
+    }
+
+    // A click away commits a plain editor's text, but a picker's only when it names one of the values.
+    fn blur_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = &self.editing else { return };
+        let Some(picker) = &editing.picker else { return self.commit_edit(window, cx) };
+        let named = picker.named(&editing.input.read(cx).value());
+        self.finish_edit(named.map(Some), window, cx);
+    }
+
+    pub(super) fn pick_choice(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.editing.as_ref().and_then(|editing| editing.picker.as_ref()?.value(ix));
+        self.finish_edit(value, window, cx);
     }
 
     pub(super) fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing.take().is_some() {
-            window.focus(&self.focus_handle, cx);
-            cx.notify();
+        self.finish_edit(None, window, cx);
+    }
+
+    // Stages `value`, if there is one, and gives the grid its focus back.
+    fn finish_edit(&mut self, value: Option<Option<String>>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = self.editing.take() else { return };
+        window.focus(&self.focus_handle, cx);
+        if let Some(value) = value {
+            cx.emit(GridEvent::EditCell { row: editing.row, column: editing.column, value });
         }
+        cx.notify();
     }
 
     // Relative to the grid, not the window.

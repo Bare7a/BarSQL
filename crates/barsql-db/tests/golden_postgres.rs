@@ -7,8 +7,8 @@ use std::time::Duration;
 use barsql_core::{DriverType, FunctionKind};
 use barsql_db::{Cancel, Engine};
 use common::{
-    Report, assert_matches, check_probes, fixture, golden_write, postgres_config, run_all, schema_snapshot, strings,
-    write_fixture,
+    Report, assert_matches, check_probes, column_values, fixture, golden_write, postgres_config, run_all,
+    schema_snapshot, strings, write_fixture,
 };
 use jiff::tz::{Offset, TimeZone};
 
@@ -57,6 +57,27 @@ async fn postgres_schema_and_ddl_match_the_fixtures() {
     run_all(&mut session, &strings(&expected["setup"])).await;
     let actual = schema_snapshot(&engine, expected["schema"].as_str().unwrap(), &expected).await;
     assert_matches(&format!("schema/{}.json", expected["engine"].as_str().unwrap()), &expected, &actual);
+}
+
+// An enum gives its labels in their order. Otherwise a check on just that column can list the values.
+#[tokio::test]
+async fn an_enum_or_a_check_list_gives_a_columns_values() {
+    let _serial = common::serial().await;
+    let engine = connect(TimeZone::UTC).await;
+    let mut session = engine.session().await.unwrap();
+    let setup = [
+        "DROP TABLE IF EXISTS public.enum_probe",
+        "DROP TYPE IF EXISTS public.enum_probe_mood",
+        "CREATE TYPE public.enum_probe_mood AS ENUM ('sad', 'happy')",
+        "ALTER TYPE public.enum_probe_mood ADD VALUE 'meh' BEFORE 'happy'",
+        "CREATE TABLE public.enum_probe (mood public.enum_probe_mood, kind varchar(10) CHECK (kind IN ('like', 'love')),
+            stars int, note text CHECK (length(note) < 100), CONSTRAINT star_list CHECK (stars IN (1, 2)),
+            CONSTRAINT pair CHECK (stars < 3 OR kind = 'love'))",
+    ];
+    run_all(&mut session, &setup.map(String::from)).await;
+    let columns = engine.list_columns("public", "enum_probe").await.unwrap();
+    assert_eq!(column_values(&columns), ["mood: sad, meh, happy", "kind: like, love", "stars: 1, 2", "note: "]);
+    run_all(&mut session, &["DROP TABLE public.enum_probe".into(), "DROP TYPE public.enum_probe_mood".into()]).await;
 }
 
 // Built-ins come with every overload. Functions that only back operators, casts, types, aggregates and index

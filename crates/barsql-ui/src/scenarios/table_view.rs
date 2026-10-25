@@ -196,6 +196,23 @@ fn the_add_row_dialog_inserts_a_row(cx: &mut TestAppContext) {
     assert_eq!(column(&mut app, 1), [Some("Alice".into()), Some("Bob".into())]);
 }
 
+// A column that takes its values from a list picks one, in place of typing it.
+#[gpui_kit::test]
+fn the_add_row_dialog_picks_a_listed_value(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        "CREATE TABLE e2e_addpick (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('like', 'love', 'wow')))",
+    );
+    browse(&mut app, "e2e_addpick");
+    app.click("table-add-row");
+    assert!(!app.shown("insert-field-kind"), "no text field to type in");
+    app.menu_pick("insert-value-kind", 1);
+    app.click("insert-row-submit");
+    app.settle_dialog_closed();
+    wait(&mut app);
+    assert_eq!(app.query("SELECT kind FROM e2e_addpick"), [[Value::Text("love".into())]]);
+}
+
 #[gpui_kit::test]
 fn the_add_row_dialog_asks_for_each_column_of_a_composite_key(cx: &mut TestAppContext) {
     let mut app = prepared(

@@ -124,6 +124,14 @@ fn a_small_schema_opens_at_full_size(cx: &mut TestAppContext) {
     assert_eq!(zoom_of(&view, cx), 1.);
 }
 
+// How to get around sits behind a "?" instead of along the toolbar.
+#[gpui_kit::test]
+fn the_toolbar_keeps_its_hint_behind_a_help_button(cx: &mut TestAppContext) {
+    let (_, _, cx) = diagram(cx, small());
+    bounds(cx, "er-help");
+    assert!(cx.debug_bounds("er-note").is_none(), "nothing to say while every table shows");
+}
+
 // It opens fitted, unless that would be too small to read. Fit then shows it all.
 #[gpui_kit::test]
 fn a_big_schema_opens_readable_and_fit_shows_it_all(cx: &mut TestAppContext) {

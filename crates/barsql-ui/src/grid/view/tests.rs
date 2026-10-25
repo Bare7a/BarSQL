@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -12,9 +12,24 @@ use gpui_kit::{
     Styled as _, TestAppContext, TouchPhase, VisualTestContext, Window, div, point, px,
 };
 
-use super::{Grid, GridEvent, LANE, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
+use super::{Choices, Grid, GridEvent, LANE, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
+use crate::grid::copy::flag;
 use crate::grid::range::CellRange;
 use crate::test_support::Env;
+
+// The engine's own true and false, or 0 and 1 in a column declared boolean, as SQLite stores them.
+#[test]
+fn booleans_come_from_the_engine_or_a_boolean_column() {
+    use barsql_db::Cell;
+    assert_eq!(flag(Cell::Bool(true), "bool"), Some(true));
+    assert_eq!(flag(Cell::Bool(false), "text"), Some(false));
+    assert_eq!(flag(Cell::Number("1"), "BOOLEAN"), Some(true));
+    assert_eq!(flag(Cell::Number("0"), "boolean"), Some(false));
+    assert_eq!(flag(Cell::Number("2"), "boolean"), None, "not a boolean value");
+    assert_eq!(flag(Cell::Number("1"), "INTEGER"), None);
+    assert_eq!(flag(Cell::Null, "boolean"), None, "NULL shows as NULL");
+    assert_eq!(flag(Cell::Text("false"), "boolean"), Some(false), "a staged one");
+}
 
 #[test]
 fn cell_text_collapses_whitespace_like_nowrap() {
@@ -55,7 +70,15 @@ fn columns() -> Arc<[ColumnMeta]> {
 
 // A focused grid of (id, name, note) in its own window.
 fn mount(builder: ChunkBuilder, cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
-    let grid = cx.new(|cx| Grid::new(columns(), cx));
+    mount_with(columns(), builder, cx)
+}
+
+fn mount_with(
+    columns: Arc<[ColumnMeta]>,
+    builder: ChunkBuilder,
+    cx: &mut TestAppContext,
+) -> (Entity<Grid>, &mut VisualTestContext) {
+    let grid = cx.new(|cx| Grid::new(columns, cx));
     let view = grid.clone();
     let window = cx.add_window(move |window, cx| Root::new(view, window, cx));
     let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
@@ -214,6 +237,21 @@ fn copy_takes_a_lone_cell_raw_and_a_selection_in_the_copy_format(cx: &mut TestAp
     assert_eq!(text.as_deref(), Some("id,name,note\n3,name 0,note 0\n2,name 1,note 1\n1,name 2,"));
 }
 
+// The grid rounds a long fraction, and sizes its column for what it shows. A copy keeps every digit.
+#[gpui_kit::test]
+fn long_fractions_show_rounded_and_copy_whole(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let mut builder = ChunkBuilder::new(3, 1);
+    builder.push_number(|s| s.push_str("133.28571428571428"));
+    builder.push_text(|s| s.push('a'));
+    builder.push_text(|s| s.push('b'));
+    builder.end_row();
+    let (grid, cx) = mount(builder, cx);
+    assert_eq!(read(&grid, cx, |g| g.widths[0]), Width::Ch(13), "`133.285714` and padding");
+    cx.simulate_keystrokes(&format!("{}-c", modifier()));
+    assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some("133.28571428571428"));
+}
+
 // SQL INSERTs copy in the connection's own quoting, so they run there as they are.
 #[gpui_kit::test]
 fn a_sql_copy_quotes_for_the_connections_dialect(cx: &mut TestAppContext) {
@@ -225,6 +263,176 @@ fn a_sql_copy_quotes_for_the_connections_dialect(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let text = cx.read_from_clipboard().and_then(|item| item.text());
     assert_eq!(text.as_deref(), Some("INSERT INTO [results] ([id], [name], [note]) VALUES (1, N'name 0', N'note 0');"));
+}
+
+// (id, active, flag): SQLite's 1 and 0 in a column declared BOOLEAN, then the engine's own true and false.
+fn booleans(cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
+    let columns: Arc<[ColumnMeta]> = [("id", "INTEGER"), ("active", "BOOLEAN"), ("flag", "bool")]
+        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+        .to_vec()
+        .into();
+    let mut builder = ChunkBuilder::new(3, 2);
+    for (id, active, flag) in [("1", "1", true), ("2", "0", false)] {
+        builder.push_number(|s| s.push_str(id));
+        builder.push_number(|s| s.push_str(active));
+        builder.push_bool(flag);
+        builder.end_row();
+    }
+    mount_with(columns, builder, cx)
+}
+
+// The cells the grid asked to stage, as (row, column, value).
+type Edits = Rc<RefCell<Vec<(usize, usize, Option<String>)>>>;
+
+fn edits(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> Edits {
+    let edits = Rc::new(RefCell::new(Vec::new()));
+    let sink = edits.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(grid, move |_, event: &GridEvent, _| {
+            if let GridEvent::EditCell { row, column, value } = event {
+                sink.borrow_mut().push((*row, *column, value.clone()));
+            }
+        })
+        .detach()
+    });
+    edits
+}
+
+// A click or Space flips a boolean in an editable table view, and does nothing in query results.
+#[gpui_kit::test]
+fn a_checkbox_flips_a_boolean_only_where_the_grid_can_be_edited(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (grid, cx) = booleans(cx);
+    let edits = edits(&grid, cx);
+    let at = read(&grid, cx, |g| g.check_point(0, 1));
+    cx.simulate_click(at, Modifiers::none());
+    cx.simulate_keystrokes("space");
+    assert!(edits.borrow().is_empty(), "query results stay as they are");
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { editable: true, ..Default::default() }, cx));
+    cx.simulate_click(at, Modifiers::none());
+    cx.simulate_keystrokes("right space");
+    assert_eq!(*edits.borrow(), [(0, 1, Some("0".into())), (0, 2, Some("false".into()))]);
+}
+
+// Space flips a checkbox, but in a cell's editor it's still a space.
+#[gpui_kit::test]
+fn space_types_in_a_cells_editor(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    let edits = edits(&grid, cx);
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { editable: true, ..Default::default() }, cx));
+    cx.simulate_keystrokes("right enter");
+    cx.simulate_keystrokes("space x enter");
+    assert_eq!(*edits.borrow(), [(0, 1, Some("name 0 x".into()))]);
+}
+
+// (id, kind) in a table view, rows (1, like) and (2, love), where kind takes like, love or wow.
+fn reactions(nullable: bool, cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
+    reactions_rows(nullable, 2, cx)
+}
+
+// As reactions, with `rows` rows alternating like and love.
+fn reactions_rows(nullable: bool, rows: usize, cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
+    let columns: Arc<[ColumnMeta]> = [("id", "INTEGER"), ("kind", "TEXT")]
+        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+        .to_vec()
+        .into();
+    let mut builder = ChunkBuilder::new(2, rows);
+    for row in 0..rows {
+        builder.push_number(|s| s.push_str(&(row + 1).to_string()));
+        builder.push_text(|s| s.push_str(if row % 2 == 0 { "like" } else { "love" }));
+        builder.end_row();
+    }
+    let (grid, cx) = mount_with(columns, builder, cx);
+    let choices = Choices { values: ["like", "love", "wow"].map(String::from).into(), nullable };
+    let overlay = TableOverlay { editable: true, choices: HashMap::from([(1, choices)]), ..Default::default() };
+    grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
+    (grid, cx)
+}
+
+// What the open list holds, NULL as None, and the one Enter takes.
+fn picker(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> Option<(Vec<Option<String>>, usize)> {
+    read(grid, cx, |g| g.picker())
+}
+
+fn kinds(names: &[&str]) -> Vec<Option<String>> {
+    names.iter().map(|name| Some(name.to_string())).collect()
+}
+
+// A frame, as the app draws after every event. Focus changes and debug bounds arrive with it.
+fn draw(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+// An enum's cell edits with a list of its values under it, starting at the one the cell holds.
+#[gpui_kit::test]
+fn an_enum_cell_picks_from_its_values(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (grid, cx) = reactions(false, cx);
+    let edits = edits(&grid, cx);
+    cx.simulate_keystrokes("right down enter");
+    assert_eq!(picker(&grid, cx), Some((kinds(&["like", "love", "wow"]), 1)), "the second row holds love");
+    draw(cx);
+    assert!(cx.debug_bounds("grid-choices").is_some(), "the list shows");
+    cx.simulate_keystrokes("down down enter");
+    assert_eq!(*edits.borrow(), [(1, 1, Some("wow".into()))], "the list ends at its last value");
+    assert_eq!(picker(&grid, cx), None);
+}
+
+// Typing narrows the list to the values holding the text, and NULL when the column takes it.
+#[gpui_kit::test]
+fn typing_narrows_an_enums_values(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (grid, cx) = reactions(true, cx);
+    let edits = edits(&grid, cx);
+    cx.simulate_keystrokes("right enter");
+    assert_eq!(picker(&grid, cx).map(|(list, _)| list.len()), Some(4), "the three values and NULL");
+    cx.simulate_keystrokes("o");
+    assert_eq!(picker(&grid, cx), Some((kinds(&["love", "wow"]), 0)), "the typed text replaces the value");
+    cx.simulate_keystrokes("backspace n");
+    assert_eq!(picker(&grid, cx), Some((vec![None], 0)));
+    cx.simulate_keystrokes("enter");
+    assert_eq!(*edits.borrow(), [(0, 1, None)]);
+}
+
+// A click on a value takes it. Escape, or a click away, leaves the cell as it was, whatever is highlighted or typed.
+#[gpui_kit::test]
+fn a_click_picks_a_value_and_escape_or_a_click_away_keeps_the_cell(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (grid, cx) = reactions(false, cx);
+    let edits = edits(&grid, cx);
+    // Blurs only reach listeners in an active window.
+    cx.update(|window, _| window.activate_window());
+    cx.simulate_keystrokes("right enter down escape");
+    assert_eq!(picker(&grid, cx), None);
+    cx.simulate_keystrokes("enter l");
+    draw(cx);
+    let away = cell(&grid, 1, 0, cx);
+    cx.simulate_click(away, Modifiers::none());
+    draw(cx);
+    assert_eq!(picker(&grid, cx), None);
+    assert!(edits.borrow().is_empty(), "{:?}", edits.borrow());
+    cx.simulate_keystrokes("right enter");
+    draw(cx);
+    let wow = cx.debug_bounds("grid-choice-2").expect("the third value shows").center();
+    cx.simulate_click(wow, Modifiers::none());
+    assert_eq!(*edits.borrow(), [(1, 1, Some("wow".into()))]);
+    assert_eq!(read(&grid, cx, |g| g.selection.focus_row), Some(1), "the click didn't land on the grid under it");
+}
+
+// The list goes with its cell when the grid scrolls the cell out of sight.
+#[gpui_kit::test]
+fn the_list_hides_once_its_cell_scrolls_away(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (grid, cx) = reactions_rows(false, 200, cx);
+    cx.simulate_keystrokes("right enter");
+    draw(cx);
+    assert!(cx.debug_bounds("grid-choices").is_some());
+    grid.update(cx, |grid, cx| {
+        grid.scroll.scroll_to(point(px(0.), px(2000.)));
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("grid-choices").is_none());
 }
 
 // Copied from a grid that can't be edited, like query results, and pasted into a table view.

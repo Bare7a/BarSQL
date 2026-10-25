@@ -2,6 +2,7 @@ pub mod alter;
 pub mod ddl;
 pub mod dialect;
 pub mod dml;
+pub mod enum_values;
 pub mod explain;
 pub mod float_format;
 pub mod lang;

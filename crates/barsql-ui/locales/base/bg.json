@@ -76,12 +76,8 @@
     "statusNoConnection": "Няма връзка",
     "statusRunning": "Изпълнява се… {{seconds}}s",
     "statusStreaming": "Зареждане… {{count}} ред(а) · {{seconds}}s",
-    "statusRows": "{{count}} ред(а) · {{ms}}ms",
-    "statusAffected": "{{count}} засегнат(и) ред(а) · {{ms}}ms",
-    "statusReady": "Готово",
     "statusConnectedTo": "Свързано с {{database}}",
-    "statusNotConnected": "не е свързано",
-    "readOnly": "само за четене"
+    "statusNotConnected": "не е свързано"
   },
   "errors": {
     "generic": "Нещо се обърка",

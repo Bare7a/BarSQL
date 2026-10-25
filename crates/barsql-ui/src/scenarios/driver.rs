@@ -15,6 +15,7 @@ use crate::plan_view::PlanView;
 use crate::query_tab::QueryTab;
 use crate::results::{ResultStatus, ResultsPanel, ShownError};
 use crate::sidebar::Sidebar;
+use crate::status_bar::StatusBarState;
 use crate::test_support::{Env, chord, settle};
 use crate::toast::{self, ToastKind};
 use crate::workspace::Workspace;
@@ -322,9 +323,11 @@ impl Driver<'_> {
         self.cx.update(|_, cx| results.read(cx).status(cx))
     }
 
-    pub fn status_is_error(&mut self) -> bool {
-        let tab = self.tab();
-        self.cx.update(|_, cx| tab.read(cx).status(cx).error)
+    // What the status bar shows now.
+    pub fn status_bar(&mut self) -> StatusBarState {
+        self.draw();
+        let workspace = self.workspace.clone();
+        self.cx.update(|window, cx| workspace.read(cx).status(window, cx))
     }
 
     pub fn result_tabs(&mut self) -> usize {

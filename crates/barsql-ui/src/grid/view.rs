@@ -11,10 +11,11 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::input::{Copy, Input, InputState, Paste, Redo, SelectAll, Undo};
 use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::copy::{self, CopyTarget, Staged};
-use super::layout::{SAMPLE_ROWS, auto_width_ch, fraction_len, row_height};
+use super::layout::{SAMPLE_ROWS, auto_width_ch, fraction_len, row_height, shown_number};
 use super::range::{self, CellCoord};
 use super::scroll::{GridScroll, LANE};
 use super::selection::{Arrow, GUTTER, Selection, View};
@@ -24,6 +25,8 @@ use crate::state::{set_setting, setting, setting_bool};
 use crate::toast;
 
 const CONTEXT: &str = "Grid";
+// On a cell's editor while an enum's values show under it.
+const PICKING: &str = "picking";
 const FORMAT_KEY: &str = "barsql-export-format";
 pub const STRIPES_KEY: &str = "barsql-grid-stripes";
 const MIN_COLUMN_PX: f32 = 40.;
@@ -35,12 +38,46 @@ const SYNC_SORT_ROWS: usize = 20_000;
 // Selections larger than this get no status bar sums.
 const MAX_AGGREGATE_CELLS: usize = 500_000;
 
-// Count of the selected cells that aren't NULL, and the sum of those that are numbers.
-#[derive(Debug, Clone, Copy, PartialEq)]
+// What the selected cells hold, column by column, so numbers from different columns are never added up. `cells`
+// counts NULLs too.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Aggregate {
+    pub cells: usize,
+    pub columns: Vec<ColumnStats>,
+}
+
+// One selected column's cells that aren't NULL, and the numbers among them. `decimals` is the most any of them has.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ColumnStats {
+    pub name: String,
     pub count: usize,
     pub numbers: usize,
     pub sum: f64,
+    pub min: f64,
+    pub max: f64,
+    pub decimals: usize,
+}
+
+impl ColumnStats {
+    fn add(&mut self, cell: barsql_db::Cell) {
+        match cell {
+            barsql_db::Cell::Null => return,
+            barsql_db::Cell::Number(text) => {
+                if let Ok(value) = text.parse::<f64>()
+                    && value.is_finite()
+                {
+                    let first = self.numbers == 0;
+                    self.min = if first { value } else { self.min.min(value) };
+                    self.max = if first { value } else { self.max.max(value) };
+                    self.numbers += 1;
+                    self.sum += value;
+                    self.decimals = self.decimals.max(fraction_len(text).saturating_sub(1));
+                }
+            }
+            _ => {}
+        }
+        self.count += 1;
+    }
 }
 
 // What an aggregate was worked out for: the selection's shape, its ends and the rows loaded.
@@ -68,6 +105,9 @@ actions!(
         ExportResults,
         ToggleDeleteRow,
         SetNull,
+        ToggleValue,
+        PrevChoice,
+        NextChoice,
         ApplyChanges,
         RefreshData,
     ]
@@ -109,6 +149,11 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(&format!("{MOD}-s"), ApplyChanges, context),
         KeyBinding::new(&format!("{MOD}-r"), RefreshData, context),
         KeyBinding::new("f5", RefreshData, context),
+        // Not in a cell's editor, where it types a space.
+        KeyBinding::new("space", ToggleValue, Some(&format!("{CONTEXT} && !Input"))),
+        // The editor would take them, as it does with its own list of suggestions.
+        KeyBinding::new("up", PrevChoice, Some(&format!("{PICKING} > Input"))),
+        KeyBinding::new("down", NextChoice, Some(&format!("{PICKING} > Input"))),
     ]);
 }
 
@@ -178,13 +223,25 @@ pub struct TableOverlay {
     pub foreign: HashMap<usize, String>,
     // The primary key's columns.
     pub primary: HashSet<usize>,
+    // Column -> the values it takes from a list.
+    pub choices: HashMap<usize, Choices>,
     pub editable: bool,
+}
+
+// A column's values from a fixed list: an enum's, or the ones a CHECK lists. NULL is one more where the column
+// takes it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Choices {
+    pub values: Arc<[String]>,
+    pub nullable: bool,
 }
 
 struct Editing {
     row: usize,
     column: usize,
     input: Entity<InputState>,
+    // An enum's values to pick from, under the editor.
+    picker: Option<picker::Picker>,
     _subscription: Subscription,
 }
 
@@ -217,6 +274,8 @@ enum Target {
     Cell { row: usize, col: usize },
     // Foreign-key jump button in a table view cell.
     Jump { row: usize, col: usize },
+    // A boolean's checkbox in an editable table view.
+    Check { row: usize, col: usize },
 }
 
 // All in px at the current zoom.
@@ -233,6 +292,8 @@ struct Metrics {
     chevron: Pixels,
     gap: Pixels,
     icon: Pixels,
+    // A boolean's checkbox.
+    check: Pixels,
     radius: Pixels,
     jump_inset: Pixels,
     ch: Pixels,
@@ -257,6 +318,7 @@ impl Metrics {
             chevron: r(1.385),
             gap: r(0.385),
             icon: r(0.923),
+            check: r(1.077),
             radius: r(0.308),
             jump_inset: r(0.231),
             ch,
@@ -476,7 +538,7 @@ impl Grid {
         let rows: Vec<usize> = (0..want).filter_map(|d| self.order.global_at(d)).collect();
         for column in 0..self.set.columns.len() {
             let numbers = rows.iter().filter_map(|&row| match self.set.cell(row, column) {
-                barsql_db::Cell::Number(text) => Some(fraction_len(text)),
+                barsql_db::Cell::Number(text) => Some(fraction_len(&shown_number(text))),
                 _ => None,
             });
             let fraction = numbers.max().unwrap_or(0);
@@ -488,7 +550,9 @@ impl Grid {
                 .iter()
                 .map(|&row| match self.set.cell(row, column) {
                     barsql_db::Cell::Number(text) => {
-                        Some(Cow::Owned(format!("{text}{}", " ".repeat(fraction.saturating_sub(fraction_len(text))))))
+                        let shown = shown_number(text);
+                        let pad = " ".repeat(fraction.saturating_sub(fraction_len(&shown)));
+                        Some(Cow::Owned(format!("{shown}{pad}")))
                     }
                     cell => cell.display().map(Cow::Borrowed),
                 })
@@ -557,10 +621,10 @@ impl Grid {
         if let Some((cached, value)) = self.aggregate.borrow().as_ref()
             && *cached == key
         {
-            return *value;
+            return value.clone();
         }
         let value = self.compute_aggregate();
-        *self.aggregate.borrow_mut() = Some((key, value));
+        *self.aggregate.borrow_mut() = Some((key, value.clone()));
         value
     }
 
@@ -582,25 +646,15 @@ impl Grid {
         if !(2..=MAX_AGGREGATE_CELLS).contains(&cells) {
             return None;
         }
-        let mut total = Aggregate { count: 0, numbers: 0, sum: 0. };
+        let name = |column: usize| self.set.columns.get(column).map(|meta| meta.name.clone()).unwrap_or_default();
+        let mut stats: Vec<ColumnStats> =
+            columns.iter().map(|&column| ColumnStats { name: name(column), ..Default::default() }).collect();
         for &row in &rows {
-            for &column in &columns {
-                match self.shown(row, column) {
-                    barsql_db::Cell::Null => {}
-                    barsql_db::Cell::Number(text) => {
-                        total.count += 1;
-                        if let Ok(value) = text.parse::<f64>()
-                            && value.is_finite()
-                        {
-                            total.numbers += 1;
-                            total.sum += value;
-                        }
-                    }
-                    _ => total.count += 1,
-                }
+            for (stats, &column) in stats.iter_mut().zip(&columns) {
+                stats.add(self.shown(row, column));
             }
         }
-        Some(total)
+        Some(Aggregate { cells, columns: stats })
     }
 
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -823,9 +877,31 @@ impl Grid {
                     .is_some_and(|overlay| overlay.foreign.contains_key(&self.columns[col]))
                     && self.order.global_at(row).is_some_and(|global| !self.shown(global, self.columns[col]).is_null())
                     && self.jump_box(row, col).contains(&position);
-                Some(if on_jump { Target::Jump { row, col } } else { Target::Cell { row, col } })
+                let on_check = !on_jump && self.check_box(row, col).contains(&position) && self.checkable(row, col);
+                Some(match (on_jump, on_check) {
+                    (true, _) => Target::Jump { row, col },
+                    (_, true) => Target::Check { row, col },
+                    _ => Target::Cell { row, col },
+                })
             }
         }
+    }
+
+    // A boolean's checkbox, in the middle of its cell, in window coordinates.
+    fn check_box(&self, row: usize, col: usize) -> Bounds<Pixels> {
+        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
+        let left = bounds.left() + m.gutter_width + self.col_x[col] - scroll.x;
+        let top = bounds.top() + m.header_height + m.row_height * row as f32 - scroll.y;
+        let center = point(left + (self.col_x[col + 1] - self.col_x[col]) / 2., top + (m.row_height - px(1.)) / 2.);
+        Bounds::new(center - point(m.check / 2., m.check / 2.), size(m.check, m.check))
+    }
+
+    // Whether the cell at display row `row` holds a boolean a click can flip.
+    fn checkable(&self, row: usize, col: usize) -> bool {
+        let (Some(global), Some(&column)) = (self.order.global_at(row), self.columns.get(col)) else { return false };
+        self.editable()
+            && !self.is_deleted(global)
+            && copy::flag(self.shown(global, column), &self.set.columns[column].type_name).is_some()
     }
 
     // Foreign-key button at the cell's right edge, in window coordinates.
@@ -873,6 +949,15 @@ impl Grid {
                 }
                 return;
             }
+            // The second click of a double-click on the box doesn't flip it back.
+            Target::Check { row, col } => {
+                self.selection.press_cell(row, col, false, &view);
+                self.selection.release(Some(CellCoord { row, col }));
+                if let (1, Some(global)) = (event.click_count, view.order.global_at(row)) {
+                    let column = self.columns[col];
+                    self.toggle(global, column, cx);
+                }
+            }
             Target::Cell { row, col } => {
                 self.selection.press_cell(row, col, shift, &view);
                 self.press = Some(Press::Cells);
@@ -880,6 +965,7 @@ impl Grid {
                     self.selection.release(Some(CellCoord { row, col }));
                     self.press = None;
                     match self.order.global_at(row) {
+                        Some(global) if self.checkable(row, col) => self.toggle(global, self.columns[col], cx),
                         Some(global) if editable => {
                             self.selection.clear();
                             self.start_edit(global, self.columns[col], window, cx);
@@ -952,7 +1038,7 @@ impl Grid {
         match self.press.take() {
             Some(Press::Cells) => {
                 let at = match self.hit(event.position) {
-                    Some(Target::Cell { row, col }) => Some(CellCoord { row, col }),
+                    Some(Target::Cell { row, col } | Target::Check { row, col }) => Some(CellCoord { row, col }),
                     _ => None,
                 };
                 self.selection.release(at);
@@ -1008,19 +1094,30 @@ impl Render for Grid {
         let m = self.metrics;
         // Editor fills the cell inside its borders, with a 2px ring outside.
         let editor = self.editor_bounds().map(|(input, bounds)| {
-            let theme = cx.theme();
             let ring = px(2.);
+            let ringed = Bounds::new(
+                point(bounds.left() - ring, bounds.top() - ring),
+                size(bounds.size.width - px(1.) + ring * 2., bounds.size.height - px(1.) + ring * 2.),
+            );
+            let picker = self.picker_list(Bounds::new(self.scroll.grid().origin + ringed.origin, ringed.size), cx);
+            let theme = cx.theme();
             div()
                 .absolute()
-                .left(bounds.left() - ring)
-                .top(bounds.top() - ring)
-                .w(bounds.size.width - px(1.) + ring * 2.)
-                .h(bounds.size.height - px(1.) + ring * 2.)
+                .left(ringed.left())
+                .top(ringed.top())
+                .w(ringed.size.width)
+                .h(ringed.size.height)
                 .border_2()
                 .border_color(theme.primary)
                 .bg(theme.background)
                 // Its own Cut/Copy/Paste menu, not the grid's, which would also take focus and commit the edit.
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .when(picker.is_some(), |editor| {
+                    editor
+                        .key_context(PICKING)
+                        .on_action(cx.listener(|this, _: &PrevChoice, _, cx| this.step_choice(-1, cx)))
+                        .on_action(cx.listener(|this, _: &NextChoice, _, cx| this.step_choice(1, cx)))
+                })
                 .child(
                     Input::new(&input)
                         .context_menu(crate::context_menu::input(&input))
@@ -1031,6 +1128,7 @@ impl Render for Grid {
                         .text_size(m.font_size)
                         .font_family(theme.mono_font_family.clone()),
                 )
+                .children(picker)
         });
         let grid = div()
             .id("grid")
@@ -1056,6 +1154,7 @@ impl Render for Grid {
             .on_action(cx.listener(|this, _: &ViewCellValue, _, cx| this.view_value(cx)))
             .on_action(cx.listener(|this, _: &ToggleDeleteRow, _, cx| this.delete_focused_row(cx)))
             .on_action(cx.listener(|this, _: &SetNull, _, cx| this.null_focused_cell(cx)))
+            .on_action(cx.listener(|this, _: &ToggleValue, _, cx| this.toggle_focused(cx)))
             .on_action(cx.listener(|this, _: &Paste, _, cx| this.paste(cx)))
             .on_action(cx.listener(|this, _: &Undo, _, cx| this.table_event(GridEvent::Undo, cx)))
             .on_action(cx.listener(|this, _: &Redo, _, cx| this.table_event(GridEvent::Redo, cx)))
@@ -1142,6 +1241,9 @@ struct Colors {
     staged: Hsla,
     staged_border: Hsla,
     deleted: Hsla,
+    // A ticked checkbox's tick, on the accent, and an empty one's border.
+    on_accent: Hsla,
+    check_border: Hsla,
 }
 
 // Mixes `amount` of `a` into `b`, in sRGB.
@@ -1178,6 +1280,8 @@ impl Colors {
             staged: mix(theme.warning, background, 0.22),
             staged_border: theme.warning.opacity(0.55),
             deleted: theme.danger.opacity(0.22),
+            on_accent: theme.primary_foreground,
+            check_border: theme.muted_foreground.opacity(0.7),
         }
     }
 }
@@ -1295,7 +1399,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     let focused = grid.focus_handle.is_focused(window);
     let focus_display = selection.focus_row.and_then(|row| grid.order.display_of(row));
     let hover_row = match grid.hover {
-        Some(Target::Cell { row, .. } | Target::Gutter { row }) => Some(row),
+        Some(Target::Cell { row, .. } | Target::Check { row, .. } | Target::Gutter { row }) => Some(row),
         _ => None,
     };
     let null = t(cx, "common.null");
@@ -1304,6 +1408,9 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     let mut background = Layer::new(bounds);
     background.quads.push(fill(bounds, colors.background));
 
+    let editable = overlay.is_some_and(|overlay| overlay.editable);
+    // Checkboxes a click flips, which take the pointing hand.
+    let mut checks = Vec::new();
     let mut cells = Layer::new(body);
     for row in first_row..last_row {
         let Some(global) = grid.order.global_at(row) else { continue };
@@ -1349,19 +1456,48 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                 && !value.is_null()
                 && matches!(grid.hover, Some(Target::Cell { row: r, col: c } | Target::Jump { row: r, col: c }) if r == row && c == col);
             let text_width = width - m.cell_pad_x * 2. - if jump { m.chevron } else { px(0.) };
-            let line = match value.display() {
-                Some(text) => plain.shape(&display_text(text), colors.text, text_width, window),
-                None => italic.shape(&null, colors.muted, text_width, window),
-            };
-            // Numbers line up on their decimal point, as in a spreadsheet: a shorter fraction leaves room on the right.
-            let x = match value {
-                barsql_db::Cell::Number(text) => {
-                    let pad = m.ch * grid.fractions[column].saturating_sub(fraction_len(text)) as f32;
-                    left + m.cell_pad_x + (text_width - line.width - pad).max(px(0.))
+            // Booleans are checkboxes in every grid. Only an editable table view's take clicks.
+            if let Some(on) = copy::flag(value, &grid.set.columns[column].type_name) {
+                let check = grid.check_box(row, col);
+                if editable && !deleted {
+                    checks.push(check);
                 }
-                _ => left + m.cell_pad_x,
-            };
-            cells.texts.push((line, point(x, top + m.cell_pad_y)));
+                match on {
+                    true => {
+                        let tick = check.inset(check.size.width * 0.15);
+                        cells.quads.push(quad(check, px(3.), colors.accent, px(0.), colors.accent, BorderStyle::Solid));
+                        cells.icons.push((tick, Lucide::Check.path(), colors.on_accent));
+                    }
+                    false => cells.quads.push(quad(
+                        check,
+                        px(3.),
+                        transparent_black(),
+                        px(1.),
+                        colors.check_border,
+                        BorderStyle::Solid,
+                    )),
+                }
+            } else {
+                let number = match value {
+                    barsql_db::Cell::Number(text) => Some(shown_number(text)),
+                    _ => None,
+                };
+                let line = match (&number, value.display()) {
+                    (Some(number), _) => plain.shape(number, colors.text, text_width, window),
+                    (None, Some(text)) => plain.shape(&display_text(text), colors.text, text_width, window),
+                    (None, None) => italic.shape(&null, colors.muted, text_width, window),
+                };
+                // Numbers line up on their decimal point, as in a spreadsheet: a shorter fraction leaves room on the
+                // right.
+                let x = match &number {
+                    Some(number) => {
+                        let pad = m.ch * grid.fractions[column].saturating_sub(fraction_len(number)) as f32;
+                        left + m.cell_pad_x + (text_width - line.width - pad).max(px(0.))
+                    }
+                    None => left + m.cell_pad_x,
+                };
+                cells.texts.push((line, point(x, top + m.cell_pad_y)));
+            }
             let inner = Bounds::new(cell.origin, size(width - px(1.), m.row_height - px(1.)));
             if staged && edges.is_none() {
                 cells.quads.push(quad(
@@ -1604,6 +1740,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         gutter_mask.intersect(&Bounds::from_corners(gutter_mask.origin, point(gutter_mask.right(), gutter_bottom))),
     ]
     .into_iter()
+    .chain(checks.into_iter().map(|check| body.intersect(&check)))
     .map(|area| window.insert_hitbox(area, HitboxBehavior::Normal))
     .collect();
     let resize = resize.into_iter().map(|area| window.insert_hitbox(area, HitboxBehavior::Normal)).collect();
@@ -1655,6 +1792,7 @@ fn paint(entity: &Entity<Grid>, _: Bounds<Pixels>, frame: Frame, window: &mut Wi
 }
 
 mod menu;
+mod picker;
 mod table;
 
 #[cfg(any(test, feature = "snapshot"))]
@@ -1718,12 +1856,21 @@ impl Grid {
         self.editing.is_some()
     }
 
+    // What the open list of an enum's values holds, NULL as None, and the one Enter takes.
+    pub(crate) fn picker(&self) -> Option<(Vec<Option<String>>, usize)> {
+        self.editing.as_ref()?.picker.as_ref().map(picker::Picker::listed)
+    }
+
     pub(crate) fn chevron_point(&self, col: usize) -> Point<Pixels> {
         let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         point(
             bounds.left() + m.gutter_width + self.col_x[col + 1] - m.cell_pad_x - m.chevron / 2. - scroll.x,
             bounds.top() + m.header_height / 2.,
         )
+    }
+
+    pub(crate) fn check_point(&self, row: usize, col: usize) -> Point<Pixels> {
+        self.check_box(row, col).center()
     }
 
     pub(crate) fn jump_point(&self, row: usize, col: usize) -> Point<Pixels> {

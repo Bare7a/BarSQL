@@ -34,10 +34,11 @@ use crate::grid::{RowRef, copy};
 use crate::hover_card::HoverCard;
 use crate::i18n::{I18n, t, t_count, t_with};
 use crate::occurrences::{self, OccurrenceMarks};
-use crate::results::{ResultStatus, ResultsEvent, ResultsPanel};
+use crate::results::{Fix, ResultsEvent, ResultsPanel};
 use crate::saved_queries;
 use crate::schema::{self, Schemas};
 use crate::scrollbars::ScrollbarsOnHover as _;
+use crate::spinner::ProgressLine;
 use crate::sql_language::{self, SqlDefinitions, SqlLanguage, linked_table, lsp_range};
 use crate::status_bar::Caret;
 use crate::tokens::{ICON_XS, RADIUS, TEXT_XS, TINT, TINT_BORDER};
@@ -130,11 +131,6 @@ pub enum QueryTabEvent {
     OpenTable { schema: String, table: String },
 }
 
-pub struct TabStatus {
-    pub text: SharedString,
-    pub error: bool,
-}
-
 pub struct QueryTab {
     pub id: String,
     pub title: SharedString,
@@ -157,6 +153,23 @@ pub struct QueryTab {
     query_error: Option<(Range<usize>, String)>,
     diagnostics: Task<()>,
     _subscriptions: Vec<Subscription>,
+}
+
+// The misspelt name at `start`, or just inside the quote that opens it there, as Postgres points at a quoted one.
+fn misspelt_range(sql: &str, start: usize, name: &str) -> Option<Range<usize>> {
+    let quoted = sql.get(start..).is_some_and(|rest| rest.starts_with(['"', '`', '[']));
+    let start = start + usize::from(quoted);
+    let range = start..start + name.len();
+    sql.get(range.clone()).is_some_and(|found| found.eq_ignore_ascii_case(name)).then_some(range)
+}
+
+// Rewrites an old default title, "Query 1 - Forum", as "Query 1 · Forum". Only a word and a number before the
+// connection's name count, so a title the user chose stays.
+fn dotted_title(title: &str, connection: &str) -> Option<String> {
+    let head = title.strip_suffix(connection)?.strip_suffix(" - ")?;
+    let (word, number) = head.split_once(' ')?;
+    let default = !word.is_empty() && !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit());
+    default.then(|| format!("{head} · {connection}"))
 }
 
 pub fn new_tab_id() -> String {
@@ -206,6 +219,10 @@ impl QueryTab {
                 ResultsEvent::JumpToError { statement, position, message } => {
                     this.jump_to_error(statement, *position, message, window, cx)
                 }
+                ResultsEvent::Located { statement, position, message } => {
+                    this.mark_error(statement, *position, message, cx)
+                }
+                ResultsEvent::Fix(fix) => this.apply_fix(fix, window, cx),
                 ResultsEvent::FocusedRowChanged => cx.emit(QueryTabEvent::FocusedRowChanged),
             }),
             cx.observe_global_in::<Schemas>(window, |this, window, cx| this.schedule_diagnostics(window, cx)),
@@ -213,9 +230,10 @@ impl QueryTab {
             cx.observe(&results, |_, _, cx| cx.notify()),
         ];
         schema::ensure_loaded(&connection.id, connection.driver.clone(), cx);
+        let title = dotted_title(&tab.title, &connection.name).unwrap_or(tab.title);
         let mut this = Self {
             id: tab.id,
-            title: tab.title.into(),
+            title: title.into(),
             connection,
             color: tab.color,
             saved_query_id: tab.saved_query_id,
@@ -244,6 +262,10 @@ impl QueryTab {
 
     pub fn results_focus(&self, cx: &App) -> Option<FocusHandle> {
         self.results.read(cx).grid_focus(cx)
+    }
+
+    pub fn editor_has_focus(&self, window: &Window, cx: &App) -> bool {
+        self.editor.read(cx).focus_handle(cx).contains_focused(window, cx)
     }
 
     pub fn focus_editor(&self, window: &mut Window, cx: &mut App) {
@@ -476,16 +498,9 @@ impl QueryTab {
         });
     }
 
-    // Finds the statement by the last run's split ranges, or by its text if the buffer changed since.
-    // `position` counts characters, not bytes.
-    fn jump_to_error(
-        &mut self,
-        statement: &str,
-        position: u32,
-        message: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    // Where `position`, in characters into `statement`, falls in the buffer. The statement is found by the last run's
+    // split ranges, or by its text if the buffer changed since.
+    fn error_offset(&self, statement: &str, position: u32, cx: &App) -> Option<usize> {
         let buffer = self.sql(cx);
         let at_run = self.run_origin.as_ref().and_then(|origin| {
             let found =
@@ -495,15 +510,46 @@ impl QueryTab {
         let start = at_run
             .filter(|&start| buffer.get(start..start + statement.len()) == Some(statement))
             .or_else(|| buffer.find(statement));
-        let offset = start.and_then(|start| char_offset(statement, position).map(|ix| start + ix));
-        let Some(offset) = offset else {
+        start.and_then(|start| char_offset(statement, position).map(|ix| start + ix))
+    }
+
+    // Underlines where a run failed, and leaves the caret where it is.
+    fn mark_error(&mut self, statement: &str, position: u32, message: &str, cx: &mut Context<Self>) {
+        let Some(offset) = self.error_offset(statement, position, cx) else { return };
+        self.query_error = Some((word_range(&self.sql(cx), offset), message.to_string()));
+        self.refresh_diagnostics(cx);
+    }
+
+    fn jump_to_error(
+        &mut self,
+        statement: &str,
+        position: u32,
+        message: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(offset) = self.error_offset(statement, position, cx) else {
             self.focus_editor(window, cx);
             return;
         };
-        self.query_error = Some((word_range(&buffer, offset), message.to_string()));
+        self.query_error = Some((word_range(&self.sql(cx), offset), message.to_string()));
         self.editor.update(cx, |state, cx| {
             let position = state.text().offset_to_position(offset);
             state.set_cursor_position(position, window, cx);
+        });
+        self.refresh_diagnostics(cx);
+    }
+
+    // Puts the name the error card offered in place of the misspelt one, as one edit to undo.
+    pub(crate) fn apply_fix(&mut self, fix: &Fix, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(start) = self.error_offset(&fix.statement, fix.position, cx) else { return };
+        let Some(range) = misspelt_range(&self.sql(cx), start, &fix.name) else { return };
+        self.query_error = None;
+        let meant = fix.meant.clone();
+        self.editor.update(cx, |state, cx| {
+            state.set_selected_range(range, cx);
+            state.replace(meant, window, cx);
+            state.focus(window, cx);
         });
         self.refresh_diagnostics(cx);
     }
@@ -800,8 +846,12 @@ impl QueryTab {
         };
     }
 
-    fn cancel(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
         state::bar(cx).cancel_query(&self.id);
+    }
+
+    pub fn go_to_line(&self, window: &mut Window, cx: &mut App) {
+        editor_commands::go_to_line(&self.editor, window, cx);
     }
 
     // `confirm` shows the result message a typed BEGIN, COMMIT or ROLLBACK gets. Toolbar buttons pass false.
@@ -896,28 +946,14 @@ impl QueryTab {
         self.start_running(work, cx);
     }
 
-    pub fn status(&self, cx: &App) -> TabStatus {
-        let result = self.results.read(cx).status(cx);
-        let status = |text: SharedString| TabStatus { text, error: false };
-        if let Some(running) = &self.running {
-            let seconds = format!("{:.1}", running.started.elapsed().as_secs_f64());
-            return status(match result {
-                ResultStatus::Streaming(rows) if rows > 0 => {
-                    t_count(cx, "app.statusStreaming", rows as i64, &[("seconds", &seconds)])
-                }
-                _ => t_with(cx, "app.statusRunning", &[("seconds", &seconds)]),
-            });
-        }
-        match result {
-            ResultStatus::Error(message) => TabStatus { text: message, error: true },
-            ResultStatus::Rows { count, ms } => {
-                status(t_count(cx, "app.statusRows", count, &[("ms", &ms.to_string())]))
-            }
-            ResultStatus::Affected { count, ms } => {
-                status(t_count(cx, "app.statusAffected", count, &[("ms", &ms.to_string())]))
-            }
-            ResultStatus::Empty | ResultStatus::Streaming(_) => status(t(cx, "app.statusReady")),
-        }
+    // A run going on, for the status bar. Once it's done the results say how it went.
+    pub fn live_status(&self, cx: &App) -> Option<SharedString> {
+        let running = self.running.as_ref()?;
+        let seconds = format!("{:.1}", running.started.elapsed().as_secs_f64());
+        Some(match self.results.read(cx).streamed_rows(cx) {
+            Some(rows) if rows > 0 => t_count(cx, "app.statusStreaming", rows as i64, &[("seconds", &seconds)]),
+            _ => t_with(cx, "app.statusRunning", &[("seconds", &seconds)]),
+        })
     }
 
     // Run and Run all lead, then Explain with Explain analyze in its menu, then saving. Stop stands in for both runs
@@ -1221,7 +1257,8 @@ impl Render for QueryTab {
                             cx.new(|_| drag.as_ref().clone())
                         },
                     ))
-                    .child(self.splitter_double_click(cx)),
+                    .child(self.splitter_double_click(cx))
+                    .when(self.running.is_some(), |el| el.child(ProgressLine)),
             )
     }
 }
@@ -1281,12 +1318,14 @@ impl QueryTab {
     }
 }
 
-#[cfg(any(test, feature = "snapshot"))]
 impl QueryTab {
     pub(crate) fn is_running(&self) -> bool {
         self.running.is_some()
     }
+}
 
+#[cfg(any(test, feature = "snapshot"))]
+impl QueryTab {
     pub(crate) fn in_transaction(&self) -> bool {
         self.txn != TxnState::Idle
     }

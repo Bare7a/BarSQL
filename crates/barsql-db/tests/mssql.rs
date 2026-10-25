@@ -284,6 +284,27 @@ async fn a_cancel_while_rows_stream_keeps_the_connection() {
     }
 }
 
+// SQL Server keeps an IN list as an OR of equalities, last value first, on the column or the table.
+#[tokio::test]
+async fn a_check_that_lists_values_gives_the_column_its_values() {
+    let Some(cfg) = mssql_config() else { return };
+    let engine = mssql_engine(&cfg).await;
+    let mut session = engine.session().await.unwrap();
+    session
+        .buffered(
+            "DROP TABLE IF EXISTS dbo.enum_probe;
+            CREATE TABLE dbo.enum_probe (kind nvarchar(10) CHECK (kind IN (N'like', N'love')), stars int,
+                note nvarchar(200) CHECK (LEN(note) < 100), CONSTRAINT star_list CHECK (stars IN (1, 2)),
+                CONSTRAINT pair CHECK (stars < 3 OR kind = N'love'))",
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    let columns = engine.list_columns("dbo", "enum_probe").await.unwrap();
+    assert_eq!(common::column_values(&columns), ["kind: love, like", "stars: 2, 1", "note: "]);
+    session.buffered("DROP TABLE dbo.enum_probe", &Cancel::new()).await.unwrap();
+}
+
 #[tokio::test]
 async fn the_catalog_describes_a_table() {
     let Some(cfg) = mssql_config() else { return };

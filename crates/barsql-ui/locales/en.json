@@ -29,13 +29,10 @@
     }
   },
   "app": {
+    "queryTabWithConn": "Query {{num}} · {{conn}}",
     "statusRunning": "Running… {{seconds}} s",
     "statusStreaming_one": "Streaming… {{count}} row · {{seconds}} s",
     "statusStreaming_other": "Streaming… {{count}} rows · {{seconds}} s",
-    "statusRows_one": "{{count}} row · {{ms}} ms",
-    "statusRows_other": "{{count}} rows · {{ms}} ms",
-    "statusAffected_one": "{{count}} row affected · {{ms}} ms",
-    "statusAffected_other": "{{count}} rows affected · {{ms}} ms",
     "newQuery": "New query",
     "openSqlite": "Open SQLite file…",
     "welcomeDrop": "or drop a SQLite file anywhere in the window"
@@ -221,7 +218,8 @@
     "rowsOf_other": "{{loaded}} of {{total}} rows",
     "countRows": "Count all",
     "countRowsTooltip": "Count the rows the filter lets through",
-    "counting": "Counting…"
+    "counting": "Counting…",
+    "addRowDialog": { "choosePlaceholder": "Choose a value…" }
   },
   "shortcuts": {
     "items": {
@@ -293,17 +291,22 @@
     "sessionNotSaved": "Open tabs could not be saved: {{error}}. BarSQL may not reopen them as they are now.",
     "historyNotSaved": "Query history could not be saved: {{error}}. Recent won't list new queries until saving works again.",
     "code": "Code {{code}}",
+    "useName": "Use {{name}}",
     "didYouMean": "Did you mean {{name}}?"
   },
+  "goToLine": { "title": "Go to line", "label": "Line, or line:column", "go": "Go" },
   "status": {
     "caret": "Ln {{line}}, Col {{column}}",
     "selected": "{{count}} selected",
     "selected_other": "{{count}} selected",
     "selections": "{{count}} selection",
     "selections_other": "{{count}} selections",
-    "count": "Count {{count}}",
-    "sum": "Sum {{sum}}",
-    "average": "Avg {{avg}}",
+    "stat": { "count": "Count", "sum": "Sum", "avg": "Avg", "min": "Min", "max": "Max" },
+    "cellsInColumns": "{{cells}} cells in {{columns}} columns",
+    "column": "Column",
+    "switchConnection": "Switch connection",
+    "connectionSettings": "Connection settings",
+    "readOnly": "Read-only",
     "protected": "Asks before changes"
   },
   "theme": {

@@ -11,7 +11,7 @@ use barsql_sql::ddl::{
     DdlColumn, compose_create_table, join_ddl, render_constraint, render_create_index, terminate_statement,
     unsupported_ddl,
 };
-use barsql_sql::{qualified_table, quote_ident, quote_literal_in};
+use barsql_sql::{enum_values, qualified_table, quote_ident, quote_literal_in};
 use tokio_postgres::Row;
 use tokio_postgres::types::ToSql;
 
@@ -187,7 +187,17 @@ impl PgEngine {
                     COALESCE(fk.reftable::text, ''),
                     COALESCE(fk.refcolumn::text, ''),
                     a.attidentity <> '',
-                    a.attgenerated <> ''
+                    a.attgenerated <> '',
+                    ARRAY(
+                        SELECT e.enumlabel::text FROM pg_catalog.pg_enum e
+                        WHERE e.enumtypid = a.atttypid
+                        ORDER BY e.enumsortorder
+                    ),
+                    ARRAY(
+                        SELECT pg_catalog.pg_get_constraintdef(con.oid, true) FROM pg_catalog.pg_constraint con
+                        WHERE con.conrelid = c.oid AND con.contype = 'c' AND con.conkey = ARRAY[a.attnum]
+                        ORDER BY con.conname
+                    )
                 FROM pg_catalog.pg_attribute a
                 JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
                 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
@@ -211,9 +221,16 @@ impl PgEngine {
         Ok(rows
             .iter()
             .map(|r| {
+                let name: String = r.get(0);
                 let foreign_table: String = r.get(5);
+                let labels: Vec<String> = r.get(9);
+                let enum_values = if labels.is_empty() {
+                    enum_values::from_checks(&name, &r.get::<_, Vec<String>>(10), &PG)
+                } else {
+                    labels
+                };
                 ColumnInfo {
-                    name: r.get(0),
+                    name,
                     data_type: r.get::<_, Option<String>>(1).unwrap_or_default(),
                     is_nullable: r.get(2),
                     default_val: r.get(3),
@@ -223,6 +240,7 @@ impl PgEngine {
                     foreign_column: r.get(6),
                     is_identity: r.get(7),
                     is_computed: r.get(8),
+                    enum_values,
                 }
             })
             .collect())

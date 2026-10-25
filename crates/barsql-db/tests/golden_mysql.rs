@@ -86,6 +86,40 @@ async fn check_engine(engine_name: &str, prefix: &str, port: &str) {
     assert_matches(&format!("schema/{}.json", expected["engine"].as_str().unwrap()), &expected, &actual);
 }
 
+// An enum gives its labels. Otherwise a check that lists a column's values gives them, read from the DDL since
+// CHECK_CONSTRAINTS doesn't say which table a check is on.
+#[tokio::test]
+async fn an_enum_or_a_check_list_gives_a_columns_values() {
+    let _serial = common::serial().await;
+    for (prefix, port) in SERVERS {
+        let engine = connect(prefix, port).await;
+        let mut session = engine.session().await.unwrap();
+        let schema = text(&mut session, "SELECT DATABASE()").await;
+        let setup = [
+            "DROP TABLE IF EXISTS enum_probe",
+            "CREATE TABLE enum_probe (mood ENUM('sad', 'it''s', 'happy'), kind VARCHAR(10) CHECK (kind IN ('like', 'love')),
+                stars INT, note TEXT, CONSTRAINT star_list CHECK (stars = 1 OR stars = 2),
+                CONSTRAINT short_note CHECK (CHAR_LENGTH(note) < 100))",
+        ];
+        run_all(&mut session, &setup.map(String::from)).await;
+        let columns = engine.list_columns(&schema, "enum_probe").await.unwrap();
+        assert_eq!(
+            common::column_values(&columns),
+            ["mood: sad, it's, happy", "kind: like, love", "stars: 1, 2", "note: "],
+            "{prefix}"
+        );
+        // A check written on its column alone still counts as the table's.
+        let setup = [
+            "DROP TABLE IF EXISTS enum_probe_one",
+            "CREATE TABLE enum_probe_one (kind TEXT CHECK (kind IN ('a', 'b')))",
+        ];
+        run_all(&mut session, &setup.map(String::from)).await;
+        let columns = engine.list_columns(&schema, "enum_probe_one").await.unwrap();
+        assert_eq!(common::column_values(&columns), ["kind: a, b"], "{prefix}");
+        run_all(&mut session, &["DROP TABLE enum_probe".into(), "DROP TABLE enum_probe_one".into()]).await;
+    }
+}
+
 #[tokio::test]
 async fn mysql_matches_the_fixtures() {
     let _serial = common::serial().await;

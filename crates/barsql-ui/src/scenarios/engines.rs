@@ -206,7 +206,7 @@ fn ran_in_new_tab(app: &mut Driver, tabs: usize, title: &str) {
     assert_eq!(app.titles().len(), tabs + 1);
     assert_eq!(app.titles().last().map(String::as_str), Some(title));
     app.wait_idle();
-    assert!(!app.status_is_error(), "{:?}", app.error());
+    assert!(app.error().is_none(), "{:?}", app.error());
     assert!(app.grid().is_some(), "a grid of the view's rows");
 }
 
@@ -382,6 +382,8 @@ fn foreign_key(cx: &mut TestAppContext, engine: Engine) {
     app.refresh_schema();
     browse(&mut app, &child);
     let grid = grid(&mut app);
+    // Where the key leads comes in a load of its own, after the rows.
+    app.settle(|cx| cx.update(|_, cx| grid.read(cx).jumps_at(0, 1)));
     let at = app.grid_point(&grid, |grid| grid.jump_point(0, 1));
     let buttons = app.cx.update(|_, cx| {
         let grid = grid.read(cx);
@@ -413,6 +415,7 @@ fn text_foreign_key(cx: &mut TestAppContext, engine: Engine) {
     app.refresh_schema();
     browse(&mut app, &child);
     let grid = grid(&mut app);
+    app.settle(|cx| cx.update(|_, cx| grid.read(cx).jumps_at(0, 1)));
     let at = app.grid_point(&grid, |grid| grid.jump_point(0, 1));
     app.click_at(at, Modifiers::none());
     let workspace = app.workspace.clone();
@@ -604,7 +607,6 @@ mod postgres_only {
         let mut app = open_on(cx, Engine::Postgres);
         app.connect();
         app.run("SELECT nonexistent_func_e2e();");
-        assert!(app.status_is_error());
         let info = app.error().and_then(|error| error.info).expect("the error card");
         assert_eq!(info.code, "42883");
         assert!(info.message.contains("nonexistent_func_e2e") && info.hint.contains("No function matches"), "{info:?}");

@@ -29,13 +29,10 @@
     }
   },
   "app": {
+    "queryTabWithConn": "Заявка {{num}} · {{conn}}",
     "statusRunning": "Изпълнява се… {{seconds}} s",
     "statusStreaming_one": "Зареждане… {{count}} ред · {{seconds}} s",
     "statusStreaming_other": "Зареждане… {{count}} реда · {{seconds}} s",
-    "statusRows_one": "{{count}} ред · {{ms}} ms",
-    "statusRows_other": "{{count}} реда · {{ms}} ms",
-    "statusAffected_one": "{{count}} засегнат ред · {{ms}} ms",
-    "statusAffected_other": "{{count}} засегнати реда · {{ms}} ms",
     "newQuery": "Нова заявка",
     "openSqlite": "Отвори SQLite файл…",
     "welcomeDrop": "или пуснете SQLite файл където и да е в прозореца"
@@ -221,7 +218,8 @@
     "rowsOf_other": "{{loaded}} от {{total}} реда",
     "countRows": "Преброй всички",
     "countRowsTooltip": "Преброй редовете, които филтърът пропуска",
-    "counting": "Брои се…"
+    "counting": "Брои се…",
+    "addRowDialog": { "choosePlaceholder": "Изберете стойност…" }
   },
   "shortcuts": {
     "items": {
@@ -293,17 +291,22 @@
     "sessionNotSaved": "Отворените раздели не можаха да бъдат запазени: {{error}}. BarSQL може да не ги отвори отново такива, каквито са сега.",
     "historyNotSaved": "Историята на заявките не можа да бъде запазена: {{error}}. Новите заявки няма да се появят в „Скорошни“, докато запазването не проработи.",
     "code": "Код {{code}}",
+    "useName": "Използвай {{name}}",
     "didYouMean": "Имахте предвид {{name}}?"
   },
+  "goToLine": { "title": "Отиди на ред", "label": "Ред или ред:колона", "go": "Отиди" },
   "status": {
     "caret": "Ред {{line}}, колона {{column}}",
     "selected": "{{count}} избран",
     "selected_other": "{{count}} избрани",
     "selections": "{{count}} селекция",
     "selections_other": "{{count}} селекции",
-    "count": "Брой {{count}}",
-    "sum": "Сума {{sum}}",
-    "average": "Средно {{avg}}",
+    "stat": { "count": "Брой", "sum": "Сума", "avg": "Средно", "min": "Мин", "max": "Макс" },
+    "cellsInColumns": "{{cells}} клетки в {{columns}} колони",
+    "column": "Колона",
+    "switchConnection": "Смени връзката",
+    "connectionSettings": "Настройки на връзката",
+    "readOnly": "Само за четене",
     "protected": "Пита преди промени"
   },
   "theme": {

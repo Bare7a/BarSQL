@@ -312,17 +312,13 @@ impl ErDiagram {
             }
         };
         let percent = format!("{}%", (self.zoom * 100.).round());
-        // How to get around, in the room the toolbar has to spare, unless the tables were cut.
-        let note = match self.total > MAX_TABLES {
-            true => {
-                let (shown, total) = (MAX_TABLES.to_string(), self.total.to_string());
-                t_with(cx, "erDiagram.truncated", &[("shown", &shown), ("total", &total)])
-            }
-            false => {
-                let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
-                t_with(cx, "erDiagram.hint", &[("modifier", modifier)])
-            }
-        };
+        // Only a cut diagram has something to say along the toolbar. How to get around waits behind the "?".
+        let note = (self.total > MAX_TABLES).then(|| {
+            let (shown, total) = (MAX_TABLES.to_string(), self.total.to_string());
+            t_with(cx, "erDiagram.truncated", &[("shown", &shown), ("total", &total)])
+        });
+        let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
+        let hint = t_with(cx, "erDiagram.hint", &[("modifier", modifier)]);
         h_flex()
             .flex_none()
             .gap(rems(0.462))
@@ -343,15 +339,21 @@ impl ErDiagram {
                     .debug_selector(|| "er-matches".into())
                     .child(text)
             }))
-            .child(
+            .child(div().flex_1().min_w_0().children(note.map(|note| {
                 div()
-                    .flex_1()
-                    .min_w_0()
+                    .debug_selector(|| "er-note".into())
                     .truncate()
                     .text_right()
                     .text_size(TEXT_XS)
                     .text_color(theme.muted_foreground)
-                    .child(note),
+                    .child(note)
+            })))
+            .child(
+                Button::new("er-help")
+                    .debug_selector(|| "er-help".into())
+                    .ghost()
+                    .tool_icon(Icon::new(Lucide::CircleQuestionMark), ICON_XS)
+                    .tooltip(hint),
             )
             .child(
                 Button::new("er-keys-only")

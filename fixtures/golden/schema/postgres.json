@@ -96,7 +96,11 @@
           "dataType": "golden.mood",
           "isNullable": true,
           "isPrimary": false,
-          "isForeign": false
+          "isForeign": false,
+          "enumValues": [
+            "sad",
+            "happy"
+          ]
         },
         {
           "name": "created_at",

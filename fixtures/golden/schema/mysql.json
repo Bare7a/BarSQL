@@ -94,7 +94,11 @@
           "dataType": "enum",
           "isNullable": true,
           "isPrimary": false,
-          "isForeign": false
+          "isForeign": false,
+          "enumValues": [
+            "sad",
+            "happy"
+          ]
         },
         {
           "name": "created_at",
@@ -458,7 +462,11 @@
           "dataType": "enum",
           "isNullable": true,
           "isPrimary": false,
-          "isForeign": false
+          "isForeign": false,
+          "enumValues": [
+            "sad",
+            "happy"
+          ]
         },
         {
           "name": "c_set",

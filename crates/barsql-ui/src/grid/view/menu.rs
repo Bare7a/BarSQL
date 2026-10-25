@@ -34,7 +34,9 @@ impl Grid {
         self.menu_target = target;
         let view = View { order: &self.order, columns: &self.columns };
         match target {
-            Some(Target::Cell { row, col } | Target::Jump { row, col }) if !self.selection.covers(row, col, &view) => {
+            Some(Target::Cell { row, col } | Target::Jump { row, col } | Target::Check { row, col })
+                if !self.selection.covers(row, col, &view) =>
+            {
                 // As a left click does: the cell takes the focus and any selection goes.
                 self.selection.press_cell(row, col, false, &view);
                 self.selection.release(Some(CellCoord { row, col }));

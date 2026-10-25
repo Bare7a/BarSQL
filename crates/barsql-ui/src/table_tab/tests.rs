@@ -78,7 +78,7 @@ fn tables_load_a_page_then_more_on_request(cx: &mut TestAppContext) {
 }
 
 fn label(view: &Entity<TableTab>, cx: &mut VisualTestContext) -> String {
-    cx.update(|_, cx| view.read(cx).status(cx).0.to_string())
+    cx.update(|_, cx| view.read(cx).rows_label(cx).to_string())
 }
 
 // A table that loaded whole says how many rows it has. One with more pages offers to count them, filter and all,
@@ -251,6 +251,47 @@ fn the_filter_completes_columns_then_where_keywords(cx: &mut TestAppContext) {
     assert_eq!(all[3].0, "AND");
     let matches = complete("id > 1 AND no", cx);
     assert_eq!(matches.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(), ["note", "NOT", "IS NOT NULL"]);
+}
+
+// A click on a SQLite boolean's checkbox stages its flip as 0 or 1, which applies to the row.
+#[gpui_kit::test]
+fn a_checkbox_flips_a_sqlite_boolean_in_the_table(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    seed(&env, "CREATE TABLE flags (id INTEGER PRIMARY KEY, active BOOLEAN); INSERT INTO flags VALUES (1, 1), (2, 0)");
+    let (view, cx) = open(&env, cx, "flags");
+    let grid = cx.update(|_, cx| view.read(cx).grid.clone());
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let at = cx.update(|_, cx| grid.read(cx).check_point(0, 1));
+    cx.simulate_click(at, Modifiers::none());
+    assert_eq!(cell(&view, 0, 1, cx).as_deref(), Some("0"), "staged as the column holds it");
+    grid_event(&view, GridEvent::Apply, cx);
+    settle(cx, |cx| cx.update(|_, cx| !view.read(cx).applying && view.read(cx).loading.is_none()));
+    assert_eq!(query(&env, "SELECT active FROM flags ORDER BY id"), [vec![Value::Int(0)], vec![Value::Int(0)]]);
+}
+
+// A CHECK that lists a column's values gives it a list to pick from, and the pick applies to the row.
+#[gpui_kit::test]
+fn a_column_that_lists_its_values_edits_with_a_picker(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    seed(
+        &env,
+        "CREATE TABLE reactions (id INTEGER PRIMARY KEY, kind TEXT CHECK (kind IN ('like', 'love'))); \
+         INSERT INTO reactions VALUES (1, 'like')",
+    );
+    let (view, cx) = open(&env, cx, "reactions");
+    let grid = cx.update(|_, cx| view.read(cx).grid.clone());
+    settle(cx, |cx| cx.update(|_, cx| !view.read(cx).choices.is_empty()));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let at = cx.update(|_, cx| grid.read(cx).cell_point(0, 1));
+    let (button, modifiers) = (gpui_kit::MouseButton::Left, Default::default());
+    cx.simulate_event(gpui_kit::MouseDownEvent { button, position: at, modifiers, click_count: 2, first_mouse: false });
+    cx.simulate_event(gpui_kit::MouseUpEvent { button, position: at, modifiers, click_count: 2 });
+    let listed = cx.update(|_, cx| grid.read(cx).picker());
+    assert_eq!(listed, Some((vec![Some("like".into()), Some("love".into()), None], 0)), "the column takes NULL too");
+    cx.simulate_keystrokes("down enter");
+    grid_event(&view, GridEvent::Apply, cx);
+    settle(cx, |cx| cx.update(|_, cx| !view.read(cx).applying && view.read(cx).loading.is_none()));
+    assert_eq!(query(&env, "SELECT kind FROM reactions"), [vec![Value::Text("love".into())]]);
 }
 
 // Checks that the editor keeps the focus the double-click gave it.

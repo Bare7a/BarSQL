@@ -9,6 +9,6 @@ mod view;
 
 pub use toolbar::{format_label, toolbar};
 pub use view::{
-    Aggregate, ExportResults, ExportSource, Grid, GridEvent, RowRef, STRIPES_KEY, TableOverlay, ViewCell, copy_format,
-    init, set_copy_format,
+    Aggregate, Choices, ColumnStats, ExportResults, ExportSource, Grid, GridEvent, RowRef, STRIPES_KEY, TableOverlay,
+    ViewCell, copy_format, init, set_copy_format,
 };

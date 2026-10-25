@@ -59,8 +59,36 @@ pub fn shown<'a>(set: &'a ResultSet, staged: Option<&'a Staged>, row: usize, col
     }
 }
 
+// The engine's own booleans, plus 1/0 and true/false in a column declared boolean, as SQLite and staged edits hold them.
+pub fn flag(cell: Cell, type_name: &str) -> Option<bool> {
+    let boolean = || ["boolean", "bool"].iter().any(|name| type_name.trim().eq_ignore_ascii_case(name));
+    let spelled = |text: &str, words: [&str; 3]| words.iter().any(|word| text.eq_ignore_ascii_case(word));
+    match cell {
+        Cell::Bool(on) => Some(on),
+        Cell::Number(text) | Cell::Text(text) if boolean() => {
+            if spelled(text, ["1", "true", "t"]) {
+                Some(true)
+            } else {
+                spelled(text, ["0", "false", "f"]).then_some(false)
+            }
+        }
+        _ => None,
+    }
+}
+
+// Booleans copy as TRUE and FALSE, except into JSON and SQL, which write their own literals.
+fn copy_cell<'a>(cell: Cell<'a>, type_name: &str, format: Option<ExportFormat>) -> Cell<'a> {
+    match (flag(cell, type_name), format) {
+        (Some(on), Some(ExportFormat::Json | ExportFormat::Sql)) => Cell::Bool(on),
+        (Some(true), _) => Cell::Text("TRUE"),
+        (Some(false), _) => Cell::Text("FALSE"),
+        (None, _) => cell,
+    }
+}
+
 pub fn cell_text(set: &ResultSet, staged: Option<&Staged>, row: usize, column: usize) -> String {
-    shown(set, staged, row, column).display().unwrap_or_default().to_string()
+    let cell = copy_cell(shown(set, staged, row, column), &set.columns[column].type_name, None);
+    cell.display().unwrap_or_default().to_string()
 }
 
 // Lazy, so a file can be written while the rest is still being formatted.
@@ -99,7 +127,8 @@ pub fn export(
 ) -> String {
     let names: Vec<String> = target.columns.iter().map(|&c| set.columns[c].name.clone()).collect();
     let types: Vec<String> = target.columns.iter().map(|&c| set.columns[c].type_name.clone()).collect();
-    let rows = target.rows.iter().map(|&row| target.columns.iter().map(|&c| shown(set, staged, row, c)).collect());
+    let cell = |row, c: usize| copy_cell(shown(set, staged, row, c), &set.columns[c].type_name, Some(format));
+    let rows = target.rows.iter().map(|&row| target.columns.iter().map(|&c| cell(row, c)).collect());
     export_to_string(format, &names, &types, table, dialect, rows)
 }
 
@@ -247,6 +276,36 @@ mod tests {
         }
         let rows: usize = chunks(set(), None, ExportFormat::Json, None, None, target).map(|chunk| chunk.rows).sum();
         assert_eq!(rows, 3);
+    }
+
+    // SQLite's 1 and 0 in a boolean column too. A paste still puts back the raw values.
+    #[test]
+    fn booleans_copy_as_true_and_false() {
+        let columns: Arc<[ColumnMeta]> = [("active", "BOOLEAN"), ("flag", "bool")]
+            .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+            .to_vec()
+            .into();
+        let mut builder = ChunkBuilder::new(2, 2);
+        for (active, flag) in [("1", false), ("0", true)] {
+            builder.push_number(|s| s.push_str(active));
+            builder.push_bool(flag);
+            builder.end_row();
+        }
+        let mut set = ResultSet::new(columns);
+        set.push(Arc::new(builder.finish()));
+        let order = RowOrder::identity(2);
+        let target = resolve(&Selection::default(), &View { order: &order, columns: &[0, 1] });
+        let copy = |format, dialect| export(&set, None, format, Some("t"), dialect, &target);
+        assert_eq!(copy(ExportFormat::Csv, None), "active,flag\nTRUE,FALSE\nFALSE,TRUE");
+        assert!(copy(ExportFormat::Json, None).contains("\"active\": true"), "{}", copy(ExportFormat::Json, None));
+        let sql = copy(ExportFormat::Sql, Some(SqlDialect::Sqlite));
+        assert!(sql.contains("(TRUE, FALSE)") && sql.contains("(FALSE, TRUE)"), "{sql}");
+        assert_eq!(cell_text(&set, None, 0, 0), "TRUE", "a lone cell");
+        assert_eq!(
+            values(&set, None, &target)[0],
+            [Some("1".into()), Some("false".into())],
+            "pasted back as they were"
+        );
     }
 
     #[test]

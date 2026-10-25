@@ -7,7 +7,7 @@ use barsql_core::{
     IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{terminate_statement, unsupported_ddl};
-use barsql_sql::{qualified_table, quote_ident};
+use barsql_sql::{enum_values, qualified_table, quote_ident};
 
 use super::{CH, ChEngine};
 use crate::dump::DumpColumn;
@@ -137,23 +137,35 @@ impl ChEngine {
             .collect())
     }
 
-    // Keys aren't unique in ClickHouse, so no column counts as a primary key.
+    // Keys aren't unique in ClickHouse, so no column counts as a primary key. The first row brings the DDL, the only
+    // place constraints show.
     pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
         let schema = self.schema_or(schema).to_string();
         let rows = self
             .rows(
-                "SELECT name, type, default_kind, default_expression FROM system.columns
+                "SELECT name, type, default_kind, default_expression,
+                    if(position = 1, (
+                        SELECT create_table_query FROM system.tables WHERE database = {db:String} AND name = {t:String}
+                    ), '')
+                FROM system.columns
                 WHERE database = {db:String} AND table = {t:String}
                 ORDER BY position",
                 &[("db", &schema), ("t", table)],
             )
             .await?;
+        let ddl = rows.first().map(|r| text(r, 4)).unwrap_or_default();
+        let checks = enum_values::ddl_checks(&ddl, &CH);
         Ok(rows
             .iter()
             .map(|r| {
-                let (data_type, default_kind) = (text(r, 1), text(r, 2));
+                let (name, data_type, default_kind) = (text(r, 0), text(r, 1), text(r, 2));
+                let mut values = enum_values::from_type(&data_type, &CH);
+                if values.is_empty() {
+                    values = enum_values::from_checks(&name, &checks, &CH);
+                }
                 ColumnInfo {
-                    name: text(r, 0),
+                    enum_values: values,
+                    name,
                     is_nullable: data_type.starts_with("Nullable("),
                     data_type,
                     default_val: text(r, 3),

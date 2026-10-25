@@ -76,12 +76,8 @@
     "statusNoConnection": "Keine Verbindung",
     "statusRunning": "Läuft… {{seconds}}s",
     "statusStreaming": "Lädt… {{count}} Zeile(n) · {{seconds}}s",
-    "statusRows": "{{count}} Zeile(n) · {{ms}}ms",
-    "statusAffected": "{{count}} betroffene Zeile(n) · {{ms}}ms",
-    "statusReady": "Bereit",
     "statusConnectedTo": "Verbunden mit {{database}}",
-    "statusNotConnected": "nicht verbunden",
-    "readOnly": "nur Lesen"
+    "statusNotConnected": "nicht verbunden"
   },
   "errors": {
     "generic": "Etwas ist schiefgelaufen",

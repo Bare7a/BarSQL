@@ -76,12 +76,8 @@
     "statusNoConnection": "No connection",
     "statusRunning": "Running… {{seconds}}s",
     "statusStreaming": "Streaming… {{count}} row(s) · {{seconds}}s",
-    "statusRows": "{{count}} row(s) · {{ms}}ms",
-    "statusAffected": "{{count}} row(s) affected · {{ms}}ms",
-    "statusReady": "Ready",
     "statusConnectedTo": "Connected to {{database}}",
-    "statusNotConnected": "not connected",
-    "readOnly": "read-only"
+    "statusNotConnected": "not connected"
   },
   "errors": {
     "generic": "Something went wrong",

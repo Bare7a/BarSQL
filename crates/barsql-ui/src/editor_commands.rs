@@ -1,9 +1,13 @@
 use std::ops::Range;
 
 use gpui_kit::base::input::{AddCursorAbove, AddCursorBelow};
+use gpui_kit::component::RopeExt as _;
 use gpui_kit::component::input::{Copy, Cut, EditorState, Escape, GoToDefinition, Paste};
 use gpui_kit::*;
+use lsp_types::Position;
 
+use crate::dialogs::{self, Prompt};
+use crate::i18n::t;
 use crate::occurrences::{self, Query, Session, find_all, find_next, overlaps, word_at};
 
 // Line and multi-cursor commands from VS Code and Zed that GPUI Kit's editor lacks. GPUI Kit doesn't list the extra
@@ -25,6 +29,7 @@ actions!(
         DuplicateLineDown,
         DeleteLine,
         ToggleComment,
+        GoToLine,
     ]
 );
 
@@ -52,6 +57,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(&format!("{m}-shift-k"), DeleteLine, context),
         KeyBinding::new(&format!("{m}-/"), ToggleComment, context),
         KeyBinding::new("f12", GoToDefinition, context),
+        // Control on macOS too, as in VS Code, since Cmd+G finds the next match there.
+        KeyBinding::new("ctrl-g", GoToLine, context),
     ]);
     // Alt+Shift+Up/Down duplicate lines here, so Linux gets VS Code's add-cursor keys instead of GPUI Kit's.
     if !cfg!(any(target_os = "macos", target_os = "windows")) {
@@ -68,6 +75,10 @@ pub fn handlers<E: InteractiveElement>(el: E, editor: &Entity<EditorState>, comm
     el.on_action({
         let editor = on();
         move |_: &CutLine, window, cx| cut_line(&editor, window, cx)
+    })
+    .on_action({
+        let editor = on();
+        move |_: &GoToLine, window, cx| go_to_line(&editor, window, cx)
     })
     .on_action({
         let editor = on();
@@ -161,6 +172,38 @@ fn select(editor: &Entity<EditorState>, cx: &mut App, pick: impl FnOnce(&str, Ra
     if let Some(range) = pick(&text, sel) {
         editor.update(cx, |state, cx| state.set_selected_range(range, cx));
     }
+}
+
+// Asks for a line, or line:column, and puts the caret there. A line past the end goes to the last one.
+pub fn go_to_line(editor: &Entity<EditorState>, window: &mut Window, cx: &mut App) {
+    let at = editor.read(cx).cursor_position();
+    let prompt = Prompt {
+        title: t(cx, "goToLine.title"),
+        description: None,
+        label: t(cx, "goToLine.label"),
+        placeholder: format!("{}:{}", at.line + 1, at.character + 1).into(),
+        initial: String::new(),
+        confirm: t(cx, "goToLine.go"),
+    };
+    let editor = editor.clone();
+    dialogs::prompt(prompt, window, cx, move |input, window, cx| {
+        let Some((line, column)) = parse_line(&input) else { return };
+        editor.update(cx, |state, cx| {
+            let last = state.text().lines_len().saturating_sub(1) as u32;
+            state.set_cursor_position(Position::new((line - 1).min(last), column - 1), window, cx);
+        });
+    });
+}
+
+// "12" or "12:5", counted from 1.
+fn parse_line(input: &str) -> Option<(u32, u32)> {
+    let (line, column) = input.trim().split_once(':').unwrap_or((input.trim(), ""));
+    let line = line.parse::<u32>().ok().filter(|&line| line > 0)?;
+    let column = match column {
+        "" => 1,
+        column => column.parse::<u32>().ok().filter(|&column| column > 0)?,
+    };
+    Some((line, column))
 }
 
 // With no selection, cuts the whole line including its newline.
@@ -412,9 +455,22 @@ fn select_line(text: &str, sel: Range<usize>) -> Option<Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Change, delete_lines, duplicate_lines, line_block, line_text, move_lines, query_at, select_line, toggle_comment,
+        Change, delete_lines, duplicate_lines, line_block, line_text, move_lines, parse_line, query_at, select_line,
+        toggle_comment,
     };
     use crate::occurrences::Query;
+
+    // Go to Line takes a line, or a line and a column, both counted from 1.
+    #[test]
+    fn go_to_line_reads_a_line_and_maybe_a_column() {
+        assert_eq!(parse_line("12"), Some((12, 1)));
+        assert_eq!(parse_line(" 12:5 "), Some((12, 5)));
+        assert_eq!(parse_line("3:"), Some((3, 1)));
+        assert_eq!(parse_line("0"), None);
+        assert_eq!(parse_line("2:0"), None);
+        assert_eq!(parse_line("x"), None);
+        assert_eq!(parse_line(""), None);
+    }
 
     fn apply(text: &str, (range, new, _): Change) -> String {
         format!("{}{new}{}", &text[..range.start], &text[range.end..])

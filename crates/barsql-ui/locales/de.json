@@ -29,13 +29,10 @@
     }
   },
   "app": {
+    "queryTabWithConn": "Abfrage {{num}} · {{conn}}",
     "statusRunning": "Läuft… {{seconds}} s",
     "statusStreaming_one": "Lädt… {{count}} Zeile · {{seconds}} s",
     "statusStreaming_other": "Lädt… {{count}} Zeilen · {{seconds}} s",
-    "statusRows_one": "{{count}} Zeile · {{ms}} ms",
-    "statusRows_other": "{{count}} Zeilen · {{ms}} ms",
-    "statusAffected_one": "{{count}} betroffene Zeile · {{ms}} ms",
-    "statusAffected_other": "{{count}} betroffene Zeilen · {{ms}} ms",
     "newQuery": "Neue Abfrage",
     "openSqlite": "SQLite-Datei öffnen…",
     "welcomeDrop": "oder eine SQLite-Datei irgendwo ins Fenster ziehen"
@@ -221,7 +218,8 @@
     "rowsOf_other": "{{loaded}} von {{total}} Zeilen",
     "countRows": "Alle zählen",
     "countRowsTooltip": "Die Zeilen zählen, die der Filter durchlässt",
-    "counting": "Wird gezählt…"
+    "counting": "Wird gezählt…",
+    "addRowDialog": { "choosePlaceholder": "Wert auswählen…" }
   },
   "shortcuts": {
     "items": {
@@ -293,17 +291,22 @@
     "sessionNotSaved": "Offene Tabs konnten nicht gespeichert werden: {{error}}. BarSQL öffnet sie eventuell nicht so wieder, wie sie jetzt sind.",
     "historyNotSaved": "Der Abfrageverlauf konnte nicht gespeichert werden: {{error}}. Neue Abfragen erscheinen erst wieder unter „Zuletzt“, wenn das Speichern gelingt.",
     "code": "Code {{code}}",
+    "useName": "{{name}} verwenden",
     "didYouMean": "Meinten Sie {{name}}?"
   },
+  "goToLine": { "title": "Gehe zu Zeile", "label": "Zeile oder Zeile:Spalte", "go": "Gehe zu" },
   "status": {
     "caret": "Zeile {{line}}, Spalte {{column}}",
     "selected": "{{count}} ausgewählt",
     "selected_other": "{{count}} ausgewählt",
     "selections": "{{count}} Auswahl",
     "selections_other": "{{count}} Auswahlen",
-    "count": "Anzahl {{count}}",
-    "sum": "Summe {{sum}}",
-    "average": "Mittelwert {{avg}}",
+    "stat": { "count": "Anzahl", "sum": "Summe", "avg": "Mittel", "min": "Min", "max": "Max" },
+    "cellsInColumns": "{{cells}} Zellen in {{columns}} Spalten",
+    "column": "Spalte",
+    "switchConnection": "Verbindung wechseln",
+    "connectionSettings": "Verbindungseinstellungen",
+    "readOnly": "Schreibgeschützt",
     "protected": "Fragt vor Änderungen"
   },
   "theme": {

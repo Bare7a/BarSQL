@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use barsql_app::{
@@ -28,15 +29,15 @@ use crate::schema_tree::TableChange;
 use crate::scrollbars;
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::state::{self, set_setting, set_setting_bool, set_setting_json, setting_bool};
-use crate::status_bar::{self, StatusBarState};
+use crate::status_bar::{self, StatusAction, StatusActions, StatusBarState, StatusConnection};
 use crate::table_tab::{TableTab, TableTabEvent};
 use crate::theme::ThemeChoice;
 use crate::toast;
 use crate::tokens::{ICON_2XS, ICON_XL, ICON_XS, RADIUS, RADIUS_LG, TEXT_LG, TEXT_MD, TEXT_SM};
 use crate::window_state::{self, WindowState};
 use crate::{
-    LaunchOptions, about_dialog, command_palette, context_menu, file_dialogs, form, grid, schema, screenshots,
-    shortcuts, shortcuts_dialog, theme, tips_dialog, title_bar, update_dialog,
+    LaunchOptions, about_dialog, command_palette, connection_dialog, context_menu, file_dialogs, form, grid, schema,
+    screenshots, shortcuts, shortcuts_dialog, theme, tips_dialog, title_bar, update_dialog,
 };
 
 const SIDEBAR_OPEN_KEY: &str = "barsql-sidebar-open";
@@ -68,6 +69,14 @@ impl TabView {
             Self::Query(tab) => tab.read(cx).id.clone(),
             Self::Table(tab) => tab.read(cx).id.clone(),
             Self::Diagram(tab) => tab.read(cx).id.clone(),
+        }
+    }
+
+    fn entity_id(&self) -> EntityId {
+        match self {
+            Self::Query(tab) => tab.entity_id(),
+            Self::Table(tab) => tab.entity_id(),
+            Self::Diagram(tab) => tab.entity_id(),
         }
     }
 
@@ -210,6 +219,9 @@ pub struct Workspace {
     window_state: Option<WindowState>,
     window_save: Task<()>,
     focus: FocusHandle,
+    // Whether the active tab's grid, not its editor, had the focus last. The status bar keeps speaking for it while
+    // the focus is elsewhere, like in the bar's own popup.
+    grid_context: Cell<Option<(EntityId, bool)>>,
     tabs: Vec<OpenTab>,
     active: usize,
     tab_scroll: ScrollHandle,
@@ -550,6 +562,7 @@ impl Workspace {
             window_state: None,
             window_save: Task::ready(()),
             focus,
+            grid_context: Cell::new(None),
             tabs: Vec::new(),
             active: 0,
             tab_scroll: ScrollHandle::new(),
@@ -1732,29 +1745,21 @@ impl Workspace {
         }
     }
 
-    fn status(&self, cx: &App) -> StatusBarState {
+    pub(crate) fn status(&self, window: &Window, cx: &App) -> StatusBarState {
+        let named = |connection: &ConnectionConfig| StatusConnection {
+            name: connection.name.clone().into(),
+            engine: connection_dialog::engine_name(&connection.driver, cx),
+            connected: state::bar(cx).is_connected(&connection.id),
+        };
         let Some(tab) = self.active_tab() else {
-            return StatusBarState {
-                connection: None,
-                color: None,
-                read_only: false,
-                protected: false,
-                transaction: None,
-                caret: None,
-                aggregate: None,
-                status: t(cx, "app.statusReady"),
-                error: false,
-            };
+            let connection = self.sidebar.read(cx).selected().map(named);
+            return StatusBarState { connection, ..Default::default() };
         };
         let connection = tab.connection(cx);
-        let connected = state::bar(cx).is_connected(&connection.id);
-        let (status, error) = match tab {
-            TabView::Query(tab) => {
-                let status = tab.read(cx).status(cx);
-                (status.text, status.error)
-            }
-            TabView::Table(tab) => tab.read(cx).status(cx),
-            TabView::Diagram(_) => (t(cx, "app.statusReady"), false),
+        let live = match tab {
+            TabView::Query(tab) => tab.read(cx).live_status(cx),
+            TabView::Table(tab) => tab.read(cx).is_loading().then(|| t(cx, "tableView.loading")),
+            TabView::Diagram(_) => None,
         };
         let query = tab.query().map(|tab| tab.read(cx));
         let transaction = query.and_then(|tab| match tab.txn_state() {
@@ -1762,16 +1767,68 @@ impl Workspace {
             TxnState::Active => Some(false),
             TxnState::Error => Some(true),
         });
+        let grid = self.active_grid(cx);
+        let in_grid = grid.as_ref().is_some_and(|grid| grid.read(cx).focus_handle(cx).contains_focused(window, cx));
+        let in_editor = query.is_some_and(|tab| tab.editor_has_focus(window, cx));
+        let last = self.grid_context.get().filter(|(id, _)| *id == tab.entity_id()).map(|(_, grid)| grid);
+        let grid_context = in_grid || (!in_editor && last.unwrap_or(query.is_none()));
+        self.grid_context.set(Some((tab.entity_id(), grid_context)));
+        let grid = grid.filter(|_| grid_context);
         StatusBarState {
-            connection: Some((format!("{} ({})", connection.name, connection.driver).into(), connected)),
+            connection: Some(named(connection)),
             color: parse_color(&connection.color),
             read_only: connection.read_only,
             protected: connection.confirm_changes,
             transaction,
-            caret: query.map(|tab| tab.caret(cx)),
-            aggregate: self.active_grid(cx).and_then(|grid| grid.read(cx).aggregate()),
-            status,
-            error,
+            caret: query.filter(|_| grid.is_none()).map(|tab| tab.caret(cx)),
+            aggregate: grid.and_then(|grid| grid.read(cx).aggregate()),
+            live,
+            actions: StatusActions::default(),
+        }
+    }
+
+    // A click on the caret's place goes to a line, on the connection opens the switcher, on its chips opens its
+    // settings, and on Stop ends the run.
+    fn status_actions(&self, cx: &Context<Self>) -> StatusActions {
+        let this = cx.weak_entity();
+        let on = |f: fn(&mut Self, &mut Window, &mut Context<Self>)| -> StatusAction {
+            let this = this.clone();
+            Rc::new(move |window, cx| {
+                let _ = this.update(cx, |this, cx| f(this, window, cx));
+            })
+        };
+        let query = self.active_tab().and_then(TabView::query);
+        StatusActions {
+            go_to_line: query.map(|_| on(Self::go_to_line)),
+            switch_connection: Some(on(Self::open_switcher)),
+            edit_connection: self.active_tab().map(|_| on(Self::edit_tab_connection)),
+            stop: query.filter(|tab| tab.read(cx).is_running()).map(|_| on(Self::stop_run)),
+        }
+    }
+
+    fn go_to_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.active_tab().and_then(TabView::query).cloned() {
+            tab.update(cx, |tab, cx| tab.go_to_line(window, cx));
+        }
+    }
+
+    fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.sidebar_open {
+            self.sidebar_open = true;
+            set_setting_bool(cx, SIDEBAR_OPEN_KEY, true);
+        }
+        self.sidebar.update(cx, |sidebar, cx| sidebar.open_switcher(window, cx));
+        cx.notify();
+    }
+
+    fn edit_tab_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.active_tab().map(|tab| tab.connection(cx).clone()) else { return };
+        self.sidebar.update(cx, |sidebar, cx| sidebar.edit_connection(Some(connection), window, cx));
+    }
+
+    fn stop_run(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.active_tab().and_then(TabView::query).cloned() {
+            tab.update(cx, |tab, cx| tab.cancel(cx));
         }
     }
 
@@ -2038,7 +2095,10 @@ impl Render for Workspace {
                         }),
                 ),
             )
-            .child(status_bar::render(self.status(cx), cx))
+            .child(status_bar::render(
+                StatusBarState { actions: self.status_actions(cx), ..self.status(window, cx) },
+                cx,
+            ))
             .children(toast::render(window, cx))
             .child(self.drop_overlay(cx))
             .child(self.context_menu.clone())

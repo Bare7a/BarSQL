@@ -94,7 +94,6 @@ fn a_failed_explain_reports_the_error_instead_of_a_plan(cx: &mut TestAppContext)
     let mut app = open(cx);
     app.connect();
     explain(&mut app, "SELECT * FROM definitely_missing_table_e2e;");
-    assert!(app.status_is_error());
     assert!(app.plan().is_none());
     assert!(app.error().is_some());
 }

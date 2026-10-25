@@ -53,6 +53,24 @@ async fn clickhouse_schema_and_ddl_match_the_fixtures() {
     assert_matches("schema/clickhouse.json", &expected, &actual);
 }
 
+// An Enum gives its labels. A constraint that lists a column's values, which only the DDL has, gives them too.
+#[tokio::test]
+async fn an_enum_or_a_check_list_gives_a_columns_values() {
+    let _serial = common::serial().await;
+    let engine = connect().await;
+    let mut session = engine.session().await.unwrap();
+    let setup = [
+        "DROP TABLE IF EXISTS default.enum_probe",
+        "CREATE TABLE default.enum_probe (mood Nullable(Enum8('sad' = 1, 'it\\'s' = 2, 'happy' = 3)), kind String,
+            note String, CONSTRAINT kinds CHECK kind IN ('like', 'love'), CONSTRAINT short CHECK length(note) < 100)
+            ENGINE = Memory",
+    ];
+    run_all(&mut session, &setup.map(String::from)).await;
+    let columns = engine.list_columns("default", "enum_probe").await.unwrap();
+    assert_eq!(common::column_values(&columns), ["mood: sad, it's, happy", "kind: like, love", "note: "]);
+    run_all(&mut session, &["DROP TABLE default.enum_probe".into()]).await;
+}
+
 // Records plans for barsql-sql's offline parser test. Plans change between server versions, so this only writes.
 #[tokio::test]
 async fn clickhouse_plans_are_recorded_on_request() {

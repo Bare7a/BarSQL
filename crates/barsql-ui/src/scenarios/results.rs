@@ -4,7 +4,7 @@ use super::driver::{Driver, open, selector};
 use crate::actions::ToggleJsonPanel;
 use crate::chart_view::{Aggregate, ChartView, Kind};
 use crate::export_dialog::{ExportDialog, Opened};
-use crate::grid::Grid;
+use crate::grid::{self, ColumnStats, Grid};
 
 const SETS: &str = "CREATE TABLE e2e_sets (id INTEGER PRIMARY KEY, name VARCHAR(50));
     INSERT INTO e2e_sets (id, name) VALUES (1, 'Charlie'), (2, 'Alice'), (3, 'Bob')";
@@ -149,7 +149,7 @@ fn a_table_view_visit_keeps_the_query_grid_state(cx: &mut TestAppContext) {
     app.keys("mod-p");
     app.type_text("e2e_sets");
     app.keys("enter");
-    assert_eq!(app.titles(), ["Query 1 - Local", "e2e_sets"], "the table view opened in its own tab");
+    assert_eq!(app.titles(), ["Query 1 · Local", "e2e_sets"], "the table view opened in its own tab");
     app.click("editor-tab-0");
     assert_eq!(layout(&mut app), (vec!["name".into()], Some(("name".into(), false))));
     assert_eq!(app.cell(0, 0).as_deref(), Some("Alice"));
@@ -290,6 +290,7 @@ fn a_failed_results_menu_copies_the_error(cx: &mut TestAppContext) {
     assert!(copied.contains("missing_e2e_table"), "{copied}");
 }
 
+// Column by column, so numbers from different columns are never added together.
 #[gpui_kit::test]
 fn the_status_bar_sums_the_selected_numbers(cx: &mut TestAppContext) {
     let mut app = open(cx);
@@ -300,12 +301,45 @@ fn the_status_bar_sums_the_selected_numbers(cx: &mut TestAppContext) {
     assert_eq!(aggregate(&mut app), None, "a lone focused cell has nothing to sum");
     let header = app.grid_point(&grid, |grid| grid.header_point(0));
     app.click_at(header, Modifiers::none());
-    let total = aggregate(&mut app).expect("a column");
-    assert_eq!((total.count, total.numbers, total.sum), (2, 2, 3.5), "NULL isn't counted");
+    let total = |cells, columns| Some(grid::Aggregate { cells, columns });
+    let n = ColumnStats { name: "n".into(), count: 2, numbers: 2, sum: 3.5, min: 1., max: 2.5, decimals: 1 };
+    assert_eq!(aggregate(&mut app), total(3, vec![n.clone()]), "NULL isn't counted");
     let text = app.grid_point(&grid, |grid| grid.header_point(1));
     app.click_at(text, Modifiers::none());
-    let total = aggregate(&mut app).expect("a column");
-    assert_eq!((total.count, total.numbers), (2, 0), "text counts but doesn't sum");
+    let t = ColumnStats { name: "t".into(), count: 2, ..Default::default() };
+    assert_eq!(aggregate(&mut app), total(3, vec![t.clone()]), "text counts but doesn't sum");
+    app.click_at(header, Modifiers::shift());
+    assert_eq!(aggregate(&mut app), total(6, vec![n, t]));
+}
+
+#[gpui_kit::test]
+fn the_status_bar_lists_each_selected_columns_stats(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS n, 'x' AS t UNION ALL SELECT 2.5, NULL UNION ALL SELECT NULL, 'y';");
+    let grid = grid(&mut app);
+    let header = app.grid_point(&grid, |grid| grid.header_point(0));
+    app.click_at(header, Modifiers::none());
+    assert!(app.shown("status-stat-sum") && !app.shown("status-spread"), "one column's stats");
+    let text = app.grid_point(&grid, |grid| grid.header_point(1));
+    app.click_at(text, Modifiers::shift());
+    assert!(app.shown("status-spread") && !app.shown("status-stat-sum"), "two columns show their size");
+    app.click("status-spread");
+    assert!(app.shown("status-spread-table"), "a click lists each column's stats");
+}
+
+// A stat copies its value, plain, for pasting into a query.
+#[gpui_kit::test]
+fn a_click_on_a_stat_copies_it(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1234.5 AS n UNION ALL SELECT 1000;");
+    let grid = grid(&mut app);
+    let header = app.grid_point(&grid, |grid| grid.header_point(0));
+    app.click_at(header, Modifiers::none());
+    app.click("status-stat-sum");
+    let copied = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied.as_deref(), Some("2234.5"), "without the grouping the bar shows");
 }
 
 // The chart toggle swaps the grid for a chart of the result, and back. The grid's own tools step aside meanwhile.

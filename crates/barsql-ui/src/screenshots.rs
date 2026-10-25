@@ -386,7 +386,7 @@ RETURNING *;
         })?;
 
         // 2: a transaction with two inserts that each return rows.
-        robot.open_query(cx, "Query 3 - Forum", "").await?;
+        robot.open_query(cx, "Query 3 · Forum", "").await?;
         robot.act(cx, |workspace, window, cx| {
             let tab = workspace.read(cx).query_tab()?;
             tab.update(cx, |tab, cx| tab.transaction(TxnControl::Begin, false, window, cx));
@@ -594,7 +594,7 @@ RETURNING *;
 
         // 10: EXPLAIN ANALYZE plan with the hottest node selected.
         robot.activate(cx, "users").await?;
-        robot.open_query(cx, "Query 3 - Forum", PLAN_SQL).await?;
+        robot.open_query(cx, "Query 3 · Forum", PLAN_SQL).await?;
         robot.act(cx, |workspace, window, cx| {
             let tab = workspace.read(cx).query_tab()?;
             tab.update(cx, |tab, cx| tab.explain(true, window, cx));

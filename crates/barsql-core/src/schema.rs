@@ -22,6 +22,9 @@ pub struct ColumnInfo {
     // Generated, computed, MATERIALIZED or ALIAS. It takes no value on insert.
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_computed: bool,
+    // The values it takes from a fixed list: an enum's labels, or the ones a CHECK on it lists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enum_values: Vec<String>,
 }
 
 fn is_false(v: &bool) -> bool {

@@ -6,7 +6,7 @@ use barsql_core::{
     ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{render_constraint, render_create_index, terminate_statement, unsupported_ddl};
-use barsql_sql::{qualified_table, quote_ident_list};
+use barsql_sql::{enum_values, qualified_table, quote_ident_list};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Params, Row, Value as MyValue};
 
@@ -139,22 +139,43 @@ impl MyEngine {
                           AND k.REFERENCED_TABLE_NAME IS NOT NULL
                         LIMIT 1
                     ), ''),
-                    c.EXTRA
+                    c.EXTRA, c.COLUMN_TYPE,
+                    c.ORDINAL_POSITION = 1 AND EXISTS (
+                        SELECT 1 FROM information_schema.TABLE_CONSTRAINTS tc
+                        WHERE tc.TABLE_SCHEMA = c.TABLE_SCHEMA
+                          AND tc.TABLE_NAME = c.TABLE_NAME
+                          AND tc.CONSTRAINT_TYPE = 'CHECK'
+                    )
                 FROM information_schema.COLUMNS c
                 WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
                 ORDER BY c.ORDINAL_POSITION",
-                vec![schema.into(), table.into()],
+                vec![schema.clone().into(), table.into()],
             )
             .await?;
+        // Checks come from the DDL, since MySQL's CHECK_CONSTRAINTS doesn't say which table each is on. Read only for a
+        // table that has some.
+        let ddl = match rows.first().is_some_and(|r| string(r, 9) == "1") {
+            false => String::new(),
+            true => {
+                let show = format!("SHOW CREATE TABLE {}", qualified_table(&MY, &schema, table));
+                self.show_create(&show, "Create Table").await.unwrap_or_default()
+            }
+        };
+        let checks = enum_values::ddl_checks(&ddl, &MY);
         Ok(rows
             .iter()
             .map(|r| {
+                let name = string(r, 0);
                 let foreign_table = string(r, 5);
                 // auto_increment, or VIRTUAL/STORED/PERSISTENT GENERATED. MySQL also tags an expression default
                 // DEFAULT_GENERATED, and that column still takes values.
                 let extra = string(r, 7).to_lowercase().replace("default_generated", "");
+                let mut values = enum_values::from_type(&string(r, 8), &MY);
+                if values.is_empty() {
+                    values = enum_values::from_checks(&name, &checks, &MY);
+                }
                 ColumnInfo {
-                    name: string(r, 0),
+                    name,
                     data_type: string(r, 1),
                     is_nullable: string(r, 2).eq_ignore_ascii_case("YES"),
                     default_val: string(r, 3),
@@ -164,6 +185,7 @@ impl MyEngine {
                     foreign_column: string(r, 6),
                     is_identity: extra.contains("auto_increment"),
                     is_computed: extra.contains("generated"),
+                    enum_values: values,
                 }
             })
             .collect())

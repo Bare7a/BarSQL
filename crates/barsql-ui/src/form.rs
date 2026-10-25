@@ -128,6 +128,15 @@ pub fn section(cx: &App) -> Div {
 }
 
 pub fn select(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
+    labeled_select(id, label.into(), cx.theme().foreground, cx)
+}
+
+// A select with nothing chosen yet, dimmed like an input's placeholder.
+pub fn select_placeholder(id: impl Into<ElementId>, placeholder: impl Into<SharedString>, cx: &App) -> Button {
+    labeled_select(id, placeholder.into(), cx.theme().muted_foreground, cx)
+}
+
+fn labeled_select(id: impl Into<ElementId>, label: SharedString, color: Hsla, cx: &App) -> Button {
     let theme = cx.theme();
     Button::new(id).outline().w_full().h(rems(2.308)).pl(rems(0.769)).pr(rems(0.615)).bg(theme.background).child(
         h_flex()
@@ -135,8 +144,8 @@ pub fn select(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App
             .justify_between()
             .gap(rems(0.462))
             .text_size(TEXT_BASE)
-            .text_color(theme.foreground)
-            .child(div().min_w_0().truncate().child(label.into()))
+            .text_color(color)
+            .child(div().min_w_0().truncate().child(label))
             .child(Icon::new(IconName::ChevronDown).size(ICON_MD).text_color(theme.muted_foreground)),
     )
 }

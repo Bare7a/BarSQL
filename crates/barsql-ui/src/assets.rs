@@ -19,6 +19,7 @@ icon_assets!(
         ChartColumn,
         CircleAlert,
         CirclePlay,
+        CircleQuestionMark,
         ClipboardCopy,
         CodeXml,
         Clock,
@@ -113,5 +114,23 @@ impl AssetSource for AppAssets {
         all.sort();
         all.dedup();
         Ok(all)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::AssetSource as _;
+    use gpui_kit::assets::IconName as Lucide;
+
+    use super::AppAssets;
+
+    // An icon the app uses but doesn't ship draws as nothing at all.
+    #[test]
+    fn the_icons_the_status_bar_and_toolbars_use_are_shipped() {
+        for icon in [Lucide::CircleQuestionMark, Lucide::Check, Lucide::Lock, Lucide::ShieldCheck, Lucide::LoaderCircle]
+        {
+            let path = icon.path();
+            assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");
+        }
     }
 }

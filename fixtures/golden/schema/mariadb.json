@@ -60,7 +60,11 @@
           "isNullable": true,
           "isPrimary": false,
           "isForeign": false,
-          "defaultVal": "NULL"
+          "defaultVal": "NULL",
+          "enumValues": [
+            "sad",
+            "happy"
+          ]
         },
         {
           "name": "created_at",
@@ -484,7 +488,11 @@
           "isNullable": true,
           "isPrimary": false,
           "isForeign": false,
-          "defaultVal": "NULL"
+          "defaultVal": "NULL",
+          "enumValues": [
+            "sad",
+            "happy"
+          ]
         },
         {
           "name": "c_set",

@@ -9,6 +9,7 @@ use barsql_core::{
     QueryError, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{join_ddl, render_create_index, terminate_statement, unsupported_ddl};
+use barsql_sql::enum_values;
 use regex::Regex;
 
 use super::{LiteRow, LiteSource, LiteValue};
@@ -31,16 +32,20 @@ pub(crate) fn tables(src: &mut dyn LiteSource) -> Result<Vec<TableInfo>, QueryEr
 }
 
 // Unlike table_info, table_xinfo lists generated columns: hidden 2 (virtual) or 3 (stored). Hidden 1 is a virtual
-// table's hidden column, which SELECT * leaves out too. A column in several foreign keys takes the first.
+// table's hidden column, which SELECT * leaves out too. A column in several foreign keys takes the first. No pragma
+// lists the CHECKs, so the first row brings the table's DDL for them.
 pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
     let rows = src.query(
         "SELECT x.name, x.type, x.\"notnull\", x.dflt_value, x.pk, x.hidden, f.\"table\", f.\"to\",
-            EXISTS (SELECT 1 FROM pragma_index_list(?1) WHERE origin = 'pk')
+            EXISTS (SELECT 1 FROM pragma_index_list(?1) WHERE origin = 'pk'),
+            CASE WHEN x.cid = 0 THEN (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1) END
         FROM pragma_table_xinfo(?1) x
         LEFT JOIN pragma_foreign_key_list(?1) f ON f.\"from\" = x.name
         ORDER BY x.cid, f.id, f.seq",
         &[text(table)],
     )?;
+    let ddl = rows.rows.first().and_then(|r| r.opt_text(9)).unwrap_or_default();
+    let checks = enum_values::ddl_checks(&ddl, &LITE);
     let mut out: Vec<ColumnInfo> = Vec::new();
     for r in &rows.rows {
         let name = r.text(0);
@@ -50,6 +55,7 @@ pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Colum
         }
         let foreign_table = r.text(6);
         out.push(ColumnInfo {
+            enum_values: enum_values::from_checks(&name, &checks, &LITE),
             name,
             data_type: r.text(1),
             is_nullable: r.int(2) == 0,

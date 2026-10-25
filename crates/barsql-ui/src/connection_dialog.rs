@@ -94,6 +94,14 @@ fn copy(driver: &DriverType) -> DriverCopy {
     }
 }
 
+// The engine's name, as the type picker shows it.
+pub fn engine_name(driver: &DriverType, cx: &App) -> SharedString {
+    match copy(driver).label {
+        "" => driver.as_str().to_string().into(),
+        label => t(cx, label),
+    }
+}
+
 fn default_port(driver: &DriverType) -> i64 {
     driver.capabilities().default_port.map_or(5432, i64::from)
 }

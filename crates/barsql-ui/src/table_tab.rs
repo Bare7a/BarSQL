@@ -17,7 +17,7 @@ use crate::cell_viewer;
 use crate::completion::{self, Completion};
 use crate::dialogs;
 use crate::form::{self, ToolButton};
-use crate::grid::{self, Grid, GridEvent, RowRef, TableOverlay};
+use crate::grid::{self, Choices, Grid, GridEvent, RowRef, TableOverlay};
 use crate::i18n::{I18n, count, t, t_count, t_with};
 use crate::results::ShownError;
 use crate::schema;
@@ -71,6 +71,8 @@ pub struct TableTab {
     applying: bool,
     error: Option<ShownError>,
     foreign: HashMap<String, (String, String)>,
+    // By column name, as `foreign` is.
+    choices: HashMap<String, Choices>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -132,11 +134,12 @@ impl TableTab {
             applying: false,
             error: None,
             foreign: HashMap::new(),
+            choices: HashMap::new(),
             _subscriptions: subscriptions,
         };
         // Like a query tab, so the sidebar tree fills when the app starts on a table view.
         schema::ensure_loaded(&this.connection.id, this.connection.driver.clone(), cx);
-        this.load_foreign_keys(cx);
+        this.load_columns(cx);
         this.fetch(0, true, window, cx);
         this
     }
@@ -215,16 +218,13 @@ impl TableTab {
         self.grid.read(cx).focused_row()
     }
 
-    pub fn status(&self, cx: &App) -> (SharedString, bool) {
-        match &self.error {
-            Some(error) => (error.message.clone(), true),
-            None if self.loading.is_some() => (t(cx, "tableView.loading"), false),
-            None => (self.rows_label(cx), false),
-        }
+    // A page on its way, for the status bar.
+    pub fn is_loading(&self) -> bool {
+        self.loading.is_some()
     }
 
     // "37 rows" once the whole table is loaded, "100 rows loaded" while more pages wait, and "100 of 3,000 rows" once
-    // counted. Both the status bar and the grid's toolbar show it.
+    // counted, for the grid's toolbar.
     fn rows_label(&self, cx: &App) -> SharedString {
         let loaded = self.grid.read(cx).set().rows();
         let rows = count(cx, loaded);
@@ -304,7 +304,8 @@ impl TableTab {
         !self.connection.read_only && !self.primary_keys.is_empty()
     }
 
-    fn load_foreign_keys(&mut self, cx: &mut Context<Self>) {
+    // The catalog's word on each column: where its foreign key leads, and the values it takes from a list.
+    fn load_columns(&mut self, cx: &mut Context<Self>) {
         let load = schema::columns(&self.connection.id, &self.schema, &self.table, cx);
         cx.spawn(async move |this, cx| {
             let Ok(columns) = load.await else { return };
@@ -313,6 +314,13 @@ impl TableTab {
                     .iter()
                     .filter(|c| c.is_foreign && !c.foreign_table.is_empty())
                     .map(|c| (c.name.clone(), (c.foreign_table.clone(), c.foreign_column.clone())))
+                    .collect();
+                this.choices = columns
+                    .iter()
+                    .filter(|c| !c.enum_values.is_empty())
+                    .map(|c| {
+                        (c.name.clone(), Choices { values: c.enum_values.clone().into(), nullable: c.is_nullable })
+                    })
                     .collect();
                 this.sync_overlay(cx);
             })
@@ -445,12 +453,15 @@ impl TableTab {
         let foreign =
             self.foreign.iter().filter_map(|(column, (table, _))| Some((column_ix(column)?, table.clone()))).collect();
         let primary = self.primary_keys.iter().filter_map(|name| column_ix(name)).collect();
+        let choices =
+            self.choices.iter().filter_map(|(column, choices)| Some((column_ix(column)?, choices.clone()))).collect();
         let overlay = TableOverlay {
             staged: Arc::new(staged),
             deleted,
             sort: sort.map(|column| (column, self.order_desc)),
             foreign,
             primary,
+            choices,
             editable: self.editable(),
         };
         self.grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
@@ -842,7 +853,7 @@ impl TableTab {
 
     fn body(&self, cx: &mut Context<Self>) -> AnyElement {
         if let Some(error) = &self.error {
-            return error.card(None, cx).into_any_element();
+            return error.card(None, None, cx).into_any_element();
         }
         if !self.loaded {
             let key = if self.loading.is_some() { "tableView.loading" } else { "results.noResults" };
