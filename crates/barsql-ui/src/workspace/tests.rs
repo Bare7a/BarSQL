@@ -5,11 +5,12 @@ use barsql_app::{DiagramRef, EditorSession, EditorTab, TableViewRef};
 use barsql_core::SavedQuery;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::{
-    AppContext as _, Entity, ExternalPaths, FileDropEvent, Modifiers, MouseButton, TestAppContext, VisualTestContext,
-    point, px, size,
+    AppContext as _, Entity, ExternalPaths, FileDropEvent, Modifiers, MouseButton, Pixels, TestAppContext,
+    VisualTestContext, point, px, size,
 };
 
 use super::Workspace;
+use crate::actions::{ToggleJsonPanel, ToggleSidebar};
 use crate::query_tab::QueryTab;
 use crate::saved_queries;
 use crate::schema_tree::TableChange;
@@ -297,6 +298,58 @@ fn panel_widths_come_back_clamped_and_drags_store_them(cx: &mut TestAppContext) 
     let settings = env.bar.settings();
     assert_eq!(settings.get("barsql-sidebar-w").map(String::as_str), Some("301"));
     assert_eq!(settings.get("barsql-json-w").map(String::as_str), Some("251"));
+}
+
+// The sidebar's and the JSON panel's widths, for those that are open, once the panels have settled.
+fn panel_widths(cx: &mut VisualTestContext) -> (Option<Pixels>, Option<Pixels>) {
+    // A resize or a toggle settles on the frame after.
+    for _ in 0..2 {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+    let sidebar = cx.debug_bounds("sidebar").map(|bounds| bounds.size.width);
+    let json = cx.debug_bounds("json-panel-header").map(|bounds| bounds.size.width);
+    (sidebar, json)
+}
+
+// The side panels keep their widths while the window resizes. The editor between them takes the difference.
+#[gpui_kit::test]
+fn the_side_panels_keep_their_widths_when_the_window_resizes(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (workspace, cx) = open(cx);
+    workspace.update_in(cx, |workspace, window, cx| workspace.toggle_json_panel(window, cx));
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    let given = panel_widths(cx);
+    assert_eq!(given.0, Some(px(280.)));
+    assert!(given.1.is_some(), "the JSON panel is open");
+    for width in [1800., 1000.] {
+        cx.simulate_resize(size(px(width), px(800.)));
+        assert_eq!(panel_widths(cx), given, "at {width}px");
+    }
+}
+
+// Closing the sidebar leaves the JSON panel as wide as it was, and opening it again, by its toggle or the connection
+// switcher, brings back both widths.
+#[gpui_kit::test]
+fn the_json_panel_keeps_its_width_while_the_sidebar_closes_and_opens(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (workspace, cx) = open(cx);
+    cx.simulate_resize(size(px(1400.), px(800.)));
+    workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(ToggleJsonPanel), cx));
+    let (sidebar, json) = panel_widths(cx);
+    assert_eq!(sidebar, Some(px(280.)));
+    assert!(json.is_some(), "the JSON panel is open");
+
+    workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(ToggleSidebar), cx));
+    assert_eq!(panel_widths(cx), (None, json), "with the sidebar closed");
+    workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(ToggleSidebar), cx));
+    assert_eq!(panel_widths(cx), (sidebar, json), "with the sidebar open again");
+
+    // The status bar's connection chip opens the sidebar on its switcher.
+    workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(ToggleSidebar), cx));
+    assert_eq!(panel_widths(cx), (None, json), "with the sidebar closed again");
+    workspace.update_in(cx, |workspace, window, cx| workspace.open_switcher(window, cx));
+    assert_eq!(panel_widths(cx), (sidebar, json), "with the switcher opening the sidebar");
 }
 
 #[gpui_kit::test]

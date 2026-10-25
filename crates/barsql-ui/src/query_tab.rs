@@ -16,7 +16,9 @@ use gpui_kit::component::input::{
 };
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::native_menu::NativeMenu;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, RopeExt, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt as _, RopeExt, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use lsp_types::{Diagnostic, DiagnosticSeverity, ShowDocumentParams};
@@ -55,9 +57,6 @@ const RESULTS_SHARE: (f32, f32, f32) = (40., 15., 70.);
 
 // Room left of the line numbers for the run glyphs.
 const GLYPH_MARGIN_REM: f32 = 1.077;
-
-// How far either side of the splitter's line a double click still lands on it, as its grab band does.
-const SPLITTER_GRAB: Pixels = px(4.);
 
 // Shared by every query tab and kept for the session only.
 struct ResultsShare(f32);
@@ -1205,7 +1204,7 @@ impl Render for QueryTab {
                     this.transaction(TxnControl::Rollback, false, window, cx)
                 }))
             })
-            .on_drag_move(cx.listener(|_, event: &DragMoveEvent<Rc<SplitDrag>>, _, cx| {
+            .on_drag_move(cx.listener(|_, event: &DragMoveEvent<SplitDrag>, _, cx| {
                 let bounds = event.bounds;
                 if bounds.size.height > px(0.) {
                     let share = (bounds.bottom() - event.event.position.y) / bounds.size.height * 100.;
@@ -1250,40 +1249,19 @@ impl Render for QueryTab {
                     .min_h_0()
                     .h(relative(results_share(cx) / 100.))
                     .child(self.results.clone())
-                    .child(resize_handle::<SplitDrag, SplitDrag>("results-splitter", Axis::Vertical).on_drag(
-                        SplitDrag,
-                        |drag, _, _, cx| {
-                            cx.stop_propagation();
-                            cx.new(|_| drag.as_ref().clone())
-                        },
-                    ))
-                    .child(self.splitter_double_click(cx))
+                    .child(
+                        resize_handle::<SplitDrag, SplitDrag>("results-splitter", Axis::Vertical)
+                            .on_drag(SplitDrag, |drag, _, _, cx| {
+                                cx.stop_propagation();
+                                cx.new(|_| drag.clone())
+                            })
+                            .on_double_click(cx.listener(|_, _, _, cx| {
+                                toggle_results_maximized(cx);
+                                cx.notify();
+                            })),
+                    )
                     .when(self.running.is_some(), |el| el.child(ProgressLine)),
             )
-    }
-}
-
-impl QueryTab {
-    // The splitter's handle takes no clicks of its own and occludes what's under it, so a double click on it is
-    // caught on the window. `bounds` are the results pane's, whose top edge the splitter sits on.
-    fn splitter_double_click(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
-        let this = cx.entity().downgrade();
-        canvas(
-            |_, _, _| {},
-            move |bounds, _, window, _| {
-                let this = this.clone();
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
-                    let on_line = (event.position.y - bounds.top()).abs() <= SPLITTER_GRAB
-                        && (bounds.left()..=bounds.right()).contains(&event.position.x);
-                    if phase == DispatchPhase::Capture && event.click_count == 2 && on_line {
-                        toggle_results_maximized(cx);
-                        let _ = this.update(cx, |_, cx| cx.notify());
-                    }
-                });
-            },
-        )
-        .absolute()
-        .inset_0()
     }
 }
 

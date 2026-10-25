@@ -1175,27 +1175,22 @@ impl Render for Grid {
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
-            // The menu wraps the cells, not the editor: it takes a right-click first, so the editor couldn't stop it.
             .child(
-                div()
-                    .id("grid-cells")
-                    .size_full()
-                    .child(
-                        canvas(
-                            {
-                                let entity = entity.clone();
-                                move |bounds, window, cx| prepaint(&entity, bounds, window, cx)
-                            },
-                            move |bounds, frame, window, cx| paint(&entity, bounds, frame, window, cx),
-                        )
-                        .size_full(),
-                    )
-                    .context_menu(move |menu, window, cx| Grid::menu(&weak, menu, window, cx)),
+                canvas(
+                    {
+                        let entity = entity.clone();
+                        move |bounds, window, cx| prepaint(&entity, bounds, window, cx)
+                    },
+                    move |bounds, frame, window, cx| paint(&entity, bounds, frame, window, cx),
+                )
+                .size_full(),
             )
             // Each bar has a lane of its own, clear of the cells, so it can show at all times.
             .child(lane_bar(Scrollbar::vertical(&self.scroll.bar(Axis::Vertical))))
             .child(lane_bar(Scrollbar::horizontal(&self.scroll.bar(Axis::Horizontal))))
-            .children(editor);
+            .children(editor)
+            // Opens after right_down has picked what the click landed on. The editor stops its right-clicks first.
+            .context_menu(move |menu, window, cx| Grid::menu(&weak, menu, window, cx));
         div().relative().size_full().child(grid).child(lane_guard(self.scroll.clone()))
     }
 }
@@ -1204,16 +1199,16 @@ fn lane_bar(bar: Scrollbar) -> Scrollbar {
     bar.mode(ScrollbarMode::Always).styles(|styles| styles.track(|track| track.width(LANE)))
 }
 
-// GPUI Kit's bars take any press on their track, even through overlays. This runs first and lets through only a
-// primary press that reaches the grid, so a right-click or a click on a dialog over a lane doesn't scroll it.
+// GPUI Kit's bars take a press of any button on their track. This runs first and lets through only a primary
+// press, so a right-click on a lane doesn't scroll it.
 fn lane_guard(scroll: GridScroll) -> impl IntoElement {
     canvas(
-        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-        move |_, hitbox, window, _| {
+        |_, _, _| {},
+        move |_, _, window, _| {
             let lanes = scroll.lane_bounds();
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
                 let in_lane = lanes.iter().any(|lane| lane.contains(&event.position));
-                if phase.bubble() && in_lane && (event.button != MouseButton::Left || !hitbox.is_hovered(window)) {
+                if phase.bubble() && in_lane && event.button != MouseButton::Left {
                     cx.stop_propagation();
                 }
             });

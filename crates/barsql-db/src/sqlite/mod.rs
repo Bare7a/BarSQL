@@ -121,12 +121,12 @@ impl SqliteSession {
 
     async fn blocking<T: Send + 'static>(
         &mut self,
-        work: impl FnOnce(&Connection) -> T + Send + 'static,
+        work: impl FnOnce(&mut Connection) -> T + Send + 'static,
     ) -> Result<T, QueryError> {
         self.hold().await;
-        let guard = self.guard.take().expect("connection held");
+        let mut guard = self.guard.take().expect("connection held");
         let (guard, out) = tokio::task::spawn_blocking(move || {
-            let out = work(&guard);
+            let out = work(&mut guard);
             (guard, out)
         })
         .await
@@ -242,7 +242,7 @@ impl StatementRunner for SqliteSession {
 }
 
 fn stream_statement(
-    conn: &Connection,
+    conn: &mut Connection,
     stmt: &str,
     index: usize,
     batch_rows: usize,
@@ -254,7 +254,7 @@ fn stream_statement(
     // The progress handler polls the token for the whole run instead.
     let watch = cancel.clone();
     let _ = conn.progress_handler(PROGRESS_OPS, Some(move || watch.is_cancelled()));
-    let _progress = ProgressGuard(conn);
+    let conn = ProgressGuard(conn);
     let emit = |event: ScriptEvent| {
         let _ = sink.send_blocking(event);
     };
@@ -284,7 +284,7 @@ fn stream_statement(
                 emit(ScriptEvent::Result(Box::new(StatementResult {
                     result_index: index,
                     statement: stmt.into(),
-                    summary: Some(summary_for_exec(changes_since(conn, before), started)),
+                    summary: Some(summary_for_exec(changes_since(&conn, before), started)),
                     ..Default::default()
                 })));
                 StatementRun { sets: 1, error: None }
@@ -294,7 +294,6 @@ fn stream_statement(
     }
     let columns: Arc<[ColumnMeta]> = prepared
         .columns()
-        .iter()
         .map(|c| ColumnMeta { name: c.name().to_string(), type_name: c.decl_type().unwrap_or("").to_uppercase() })
         .collect();
     emit(ScriptEvent::Meta { result_index: index, columns: columns.clone() });
@@ -345,7 +344,16 @@ fn changes_since(conn: &Connection, before: u64) -> u64 {
 
 const PROGRESS_OPS: i32 = 1000;
 
-struct ProgressGuard<'c>(&'c Connection);
+// Holds the connection while the handler is set, and removes the handler however the statement ends.
+struct ProgressGuard<'c>(&'c mut Connection);
+
+impl std::ops::Deref for ProgressGuard<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.0
+    }
+}
 
 impl Drop for ProgressGuard<'_> {
     fn drop(&mut self) {
@@ -411,7 +419,7 @@ pub(crate) struct Rusqlite<'c>(pub(crate) &'c Connection);
 impl LiteSource for Rusqlite<'_> {
     fn query(&mut self, sql: &str, params: &[LiteValue]) -> Result<LiteRows, QueryError> {
         let mut stmt = self.0.prepare(sql).map_err(|e| lite_error(&e))?;
-        let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+        let columns: Vec<String> = stmt.column_names().map(String::from).collect();
         let width = columns.len();
         let mut rows = stmt.query(params_from_iter(params.iter().map(Param))).map_err(|e| lite_error(&e))?;
         let mut out = LiteRows { columns, rows: Vec::new() };

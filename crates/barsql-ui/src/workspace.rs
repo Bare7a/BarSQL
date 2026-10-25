@@ -687,6 +687,12 @@ impl Workspace {
         }
     }
 
+    // The panel group keeps its sizes by position, so when the sidebar comes or goes the panels after it would take
+    // each other's. Cleared, each one lays out at its own width again.
+    fn reset_panels(&mut self, cx: &mut Context<Self>) {
+        self.panels.update(cx, |panels, _| panels.clear());
+    }
+
     fn app_event(&mut self, event: AppEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             // Closing and quitting ask first, so only a forced rollback lands here.
@@ -1836,6 +1842,7 @@ impl Workspace {
         if !self.sidebar_open {
             self.sidebar_open = true;
             set_setting_bool(cx, SIDEBAR_OPEN_KEY, true);
+            self.reset_panels(cx);
         }
         self.sidebar.update(cx, |sidebar, cx| sidebar.open_switcher(window, cx));
         cx.notify();
@@ -2018,6 +2025,7 @@ impl Render for Workspace {
                 this.sidebar_open = !this.sidebar_open;
                 set_setting_bool(cx, SIDEBAR_OPEN_KEY, this.sidebar_open);
                 set_menus(cx);
+                this.reset_panels(cx);
                 cx.notify();
             }))
             .on_action(cx.listener(|_, _: &MinimizeWindow, window, _| window.minimize_window()))
@@ -2097,9 +2105,9 @@ impl Render for Workspace {
                         .when(self.sidebar_open, |panels| {
                             panels.child(
                                 resizable_panel()
-                                    .flex_none()
                                     .size(self.sidebar_width)
                                     .size_range(px(SIDEBAR_WIDTHS.1)..px(SIDEBAR_WIDTHS.2))
+                                    .fixed()
                                     .child(self.sidebar.clone()),
                             )
                         })
@@ -2107,9 +2115,9 @@ impl Render for Workspace {
                         .when(self.json_open, |panels| {
                             panels.child(
                                 resizable_panel()
-                                    .flex_none()
                                     .size(self.json_width)
                                     .size_range(px(JSON_WIDTHS.1)..px(JSON_WIDTHS.2))
+                                    .fixed()
                                     .child(self.json_panel.clone()),
                             )
                         }),

@@ -112,7 +112,7 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           set -euo pipefail
-          cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.0
+          cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
           curl -fsSL -o "$RUNNER_TEMP/linuxdeploy" \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x "$RUNNER_TEMP/linuxdeploy"
