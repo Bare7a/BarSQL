@@ -1,11 +1,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use barsql_core::{ColumnInfo, DriverType};
+use barsql_core::{ColumnInfo, DriverType, ObjectKind, SqlDialect};
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{Entity, Modifiers, MouseButton, MouseDownEvent, TestAppContext, VisualTestContext};
 
-use super::{SchemaTree, SchemaTreeEvent, column_details, column_matches, table_matches};
+use super::{
+    SchemaTree, SchemaTreeEvent, column_details, column_icon, column_matches, group_icon, match_ranges, relation_look,
+    table_matches, type_label, type_needle,
+};
+use crate::assets::AppAssets;
+use crate::i18n::I18n;
 use crate::schema_objects::{Group, group_key};
 use crate::state;
 use crate::test_support::{Env, in_root, settle};
@@ -67,6 +73,92 @@ fn search_matches_names_and_column_types() {
 }
 
 // The tree shows `varchar(50)`, so searching for what's shown finds it, as does the catalog's own spelling.
+fn column(name: &str, data_type: &str) -> ColumnInfo {
+    ColumnInfo { name: name.into(), data_type: data_type.into(), ..Default::default() }
+}
+
+// A key's icon says it's a key whatever its type, and a column that takes its values from a fixed list says so
+// before its type does.
+#[test]
+fn column_icons_put_keys_first_then_fixed_lists_then_the_type() {
+    let pg = Some(SqlDialect::Postgres);
+    let statuses = vec!["draft".to_string(), "live".to_string()];
+    let key = ColumnInfo { is_primary: true, enum_values: statuses.clone(), ..column("code", "character varying(10)") };
+    let link = ColumnInfo { is_foreign: true, ..column("author_id", "uuid") };
+    let status = ColumnInfo { enum_values: statuses, ..column("status", "character varying(10)") };
+    assert_eq!(column_icon(&key, pg), Lucide::KeyRound);
+    assert_eq!(column_icon(&link, pg), Lucide::Link);
+    assert_eq!(column_icon(&status, pg), Lucide::List);
+    assert_eq!(column_icon(&column("metadata", "jsonb"), pg), Lucide::Braces);
+    assert_eq!(column_icon(&column("created_at", "timestamp without time zone"), pg), Lucide::CalendarClock);
+    assert_eq!(column_icon(&column("location", "point"), pg), Lucide::Columns3);
+}
+
+// An icon the app doesn't ship draws as nothing, so each one the tree can pick has to load.
+#[test]
+fn every_icon_the_tree_can_draw_is_shipped() {
+    use gpui_kit::AssetSource as _;
+    let pg = Some(SqlDialect::Postgres);
+    let types = ["bigint", "text", "boolean", "date", "time", "timestamp", "jsonb", "uuid", "bytea", "text[]", "point"];
+    let mut icons: Vec<Lucide> = types.into_iter().map(|data_type| column_icon(&column("c", data_type), pg)).collect();
+    icons.push(column_icon(&ColumnInfo { enum_values: vec!["a".into()], ..column("c", "text") }, pg));
+    icons.push(column_icon(&ColumnInfo { is_primary: true, ..column("c", "text") }, pg));
+    icons.push(column_icon(&ColumnInfo { is_foreign: true, ..column("c", "text") }, pg));
+    icons
+        .extend([ObjectKind::Table, ObjectKind::View, ObjectKind::MaterializedView].iter().map(|k| relation_look(k).0));
+    icons.extend([Group::Indexes, Group::Constraints, Group::Triggers, Group::Routines].map(group_icon));
+    for icon in icons {
+        let path = icon.path();
+        assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");
+    }
+}
+
+#[test]
+fn nullable_types_end_in_a_question_mark_unless_the_type_says_so() {
+    let nullable = |data_type: &str| ColumnInfo { is_nullable: true, ..column("c", data_type) };
+    assert_eq!(type_label(&nullable("character varying(255)"), Some(SqlDialect::Postgres)), "varchar(255)?");
+    assert_eq!(type_label(&column("id", "bigint"), Some(SqlDialect::Postgres)), "bigint");
+    assert_eq!(type_label(&nullable("Nullable(String)"), Some(SqlDialect::ClickHouse)), "Nullable(String)");
+}
+
+// A materialized view stores rows and a view doesn't, so they can't share an icon or a badge.
+#[test]
+fn materialized_views_look_apart_from_views() {
+    let en = I18n::new("en");
+    let (view_icon, view_badge) = relation_look(&ObjectKind::View);
+    let (stored_icon, stored_badge) = relation_look(&ObjectKind::MaterializedView);
+    assert_ne!(view_icon, stored_icon);
+    let (view_badge, stored_badge) = (view_badge.unwrap(), stored_badge.unwrap());
+    assert_ne!(en.t(view_badge), en.t(stored_badge));
+    assert_ne!(en.t(stored_badge).as_ref(), stored_badge, "the badge has no English label");
+    assert_eq!(relation_look(&ObjectKind::Table), (Lucide::Table2, None));
+}
+
+// The needle arrives lowercased, so `ID` matches, and every occurrence is marked, not just the first.
+#[test]
+fn matches_are_marked_wherever_they_fall_in_any_case() {
+    assert_eq!(match_ranges("Post_ID", "id"), vec![5..7]);
+    assert_eq!(match_ranges("id_paid", "id"), vec![0..2, 5..7]);
+    assert!(match_ranges("users", "id").is_empty());
+    assert!(match_ranges("users", "").is_empty());
+}
+
+// A column found by its name doesn't light up its type too, as `user_id uuid` would for "id". One found by its type,
+// like `metadata jsonb` for "json", has the type marked, since that's why it's listed.
+#[test]
+fn a_type_is_marked_only_when_the_name_did_not_match() {
+    assert_eq!(type_needle("user_id", "id"), "");
+    assert_eq!(type_needle("metadata", "json"), "json");
+}
+
+// `İ` lowercases to two characters, three bytes for two, so a range found in the lowercased name has to be mapped
+// back onto the name as written.
+#[test]
+fn a_match_after_a_letter_that_lowercases_longer_still_lands_on_its_own_bytes() {
+    assert_eq!(match_ranges("İd", "d"), vec![2..3]);
+    assert_eq!(match_ranges("xİdİ", "i̇d"), vec![1..4]);
+}
+
 #[test]
 fn search_matches_the_type_as_shown() {
     let column = ColumnInfo { name: "email".into(), data_type: "character varying(50)".into(), ..Default::default() };

@@ -12,7 +12,8 @@ use gpui_kit::{
 use super::Workspace;
 use crate::query_tab::QueryTab;
 use crate::saved_queries;
-use crate::test_support::Env;
+use crate::schema_tree::TableChange;
+use crate::test_support::{Env, settle};
 use crate::window_state;
 
 fn tab(id: &str, connection_id: &str, sql: &str) -> EditorTab {
@@ -137,6 +138,56 @@ fn a_session_that_opens_on_a_table_view_fills_the_sidebar_tree(cx: &mut TestAppC
     crate::test_support::settle(cx, |cx| {
         cx.update(|_, cx| tree.read(cx).listed().iter().any(|(row, _, _)| row == "s:main"))
     });
+}
+
+// A session with a query tab and a table tab on `things`, which is active, once the tree lists that table.
+fn open_on_things<'a>(env: &Env, cx: &'a mut TestAppContext) -> (Entity<Workspace>, &'a mut VisualTestContext) {
+    let id = env.connection.id.clone();
+    let table_view = EditorTab {
+        table_view: Some(TableViewRef { schema: "main".into(), table: "things".into(), ..Default::default() }),
+        ..tab("view", &id, "")
+    };
+    let session = EditorSession { tabs: vec![tab("query", &id, "SELECT 1"), table_view], active_tab: "view".into() };
+    env.bar.save_editor_session(session).unwrap();
+    let (workspace, cx) = open(cx);
+    wait_for_row(&workspace, "t:main.things", cx);
+    (workspace, cx)
+}
+
+fn wait_for_row(workspace: &Entity<Workspace>, row: &str, cx: &mut VisualTestContext) {
+    let tree = cx.update(|_, cx| workspace.read(cx).sidebar().read(cx).panels().0);
+    settle(cx, |cx| cx.update(|_, cx| tree.read(cx).listed().iter().any(|(id, _, _)| id == row)));
+}
+
+// Whether the tree's row with this selector carries the active tab's mark.
+fn marks(row: &'static str, cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let row = cx.debug_bounds(row).expect("the table's row is drawn");
+    cx.debug_bounds("open-table").is_some_and(|mark| row.contains(&mark.center()))
+}
+
+// The tree marks the table the active tab shows, and no table while a query tab is active.
+#[gpui_kit::test]
+fn the_tree_marks_the_table_open_in_the_active_tab(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (workspace, cx) = open_on_things(&env, cx);
+    assert!(marks("tree:t:main.things", cx), "the table tab's table is marked");
+    workspace.update_in(cx, |ws, window, cx| ws.activate(0, window, cx));
+    assert!(!marks("tree:t:main.things", cx), "a query tab marks no table");
+}
+
+// A renamed table keeps its tab, and the mark goes with it to the new name.
+#[gpui_kit::test]
+fn the_mark_follows_a_renamed_table(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let id = env.connection.id.clone();
+    let (workspace, cx) = open_on_things(&env, cx);
+    env.runtime.block_on(env.bar.execute_query(&id, "ALTER TABLE things RENAME TO stuff")).unwrap();
+    let renamed = TableChange::Renamed("stuff".into());
+    workspace.update_in(cx, |ws, window, cx| ws.table_changed(&id, "main", "things", &renamed, window, cx));
+    cx.update(|_, cx| crate::schema::reload_tables(&id, "main", cx));
+    wait_for_row(&workspace, "t:main.stuff", cx);
+    assert!(marks("tree:t:main.stuff", cx));
 }
 
 #[gpui_kit::test]

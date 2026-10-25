@@ -25,7 +25,7 @@ use crate::i18n::{I18n, t, t_count, t_with};
 use crate::json_panel::JsonPanel;
 use crate::query_tab::{QueryTab, QueryTabEvent, TxnState, new_tab_id};
 use crate::quick_search::{self, QuickSearchDialog, TabEntry, Target};
-use crate::schema_tree::TableChange;
+use crate::schema_tree::{ActiveTable, TableChange};
 use crate::scrollbars;
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::state::{self, set_setting, set_setting_bool, set_setting_json, setting_bool};
@@ -931,6 +931,8 @@ impl Workspace {
                 TableChange::Altered => view.update(cx, |view, cx| view.table_changed(None, window, cx)),
             }
         }
+        // A rename keeps its tab, so the mark moves to the new name.
+        self.sync_active_table(cx);
         cx.notify();
     }
 
@@ -1140,10 +1142,27 @@ impl Workspace {
         self.tab_scroll.scroll_to_item(ix);
         let connection_id = view.connection(cx).id.clone();
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_selected(&connection_id, cx));
+        self.sync_active_table(cx);
         view.focus(window, cx);
         self.sync_json_panel(window, cx);
         self.save_session(cx);
         cx.notify();
+    }
+
+    // The tree marks the table the active tab shows, and none for any other tab.
+    fn sync_active_table(&self, cx: &mut Context<Self>) {
+        let table = match self.active_tab() {
+            Some(TabView::Table(tab)) => {
+                let tab = tab.read(cx);
+                Some(ActiveTable {
+                    connection_id: tab.connection.id.clone(),
+                    schema: tab.schema.clone(),
+                    table: tab.table.clone(),
+                })
+            }
+            _ => None,
+        };
+        self.sidebar.update(cx, |sidebar, cx| sidebar.set_active_table(table, cx));
     }
 
     fn sync_json_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1189,6 +1208,7 @@ impl Workspace {
         state::spawn(cx, async move { bar.cleanup_tab(&id).await }).detach();
         if self.tabs.is_empty() {
             self.active = 0;
+            self.sync_active_table(cx);
             self.sync_json_panel(window, cx);
             window.focus(&self.focus, cx);
             self.save_session(cx);

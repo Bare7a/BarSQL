@@ -143,6 +143,9 @@
     "planHideQuiet": "Скрий 0 и false"
   },
   "sidebar": {
+    "badge": {
+      "matview": "MATVIEW"
+    },
     "serverViews": "Изгледи на сървъра",
     "systemViews": "Системни изгледи",
     "editConnection": "Редактирай…",

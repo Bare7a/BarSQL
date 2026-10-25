@@ -15,7 +15,7 @@ use crate::connections_panel::{ConnectionsEvent, ConnectionsPanel, connection_su
 use crate::history_panel::{HistoryEvent, HistoryPanel};
 use crate::i18n::t;
 use crate::saved_panel::{SavedEvent, SavedPanel};
-use crate::schema_tree::{SchemaTree, SchemaTreeEvent, TableChange};
+use crate::schema_tree::{ActiveTable, SchemaTree, SchemaTreeEvent, TableChange};
 use crate::state;
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM};
 
@@ -349,6 +349,10 @@ impl Sidebar {
             self.sync_tree(cx);
             cx.notify();
         }
+    }
+
+    pub fn set_active_table(&mut self, table: Option<ActiveTable>, cx: &mut Context<Self>) {
+        self.schema_tree.update(cx, |tree, cx| tree.set_active_table(table, cx));
     }
 
     fn select(&mut self, id: String, cx: &mut Context<Self>) {

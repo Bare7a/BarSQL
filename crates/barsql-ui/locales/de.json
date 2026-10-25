@@ -143,6 +143,9 @@
     "planHideQuiet": "0 und false ausblenden"
   },
   "sidebar": {
+    "badge": {
+      "matview": "MATVIEW"
+    },
     "serverViews": "Serveransichten",
     "systemViews": "Systemansichten",
     "editConnection": "Bearbeiten…",

@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 
-use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, ObjectKind, ObjectRef, TableInfo};
+use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, ObjectKind, ObjectRef, SqlDialect, TableInfo};
 use barsql_sql::alter::ConstraintKind;
-use barsql_sql::display_type;
 use barsql_sql::dml::preview_select;
 use barsql_sql::lang::quoting::build_qualified_table;
 use barsql_sql::system_views::{ViewScope, views};
+use barsql_sql::{TypeFamily, display_type, type_family};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -39,6 +39,8 @@ const TABLES_EXPANDED_KEY: &str = "barsql-schema-tables-expanded";
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(200);
 const ROW_HEIGHT_REM: f32 = 2.;
 const INDENT_REM: f32 = 1.231;
+// A row's own inset, before its chevron.
+const ROW_PADDING: Rems = rems(0.462);
 // Enum values a column's tooltip lists before cutting off.
 const TIP_VALUES: usize = 12;
 const CONTEXT: &str = "SchemaTree";
@@ -75,6 +77,14 @@ pub enum SchemaTreeEvent {
     TableChanged { connection_id: String, schema: String, table: String, change: TableChange },
 }
 
+// The table the active tab shows. Its row is marked.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveTable {
+    pub connection_id: String,
+    pub schema: String,
+    pub table: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableChange {
     Renamed(String),
@@ -104,9 +114,9 @@ enum RowKind {
     // `kept_open`: a search holds the row open.
     Schema { name: String, expanded: bool, kept_open: bool, count: Option<String> },
     Table { schema: String, table: TableInfo, expanded: bool, kept_open: bool },
-    Column { column: ColumnInfo, matched: bool, schema: String, table: String, view: bool },
+    Column { column: ColumnInfo, schema: String, table: String, view: bool },
     Group { key: String, group: Group, schema: String, table: Option<String>, expanded: bool, count: Option<usize> },
-    Object { row: ObjectRow, group: Group, schema: String, table: Option<String> },
+    Object { row: ObjectRow, schema: String, table: Option<String> },
     Note { text: SharedString, spinner: bool },
 }
 
@@ -138,6 +148,7 @@ pub struct SchemaTree {
     // Kept by row id so it survives rows opening and closing around it. The ring shows only after a key moves it.
     cursor: Option<SharedString>,
     keyed: bool,
+    active_table: Option<ActiveTable>,
     search_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -182,6 +193,7 @@ impl SchemaTree {
             focus: cx.focus_handle(),
             cursor: None,
             keyed: false,
+            active_table: None,
             search_task: Task::ready(()),
             _subscriptions: subscriptions,
         }
@@ -200,6 +212,13 @@ impl SchemaTree {
         }
         if !same {
             self.schema_changed(cx);
+        }
+    }
+
+    pub fn set_active_table(&mut self, table: Option<ActiveTable>, cx: &mut Context<Self>) {
+        if self.active_table != table {
+            self.active_table = table;
+            cx.notify();
         }
     }
 
@@ -549,7 +568,6 @@ impl SchemaTree {
                     depth: 2,
                     kind: RowKind::Column {
                         column: column.clone(),
-                        matched: !needle.is_empty() && matches(column),
                         schema: schema_name.to_string(),
                         table: table.name.clone(),
                         view,
@@ -608,7 +626,6 @@ impl SchemaTree {
                 depth: depth + 1,
                 kind: RowKind::Object {
                     row: row.clone(),
-                    group,
                     schema: schema_name.to_string(),
                     table: table.map(str::to_string),
                 },
@@ -1197,8 +1214,13 @@ impl SchemaTree {
     ) -> AnyElement {
         let theme = cx.theme().clone();
         let muted = theme.muted_foreground;
+        // Every chevron takes the larger one's width, so the indent guides run under their centres.
         let chevron = |open: bool, size: Rems| {
-            Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size(size)
+            h_flex()
+                .flex_none()
+                .w(ICON_SM)
+                .justify_center()
+                .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size(size))
         };
         let icon = |name: Lucide| Icon::new(name).size(ICON_SM).text_color(muted);
         let row_id = row.id.clone();
@@ -1210,7 +1232,7 @@ impl SchemaTree {
             .relative()
             .h(rems(ROW_HEIGHT_REM))
             .w_full()
-            .px(rems(0.462))
+            .px(ROW_PADDING)
             .gap(rems(0.308))
             .rounded(RADIUS)
             .text_size(TEXT_BASE)
@@ -1244,119 +1266,145 @@ impl SchemaTree {
         let mono = |el: Div| el.font_family(theme.mono_font_family.clone());
         let badge = |text: SharedString, color: Hsla| form::badge(text, color);
         let count = |text: String| div().flex_none().text_size(TEXT_2XS).text_color(muted).child(text);
-        let element = match row.kind {
-            RowKind::Schema { name, expanded, count: tables, .. } => {
-                let menu = self.schema_menu(name.clone(), cx);
-                clickable(base)
-                    .child(chevron(expanded, ICON_SM))
-                    .child(icon(Lucide::FolderOpen))
-                    .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-                    .children(tables.map(count))
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_schema(&name, cx)))
-                    .context_menu(menu)
-                    .into_any_element()
-            }
-            RowKind::Table { schema, table, expanded, .. } => {
-                let kind = ObjectKind::for_relation(&table.kind);
-                let is_view = kind != ObjectKind::Table;
-                let menu = self.table_menu(schema.clone(), table.clone(), cx);
-                let name = table.name.clone();
-                let group = SharedString::from(format!("schema-table-{}-{}", schema, table.name));
-                let browse = self.browse_action(&schema, &table.name, group.clone(), ring, clearance, cx);
-                clickable(base)
-                    .group(group)
-                    .child(chevron(expanded, ICON_SM))
-                    .child(
-                        Icon::new(if is_view { Lucide::View } else { Lucide::Table2 })
-                            .size(ICON_SM)
-                            .text_color(if is_view { theme.primary } else { muted }),
-                    )
-                    .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-                    .when(is_view, |el| el.child(badge(t(cx, "sidebar.badge.view"), theme.primary)))
-                    .child(browse)
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_table(&schema, &name, cx)))
-                    .context_menu(menu)
-                    .into_any_element()
-            }
-            RowKind::Column { column, matched, schema, table, view } => {
-                let menu = self.column_menu(schema, table, column.name.clone(), view, column.is_primary, cx);
-                let tip = column.clone();
-                let dialect = self.connection.as_ref().and_then(|c| c.driver.dialect());
-                // Keys look as they do in the ER diagram and the grid's headers: a gold key, a blue link.
-                let (key_icon, key_color) = match (column.is_primary, column.is_foreign) {
-                    (true, _) => (Lucide::KeyRound, theme.warning),
-                    (false, true) => (Lucide::Link, theme.primary),
-                    _ => (Lucide::Columns3, muted),
-                };
-                column_row(clickable(base))
-                    .when(matched && !selected, |el| el.bg(theme.primary.opacity(TINT)))
-                    .child(Icon::new(key_icon).size(ICON_SM).text_color(key_color))
-                    .child(
-                        mono(div())
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_color(if matched { theme.primary } else { theme.foreground })
-                            .child(column.name.clone()),
-                    )
-                    .child(
-                        mono(div())
-                            .flex_none()
-                            .text_size(TEXT_2XS)
-                            .text_color(muted)
-                            .child(display_type(dialect, &column.data_type)),
-                    )
-                    .tooltip(move |window, cx| {
-                        let column = tip.clone();
-                        Tooltip::element(move |_, cx| column_tip(&column, cx)).build(window, cx)
-                    })
-                    .context_menu(menu)
-                    .into_any_element()
-            }
-            RowKind::Group { key, group, schema, table, expanded, count: objects } => clickable(base)
-                .text_size(TEXT_SM)
-                .text_color(muted)
-                .child(chevron(expanded, ICON_XS))
-                .child(icon(group_icon(group)))
-                .child(div().flex_1().min_w_0().truncate().child(t(cx, &format!("sidebar.group.{}", group.key()))))
-                .children(objects.map(|n| count(n.to_string())))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_group(key.clone(), group, schema.clone(), table.clone(), cx)
-                }))
-                .into_any_element(),
-            RowKind::Object { row, group, schema, table } => {
-                let menu = self.object_menu(&row, schema, table, cx);
-                let badge_color = match row.badge {
-                    Some(Badge::Pk) => theme.warning,
-                    Some(Badge::Fk) => theme.primary,
-                    Some(Badge::Unique) => theme.success,
-                    _ => muted,
-                };
-                column_row(base)
-                    .hover(|s| s.bg(hover))
-                    .child(icon(group_icon(group)))
-                    .child(mono(div()).flex_shrink_0().max_w(relative(0.7)).truncate().child(row.label.clone()))
-                    .children(row.badge.map(|b| badge(t(cx, &format!("sidebar.badge.{}", b.key())), badge_color)))
-                    .child(
-                        mono(div())
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(TEXT_2XS)
-                            .text_color(muted)
-                            .child(row.detail.clone()),
-                    )
-                    .context_menu(menu)
-                    .into_any_element()
-            }
-            RowKind::Note { text, spinner } => column_row(base)
-                .text_color(muted)
-                .when(spinner, |el| el.child(Spinner::new(ICON_XS)))
-                .child(div().min_w_0().truncate().child(text))
-                .into_any_element(),
+        // A search marks what it matched in names and types, so the rows it keeps read as they do unsearched.
+        let highlight = HighlightStyle {
+            color: Some(theme.primary),
+            background_color: Some(theme.primary.opacity(TINT)),
+            font_weight: Some(FontWeight::MEDIUM),
+            ..Default::default()
         };
+        let marked = |text: SharedString, needle: &str| {
+            let ranges = match_ranges(&text, needle);
+            StyledText::new(text).with_highlights(ranges.into_iter().map(|range| (range, highlight)))
+        };
+        let element =
+            match row.kind {
+                RowKind::Schema { name, expanded, count: tables, .. } => {
+                    let menu = self.schema_menu(name.clone(), cx);
+                    clickable(base)
+                        .child(chevron(expanded, ICON_SM))
+                        .child(icon(Lucide::FolderOpen))
+                        .child(div().flex_1().min_w_0().truncate().child(name.clone()))
+                        .children(tables.map(count))
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_schema(&name, cx)))
+                        .context_menu(menu)
+                        .into_any_element()
+                }
+                RowKind::Table { schema, table, expanded, .. } => {
+                    let (relation_icon, relation_badge) = relation_look(&ObjectKind::for_relation(&table.kind));
+                    let active = self.active_table.as_ref().is_some_and(|active| {
+                        self.connection.as_ref().is_some_and(|c| c.id == active.connection_id)
+                            && active.schema == schema
+                            && active.table == table.name
+                    });
+                    let menu = self.table_menu(schema.clone(), table.clone(), cx);
+                    let name = table.name.clone();
+                    let group = SharedString::from(format!("schema-table-{}-{}", schema, table.name));
+                    let browse = self.browse_action(&schema, &table.name, group.clone(), ring, clearance, cx);
+                    clickable(base)
+                        .group(group)
+                        .child(chevron(expanded, ICON_SM))
+                        .child(Icon::new(relation_icon).size(ICON_SM).text_color(if relation_badge.is_some() {
+                            theme.primary
+                        } else {
+                            muted
+                        }))
+                        .child(div().flex_1().min_w_0().truncate().child(marked(name.clone().into(), &self.needle)))
+                        .children(relation_badge.map(|key| badge(t(cx, key), theme.primary)))
+                        .when(active, |el| {
+                            el.child(
+                                div()
+                                    .debug_selector(|| "open-table".into())
+                                    .flex_none()
+                                    .size(rems(0.462))
+                                    .rounded_full()
+                                    .bg(theme.primary),
+                            )
+                        })
+                        .child(browse)
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_table(&schema, &name, cx)))
+                        .context_menu(menu)
+                        .into_any_element()
+                }
+                RowKind::Column { column, schema, table, view } => {
+                    let menu = self.column_menu(schema, table, column.name.clone(), view, column.is_primary, cx);
+                    let tip = column.clone();
+                    let dialect = self.connection.as_ref().and_then(|c| c.driver.dialect());
+                    let icon_color = match (column.is_primary, column.is_foreign) {
+                        (true, _) => theme.warning,
+                        (false, true) => theme.primary,
+                        _ => muted,
+                    };
+                    column_row(clickable(base))
+                        .child(Icon::new(column_icon(&column, dialect)).size(ICON_SM).text_color(icon_color))
+                        .child(
+                            mono(div())
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme.foreground)
+                                .child(marked(column.name.clone().into(), &self.needle)),
+                        )
+                        .child(mono(div()).flex_none().text_size(TEXT_2XS).text_color(muted).child(marked(
+                            type_label(&column, dialect).into(),
+                            type_needle(&column.name, &self.needle),
+                        )))
+                        .tooltip(move |window, cx| {
+                            let column = tip.clone();
+                            Tooltip::element(move |_, cx| column_tip(&column, cx)).build(window, cx)
+                        })
+                        .context_menu(menu)
+                        .into_any_element()
+                }
+                RowKind::Group { key, group, schema, table, expanded, count: objects } => clickable(base)
+                    .text_size(TEXT_SM)
+                    .text_color(muted)
+                    .child(chevron(expanded, ICON_XS))
+                    .child(icon(group_icon(group)))
+                    .child(div().flex_1().min_w_0().truncate().child(t(cx, &format!("sidebar.group.{}", group.key()))))
+                    .children(objects.map(|n| count(n.to_string())))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_group(key.clone(), group, schema.clone(), table.clone(), cx)
+                    }))
+                    .into_any_element(),
+                RowKind::Object { row, schema, table } => {
+                    let menu = self.object_menu(&row, schema, table, cx);
+                    let badge_color = match row.badge {
+                        Some(Badge::Pk) => theme.warning,
+                        Some(Badge::Fk) => theme.primary,
+                        Some(Badge::Unique) => theme.success,
+                        _ => muted,
+                    };
+                    // The group's row already shows its icon, and every index would say IDX, so neither repeats here.
+                    let shown_badge = row.badge.filter(|badge| *badge != Badge::Index);
+                    column_row(base)
+                        .hover(|s| s.bg(hover))
+                        .child(mono(div()).flex_shrink_0().max_w(relative(0.7)).truncate().child(row.label.clone()))
+                        .children(shown_badge.map(|b| badge(t(cx, &format!("sidebar.badge.{}", b.key())), badge_color)))
+                        .child(
+                            mono(div())
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(TEXT_2XS)
+                                .text_color(muted)
+                                .child(row.detail.clone()),
+                        )
+                        .context_menu(menu)
+                        .into_any_element()
+                }
+                RowKind::Note { text, spinner } => column_row(base)
+                    .text_color(muted)
+                    .when(spinner, |el| el.child(Spinner::new(ICON_XS)))
+                    .child(div().min_w_0().truncate().child(text))
+                    .into_any_element(),
+            };
         let element = div().w_full().child(element).when(ring, |el| list_nav::ring(el, cx));
-        div().w_full().pl(rems(INDENT_REM * depth as f32)).child(element).into_any_element()
+        // Each open parent's guide runs down from its chevron, past the rows it holds.
+        let guide_left = |level: usize| rems(INDENT_REM * level as f32 + ROW_PADDING.0 + ICON_SM.0 / 2.);
+        let guides = (0..depth)
+            .map(|level| div().absolute().top_0().bottom_0().left(guide_left(level)).w(px(1.)).bg(theme.border));
+        div().relative().w_full().pl(rems(INDENT_REM * depth as f32)).children(guides).child(element).into_any_element()
     }
 
     // Sits over the row's end on a gradient that fades out the truncated name.
@@ -1559,9 +1607,74 @@ fn column_tip(column: &ColumnInfo, cx: &App) -> Div {
         )
 }
 
+// Each place a search's needle shows up in `text`, as byte ranges of `text`. The needle comes lowercased, and a
+// letter can lowercase to more bytes, so each lowercased byte keeps the span of the letter it came from.
+fn match_ranges(text: &str, needle: &str) -> Vec<Range<usize>> {
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let (mut lower, mut spans) = (String::with_capacity(text.len()), Vec::with_capacity(text.len()));
+    for (at, letter) in text.char_indices() {
+        for lowered in letter.to_lowercase() {
+            lower.push(lowered);
+            spans.extend(std::iter::repeat_n(at..at + letter.len_utf8(), lowered.len_utf8()));
+        }
+    }
+    lower.match_indices(needle).map(|(at, found)| spans[at].start..spans[at + found.len() - 1].end).collect()
+}
+
+// What a column's type is marked with: the needle, unless its name already shows why the column is listed.
+fn type_needle<'a>(name: &str, needle: &'a str) -> &'a str {
+    if match_ranges(name, needle).is_empty() { needle } else { "" }
+}
+
+// Keys look as they do in the ER diagram and the grid's headers: a gold key, a blue link. Other columns show what
+// their type holds, or a list when they take their values from a fixed one.
+fn column_icon(column: &ColumnInfo, dialect: Option<SqlDialect>) -> Lucide {
+    if column.is_primary {
+        return Lucide::KeyRound;
+    }
+    if column.is_foreign {
+        return Lucide::Link;
+    }
+    if !column.enum_values.is_empty() {
+        return Lucide::List;
+    }
+    match type_family(dialect, &column.data_type) {
+        TypeFamily::Number => Lucide::Hash,
+        TypeFamily::Text => Lucide::CaseSensitive,
+        TypeFamily::Boolean => Lucide::ToggleLeft,
+        TypeFamily::Date => Lucide::Calendar,
+        TypeFamily::Time => Lucide::Clock,
+        TypeFamily::DateTime => Lucide::CalendarClock,
+        TypeFamily::Json => Lucide::Braces,
+        TypeFamily::Uuid => Lucide::FingerprintPattern,
+        TypeFamily::Binary => Lucide::Binary,
+        TypeFamily::Array => Lucide::Brackets,
+        TypeFamily::Enum => Lucide::List,
+        TypeFamily::Other => Lucide::Columns3,
+    }
+}
+
+// A nullable column's type ends in `?`, unless the type says so itself, as ClickHouse's Nullable(…) does.
+fn type_label(column: &ColumnInfo, dialect: Option<SqlDialect>) -> String {
+    let shown = display_type(dialect, &column.data_type);
+    if column.is_nullable && !shown.contains("Nullable(") { format!("{shown}?") } else { shown }
+}
+
+// A materialized view stores its rows, so it doesn't pass for a view.
+fn relation_look(kind: &ObjectKind) -> (Lucide, Option<&'static str>) {
+    match kind {
+        ObjectKind::View => (Lucide::View, Some("sidebar.badge.view")),
+        ObjectKind::MaterializedView => (Lucide::Layers, Some("sidebar.badge.matview")),
+        _ => (Lucide::Table2, None),
+    }
+}
+
+// Indexes don't take `#`, which marks number columns.
 fn group_icon(group: Group) -> Lucide {
     match group {
-        Group::Indexes => Lucide::Hash,
+        Group::Indexes => Lucide::ListTree,
         Group::Constraints => Lucide::KeyRound,
         Group::Triggers => Lucide::Zap,
         Group::Routines => Lucide::SquareFunction,
