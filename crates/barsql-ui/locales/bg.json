@@ -151,7 +151,14 @@
     "deleteEllipsis": "Изтрий…",
     "renameFolder": "Преименувай папка…",
     "saveAsQuery": "Запази като заявка…",
-    "clearHistory": "Изчисти историята…"
+    "clearHistory": "Изчисти историята…",
+    "collapseAll": "Свий всички",
+    "failedOnly": "Само неуспешните",
+    "columnTip": {
+      "identity": "генерира се автоматично",
+      "computed": "изчислява се",
+      "values": "стойности: {{values}}"
+    }
   },
   "systemViews": {
     "tableTabTitle": "{{view}}: {{name}}",
@@ -176,6 +183,14 @@
     "kindTuple": "Кортеж",
     "arrayReadOnly": "Показва се като JSON, затова не може да се редактира тук. Превключете на Текст, за да редактирате самата стойност.",
     "arrayError": "Това вече не може да се прочете като масив."
+  },
+  "jsonViewer": {
+    "filterPlaceholder": "Филтрирай ключове и стойности",
+    "noMatch": "// Няма ключ или стойност, отговарящи на филтъра",
+    "row": "Ред {{number}}",
+    "copy": "Копирай JSON",
+    "hideNulls": "Скрий NULL колоните",
+    "showNulls": "Покажи NULL колоните"
   },
   "tips": {
     "cursorsTitle": "Няколко курсора",

@@ -115,10 +115,22 @@ fn clear_all_empties_the_history_after_confirming(cx: &mut TestAppContext) {
     app.connect();
     app.run("SELECT 888 AS hist_clear;");
     show_recent(&mut app);
-    app.menu_pick("history-options", 2);
+    app.menu_pick("history-options", 3);
     assert!(app.dialog_open(), "Clear history asks first");
     app.confirm_dialog();
     assert!(history(&mut app).is_empty(), "No query history");
+}
+
+#[gpui_kit::test]
+fn failed_only_from_the_options_menu_lists_the_runs_that_failed(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.run("SELECT 1 AS hist_ok;");
+    app.run("SELECT * FROM missing_hist_table;");
+    show_recent(&mut app);
+    assert_eq!(history(&mut app), ["SELECT * FROM missing_hist_table", "SELECT 1 AS hist_ok"]);
+    app.menu_pick("history-options", 2);
+    assert_eq!(history(&mut app), ["SELECT * FROM missing_hist_table"]);
 }
 
 #[gpui_kit::test]

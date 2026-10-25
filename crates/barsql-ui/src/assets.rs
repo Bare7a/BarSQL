@@ -17,6 +17,7 @@ icon_assets!(
         Bug,
         CalendarPlus,
         ChartColumn,
+        ChevronsDownUp,
         CircleAlert,
         CirclePlay,
         CircleQuestionMark,
@@ -84,8 +85,7 @@ pub fn load_fonts(cx: &mut gpui_kit::App) {
     let _ = cx.text_system().add_fonts(FONTS.iter().map(|bytes| Cow::Borrowed(*bytes)).collect());
 }
 
-// The app icon, and its stack without the tile for the title bar, in tones that hold up on the dark and the light
-// bar. Rendered from packaging/icon.svg.
+// The app icon, and the title bar's tile-less marks for dark and light. Rendered from packaging/icon.svg.
 pub const LOGO: &str = "images/barsql-icon.png";
 pub const MARK_DARK: &str = "images/barsql-mark-dark.png";
 pub const MARK_LIGHT: &str = "images/barsql-mark-light.png";
@@ -127,8 +127,16 @@ mod tests {
     // An icon the app uses but doesn't ship draws as nothing at all.
     #[test]
     fn the_icons_the_status_bar_and_toolbars_use_are_shipped() {
-        for icon in [Lucide::CircleQuestionMark, Lucide::Check, Lucide::Lock, Lucide::ShieldCheck, Lucide::LoaderCircle]
-        {
+        for icon in [
+            Lucide::CircleQuestionMark,
+            Lucide::Check,
+            Lucide::Lock,
+            Lucide::ShieldCheck,
+            Lucide::LoaderCircle,
+            Lucide::ChevronsDownUp,
+            Lucide::Copy,
+            Lucide::EyeOff,
+        ] {
             let path = icon.path();
             assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");
         }

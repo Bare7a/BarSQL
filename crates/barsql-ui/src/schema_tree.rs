@@ -13,11 +13,11 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::form;
 use crate::i18n::{I18n, count, t, t_count, t_with};
 use crate::list_nav::{self, BarClearance, LIST_INSET};
 use crate::schema::{self, Schemas};
@@ -30,6 +30,7 @@ use crate::spinner::Spinner;
 use crate::state::{self, set_setting_json, setting_json};
 use crate::toast;
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS, TINT};
+use crate::{form, hover_card};
 
 // How far a table's Browse button sits from the end of its row.
 const BROWSE_INSET: Rems = rems(0.308);
@@ -38,9 +39,11 @@ const TABLES_EXPANDED_KEY: &str = "barsql-schema-tables-expanded";
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(200);
 const ROW_HEIGHT_REM: f32 = 2.;
 const INDENT_REM: f32 = 1.231;
+// Enum values a column's tooltip lists before cutting off.
+const TIP_VALUES: usize = 12;
 const CONTEXT: &str = "SchemaTree";
 
-actions!(schema_tree, [CursorUp, CursorDown, CursorFirst, CursorLast, ActivateRow]);
+actions!(schema_tree, [CursorUp, CursorDown, CursorFirst, CursorLast, ActivateRow, CollapseRow, ExpandRow]);
 
 pub fn init(cx: &mut App) {
     let context = Some(CONTEXT);
@@ -51,6 +54,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("end", CursorLast, context),
         KeyBinding::new("enter", ActivateRow, context),
         KeyBinding::new("space", ActivateRow, context),
+        KeyBinding::new("left", CollapseRow, context),
+        KeyBinding::new("right", ExpandRow, context),
     ]);
 }
 
@@ -96,8 +101,9 @@ enum GroupState {
 
 #[derive(Clone)]
 enum RowKind {
-    Schema { name: String, expanded: bool, count: Option<String> },
-    Table { schema: String, table: TableInfo, expanded: bool },
+    // `kept_open`: a search holds the row open.
+    Schema { name: String, expanded: bool, kept_open: bool, count: Option<String> },
+    Table { schema: String, table: TableInfo, expanded: bool, kept_open: bool },
     Column { column: ColumnInfo, matched: bool, schema: String, table: String, view: bool },
     Group { key: String, group: Group, schema: String, table: Option<String>, expanded: bool, count: Option<usize> },
     Object { row: ObjectRow, group: Group, schema: String, table: Option<String> },
@@ -188,8 +194,7 @@ impl SchemaTree {
             self.error = None;
             self.connecting = false;
         }
-        // A connection that is up loads its schema on first view, also when it came up after the tree showed it,
-        // as when the connection switcher connects it.
+        // A live connection loads its schema on first view, even if it connected after the tree showed it.
         if let Some(conn) = self.connection.clone().filter(|c| state::bar(cx).is_connected(&c.id)) {
             self.load(&conn, false, cx);
         }
@@ -467,14 +472,15 @@ impl SchemaTree {
             if !needle.is_empty() && visible.is_empty() && !loading {
                 continue;
             }
-            let expanded = !needle.is_empty() || self.expanded_schemas.get(&key) == Some(&true);
+            let kept_open = !needle.is_empty();
+            let expanded = kept_open || self.expanded_schemas.get(&key) == Some(&true);
             let count = (!all.is_empty()).then(|| {
                 if needle.is_empty() { all.len().to_string() } else { format!("{}/{}", visible.len(), all.len()) }
             });
             rows.push(TreeRow {
                 id: format!("s:{}", sch.name).into(),
                 depth: 0,
-                kind: RowKind::Schema { name: sch.name.clone(), expanded, count },
+                kind: RowKind::Schema { name: sch.name.clone(), expanded, kept_open, count },
             });
             if !expanded {
                 continue;
@@ -513,13 +519,13 @@ impl SchemaTree {
         let matches = |column: &ColumnInfo| column_matches(&conn.driver, column, needle);
         let column_hit = !needle.is_empty() && columns.is_some_and(|c| c.iter().any(matches));
         let tk = format!("{}:{schema_name}:{}", conn.id, table.name);
-        let expanded = self.expanded_tables.get(&tk) == Some(&true)
-            || (!needle.is_empty() && !name_matches && (column_hit || loading));
+        let kept_open = !needle.is_empty() && !name_matches && (column_hit || loading);
+        let expanded = kept_open || self.expanded_tables.get(&tk) == Some(&true);
         let id = format!("{schema_name}.{}", table.name);
         rows.push(TreeRow {
             id: format!("t:{id}").into(),
             depth: 1,
-            kind: RowKind::Table { schema: schema_name.to_string(), table: table.clone(), expanded },
+            kind: RowKind::Table { schema: schema_name.to_string(), table: table.clone(), expanded, kept_open },
         });
         if !expanded {
             return;
@@ -955,8 +961,7 @@ impl SchemaTree {
         }
     }
 
-    // One item per system view, each opening its query in a new tab and running it. With a table, the views are
-    // that table's and their tabs carry its name.
+    // One item per system view, run in a new tab. With a table, the views are scoped to it.
     fn view_items(
         mut menu: PopupMenu,
         this: &WeakEntity<Self>,
@@ -1059,6 +1064,77 @@ impl SchemaTree {
         !matches!(row.kind, RowKind::Note { .. })
     }
 
+    // None for a row that doesn't expand.
+    fn open_state(kind: &RowKind) -> Option<bool> {
+        match kind {
+            RowKind::Schema { expanded, .. } | RowKind::Table { expanded, .. } | RowKind::Group { expanded, .. } => {
+                Some(*expanded)
+            }
+            _ => None,
+        }
+    }
+
+    fn cursor_index(&self) -> Option<usize> {
+        let id = self.cursor.as_ref()?;
+        self.rows.iter().position(|row| &row.id == id)
+    }
+
+    fn put_cursor(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.cursor = Some(self.rows[ix].id.clone());
+        self.keyed = true;
+        self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    // Right opens a closed row, then steps onto its first child.
+    fn expand_cursor(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.cursor_index() else { return };
+        let (kind, depth) = (self.rows[ix].kind.clone(), self.rows[ix].depth);
+        match Self::open_state(&kind) {
+            Some(false) => self.activate(kind, cx),
+            Some(true) if self.rows.get(ix + 1).is_some_and(|next| next.depth > depth && Self::focusable(next)) => {
+                self.put_cursor(ix + 1, cx)
+            }
+            _ => {}
+        }
+    }
+
+    // Left closes an open row, or steps up to its parent. A row a search keeps open can't close.
+    fn collapse_cursor(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.cursor_index() else { return };
+        let (kind, depth) = (self.rows[ix].kind.clone(), self.rows[ix].depth);
+        let kept_open =
+            matches!(kind, RowKind::Schema { kept_open: true, .. } | RowKind::Table { kept_open: true, .. });
+        if Self::open_state(&kind) == Some(true) && !kept_open {
+            return self.activate(kind, cx);
+        }
+        if let Some(parent) = self.rows[..ix].iter().rposition(|row| row.depth < depth) {
+            self.put_cursor(parent, cx);
+        }
+    }
+
+    // Closes and forgets every open row of the shown connection.
+    fn collapse_all(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = &self.connection else { return };
+        let prefix = format!("{}:", conn.id);
+        self.expanded_schemas.retain(|key, _| !key.starts_with(&prefix));
+        self.expanded_tables.retain(|key, _| !key.starts_with(&prefix));
+        self.expanded_groups.retain(|key| !key.starts_with(&prefix));
+        set_setting_json(cx, SCHEMA_EXPANDED_KEY, &self.expanded_schemas);
+        set_setting_json(cx, TABLES_EXPANDED_KEY, &self.expanded_tables);
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.rebuild(cx);
+    }
+
+    // Includes tables hidden under a closed schema.
+    fn has_open(&self) -> bool {
+        let Some(conn) = &self.connection else { return false };
+        let prefix = format!("{}:", conn.id);
+        let schemas_and_tables = self.expanded_schemas.iter().chain(&self.expanded_tables);
+        schemas_and_tables.filter(|(_, open)| **open).any(|(key, _)| key.starts_with(&prefix))
+            || self.expanded_groups.iter().any(|key| key.starts_with(&prefix))
+    }
+
     // With no cursor yet, Down starts at the top and Up at the bottom.
     fn move_cursor(&mut self, step: isize, cx: &mut Context<Self>) {
         let focusable: Vec<usize> = (0..self.rows.len()).filter(|&ix| Self::focusable(&self.rows[ix])).collect();
@@ -1071,16 +1147,12 @@ impl SchemaTree {
             (None, _) => last,
             (Some(at), step) => focusable[(at as isize + step).clamp(0, focusable.len() as isize - 1) as usize],
         };
-        self.cursor = Some(self.rows[target].id.clone());
-        self.keyed = true;
-        self.scroll.scroll_to_item(target, ScrollStrategy::Nearest);
-        cx.notify();
+        self.put_cursor(target, cx);
     }
 
     fn activate_cursor(&mut self, cx: &mut Context<Self>) {
-        let row = self.cursor.as_ref().and_then(|id| self.rows.iter().find(|row| &row.id == id)).cloned();
-        if let Some(row) = row {
-            self.activate(row.kind, cx);
+        if let Some(ix) = self.cursor_index() {
+            self.activate(self.rows[ix].kind.clone(), cx);
         }
     }
 
@@ -1158,7 +1230,7 @@ impl SchemaTree {
         let badge = |text: SharedString, color: Hsla| form::badge(text, color);
         let count = |text: String| div().flex_none().text_size(TEXT_2XS).text_color(muted).child(text);
         let element = match row.kind {
-            RowKind::Schema { name, expanded, count: tables } => {
+            RowKind::Schema { name, expanded, count: tables, .. } => {
                 let menu = self.schema_menu(name.clone(), cx);
                 clickable(base)
                     .child(chevron(expanded, ICON_SM))
@@ -1169,7 +1241,7 @@ impl SchemaTree {
                     .context_menu(menu)
                     .into_any_element()
             }
-            RowKind::Table { schema, table, expanded } => {
+            RowKind::Table { schema, table, expanded, .. } => {
                 let kind = ObjectKind::for_relation(&table.kind);
                 let is_view = kind != ObjectKind::Table;
                 let menu = self.table_menu(schema.clone(), table.clone(), cx);
@@ -1194,6 +1266,7 @@ impl SchemaTree {
             RowKind::Column { column, matched, schema, table, view } => {
                 let menu = self.column_menu(schema, table, column.name.clone(), view, column.is_primary, cx);
                 let insert = column.name.clone();
+                let tip = column.clone();
                 let dialect = self.connection.as_ref().and_then(|c| c.driver.dialect());
                 // Keys look as they do in the ER diagram and the grid's headers: a gold key, a blue link.
                 let (key_icon, key_color) = match (column.is_primary, column.is_foreign) {
@@ -1220,6 +1293,10 @@ impl SchemaTree {
                             .child(display_type(dialect, &column.data_type)),
                     )
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(SchemaTreeEvent::Insert(insert.clone()))))
+                    .tooltip(move |window, cx| {
+                        let column = tip.clone();
+                        Tooltip::element(move |_, cx| column_tip(&column, cx)).build(window, cx)
+                    })
                     .context_menu(menu)
                     .into_any_element()
             }
@@ -1323,7 +1400,7 @@ impl SchemaTree {
                     )
                     .tooltip({
                         let hint = t(cx, "sidebar.browseData");
-                        move |window, cx| gpui_kit::component::tooltip::Tooltip::new(hint.clone()).build(window, cx)
+                        move |window, cx| Tooltip::new(hint.clone()).build(window, cx)
                     })
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.stop_propagation();
@@ -1358,6 +1435,13 @@ impl SchemaTree {
                         .dropdown_menu(move |menu, _, cx| Self::view_items(menu, &this, &driver, None, cx)),
                 )
             })
+            .child(
+                form::filter_button("collapse-all", Icon::new(Lucide::ChevronsDownUp))
+                    .debug_selector(|| "collapse-all".into())
+                    .tooltip(t(cx, "sidebar.collapseAll"))
+                    .disabled(!self.has_open())
+                    .on_click(cx.listener(|this, _, _, cx| this.collapse_all(cx))),
+            )
             .child(
                 form::filter_button("refresh-schema", Icon::new(Lucide::RefreshCw))
                     .debug_selector(|| "refresh-schema".into())
@@ -1406,6 +1490,47 @@ impl SchemaTree {
 
 fn note(parent: &str, depth: usize, text: SharedString, spinner: bool) -> TreeRow {
     TreeRow { id: format!("n:{parent}").into(), depth, kind: RowKind::Note { text, spinner } }
+}
+
+// Tooltip lines: FK target, NOT NULL and default as the hover card words them, auto-generated or computed, and
+// enum values.
+fn column_details(column: &ColumnInfo, cx: &App) -> Vec<String> {
+    let labels = cx.global::<I18n>().sql_labels();
+    let flag = |on: bool, key: &str| if on { t(cx, key).to_string() } else { String::new() };
+    let mut lines = vec![hover_card::joined([
+        hover_card::column_note(column, &labels, cx),
+        flag(column.is_identity, "sidebar.columnTip.identity"),
+        flag(column.is_computed, "sidebar.columnTip.computed"),
+    ])];
+    if !column.enum_values.is_empty() {
+        let mut values = column.enum_values.iter().take(TIP_VALUES).map(String::as_str).collect::<Vec<_>>().join(", ");
+        if column.enum_values.len() > TIP_VALUES {
+            values.push_str(", …");
+        }
+        lines.push(t_with(cx, "sidebar.columnTip.values", &[("values", &values)]).to_string());
+    }
+    lines.retain(|line| !line.is_empty());
+    lines
+}
+
+// Full name and type, which the row may truncate, then the details.
+fn column_tip(column: &ColumnInfo, cx: &App) -> Div {
+    let theme = cx.theme();
+    v_flex()
+        .py(rems(0.231))
+        .gap(rems(0.154))
+        .child(
+            h_flex()
+                .gap(rems(0.462))
+                .font_family(theme.mono_font_family.clone())
+                .child(div().font_semibold().child(column.name.clone()))
+                .child(div().text_color(theme.muted_foreground).child(column.data_type.clone())),
+        )
+        .children(
+            column_details(column, cx)
+                .into_iter()
+                .map(|line| div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(line)),
+        )
 }
 
 fn group_icon(group: Group) -> Lucide {
@@ -1466,6 +1591,8 @@ impl Render for SchemaTree {
                 .on_action(cx.listener(|this, _: &CursorFirst, _, cx| this.move_cursor(isize::MIN, cx)))
                 .on_action(cx.listener(|this, _: &CursorLast, _, cx| this.move_cursor(isize::MAX, cx)))
                 .on_action(cx.listener(|this, _: &ActivateRow, _, cx| this.activate_cursor(cx)))
+                .on_action(cx.listener(|this, _: &CollapseRow, _, cx| this.collapse_cursor(cx)))
+                .on_action(cx.listener(|this, _: &ExpandRow, _, cx| this.expand_cursor(cx)))
                 .child(
                     uniform_list("schema-tree", self.rows.len(), cx.processor(Self::render_rows))
                         .debug_selector(|| "schema-tree".into())

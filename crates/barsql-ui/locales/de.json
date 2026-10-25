@@ -151,7 +151,14 @@
     "deleteEllipsis": "Löschen…",
     "renameFolder": "Ordner umbenennen…",
     "saveAsQuery": "Als Abfrage speichern…",
-    "clearHistory": "Verlauf leeren…"
+    "clearHistory": "Verlauf leeren…",
+    "collapseAll": "Alle einklappen",
+    "failedOnly": "Nur fehlgeschlagene",
+    "columnTip": {
+      "identity": "automatisch erzeugt",
+      "computed": "berechnet",
+      "values": "Werte: {{values}}"
+    }
   },
   "systemViews": {
     "tableTabTitle": "{{view}}: {{name}}",
@@ -176,6 +183,14 @@
     "kindTuple": "Tupel",
     "arrayReadOnly": "Als JSON angezeigt und deshalb hier nicht bearbeitbar. Wechseln Sie zu Text, um den Wert selbst zu bearbeiten.",
     "arrayError": "Das lässt sich nicht mehr als Array lesen."
+  },
+  "jsonViewer": {
+    "filterPlaceholder": "Schlüssel und Werte filtern",
+    "noMatch": "// Kein Schlüssel und kein Wert passt zum Filter",
+    "row": "Zeile {{number}}",
+    "copy": "JSON kopieren",
+    "hideNulls": "NULL-Spalten ausblenden",
+    "showNulls": "NULL-Spalten einblenden"
   },
   "tips": {
     "cursorsTitle": "Mehrere Cursor",

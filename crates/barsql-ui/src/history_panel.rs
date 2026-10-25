@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use barsql_app::HISTORY_LIMIT;
 use barsql_core::{ConnectionConfig, HistoryEntry};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
@@ -15,8 +16,10 @@ use jiff::{Timestamp, Zoned};
 
 use crate::dialogs::{self, Confirm};
 use crate::form;
+use crate::hover_card::joined;
 use crate::i18n::{I18n, t, t_with};
 use crate::list_nav::{self, LIST_INSET, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp, ROW_INSET};
+use crate::plan_tree::format_ms;
 use crate::relative_time::{TimeBucket, format_relative_time, one_line_preview, time_bucket};
 use crate::saved_queries;
 use crate::scrollbars::HoverScrollbar as _;
@@ -24,7 +27,6 @@ use crate::state;
 use crate::toast;
 use crate::tokens::{RADIUS, TEXT_2XS, TEXT_XS};
 
-const HISTORY_LIMIT: usize = 200;
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub enum HistoryEvent {
@@ -37,7 +39,7 @@ pub enum Scope {
     All,
 }
 
-// A row of the list: a day's caption, or entry `entry` at place `ix` among the runs shown.
+// A day caption, or `entries[entry]` shown at position `ix`.
 #[derive(Clone, Copy)]
 enum Row {
     Day(TimeBucket),
@@ -49,8 +51,9 @@ pub struct HistoryPanel {
     connection_id: Option<String>,
     connections: Vec<ConnectionConfig>,
     scope: Scope,
+    failed_only: bool,
     entries: Vec<HistoryEntry>,
-    // The runs the filter lets through, under their days as of `day`. The list builds only the rows on screen.
+    // Filtered runs under their day captions, as of `day`.
     rows: Vec<Row>,
     day: Date,
     filter: Entity<InputState>,
@@ -89,13 +92,14 @@ impl HistoryPanel {
             connection_id: None,
             connections: Vec::new(),
             scope: Scope::Connection,
+            failed_only: false,
             entries: Vec::new(),
             rows: Vec::new(),
             day: Zoned::now().date(),
             filter,
             needle: String::new(),
             filter_task: Task::ready(()),
-            // Measuring every row once a change lays them out sizes the bar right from the start.
+            // Measures every row so the scrollbar is sized right from the start.
             nav: ListNav::with_scroll(ListState::new(0, ListAlignment::Top, px(200.)).measure_all(), cx),
             _subscriptions: subscriptions,
         }
@@ -125,16 +129,25 @@ impl HistoryPanel {
         self.reload(cx);
     }
 
-    // Lays out the runs the filter lets through under their days, and keeps the list where it was.
+    fn set_failed_only(&mut self, failed_only: bool, cx: &mut Context<Self>) {
+        self.failed_only = failed_only;
+        self.rebuild();
+        cx.notify();
+    }
+
+    // Rebuilds the rows, keeping the scroll position.
     fn rebuild(&mut self) {
         self.rebuild_as_of(Zoned::now());
     }
 
     fn rebuild_as_of(&mut self, now: Zoned) {
         self.day = now.date();
-        let needle = &self.needle;
+        let (needle, failed_only) = (&self.needle, self.failed_only);
         let shown = self.entries.iter().enumerate().filter(|(_, e)| {
-            needle.is_empty() || e.sql.to_lowercase().contains(needle) || e.error.to_lowercase().contains(needle)
+            (!failed_only || !e.success)
+                && (needle.is_empty()
+                    || e.sql.to_lowercase().contains(needle)
+                    || e.error.to_lowercase().contains(needle))
         });
         let (mut rows, mut last) = (Vec::new(), None);
         for (ix, (entry, e)) in shown.enumerate() {
@@ -215,7 +228,7 @@ impl HistoryPanel {
 
     fn options_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity().downgrade();
-        let scope = self.scope;
+        let (scope, failed_only) = (self.scope, self.failed_only);
         let empty = self.entries.is_empty();
         form::filter_button("history-options", Icon::new(Lucide::SlidersHorizontal))
             .debug_selector(|| "history-options".into())
@@ -227,7 +240,7 @@ impl HistoryPanel {
                         let _ = this.update(cx, |this, cx| this.set_scope(target, cx));
                     }
                 };
-                let clear = this.clone();
+                let (failed, clear) = (this.clone(), this.clone());
                 menu.item(
                     PopupMenuItem::new(t(cx, "sidebar.scopeConnection"))
                         .icon(Icon::new(Lucide::Database))
@@ -239,6 +252,15 @@ impl HistoryPanel {
                         .icon(Icon::new(IconName::Globe))
                         .checked(scope == Scope::All)
                         .on_click(pick(Scope::All)),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new(t(cx, "sidebar.failedOnly"))
+                        .icon(Icon::new(Lucide::CircleAlert))
+                        .checked(failed_only)
+                        .on_click(move |_, _, cx| {
+                            let _ = failed.update(cx, |this, cx| this.set_failed_only(!failed_only, cx));
+                        }),
                 )
                 .separator()
                 .item(
@@ -324,7 +346,7 @@ impl HistoryPanel {
         self.visible().find(|entry| entry.id == id).cloned()
     }
 
-    // Row `row` of the list, padded at its sides as the list's own padding would: a `list` pads only its ends.
+    // Pads its own sides, since a `list` pads only its ends.
     fn render_row(
         &self,
         row: usize,
@@ -358,12 +380,11 @@ impl HistoryPanel {
         let ring = self.nav.ringed(&entry.id, window);
         let theme = cx.theme().clone();
         let lang = cx.global::<I18n>().lang();
-        let mut meta = format!("{} · {} ms", format_relative_time(&entry.executed_at, lang, now_ms), entry.duration_ms);
-        if self.scope == Scope::All
-            && let Some(connection) = self.connections.iter().find(|c| c.id == entry.connection_id)
-        {
-            meta.push_str(&format!(" · {}", connection.name));
-        }
+        let connection = (self.scope == Scope::All)
+            .then(|| self.connections.iter().find(|c| c.id == entry.connection_id))
+            .flatten()
+            .map(|c| c.name.as_str());
+        let meta = meta(entry, connection, lang, now_ms);
         let error = (!entry.success && !entry.error.is_empty()).then(|| one_line_preview(&entry.error, 100));
         let (open_conn, open_sql) = (entry.connection_id.clone(), entry.sql.clone());
         let (save_conn, save_sql) = (entry.connection_id.clone(), entry.sql.clone());
@@ -454,6 +475,12 @@ impl HistoryPanel {
     }
 }
 
+// When it ran, how long it took and, in the All scope, on which connection.
+fn meta(entry: &HistoryEntry, connection: Option<&str>, lang: &str, now_ms: i64) -> String {
+    let when = format_relative_time(&entry.executed_at, lang, now_ms);
+    joined([when, format_ms(Some(entry.duration_ms as f64), lang), connection.unwrap_or_default().to_string()])
+}
+
 impl Render for HistoryPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let field = div()
@@ -510,13 +537,70 @@ impl Render for HistoryPanel {
 mod tests {
     use barsql_core::HistoryEntry;
     use gpui_kit::{App, TestAppContext};
-    use jiff::Zoned;
+    use jiff::{SignedDuration, Timestamp, Zoned};
 
-    use super::{HistoryPanel, Row};
+    use super::{HistoryPanel, Row, meta};
     use crate::relative_time::TimeBucket;
     use crate::test_support::{Env, in_root};
 
-    // A list laid out before midnight is laid out again when it next draws, so its captions say what day it is.
+    #[gpui_kit::test]
+    fn recent_lists_every_run_the_store_keeps(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let id = env.connection.id.clone();
+        let now = Timestamp::now();
+        for n in 0..300 {
+            let entry = HistoryEntry {
+                id: format!("h{n}"),
+                connection_id: id.clone(),
+                sql: format!("SELECT {n}"),
+                executed_at: (now - SignedDuration::from_mins(n)).to_string(),
+                success: true,
+                ..Default::default()
+            };
+            env.bar.restore_query_history_entry(entry).unwrap();
+        }
+        let (panel, cx) = in_root(cx, HistoryPanel::new);
+        let connections = env.bar.list_connections();
+        panel.update(cx, |panel, cx| panel.set_connection(Some(id), connections, cx));
+        let listed = panel.read_with(cx, |panel, _| panel.listed());
+        assert!(listed.contains(&"SELECT 299".to_string()), "the oldest of the {} listed", listed.len());
+    }
+
+    #[test]
+    fn run_times_read_in_seconds_from_one_second_on() {
+        let ran = "2026-10-25T10:00:00Z";
+        let now_ms = ran.parse::<Timestamp>().unwrap().as_millisecond() + 5 * 60_000;
+        let entry = |duration_ms| HistoryEntry { executed_at: ran.into(), duration_ms, ..Default::default() };
+        assert_eq!(meta(&entry(42), None, "en", now_ms), "5 minutes ago · 42 ms");
+        assert_eq!(meta(&entry(2350), None, "en", now_ms), "5 minutes ago · 2.35 s");
+        assert_eq!(meta(&entry(120_000), Some("Forum"), "en", now_ms), "5 minutes ago · 120 s · Forum");
+        assert_eq!(meta(&entry(2350), None, "de", now_ms), "vor 5 Minuten · 2,35 s");
+    }
+
+    #[gpui_kit::test]
+    fn failed_only_lists_just_the_runs_that_failed(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let (panel, cx) = in_root(cx, HistoryPanel::new);
+        let now = Timestamp::now().to_string();
+        let entry = |id: &str, sql: &str, success: bool| HistoryEntry {
+            id: id.into(),
+            connection_id: env.connection.id.clone(),
+            sql: sql.into(),
+            executed_at: now.clone(),
+            success,
+            ..Default::default()
+        };
+        let entries = vec![entry("h1", "SELECT 1", true), entry("h2", "SELEC 2", false)];
+        panel.update(cx, |panel, cx| {
+            panel.show_entries(entries, cx);
+            panel.set_failed_only(true, cx);
+        });
+        assert_eq!(panel.read_with(cx, |panel, _| panel.listed()), ["SELEC 2"]);
+        panel.update(cx, |panel, cx| panel.set_failed_only(false, cx));
+        assert_eq!(panel.read_with(cx, |panel, _| panel.listed()), ["SELECT 1", "SELEC 2"]);
+    }
+
+    // Captions laid out before midnight update on the next draw.
     #[gpui_kit::test]
     fn the_day_captions_move_on_at_midnight(cx: &mut TestAppContext) {
         let env = Env::new(cx);

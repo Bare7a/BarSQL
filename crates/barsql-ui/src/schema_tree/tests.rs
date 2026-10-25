@@ -2,9 +2,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use barsql_core::{ColumnInfo, DriverType};
+use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
-use super::{SchemaTree, SchemaTreeEvent, column_matches, table_matches};
+use super::{SchemaTree, SchemaTreeEvent, column_details, column_matches, table_matches};
 use crate::schema_objects::{Group, group_key};
 use crate::state;
 use crate::test_support::{Env, settle};
@@ -173,4 +174,131 @@ fn the_keyboard_walks_and_opens_the_tree(cx: &mut TestAppContext) {
     assert_eq!(ids(&tree, cx), ["s:main"], "Enter closes the open schema");
     cx.simulate_keystrokes("end up");
     assert_eq!(cursor(&tree, cx).as_deref(), Some("s:main"), "one row left");
+}
+
+#[gpui_kit::test]
+fn a_columns_tooltip_spells_out_what_its_row_leaves_out(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let author = ColumnInfo {
+        name: "author_id".into(),
+        data_type: "uuid".into(),
+        is_foreign: true,
+        foreign_table: "users".into(),
+        foreign_column: "id".into(),
+        default_val: "gen_random_uuid()".into(),
+        ..Default::default()
+    };
+    let id = ColumnInfo { name: "id".into(), is_primary: true, is_identity: true, ..Default::default() };
+    let status = ColumnInfo {
+        name: "status".into(),
+        is_nullable: true,
+        is_computed: true,
+        enum_values: vec!["draft".into(), "live".into()],
+        ..Default::default()
+    };
+    let many = ColumnInfo {
+        name: "level".into(),
+        is_nullable: true,
+        enum_values: (1..=14).map(|n| format!("v{n}")).collect(),
+        ..Default::default()
+    };
+    let plain = ColumnInfo { name: "note".into(), is_nullable: true, ..Default::default() };
+    cx.update(|cx| {
+        assert_eq!(column_details(&author, cx), ["→ users.id · not null · default gen_random_uuid()"]);
+        assert_eq!(column_details(&id, cx), ["auto-generated"], "a key is never null, so that goes unsaid");
+        assert_eq!(column_details(&status, cx), ["computed", "values: draft, live"]);
+        assert_eq!(column_details(&many, cx), ["values: v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, …"]);
+        assert!(column_details(&plain, cx).is_empty());
+    });
+}
+
+#[gpui_kit::test]
+fn left_and_right_close_open_and_step_through_the_tree(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tree, cx) = open(&env, cx);
+    connect(&tree, cx);
+    tree.update_in(cx, |tree, window, cx| tree.focus.focus(window, cx));
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes("down down");
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("t:main.things"));
+    cx.simulate_keystrokes("right");
+    settle(cx, has(&tree, "c:main.things.id"));
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("t:main.things"), "Right opens the table first");
+    cx.simulate_keystrokes("right");
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("c:main.things.id"), "then steps onto its first column");
+    cx.simulate_keystrokes("right");
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("c:main.things.id"), "a column has nothing to open");
+
+    cx.simulate_keystrokes("left");
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("t:main.things"), "Left steps up to the parent");
+    cx.simulate_keystrokes("left");
+    cx.run_until_parked();
+    assert!(!ids(&tree, cx).contains(&"c:main.things.id".to_string()), "then closes it");
+    cx.simulate_keystrokes("left");
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("s:main"));
+    cx.simulate_keystrokes("left");
+    cx.run_until_parked();
+    assert_eq!(ids(&tree, cx), ["s:main"], "and closes the schema");
+}
+
+// Other connections' rows stay open.
+#[gpui_kit::test]
+fn collapse_all_closes_the_tree_and_forgets_only_this_connections_rows(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    cx.update(|cx| state::set_setting(cx, super::SCHEMA_EXPANDED_KEY, "{\"other:main\":true}"));
+    let (tree, cx) = open(&env, cx);
+    connect(&tree, cx);
+    tree.update(cx, |tree, cx| tree.toggle_table("main", "things", cx));
+    settle(cx, has(&tree, "c:main.things.id"));
+
+    cx.update(|window, cx| window.click("collapse-all", cx));
+    cx.run_until_parked();
+    assert_eq!(ids(&tree, cx), ["s:main"]);
+    let schemas = cx.update(|_, cx| state::setting(cx, super::SCHEMA_EXPANDED_KEY));
+    assert_eq!(schemas.as_deref(), Some("{\"other:main\":true}"));
+    let tables = cx.update(|_, cx| state::setting(cx, super::TABLES_EXPANDED_KEY));
+    assert_eq!(tables.as_deref(), Some("{}"));
+}
+
+// Without changing what's remembered as open.
+#[gpui_kit::test]
+fn left_steps_up_from_a_row_the_search_keeps_open(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let id = env.connection.id.clone();
+    env.runtime.block_on(env.bar.execute_query(&id, "CREATE TABLE others (id INTEGER, label TEXT)")).unwrap();
+    let (tree, cx) = open(&env, cx);
+    connect(&tree, cx);
+    tree.update(cx, |tree, cx| tree.set_needle("label".into(), cx));
+    settle(cx, has(&tree, "c:main.others.label"));
+    let remembered = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| [super::SCHEMA_EXPANDED_KEY, super::TABLES_EXPANDED_KEY].map(|key| state::setting(cx, key)))
+    };
+    let before = remembered(cx);
+    tree.update_in(cx, |tree, window, cx| tree.focus.focus(window, cx));
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes("down down left");
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("s:main"));
+    cx.simulate_keystrokes("left");
+    cx.run_until_parked();
+    assert_eq!(ids(&tree, cx), ["s:main", "t:main.others", "c:main.others.label"]);
+    assert_eq!(remembered(cx), before);
+}
+
+#[gpui_kit::test]
+fn collapse_all_closes_the_tables_a_closed_schema_hides(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tree, cx) = open(&env, cx);
+    connect(&tree, cx);
+    tree.update(cx, |tree, cx| tree.toggle_table("main", "things", cx));
+    settle(cx, has(&tree, "c:main.things.id"));
+    tree.update(cx, |tree, cx| tree.toggle_schema("main", cx));
+    cx.run_until_parked();
+    assert_eq!(ids(&tree, cx), ["s:main"]);
+
+    cx.update(|window, cx| window.click("collapse-all", cx));
+    tree.update(cx, |tree, cx| tree.toggle_schema("main", cx));
+    settle(cx, has(&tree, "t:main.things"));
+    assert!(!ids(&tree, cx).contains(&"c:main.things.id".to_string()), "the table stays closed");
 }

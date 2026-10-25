@@ -194,6 +194,43 @@ fn large_results_sort_in_the_background(cx: &mut TestAppContext) {
     assert_eq!(read(&grid, cx, |g| g.order.global_at(0)), Some(29_999));
 }
 
+fn focus_changes(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> Rc<RefCell<usize>> {
+    let heard = Rc::new(RefCell::new(0));
+    let count = heard.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(grid, move |_, event: &GridEvent, _| {
+            if matches!(event, GridEvent::FocusedRowChanged) {
+                *count.borrow_mut() += 1;
+            }
+        })
+        .detach()
+    });
+    heard
+}
+
+// The JSON viewer shows the gutter number, which a sort changes without moving the focus.
+#[gpui_kit::test]
+fn the_focused_rows_number_follows_the_sort(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    let heard = focus_changes(&grid, cx);
+    assert_eq!(read(&grid, cx, |g| g.focused_row().map(|row| (row.row, row.number))), Some((0, 1)));
+    grid.update(cx, |grid, cx| grid.toggle_sort(0, cx));
+    cx.run_until_parked();
+    let focused = read(&grid, cx, |g| g.focused_row().map(|row| (row.row, row.number)));
+    assert_eq!(focused, Some((0, 3)), "ids count down, so the first row is now the last");
+    assert_eq!(*heard.borrow(), 1);
+}
+
+#[gpui_kit::test]
+fn the_focused_rows_number_follows_a_sort_in_the_background(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 30_000);
+    let heard = focus_changes(&grid, cx);
+    grid.update(cx, |grid, cx| grid.toggle_sort(0, cx));
+    cx.run_until_parked();
+    assert_eq!(read(&grid, cx, |g| g.focused_row().map(|row| row.number)), Some(30_000));
+    assert_eq!(*heard.borrow(), 1, "once the order is in");
+}
+
 #[gpui_kit::test]
 fn dragging_selects_a_range_and_a_click_clears_it(cx: &mut TestAppContext) {
     let (_env, grid, cx) = open(cx, 20);

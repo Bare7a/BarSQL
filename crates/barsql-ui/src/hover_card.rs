@@ -18,9 +18,8 @@ use crate::sql_language::SqlLanguage;
 use crate::tokens::{RADIUS, TEXT_2XS};
 use crate::{completion, form, schema, theme};
 
-// GPUI Kit's hover popover sizes itself to its narrowest content, caps its size, has no scrollbar and can't be
-// restyled, so the SQL editor draws its own card. GPUI Kit still notices the pointer resting on a name and asks the
-// provider, which hands the request to the card and tells GPUI Kit there's nothing to show.
+// GPUI Kit's hover popover can't scroll or be restyled, so the SQL editor draws its own card. The provider hands
+// each request to the card and tells GPUI Kit there's nothing to show.
 
 // Kept clear of the window's edges.
 const MARGIN: Pixels = px(8.);
@@ -285,11 +284,12 @@ impl HoverCard {
     }
 }
 
-fn joined(parts: impl IntoIterator<Item = String>) -> String {
+pub(crate) fn joined(parts: impl IntoIterator<Item = String>) -> String {
     parts.into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ")
 }
 
-fn column_row(column: &ColumnInfo, name: bool, labels: &SqlLabels, cx: &App) -> Row {
+// A column's FK target, NOT NULL and default. The schema tree's tooltips use it too.
+pub(crate) fn column_note(column: &ColumnInfo, labels: &SqlLabels, cx: &App) -> String {
     let target = match (column.foreign_table.as_str(), column.foreign_column.as_str()) {
         ("", _) => String::new(),
         (table, "") => format!("→ {table}"),
@@ -301,7 +301,11 @@ fn column_row(column: &ColumnInfo, name: bool, labels: &SqlLabels, cx: &App) -> 
         "" => String::new(),
         value => t_with(cx, "editor.sql.defaultValue", &[("value", value)]).to_string(),
     };
-    let note = joined([target, not_null, default]);
+    joined([target, not_null, default])
+}
+
+fn column_row(column: &ColumnInfo, name: bool, labels: &SqlLabels, cx: &App) -> Row {
+    let note = column_note(column, labels, cx);
     Row {
         name: name.then(|| column.name.clone().into()),
         data_type: (!column.data_type.is_empty()).then(|| column.data_type.clone().into()),

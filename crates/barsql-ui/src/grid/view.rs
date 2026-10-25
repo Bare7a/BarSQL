@@ -178,12 +178,13 @@ pub struct ExportSource {
     pub selected_columns: Vec<usize>,
 }
 
-// For the JSON row panel, with only the visible columns.
+// For the JSON row panel, with only the visible columns. `number` is the gutter's, from 1.
 #[derive(Clone)]
 pub struct RowRef {
     pub set: ResultSet,
     pub row: usize,
     pub columns: Vec<usize>,
+    pub number: usize,
 }
 
 pub enum GridEvent {
@@ -353,7 +354,8 @@ pub struct Grid {
     hover: Option<Target>,
     // What the last right-click landed on, which picks the menu.
     menu_target: Option<Target>,
-    published: (Option<usize>, Vec<usize>),
+    // What `publish` last announced.
+    published: (Option<usize>, Vec<usize>, Option<usize>),
     pub(super) picker_open: bool,
     // Kept across renders so the column picker's list doesn't jump back to the top.
     pub(super) picker_scroll: ScrollHandle,
@@ -398,7 +400,7 @@ impl Grid {
             press: None,
             hover: None,
             menu_target: None,
-            published: (None, Vec::new()),
+            published: (None, Vec::new(), None),
             picker_open: false,
             picker_scroll: ScrollHandle::new(),
             overlay: None,
@@ -411,12 +413,16 @@ impl Grid {
 
     pub fn focused_row(&self) -> Option<RowRef> {
         let row = self.selection.focus_row.filter(|&row| row < self.set.rows())?;
-        Some(RowRef { set: self.set.clone(), row, columns: self.columns.clone() })
+        let number = self.order.display_of(row).unwrap_or(row) + 1;
+        Some(RowRef { set: self.set.clone(), row, columns: self.columns.clone(), number })
     }
 
+    // A sort renumbers the focused row without moving it, so that counts as a change.
     fn publish(&mut self, cx: &mut Context<Self>) {
-        if self.published.0 != self.selection.focus_row || self.published.1 != self.columns {
-            self.published = (self.selection.focus_row, self.columns.clone());
+        let display = self.selection.focus_row.and_then(|row| self.order.display_of(row));
+        let published = (self.selection.focus_row, self.columns.clone(), display);
+        if self.published != published {
+            self.published = published;
             cx.emit(GridEvent::FocusedRowChanged);
         }
     }
@@ -463,6 +469,7 @@ impl Grid {
                 if (grid.sort, grid.set.rows()) == wanted {
                     grid.order = RowOrder::sorted(order);
                     grid.ordered_for = wanted;
+                    grid.publish(cx);
                 }
                 cx.notify();
             })
@@ -474,6 +481,7 @@ impl Grid {
     pub fn toggle_sort(&mut self, column: usize, cx: &mut Context<Self>) {
         self.sort.toggle(column);
         self.sync_order(cx);
+        self.publish(cx);
         cx.notify();
     }
 
@@ -481,6 +489,7 @@ impl Grid {
     pub fn sort_to(&mut self, sort: Option<(usize, bool)>, cx: &mut Context<Self>) {
         self.sort = sort.map_or_else(SortState::default, |(column, desc)| SortState { column: Some(column), desc });
         self.sync_order(cx);
+        self.publish(cx);
         cx.notify();
     }
 
@@ -1166,8 +1175,7 @@ impl Render for Grid {
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
-            // The menu wraps the cells but not the editor. GPUI Kit's menu takes a right-click before anything inside
-            // it, so the editor's stop would come too late if the menu wrapped the editor too.
+            // The menu wraps the cells, not the editor: it takes a right-click first, so the editor couldn't stop it.
             .child(
                 div()
                     .id("grid-cells")
@@ -1196,10 +1204,8 @@ fn lane_bar(bar: Scrollbar) -> Scrollbar {
     bar.mode(ScrollbarMode::Always).styles(|styles| styles.track(|track| track.width(LANE)))
 }
 
-// GPUI Kit's bars take a press of any button on their track, and through anything drawn over them. Painted after the
-// grid and its menu, this goes first and keeps a lane's press only when it's the primary button reaching the grid:
-// a right-click there would open the menu for a focused cell the jump scrolls away, and a click on a dialog or
-// popover over a lane would scroll the grid under it.
+// GPUI Kit's bars take any press on their track, even through overlays. This runs first and lets through only a
+// primary press that reaches the grid, so a right-click or a click on a dialog over a lane doesn't scroll it.
 fn lane_guard(scroll: GridScroll) -> impl IntoElement {
     canvas(
         |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
