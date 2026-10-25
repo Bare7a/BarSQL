@@ -154,6 +154,8 @@
     "clearHistory": "Verlauf leeren…",
     "collapseAll": "Alle einklappen",
     "failedOnly": "Nur fehlgeschlagene",
+    "schemaOptions": "Schema-Optionen",
+    "importData": "Daten importieren…",
     "columnTip": {
       "identity": "automatisch erzeugt",
       "computed": "berechnet",

@@ -45,11 +45,16 @@ fn import(app: &mut Driver) -> (i64, i64) {
     shown(app).result.expect("an import result")
 }
 
+// Import data, from the schema tree's options menu.
+fn toolbar_import(app: &mut Driver) {
+    app.menu_pick("schema-options", 1);
+}
+
 #[gpui_kit::test]
 fn the_toolbar_import_opens_on_csv_with_its_parse_options(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();
-    app.click("import-data");
+    toolbar_import(&mut app);
     assert!(app.dialog_open());
     let state = shown(&mut app);
     assert!(state.csv && state.has_header && !state.can_run);
@@ -60,7 +65,7 @@ fn the_toolbar_import_opens_on_csv_with_its_parse_options(cx: &mut TestAppContex
 fn sql_mode_hides_the_csv_parse_options(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();
-    app.click("import-data");
+    toolbar_import(&mut app);
     app.click("import-kind-sql");
     assert!(!app.shown("import-delimiter") && !app.shown("import-header"));
     assert!(app.shown("import-stop-sql"), "Stop at the first error");
@@ -71,7 +76,7 @@ fn sql_mode_hides_the_csv_parse_options(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn an_existing_table_target_lists_the_schemas_tables(cx: &mut TestAppContext) {
     let mut app = prepared(cx, "CREATE TABLE e2e_import_target (id INTEGER PRIMARY KEY, name TEXT)");
-    app.click("import-data");
+    toolbar_import(&mut app);
     app.click("import-target-existing");
     let state = shown(&mut app);
     assert!(state.tables.iter().any(|table| table == "e2e_import_target"), "{:?}", state.tables);

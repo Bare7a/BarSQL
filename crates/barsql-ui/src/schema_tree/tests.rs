@@ -3,15 +3,16 @@ use std::rc::Rc;
 
 use barsql_core::{ColumnInfo, DriverType};
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+use gpui_kit::{Entity, Modifiers, MouseButton, MouseDownEvent, TestAppContext, VisualTestContext};
 
 use super::{SchemaTree, SchemaTreeEvent, column_details, column_matches, table_matches};
 use crate::schema_objects::{Group, group_key};
 use crate::state;
-use crate::test_support::{Env, settle};
+use crate::test_support::{Env, in_root, settle};
 
+// In Root, so its menus can open.
 fn open<'a>(env: &Env, cx: &'a mut TestAppContext) -> (Entity<SchemaTree>, &'a mut VisualTestContext) {
-    let (tree, cx) = cx.add_window_view(SchemaTree::new);
+    let (tree, cx) = in_root(cx, SchemaTree::new);
     let connection = env.connection.clone();
     tree.update(cx, |tree, cx| tree.set_connection(Some(connection), cx));
     (tree, cx)
@@ -29,6 +30,28 @@ fn has(tree: &Entity<SchemaTree>, id: &str) -> impl FnMut(&mut VisualTestContext
 fn connect(tree: &Entity<SchemaTree>, cx: &mut VisualTestContext) {
     tree.update(cx, |tree, cx| tree.connect(cx));
     settle(cx, has(tree, "s:main"));
+}
+
+fn inserts(tree: &Entity<SchemaTree>, cx: &mut VisualTestContext) -> Rc<RefCell<Vec<String>>> {
+    let inserted = Rc::new(RefCell::new(Vec::new()));
+    let seen = inserted.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(tree, move |_, event: &SchemaTreeEvent, _| {
+            if let SchemaTreeEvent::Insert(text) = event {
+                seen.borrow_mut().push(text.clone());
+            }
+        })
+        .detach()
+    });
+    inserted
+}
+
+// Picks item `downs` of the options menu with the keyboard. Separators don't count.
+fn pick_option(downs: usize, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| window.click("schema-options", cx));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.simulate_keystrokes(&format!("{}enter", "down ".repeat(downs + 1)));
+    cx.run_until_parked();
 }
 
 #[test]
@@ -144,16 +167,7 @@ fn the_keyboard_walks_and_opens_the_tree(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (tree, cx) = open(&env, cx);
     connect(&tree, cx);
-    let inserted = Rc::new(RefCell::new(Vec::new()));
-    let seen = inserted.clone();
-    cx.update(|_, cx| {
-        cx.subscribe(&tree, move |_, event: &SchemaTreeEvent, _| {
-            if let SchemaTreeEvent::Insert(text) = event {
-                seen.borrow_mut().push(text.clone());
-            }
-        })
-        .detach()
-    });
+    let inserted = inserts(&tree, cx);
     tree.update_in(cx, |tree, window, cx| tree.focus.focus(window, cx));
     cx.run_until_parked();
 
@@ -252,8 +266,7 @@ fn collapse_all_closes_the_tree_and_forgets_only_this_connections_rows(cx: &mut 
     tree.update(cx, |tree, cx| tree.toggle_table("main", "things", cx));
     settle(cx, has(&tree, "c:main.things.id"));
 
-    cx.update(|window, cx| window.click("collapse-all", cx));
-    cx.run_until_parked();
+    pick_option(0, cx);
     assert_eq!(ids(&tree, cx), ["s:main"]);
     let schemas = cx.update(|_, cx| state::setting(cx, super::SCHEMA_EXPANDED_KEY));
     assert_eq!(schemas.as_deref(), Some("{\"other:main\":true}"));
@@ -297,8 +310,32 @@ fn collapse_all_closes_the_tables_a_closed_schema_hides(cx: &mut TestAppContext)
     cx.run_until_parked();
     assert_eq!(ids(&tree, cx), ["s:main"]);
 
-    cx.update(|window, cx| window.click("collapse-all", cx));
+    pick_option(0, cx);
     tree.update(cx, |tree, cx| tree.toggle_schema("main", cx));
     settle(cx, has(&tree, "t:main.things"));
     assert!(!ids(&tree, cx).contains(&"c:main.things.id".to_string()), "the table stays closed");
+}
+
+#[gpui_kit::test]
+fn a_click_selects_a_column_and_its_menu_inserts_the_name(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tree, cx) = open(&env, cx);
+    connect(&tree, cx);
+    tree.update(cx, |tree, cx| tree.toggle_table("main", "things", cx));
+    settle(cx, has(&tree, "c:main.things.name"));
+    let inserted = inserts(&tree, cx);
+    let row = cx.debug_bounds("tree:c:main.things.name").expect("the column's row").center();
+
+    cx.simulate_click(row, Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(cursor(&tree, cx).as_deref(), Some("c:main.things.name"));
+    assert!(inserted.borrow().is_empty(), "{:?}", inserted.borrow());
+
+    let (button, modifiers) = (MouseButton::Right, Modifiers::none());
+    cx.simulate_event(MouseDownEvent { button, position: row, modifiers, click_count: 1, first_mouse: false });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    assert_eq!(*inserted.borrow(), ["name"]);
 }

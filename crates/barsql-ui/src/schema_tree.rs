@@ -986,8 +986,7 @@ impl SchemaTree {
         menu
     }
 
-    // No Insert item since a click already inserts the name. A view's columns only offer Copy. SQLite and
-    // ClickHouse won't drop a key column.
+    // A view's columns only offer Insert and Copy. SQLite and ClickHouse won't drop a key column.
     fn column_menu(
         &self,
         schema: String,
@@ -1002,7 +1001,15 @@ impl SchemaTree {
         let driver = self.connection.as_ref().map(|c| c.driver.clone()).unwrap_or_default();
         let droppable = !(primary && matches!(driver, DriverType::Sqlite | DriverType::Turso | DriverType::ClickHouse));
         move |menu, _, cx| {
-            let menu = menu.item(Self::copy_item(column.clone(), cx));
+            let insert = {
+                let (this, name) = (this.clone(), column.clone());
+                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    let _ = this.update(cx, |_, cx| cx.emit(SchemaTreeEvent::Insert(name.clone())));
+                }
+            };
+            let menu = menu
+                .item(PopupMenuItem::new(t(cx, "sidebar.insertName")).on_click(insert))
+                .item(Self::copy_item(column.clone(), cx));
             if view {
                 return menu;
             }
@@ -1172,15 +1179,22 @@ impl SchemaTree {
         let clearance = self.clearance.get(&self.scroll, rems(LIST_INSET.0 + BROWSE_INSET.0), window);
         rows.into_iter()
             .map(|row| {
-                let ring = focused && self.keyed && self.cursor.as_ref() == Some(&row.id);
-                self.render_row(row, ring, clearance, cx)
+                let selected = self.cursor.as_ref() == Some(&row.id);
+                self.render_row(row, selected, focused && self.keyed && selected, clearance, cx)
             })
             .collect()
     }
 
-    // A nested row sits inside its parent's indent, so its hover background starts at the indent.
-    // `clearance` moves a table's Browse button clear of the tree's bar.
-    fn render_row(&self, row: TreeRow, ring: bool, clearance: Pixels, cx: &mut Context<Self>) -> AnyElement {
+    // A nested row sits inside its parent's indent, so its hover background starts there. `selected` marks the
+    // cursor's row, and `clearance` moves a table's Browse button clear of the tree's bar.
+    fn render_row(
+        &self,
+        row: TreeRow,
+        selected: bool,
+        ring: bool,
+        clearance: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme().clone();
         let muted = theme.muted_foreground;
         let chevron = |open: bool, size: Rems| {
@@ -1201,6 +1215,7 @@ impl SchemaTree {
             .rounded(RADIUS)
             .text_size(TEXT_BASE)
             .overflow_hidden()
+            .when(selected, |el| el.bg(theme.sidebar_accent))
             .when(Self::focusable(&row), |el| {
                 // A right-click rings its row, as a key move does, so it's clear which one the menu is for.
                 let (left, right) = (row_id.clone(), row_id);
@@ -1265,7 +1280,6 @@ impl SchemaTree {
             }
             RowKind::Column { column, matched, schema, table, view } => {
                 let menu = self.column_menu(schema, table, column.name.clone(), view, column.is_primary, cx);
-                let insert = column.name.clone();
                 let tip = column.clone();
                 let dialect = self.connection.as_ref().and_then(|c| c.driver.dialect());
                 // Keys look as they do in the ER diagram and the grid's headers: a gold key, a blue link.
@@ -1275,7 +1289,7 @@ impl SchemaTree {
                     _ => (Lucide::Columns3, muted),
                 };
                 column_row(clickable(base))
-                    .when(matched, |el| el.bg(theme.primary.opacity(TINT)))
+                    .when(matched && !selected, |el| el.bg(theme.primary.opacity(TINT)))
                     .child(Icon::new(key_icon).size(ICON_SM).text_color(key_color))
                     .child(
                         mono(div())
@@ -1292,7 +1306,6 @@ impl SchemaTree {
                             .text_color(muted)
                             .child(display_type(dialect, &column.data_type)),
                     )
-                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(SchemaTreeEvent::Insert(insert.clone()))))
                     .tooltip(move |window, cx| {
                         let column = tip.clone();
                         Tooltip::element(move |_, cx| column_tip(&column, cx)).build(window, cx)
@@ -1412,36 +1425,10 @@ impl SchemaTree {
     fn filter_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let enabled = self.connected(cx);
         let loading = self.connection.as_ref().is_some_and(|c| schema::get(cx, &c.id).is_some_and(|d| d.loading()));
-        let driver = self.connection.as_ref().map(|c| c.driver.clone()).unwrap_or_default();
-        let server_views = views(&driver, ViewScope::Server).next().is_some();
-        let this = cx.entity().downgrade();
         let field = div()
             .debug_selector(|| "schema-search".into())
             .child(form::filter_input(&self.search, window, cx).cleanable(true).disabled(!enabled));
         form::filter_bar(field, cx)
-            .child(
-                form::filter_button("import-data", Icon::new(Lucide::Upload))
-                    .debug_selector(|| "import-data".into())
-                    .tooltip(t(cx, "sidebar.importData"))
-                    .disabled(!enabled || !self.writable())
-                    .on_click(cx.listener(|this, _, window, cx| this.import_default(window, cx))),
-            )
-            .when(server_views, |bar| {
-                bar.child(
-                    form::filter_button("server-views", Icon::new(Lucide::Activity))
-                        .debug_selector(|| "server-views".into())
-                        .tooltip(t(cx, "sidebar.serverViews"))
-                        .disabled(!enabled)
-                        .dropdown_menu(move |menu, _, cx| Self::view_items(menu, &this, &driver, None, cx)),
-                )
-            })
-            .child(
-                form::filter_button("collapse-all", Icon::new(Lucide::ChevronsDownUp))
-                    .debug_selector(|| "collapse-all".into())
-                    .tooltip(t(cx, "sidebar.collapseAll"))
-                    .disabled(!self.has_open())
-                    .on_click(cx.listener(|this, _, _, cx| this.collapse_all(cx))),
-            )
             .child(
                 form::filter_button("refresh-schema", Icon::new(Lucide::RefreshCw))
                     .debug_selector(|| "refresh-schema".into())
@@ -1449,6 +1436,45 @@ impl SchemaTree {
                     .disabled(self.connection.is_none() || loading)
                     .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
             )
+            .child(self.options_menu(enabled, cx))
+    }
+
+    fn options_menu(&self, enabled: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let this = cx.entity().downgrade();
+        let (open, writable) = (self.has_open(), self.writable());
+        let driver = self.connection.as_ref().map(|c| c.driver.clone()).unwrap_or_default();
+        let server_views = views(&driver, ViewScope::Server).next().is_some();
+        form::filter_button("schema-options", Icon::new(Lucide::SlidersHorizontal))
+            .debug_selector(|| "schema-options".into())
+            .tooltip(t(cx, "sidebar.schemaOptions"))
+            .disabled(!enabled)
+            .dropdown_menu(move |menu: PopupMenu, window, cx| {
+                let (collapse, import, views_for) = (this.clone(), this.clone(), this.clone());
+                let driver = driver.clone();
+                menu.item(
+                    PopupMenuItem::new(t(cx, "sidebar.collapseAll"))
+                        .icon(Icon::new(Lucide::ChevronsDownUp))
+                        .disabled(!open)
+                        .on_click(move |_, _, cx| {
+                            let _ = collapse.update(cx, |tree, cx| tree.collapse_all(cx));
+                        }),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new(t(cx, "sidebar.importData"))
+                        .icon(Icon::new(Lucide::Upload))
+                        .disabled(!writable)
+                        .on_click(move |_, window, cx| {
+                            let _ = import.update(cx, |tree, cx| tree.import_default(window, cx));
+                        }),
+                )
+                .when(server_views, |menu| {
+                    let label = t(cx, "sidebar.serverViews");
+                    menu.submenu_with_icon(Some(Icon::new(Lucide::Activity)), label, window, cx, move |menu, _, cx| {
+                        Self::view_items(menu, &views_for, &driver, None, cx)
+                    })
+                })
+            })
     }
 
     fn error_banner(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {

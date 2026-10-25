@@ -154,6 +154,8 @@
     "clearHistory": "Clear history…",
     "collapseAll": "Collapse all",
     "failedOnly": "Failed only",
+    "schemaOptions": "Schema options",
+    "importData": "Import data…",
     "columnTip": {
       "identity": "auto-generated",
       "computed": "computed",

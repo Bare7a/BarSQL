@@ -458,6 +458,17 @@ impl Driver<'_> {
         self.keys(&format!("{}enter", "down ".repeat(downs + 1)));
         self.pause();
     }
+
+    // As `context_submenu`, for a button's menu.
+    #[cfg(feature = "e2e")]
+    pub fn menu_submenu(&mut self, selector: &'static str, downs: usize, pick: usize) {
+        self.click(selector);
+        self.cx.update(|window, cx| window.draw(cx).clear(cx));
+        self.keys(&"down ".repeat(downs + 1));
+        self.keys("right");
+        self.keys(&format!("{}enter", "down ".repeat(pick)));
+        self.pause();
+    }
 }
 
 // The app shuts down first, so a tab's open transaction can't hold a lock a drop needs. The drops then go through a

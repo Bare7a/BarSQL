@@ -136,8 +136,9 @@ impl Render for JsonPanel {
         let shortcut = shortcut_label(&ToggleJsonPanel, window).unwrap_or_default();
         let close = t_with(cx, "tooltip.closeJsonViewer", &[("shortcut", &shortcut)]);
         let number = self.row.as_ref().map(|row| t_with(cx, "jsonViewer.row", &[("number", &count(cx, row.number))]));
-        // The header lines up with the tab bar and the filter row with the toolbar. Close sits under the window's
-        // close button.
+        // The header lines up with the tab bar, the filter row with the toolbar, and the buttons with the window's.
+        let column = |button: Button| h_flex().flex_none().w(TITLE_BAR_HEIGHT).justify_center().child(button);
+        let nulls_tip = t(cx, if self.hide_nulls { "jsonViewer.showNulls" } else { "jsonViewer.hideNulls" });
         let header = h_flex()
             .debug_selector(|| "json-panel-header".into())
             .h(rems(2.769))
@@ -157,7 +158,16 @@ impl Render for JsonPanel {
                 h_flex()
                     .flex_none()
                     .when(self.row.is_some(), |el| {
-                        el.child(
+                        el.child(column(
+                            Button::new("json-hide-nulls")
+                                .ghost()
+                                .small()
+                                .icon(Icon::new(Lucide::EyeOff))
+                                .selected(self.hide_nulls)
+                                .tooltip(nulls_tip)
+                                .on_click(cx.listener(|this, _, window, cx| this.toggle_nulls(window, cx))),
+                        ))
+                        .child(column(
                             Button::new("json-panel-copy")
                                 .ghost()
                                 .small()
@@ -165,20 +175,17 @@ impl Render for JsonPanel {
                                 .tooltip(t(cx, "jsonViewer.copy"))
                                 .disabled(!self.matched)
                                 .on_click(cx.listener(|this, _, _, cx| this.copy(cx))),
-                        )
+                        ))
                     })
-                    .child(
-                        h_flex().flex_none().w(TITLE_BAR_HEIGHT).justify_center().child(
-                            Button::new("json-panel-close")
-                                .ghost()
-                                .small()
-                                .icon(Icon::new(IconName::Close))
-                                .tooltip(close)
-                                .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleJsonPanel), cx)),
-                        ),
-                    ),
+                    .child(column(
+                        Button::new("json-panel-close")
+                            .ghost()
+                            .small()
+                            .icon(Icon::new(IconName::Close))
+                            .tooltip(close)
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleJsonPanel), cx)),
+                    )),
             );
-        let nulls_tip = t(cx, if self.hide_nulls { "jsonViewer.showNulls" } else { "jsonViewer.hideNulls" });
         let body = match self.row {
             None => div()
                 .flex_1()
@@ -207,13 +214,6 @@ impl Render for JsonPanel {
                                 .flex_1()
                                 .min_w_0()
                                 .child(form::filter_input(&self.filter, window, cx).cleanable(true)),
-                        )
-                        .child(
-                            form::filter_button("json-hide-nulls", Icon::new(Lucide::EyeOff))
-                                .debug_selector(|| "json-hide-nulls".into())
-                                .selected(self.hide_nulls)
-                                .tooltip(nulls_tip)
-                                .on_click(cx.listener(|this, _, window, cx| this.toggle_nulls(window, cx))),
                         ),
                 )
                 .child(
@@ -344,18 +344,23 @@ mod tests {
         assert_eq!(text(cx), None);
     }
 
-    // Window buttons sit in TITLE_BAR_HEIGHT-wide columns. Smallest, default and largest zoom.
+    // The window's buttons are TITLE_BAR_HEIGHT-wide columns at the right edge. Smallest, default and largest zoom.
     #[gpui_kit::test]
-    fn the_close_button_sits_under_the_windows_close_button(cx: &mut TestAppContext) {
+    fn the_header_buttons_sit_under_the_windows_buttons(cx: &mut TestAppContext) {
         let _env = Env::new(cx);
-        let (_panel, cx) = cx.add_window_view(JsonPanel::new);
+        let (panel, cx) = cx.add_window_view(JsonPanel::new);
+        panel.update_in(cx, |panel, window, cx| panel.show(Some(row()), window, cx));
         for zoom in [10., 13., 22.] {
             cx.update(|window, cx| {
                 window.set_rem_size(px(zoom));
                 window.render_frame(cx);
-                let close = window.find("json-panel-close").bounds().center().x;
-                let window_close = window.viewport_size().width - TITLE_BAR_HEIGHT / 2.;
-                assert!((close - window_close).abs() < px(0.5), "zoom {zoom}: {close:?} vs {window_close:?}");
+                let close_y = window.find("json-panel-close").bounds().center().y;
+                for (column, id) in ["json-panel-close", "json-panel-copy", "json-hide-nulls"].into_iter().enumerate() {
+                    let center = window.find(id).bounds().center();
+                    let under = window.viewport_size().width - TITLE_BAR_HEIGHT * (column as f32 + 0.5);
+                    assert!((center.x - under).abs() < px(0.5), "zoom {zoom}, {id}: {:?} vs {under:?}", center.x);
+                    assert!((center.y - close_y).abs() < px(0.5), "zoom {zoom}, {id} is in the header");
+                }
             });
         }
     }

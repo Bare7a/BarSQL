@@ -316,16 +316,13 @@ fn browse_rows(cx: &mut TestAppContext, engine: Engine) {
     assert_eq!(column(&mut app, 1), [Some("Alice".into()), Some("Bob".into())]);
 }
 
-// The filter bar's button lists the server views. SQLite keeps no statistics, so Turso has no button.
+// SQLite keeps no statistics, so Turso has no server views.
 fn server_views(cx: &mut TestAppContext, engine: Engine) {
+    let Some(first) = views(&engine.driver(), ViewScope::Server).next() else { return };
     let mut app = open_on(cx, engine);
     app.connect();
-    let Some(first) = views(&engine.driver(), ViewScope::Server).next() else {
-        assert!(app.cx.debug_bounds("server-views").is_none(), "no views, so no button");
-        return;
-    };
     let (tabs, title) = (app.titles().len(), label(&mut app, first));
-    app.menu_pick("server-views", 0);
+    app.menu_submenu("schema-options", 2, 0);
     ran_in_new_tab(&mut app, tabs, &title);
 }
 

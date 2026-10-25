@@ -154,6 +154,8 @@
     "clearHistory": "Изчисти историята…",
     "collapseAll": "Свий всички",
     "failedOnly": "Само неуспешните",
+    "schemaOptions": "Опции за схемата",
+    "importData": "Импортиране на данни…",
     "columnTip": {
       "identity": "генерира се автоматично",
       "computed": "изчислява се",

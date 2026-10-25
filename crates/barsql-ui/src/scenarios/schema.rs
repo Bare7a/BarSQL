@@ -14,9 +14,10 @@ const OPEN_DDL: usize = 6;
 const RENAME: usize = 10;
 const TRUNCATE: usize = 11;
 const DROP: usize = 12;
-// Column menus start with Copy name. Object menus start with Copy DDL, Open DDL and Copy name.
-const COLUMN_RENAME: usize = 1;
-const COLUMN_DROP: usize = 2;
+// Column menus start with Insert name and Copy name. Object menus start with Copy DDL, Open DDL and Copy name.
+const COLUMN_INSERT: usize = 0;
+const COLUMN_RENAME: usize = 2;
+const COLUMN_DROP: usize = 3;
 const OBJECT_DROP: usize = 3;
 
 fn tree(app: &mut Driver) -> Entity<SchemaTree> {
@@ -225,11 +226,13 @@ fn a_table_backs_up_to_the_picked_file(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn clicking_a_column_inserts_its_name_into_the_editor(cx: &mut TestAppContext) {
+fn a_columns_menu_inserts_its_name_into_the_editor(cx: &mut TestAppContext) {
     let mut app = prepared(cx, "CREATE TABLE e2e_col (id INTEGER PRIMARY KEY, distinctive_col TEXT)");
     open_row(&mut app, "t:main.e2e_col", "c:main.e2e_col.distinctive_col");
     app.set_sql("");
     app.click("tree:c:main.e2e_col.distinctive_col");
+    assert_eq!(app.sql(), "", "a click only selects it");
+    app.context_menu("tree:c:main.e2e_col.distinctive_col", COLUMN_INSERT);
     assert!(app.sql().contains("distinctive_col"), "{}", app.sql());
 }
 
