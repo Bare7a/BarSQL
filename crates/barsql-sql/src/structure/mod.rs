@@ -1,5 +1,6 @@
 pub mod create_sql;
 mod postgres;
+mod tsql;
 
 use std::collections::{HashMap, HashSet};
 
@@ -446,6 +447,7 @@ pub fn plan_changes(driver: &DriverType, original: &TableStructure, draft: &Draf
     }
     Ok(match driver.dialect() {
         Some(SqlDialect::Postgres) => transaction(postgres::alter(driver, original, &found)),
+        Some(SqlDialect::TSql) => tsql_transaction(tsql::alter(driver, original, &found)),
         _ => ChangePlan::default(),
     })
 }
@@ -457,12 +459,20 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
     }
     Ok(match driver.dialect() {
         Some(SqlDialect::Postgres) => transaction(postgres::create(driver, draft)),
+        Some(SqlDialect::TSql) => tsql_transaction(tsql::create(driver, draft)),
         _ => ChangePlan::default(),
     })
 }
 
 fn transaction(statements: Vec<String>) -> ChangePlan {
     let steps = std::iter::once("BEGIN".to_string()).chain(statements).chain(std::iter::once("COMMIT".to_string()));
+    ChangePlan { steps: steps.map(Step::sql).collect(), warnings: Vec::new() }
+}
+
+// XACT_ABORT rolls the whole transaction back on the first error, which a batch-by-batch run needs.
+fn tsql_transaction(statements: Vec<String>) -> ChangePlan {
+    let open = ["SET XACT_ABORT ON", "BEGIN TRANSACTION"].map(String::from);
+    let steps = open.into_iter().chain(statements).chain(std::iter::once("COMMIT TRANSACTION".to_string()));
     ChangePlan { steps: steps.map(Step::sql).collect(), warnings: Vec::new() }
 }
 
