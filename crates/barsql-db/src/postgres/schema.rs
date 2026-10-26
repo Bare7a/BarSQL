@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use barsql_core::schema::primary_keys;
+use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
     FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, SqlDialect, TableInfo,
@@ -11,6 +12,7 @@ use barsql_sql::ddl::{
     DdlColumn, compose_create_table, join_ddl, render_constraint, render_create_index, terminate_statement,
     unsupported_ddl,
 };
+use barsql_sql::structure::check_body;
 use barsql_sql::{enum_values, qualified_table, quote_ident, quote_literal_in};
 use tokio_postgres::Row;
 use tokio_postgres::types::ToSql;
@@ -522,7 +524,7 @@ impl PgEngine {
         table: &str,
         split_foreign_keys: bool,
     ) -> Result<(String, Vec<String>), QueryError> {
-        let cols = self.ddl_columns(schema, table).await?;
+        let cols = self.ddl_columns(schema, table, true).await?;
         if cols.is_empty() {
             return Err(QueryError::message(format!("table {table} not found")));
         }
@@ -552,7 +554,13 @@ impl PgEngine {
         Ok((join_ddl(&blocks), foreign_keys))
     }
 
-    async fn ddl_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<DdlColumn>, QueryError> {
+    // `serial` folds a nextval() default back into its serial type, for DDL that recreates the sequence too.
+    async fn ddl_columns(
+        self: &Arc<Self>,
+        schema: &str,
+        table: &str,
+        serial: bool,
+    ) -> Result<Vec<DdlColumn>, QueryError> {
         // COLLATE only when it differs from the type's default.
         let rows = self
             .rows(
@@ -600,7 +608,7 @@ impl PgEngine {
                     (_, "a") => col.identity = "ALWAYS".into(),
                     (_, "d") => col.identity = "BY DEFAULT".into(),
                     // The sequence is dropped with the table, so a nextval() default would not replay.
-                    _ if is_serial && serial_type_for(&data_type).is_some() => {
+                    _ if serial && is_serial && serial_type_for(&data_type).is_some() => {
                         col.data_type = serial_type_for(&data_type).unwrap_or_default().into();
                     }
                     _ => col.default = default_expr,
@@ -608,6 +616,125 @@ impl PgEngine {
                 col
             })
             .collect())
+    }
+
+    pub async fn table_structure(self: &Arc<Self>, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let comments = self
+            .rows(
+                "SELECT a.attname::text, COALESCE(pg_catalog.col_description(a.attrelid, a.attnum), '')
+                FROM pg_catalog.pg_attribute a
+                JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped",
+                &[&schema, &table],
+            )
+            .await?;
+        let comment = |name: &str| {
+            comments.iter().find(|r| r.get::<_, String>(0) == name).map(|r| r.get::<_, String>(1)).unwrap_or_default()
+        };
+        let columns: Vec<StructColumn> = self
+            .ddl_columns(&schema, table, false)
+            .await?
+            .into_iter()
+            .map(|col| StructColumn {
+                comment: comment(&col.name),
+                nullable: !col.not_null,
+                identity: match col.identity.as_str() {
+                    "ALWAYS" => Identity::Always,
+                    "BY DEFAULT" => Identity::ByDefault,
+                    _ => Identity::None,
+                },
+                name: col.name,
+                data_type: col.data_type,
+                default: col.default,
+                generated: col.generated,
+                collation: col.collation,
+                ..Default::default()
+            })
+            .collect();
+        if columns.is_empty() {
+            return Err(QueryError::message(format!("table {table} not found")));
+        }
+        let key_columns = |list: &str, relation: &str| {
+            format!(
+                "ARRAY(SELECT a.attname::text FROM unnest(con.{list}) WITH ORDINALITY AS k(attnum, ord)
+                    JOIN pg_catalog.pg_attribute a ON a.attrelid = con.{relation} AND a.attnum = k.attnum
+                    ORDER BY k.ord)"
+            )
+        };
+        let sql = format!(
+            "SELECT con.conname::text, con.contype::text, {}, pg_catalog.pg_get_constraintdef(con.oid, true),
+                COALESCE(rn.nspname::text, ''), COALESCE(rc.relname::text, ''), {},
+                con.confupdtype::text, con.confdeltype::text
+            FROM pg_catalog.pg_constraint con
+            JOIN pg_catalog.pg_class t ON t.oid = con.conrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            LEFT JOIN pg_catalog.pg_class rc ON rc.oid = con.confrelid
+            LEFT JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
+            WHERE n.nspname = $1 AND t.relname = $2 AND con.contype IN ('p', 'u', 'f', 'c')
+            ORDER BY con.conname",
+            key_columns("conkey", "conrelid"),
+            key_columns("confkey", "confrelid"),
+        );
+        let (mut primary_key, mut indexes, mut foreign_keys, mut checks) = (None, Vec::new(), Vec::new(), Vec::new());
+        for r in self.rows(&sql, &[&schema, &table]).await? {
+            let (name, columns): (String, Vec<String>) = (r.get(0), r.get(2));
+            match r.get::<_, String>(1).as_str() {
+                "p" => primary_key = Some(PrimaryKey { name, columns }),
+                "u" => {
+                    indexes.push(StructIndex { name, columns, unique: true, constraint: true, ..Default::default() })
+                }
+                "f" => foreign_keys.push(ForeignKey {
+                    name,
+                    columns,
+                    ref_schema: r.get(4),
+                    ref_table: r.get(5),
+                    ref_columns: r.get(6),
+                    on_update: RefAction::parse(&r.get::<_, String>(7)),
+                    on_delete: RefAction::parse(&r.get::<_, String>(8)),
+                }),
+                _ => checks.push(Check { name, expression: check_body(&r.get::<_, String>(3)) }),
+            }
+        }
+        // Indexes no constraint stands for. An expression or partial one is kept as the server writes it.
+        let listed = self
+            .rows(
+                "SELECT i.relname::text, ix.indisunique, am.amname::text,
+                    ARRAY(SELECT a.attname::text FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
+                        JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                        ORDER BY k.ord),
+                    CASE WHEN ix.indexprs IS NOT NULL OR ix.indpred IS NOT NULL
+                        THEN pg_catalog.pg_get_indexdef(ix.indexrelid) ELSE '' END
+                FROM pg_catalog.pg_index ix
+                JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+                JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
+                JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+                JOIN pg_catalog.pg_am am ON am.oid = i.relam
+                WHERE n.nspname = $1 AND t.relname = $2 AND NOT ix.indisprimary
+                  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint c WHERE c.conindid = ix.indexrelid)
+                ORDER BY i.relname",
+                &[&schema, &table],
+            )
+            .await?;
+        indexes.extend(listed.iter().map(|r| StructIndex {
+            name: r.get(0),
+            unique: r.get(1),
+            method: r.get(2),
+            columns: r.get(3),
+            definition: r.get(4),
+            constraint: false,
+        }));
+        Ok(TableStructure {
+            schema,
+            name: table.to_string(),
+            columns,
+            primary_key,
+            indexes,
+            foreign_keys,
+            checks,
+            ..Default::default()
+        })
     }
 
     async fn table_comments(self: &Arc<Self>, schema: &str, table: &str) -> Result<String, QueryError> {

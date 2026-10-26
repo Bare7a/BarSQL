@@ -150,3 +150,10 @@ async fn cancel_keeps_the_session_and_the_tab_transaction() {
     session.rollback().await.unwrap();
     assert!(!session.in_transaction());
 }
+
+#[tokio::test]
+async fn postgres_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    let engine = Engine::connect(&postgres_config()).await.expect("postgres is not reachable");
+    common::structure_fixture_test(&engine, "structure/postgres.json").await;
+}
