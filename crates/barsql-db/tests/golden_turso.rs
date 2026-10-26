@@ -81,3 +81,10 @@ async fn turso_schema_and_ddl_match_the_fixtures() {
     }
     assert_matches("schema/turso.json", &fixture("schema/turso.json"), &actual);
 }
+
+#[tokio::test]
+async fn turso_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    let engine = connect().await;
+    common::structure_fixture_test(&engine, "structure/turso.json").await;
+}

@@ -12,6 +12,7 @@ mod tests;
 use std::sync::Arc;
 use std::time::Instant;
 
+use barsql_core::TableStructure;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, FunctionList, IndexInfo, ObjectRef,
@@ -214,6 +215,11 @@ impl TursoEngine {
     ) -> Result<Vec<ConstraintInfo>, QueryError> {
         let table = table.to_string();
         self.catalog(move |src| catalog::constraints(src, &table)).await
+    }
+
+    pub async fn table_structure(self: &Arc<Self>, _schema: &str, table: &str) -> Result<TableStructure, QueryError> {
+        let table = table.to_string();
+        self.catalog(move |src| catalog::structure(src, &table)).await
     }
 
     pub async fn list_triggers(self: &Arc<Self>, _schema: &str, table: &str) -> Result<Vec<TriggerInfo>, QueryError> {

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use barsql_core::DriverType;
 
 use crate::lang::tokens::{TokenKind, tokenize};
@@ -47,6 +49,31 @@ pub fn item_column(item: &str) -> Option<String> {
         TokenKind::Ident | TokenKind::Quoted => Some(first.ident_text()),
         _ => None,
     }
+}
+
+// The identifiers a statement names, lowercased. Strings and comments don't count.
+pub fn names_in(sql: &str) -> HashSet<String> {
+    let tokens = tokenize(sql, Some(&DriverType::Sqlite));
+    let names = tokens.iter().filter(|t| matches!(t.kind, TokenKind::Ident | TokenKind::Quoted));
+    names.map(|t| t.ident_text().to_lowercase()).collect()
+}
+
+// What the first top-level parentheses hold, like a generated column's expression.
+pub fn paren_body(text: &str) -> Option<&str> {
+    let tokens = tokenize(text, Some(&DriverType::Sqlite));
+    let open = tokens.iter().position(|t| t.is_punct("("))?;
+    let mut depth = 0usize;
+    for token in &tokens[open..] {
+        if token.is_punct("(") {
+            depth += 1;
+        } else if token.is_punct(")") {
+            depth -= 1;
+            if depth == 0 {
+                return Some(text[tokens[open].end..token.start].trim());
+            }
+        }
+    }
+    None
 }
 
 // One column definition: its name, its type, and each constraint clause as written, keyed by the clause's kind (the
@@ -116,6 +143,19 @@ pub fn column_item(item: &str) -> Option<ColumnItem<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_in_lists_identifiers_but_not_strings() {
+        let names = names_in("SELECT \"Nick\" FROM e2e_people WHERE note = 'e2e_orgs'");
+        assert!(names.contains("nick") && names.contains("e2e_people") && !names.contains("e2e_orgs"), "{names:?}");
+    }
+
+    #[test]
+    fn paren_bodies_skip_the_keyword_before_them() {
+        assert_eq!(paren_body("GENERATED ALWAYS AS (price * (1 + tax)) STORED"), Some("price * (1 + tax)"));
+        assert_eq!(paren_body("AS (')' || name)"), Some("')' || name"));
+        assert_eq!(paren_body("COLLATE NOCASE"), None);
+    }
 
     #[test]
     fn column_items_split_into_type_and_clauses() {

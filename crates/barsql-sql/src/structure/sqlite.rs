@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
+use barsql_core::{Dependent, DriverType, Identity, StructColumn, TableStructure};
 
-use super::create_sql::{column_item, item_column, split_create_table};
+use super::create_sql::{column_item, item_column, names_in, split_create_table};
 use super::{Changes, Draft, Step, Warning};
 use crate::alter::{drop_column, rename_column};
 use crate::lang::tokens::{TokenKind, tokenize};
@@ -84,12 +84,6 @@ fn literal_default(text: &str) -> bool {
         [sign, number] => matches!(sign.text, "-" | "+") && number.kind == TokenKind::Number,
         _ => false,
     }
-}
-
-fn names_in(expression: &str) -> HashSet<String> {
-    let tokens = tokenize(expression, Some(&LITE));
-    let names = tokens.iter().filter(|t| matches!(t.kind, TokenKind::Ident | TokenKind::Quoted));
-    names.map(|t| t.ident_text().to_lowercase()).collect()
 }
 
 fn plain(original: &TableStructure, changes: &Changes, draft: &Draft) -> bool {
@@ -209,12 +203,32 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
     let mut steps = vec![Step::sql("PRAGMA foreign_keys = OFF"), Step::sql("BEGIN")];
     steps.push(Step::sql(format!("CREATE TABLE {new_table} (\n    {}\n){}", items.join(",\n    "), split.options)));
     steps.push(Step::sql(format!("INSERT INTO {new_table} ({copied}) SELECT {copied} FROM {table}")));
-    steps.push(Step::sql("PRAGMA legacy_alter_table = ON"));
+    // While the table is briefly gone, renaming the copy in trips over every view and trigger that names it. SQLite
+    // skips that check under legacy_alter_table. Turso's server won't set it, so those objects go and come back.
+    let turso = *driver == DriverType::Turso;
+    let referring: Vec<&Dependent> = match turso {
+        true => {
+            original.dependents.iter().filter(|d| matches!(d.kind.as_str(), "view" | "referring trigger")).collect()
+        }
+        false => Vec::new(),
+    };
+    if !turso {
+        steps.push(Step::sql("PRAGMA legacy_alter_table = ON"));
+    }
+    for dependent in referring.iter().rev() {
+        let what = if dependent.kind == "view" { "VIEW" } else { "TRIGGER" };
+        steps.push(Step::sql(format!("DROP {what} {}", quote_ident(driver, &dependent.name))));
+    }
     steps.push(Step::sql(format!("DROP TABLE {table}")));
     steps.push(Step::sql(format!("ALTER TABLE {new_table} RENAME TO {}", quote_ident(driver, name))));
-    steps.push(Step::sql("PRAGMA legacy_alter_table = OFF"));
-    let dependents = original.dependents.iter().filter(|d| !(d.kind == "index" && skipped.contains(d.name.as_str())));
-    steps.extend(dependents.map(|dependent| Step::sql(dependent.sql.clone())));
+    if !turso {
+        steps.push(Step::sql("PRAGMA legacy_alter_table = OFF"));
+    }
+    let own = original.dependents.iter().filter(|d| match d.kind.as_str() {
+        "index" => !skipped.contains(d.name.as_str()),
+        kind => kind == "trigger",
+    });
+    steps.extend(own.chain(referring.iter().copied()).map(|dependent| Step::sql(dependent.sql.clone())));
     steps.extend(changes.renamed.iter().map(|(old, new)| Step::sql(rename_column(driver, schema, name, old, new))));
     let check = format!("PRAGMA foreign_key_check({})", quote_ident(driver, name));
     steps.push(Step { sql: check, expect_no_rows: true });
@@ -281,6 +295,10 @@ mod tests {
   CHECK (length(name) > 0)
 ) STRICT"#;
 
+    fn dependent(kind: &str, name: &str, sql: &str) -> Dependent {
+        Dependent { kind: kind.into(), name: name.into(), sql: sql.into() }
+    }
+
     fn rebuilt() -> TableStructure {
         let mut original = table(
             "users",
@@ -296,8 +314,6 @@ mod tests {
         original.checks = vec![Check { name: String::new(), expression: "length(name) > 0".into() }];
         original.indexes =
             vec![StructIndex { name: "users_name".into(), columns: vec!["name".into()], ..Default::default() }];
-        let dependent =
-            |kind: &str, name: &str, sql: &str| Dependent { kind: kind.into(), name: name.into(), sql: sql.into() };
         original.dependents = vec![
             dependent("index", "users_name", "CREATE INDEX users_name ON users (name)"),
             dependent("trigger", "users_touch", "CREATE TRIGGER users_touch AFTER UPDATE ON users BEGIN SELECT 1; END"),
@@ -334,6 +350,43 @@ mod tests {
         );
         let checked: Vec<&str> = plan.steps.iter().filter(|s| s.expect_no_rows).map(|s| s.sql.as_str()).collect();
         assert_eq!(checked, [r#"PRAGMA foreign_key_check("users")"#]);
+    }
+
+    fn with_view() -> (TableStructure, Draft) {
+        let mut original = rebuilt();
+        original.dependents.push(dependent("view", "users_v", "CREATE VIEW users_v AS SELECT name FROM users"));
+        let other = "CREATE TRIGGER pets_log AFTER INSERT ON pets BEGIN UPDATE users SET age = age; END";
+        original.dependents.push(dependent("referring trigger", "pets_log", other));
+        let mut draft = Draft::from_structure(&original);
+        draft.columns[2].column.data_type = "INTEGER".into();
+        draft.rename_column(1, "full_name".into());
+        (original, draft)
+    }
+
+    #[test]
+    fn turso_rebuilds_by_dropping_and_recreating_what_refers_to_the_table() {
+        let (original, draft) = with_view();
+        let plan = plan_changes(&DriverType::Turso, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert!(!steps.iter().any(|step| step.contains("legacy_alter_table")), "{steps:?}");
+        let at =
+            |text: &str| steps.iter().position(|step| *step == text).unwrap_or_else(|| panic!("{text}: {steps:?}"));
+        let renamed = at(r#"ALTER TABLE "barsql_new_users" RENAME TO "users""#);
+        assert!(at(r#"DROP VIEW "users_v""#) < at(r#"DROP TABLE "users""#));
+        assert!(at(r#"DROP TRIGGER "pets_log""#) < at(r#"DROP TABLE "users""#));
+        let view = at("CREATE VIEW users_v AS SELECT name FROM users");
+        let trigger = at("CREATE TRIGGER pets_log AFTER INSERT ON pets BEGIN UPDATE users SET age = age; END");
+        let column = at(r#"ALTER TABLE "users" RENAME COLUMN "name" TO "full_name""#);
+        assert!(renamed < view && view < trigger && trigger < column, "{steps:?}");
+    }
+
+    #[test]
+    fn sqlite_leaves_what_refers_to_the_table_to_legacy_alter_table() {
+        let (original, draft) = with_view();
+        let steps: Vec<String> =
+            sql(&plan_changes(&LITE, &original, &draft).expect("valid")).iter().map(|s| s.to_string()).collect();
+        assert!(steps.contains(&"PRAGMA legacy_alter_table = ON".to_string()));
+        assert!(!steps.iter().any(|step| step.contains("users_v") || step.contains("pets_log")), "{steps:?}");
     }
 
     #[test]

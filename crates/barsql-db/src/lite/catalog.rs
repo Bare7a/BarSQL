@@ -4,12 +4,16 @@
 use std::sync::LazyLock;
 
 use barsql_core::schema::primary_keys;
+use std::collections::{HashMap, HashSet};
+
 use barsql_core::{
-    ColumnInfo, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList, IndexInfo, ObjectKind, ObjectRef,
-    QueryError, TableInfo, TriggerInfo,
+    Check, ColumnInfo, ConstraintInfo, Dependent, DriverType, ForeignKey, FunctionInfo, FunctionKind, FunctionList,
+    Identity, IndexInfo, ObjectKind, ObjectRef, PrimaryKey, QueryError, RefAction, StructColumn, StructIndex,
+    TableInfo, TableStructure, TriggerInfo,
 };
 use barsql_sql::ddl::{join_ddl, render_create_index, terminate_statement, unsupported_ddl};
 use barsql_sql::enum_values;
+use barsql_sql::structure::create_sql::{column_item, item_column, names_in, paren_body, split_create_table};
 use regex::Regex;
 
 use super::{LiteRow, LiteSource, LiteValue};
@@ -171,6 +175,173 @@ pub(crate) fn constraints(src: &mut dyn LiteSource, table: &str) -> Result<Vec<C
         }
     }
     out.extend(fks.into_iter().map(|(_, c)| c));
+    Ok(out)
+}
+
+// What the structure editor loads. The pragmas give the shape, and the table's own CREATE TABLE gives what they leave
+// out: collations, AUTOINCREMENT, generated expressions and checks.
+pub(crate) fn structure(src: &mut dyn LiteSource, table: &str) -> Result<TableStructure, QueryError> {
+    let master = src.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1", &[text(table)])?;
+    let create_sql = master.rows.first().map(|r| r.text(0)).unwrap_or_default();
+    let items: HashMap<String, String> = split_create_table(&create_sql)
+        .map(|split| {
+            let named =
+                split.items.iter().filter_map(|item| Some((item_column(item)?.to_lowercase(), item.to_string())));
+            named.collect()
+        })
+        .unwrap_or_default();
+    let rows = src.query(
+        "SELECT name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?1) ORDER BY cid",
+        &[text(table)],
+    )?;
+    let mut keys: Vec<(i64, String)> = Vec::new();
+    let mut columns = Vec::new();
+    for r in rows.rows.iter().filter(|r| r.int(5) != 1) {
+        let name = r.text(0);
+        let parsed = items.get(&name.to_lowercase()).and_then(|item| column_item(item));
+        let clause = |kind: &str| parsed.as_ref()?.clauses.iter().find(|(k, _)| k == kind).map(|(_, text)| *text);
+        let autoincrement = clause("primary").is_some_and(|text| text.to_ascii_uppercase().contains("AUTOINCREMENT"));
+        let collation = clause("collate").map(|text| text[7..].trim().to_string()).unwrap_or_default();
+        let generated = clause("generated").or_else(|| clause("as")).and_then(paren_body).unwrap_or_default();
+        if r.int(4) > 0 {
+            keys.push((r.int(4), name.clone()));
+        }
+        columns.push(StructColumn {
+            name,
+            data_type: r.text(1),
+            nullable: r.int(2) == 0,
+            default: r.text(3),
+            identity: if autoincrement { Identity::AutoIncrement } else { Identity::None },
+            generated: generated.to_string(),
+            collation,
+            ..Default::default()
+        });
+    }
+    keys.sort();
+    let primary_key = (!keys.is_empty())
+        .then(|| PrimaryKey { name: String::new(), columns: keys.into_iter().map(|(_, column)| column).collect() });
+
+    let listed = src.query(
+        "SELECT il.name, il.\"unique\", il.origin, il.partial, ii.name, ii.cid, m.sql
+        FROM pragma_index_list(?1) il
+        LEFT JOIN pragma_index_info(il.name) ii
+        LEFT JOIN sqlite_master m ON m.type = 'index' AND m.name = il.name
+        ORDER BY il.name, ii.seqno",
+        &[text(table)],
+    )?;
+    let mut indexes: Vec<StructIndex> = Vec::new();
+    for r in listed.rows.iter().filter(|r| r.text(2) != "pk") {
+        let name = r.text(0);
+        if indexes.last().is_none_or(|index| index.name != name) {
+            indexes.push(StructIndex {
+                name: name.clone(),
+                unique: r.int(1) == 1,
+                constraint: r.text(2) == "u",
+                definition: if r.int(3) == 1 { r.text(6) } else { String::new() },
+                ..Default::default()
+            });
+        }
+        let index = indexes.last_mut().expect("pushed");
+        match r.opt_text(4) {
+            Some(column) => index.columns.push(column),
+            // An expression part has no column, so the index is shown as written.
+            None if r.int(5) == -2 => index.definition = r.text(6),
+            None => {}
+        }
+    }
+
+    let keyed = src.query(
+        "SELECT id, \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list(?1) ORDER BY id, seq",
+        &[text(table)],
+    )?;
+    let mut foreign_keys: Vec<(i64, ForeignKey)> = Vec::new();
+    for r in &keyed.rows {
+        if foreign_keys.last().is_none_or(|(id, _)| *id != r.int(0)) {
+            let key = ForeignKey {
+                ref_table: r.text(1),
+                on_update: RefAction::parse(&r.text(4)),
+                on_delete: RefAction::parse(&r.text(5)),
+                ..Default::default()
+            };
+            foreign_keys.push((r.int(0), key));
+        }
+        let key = &mut foreign_keys.last_mut().expect("pushed").1;
+        key.columns.push(r.text(2));
+        if let Some(to) = r.opt_text(3) {
+            key.ref_columns.push(to);
+        }
+    }
+
+    let checks = enum_values::ddl_checks(&create_sql, &LITE)
+        .into_iter()
+        .map(|expression| Check { name: String::new(), expression: expression.to_string() })
+        .collect();
+    let dependents = src.query(
+        "SELECT type, name, sql FROM sqlite_master
+        WHERE tbl_name = ?1 AND type IN ('index', 'trigger') AND sql IS NOT NULL
+        ORDER BY type, name",
+        &[text(table)],
+    )?;
+    let mut dependents: Vec<Dependent> =
+        dependents.rows.iter().map(|r| Dependent { kind: r.text(0), name: r.text(1), sql: r.text(2) }).collect();
+    dependents.extend(referring(src, table)?);
+    Ok(TableStructure {
+        schema: "main".into(),
+        name: table.to_string(),
+        columns,
+        primary_key,
+        indexes,
+        foreign_keys: foreign_keys.into_iter().map(|(_, key)| key).collect(),
+        checks,
+        create_sql,
+        dependents,
+        sorting_key: String::new(),
+    })
+}
+
+// The views that use the table, directly or through another view, each after the views it uses. Then the other
+// tables' triggers that name the table or one of those views.
+fn referring(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Dependent>, QueryError> {
+    let rows = src.query(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') AND sql IS NOT NULL ORDER BY name",
+        &[],
+    )?;
+    let views: Vec<(String, String, HashSet<String>)> = rows
+        .rows
+        .iter()
+        .filter(|r| r.text(0) == "view")
+        .map(|r| (r.text(1), r.text(3), names_in(&r.text(3))))
+        .collect();
+    let mut named: HashSet<String> = HashSet::from([table.to_lowercase()]);
+    let mut used: Vec<usize> = Vec::new();
+    while let Some(ix) = (0..views.len()).find(|ix| !used.contains(ix) && !views[*ix].2.is_disjoint(&named)) {
+        named.insert(views[ix].0.to_lowercase());
+        used.push(ix);
+    }
+    let mut ordered: Vec<usize> = Vec::new();
+    while ordered.len() < used.len() {
+        let before = ordered.len();
+        for &ix in &used {
+            let waits = used.iter().any(|&other| {
+                other != ix && !ordered.contains(&other) && views[ix].2.contains(&views[other].0.to_lowercase())
+            });
+            if !ordered.contains(&ix) && !waits {
+                ordered.push(ix);
+            }
+        }
+        // A cycle can't be created, but a stalled pass shouldn't loop.
+        if ordered.len() == before {
+            ordered.extend(used.iter().filter(|ix| !ordered.contains(ix)).collect::<Vec<_>>());
+        }
+    }
+    let mut out: Vec<Dependent> = ordered
+        .into_iter()
+        .map(|ix| Dependent { kind: "view".into(), name: views[ix].0.clone(), sql: views[ix].1.clone() })
+        .collect();
+    let triggers = rows.rows.iter().filter(|r| r.text(0) == "trigger" && !r.text(2).eq_ignore_ascii_case(table));
+    for r in triggers.filter(|r| !names_in(&r.text(3)).is_disjoint(&named)) {
+        out.push(Dependent { kind: "referring trigger".into(), name: r.text(1), sql: r.text(3) });
+    }
     Ok(out)
 }
 

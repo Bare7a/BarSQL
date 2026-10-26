@@ -5,9 +5,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError};
+use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError, SqlDialect};
 use barsql_db::{Cancel, Cell, Engine, ScriptEvent, Session};
+use barsql_sql::Dialect;
 use barsql_sql::split_statement_texts;
+use barsql_sql::structure::{ColumnRow, Draft, plan_changes};
 use serde_json::{Map, Value as Json, json};
 
 // "kind: like, love" for each column, so a test reads the values the catalog found at a glance.
@@ -555,4 +557,71 @@ pub fn first_difference(path: &str, expected: &Json, actual: &Json) -> Option<St
         _ if expected == actual => None,
         _ => Some(format!("{path}: expected {expected} actual {actual}")),
     }
+}
+
+// The same edit on every engine's fixture table, within what each engine can change.
+pub fn structure_edit(driver: &DriverType, original: &barsql_core::TableStructure) -> Draft {
+    let editing = &driver.capabilities().structure;
+    let mut draft = Draft::from_structure(original);
+    let find = |draft: &Draft, name: &str| {
+        draft.columns.iter().position(|row| row.column.name == name).unwrap_or_else(|| panic!("no column {name}"))
+    };
+    let nick = find(&draft, "nick");
+    draft.rename_column(nick, "nickname".into());
+    let age = find(&draft, "age");
+    draft.columns[age].column.data_type = match driver.dialect() {
+        Some(SqlDialect::Sqlite) => "REAL",
+        Some(SqlDialect::ClickHouse) => "Int64",
+        _ => "bigint",
+    }
+    .into();
+    let email = find(&draft, "email");
+    let column = &mut draft.columns[email].column;
+    column.nullable = false;
+    column.default = "''".into();
+    if editing.comments {
+        column.comment = "Login".into();
+    }
+    let legacy = find(&draft, "legacy");
+    draft.columns[legacy].dropped = true;
+    let timestamp = Dialect::for_driver(driver).import_types.timestamp;
+    let timestamp = timestamp.strip_prefix("Nullable(").and_then(|t| t.strip_suffix(')')).unwrap_or(timestamp);
+    let created_at = barsql_core::StructColumn {
+        name: "created_at".into(),
+        data_type: timestamp.into(),
+        nullable: true,
+        ..Default::default()
+    };
+    draft.columns.push(ColumnRow { origin: None, dropped: false, column: created_at, primary: false });
+    draft
+}
+
+// Loads the fixture table's structure, applies `structure_edit` and reloads it. Each stage is pinned by the fixture.
+pub async fn structure_fixture_test(engine: &Engine, rel: &str) {
+    let expected = fixture(rel);
+    let mut session = engine.session().await.unwrap();
+    run_all(&mut session, &strings(&expected["setup"])).await;
+    let driver = engine.driver();
+    let (schema, table) = (expected["schema"].as_str().unwrap(), expected["table"].as_str().unwrap());
+    let loaded = engine.table_structure(schema, table).await.expect("load the structure");
+    let draft = structure_edit(&driver, &loaded);
+    let plan = plan_changes(&driver, &loaded, &draft).expect("a valid edit");
+    barsql_db::structure::apply(&mut session, &plan.steps, &Cancel::new()).await.expect("apply the edit");
+    let after = engine.table_structure(schema, table).await.expect("reload the structure");
+    let mut counts = Map::new();
+    for name in strings(&expected["countTables"]) {
+        let sql = format!("SELECT COUNT(*) FROM {}", barsql_sql::quote::table_ref(&driver, schema, &name));
+        let result = session.buffered(&sql, &Cancel::new()).await.expect("count");
+        counts.insert(name, json!(result.text(0, 0).unwrap_or_default()));
+    }
+    let mut actual = expected.clone();
+    actual["structure"] = serde_json::to_value(&loaded).unwrap();
+    actual["plan"] = json!(plan.steps.iter().map(|step| step.sql.as_str()).collect::<Vec<_>>());
+    actual["after"] = serde_json::to_value(&after).unwrap();
+    actual["counts"] = Json::Object(counts);
+    if golden_write() {
+        write_fixture(rel, &actual);
+        return;
+    }
+    assert_matches(rel, &expected, &actual);
 }

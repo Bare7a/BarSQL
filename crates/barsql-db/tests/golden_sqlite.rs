@@ -52,3 +52,11 @@ async fn sqlite_schema_and_ddl_match_the_fixtures() {
     let actual = schema_snapshot(&engine, expected["schema"].as_str().unwrap(), &expected).await;
     assert_matches(&format!("schema/{}.json", expected["engine"].as_str().unwrap()), &expected, &actual);
 }
+
+#[tokio::test]
+async fn sqlite_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = fresh(&dir, "structure.db").await;
+    common::structure_fixture_test(&engine, "structure/sqlite.json").await;
+}

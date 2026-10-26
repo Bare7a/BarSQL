@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use barsql_core::TableStructure;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, FunctionList, IndexInfo, ObjectKind,
@@ -226,6 +227,14 @@ impl Engine {
 
     pub async fn list_constraints(&self, schema: &str, table: &str) -> Result<Vec<ConstraintInfo>, QueryError> {
         dispatch!(self, e => e.list_constraints(schema, table).await)
+    }
+
+    pub async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
+        match self {
+            Self::Sqlite(e) => e.table_structure(schema, table).await,
+            Self::Turso(e) => e.table_structure(schema, table).await,
+            _ => Err(QueryError::message(format!("{} has no structure loader yet", self.driver()))),
+        }
     }
 
     pub async fn list_triggers(&self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>, QueryError> {

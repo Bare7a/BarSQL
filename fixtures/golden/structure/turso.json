@@ -1,0 +1,192 @@
+{
+  "engine": "turso",
+  "schema": "main",
+  "table": "e2e_people",
+  "setup": [
+    "DROP TRIGGER IF EXISTS e2e_people_touch",
+    "DROP VIEW IF EXISTS e2e_people_v",
+    "DROP TABLE IF EXISTS e2e_pets",
+    "DROP TABLE IF EXISTS barsql_new_e2e_people",
+    "DROP TABLE IF EXISTS e2e_people",
+    "DROP TABLE IF EXISTS e2e_orgs",
+    "CREATE TABLE e2e_orgs (id INTEGER PRIMARY KEY)",
+    "CREATE TABLE e2e_people (id INTEGER PRIMARY KEY AUTOINCREMENT, nick TEXT COLLATE NOCASE, age INTEGER, email TEXT, legacy TEXT, org_id INTEGER, CHECK (age >= 0))",
+    "CREATE VIEW e2e_people_v AS SELECT nick FROM e2e_people",
+    "CREATE TRIGGER e2e_people_touch AFTER UPDATE ON e2e_people BEGIN SELECT 1; END",
+    "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))",
+    "CREATE TABLE e2e_pets (id INTEGER PRIMARY KEY, owner_id INTEGER REFERENCES e2e_people(id))",
+    "INSERT INTO e2e_orgs VALUES (1)",
+    "INSERT INTO e2e_people (nick, age, email, legacy, org_id) VALUES ('ann', 30, 'ann@example.com', 'old', 1)",
+    "INSERT INTO e2e_pets VALUES (1, 1)"
+  ],
+  "countTables": [
+    "e2e_people",
+    "e2e_pets",
+    "e2e_people_v"
+  ],
+  "structure": {
+    "schema": "main",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "INTEGER",
+        "nullable": true,
+        "identity": "autoIncrement"
+      },
+      {
+        "name": "nick",
+        "dataType": "TEXT",
+        "nullable": true,
+        "collation": "NOCASE"
+      },
+      {
+        "name": "age",
+        "dataType": "INTEGER",
+        "nullable": true
+      },
+      {
+        "name": "email",
+        "dataType": "TEXT",
+        "nullable": true
+      },
+      {
+        "name": "legacy",
+        "dataType": "TEXT",
+        "nullable": true
+      },
+      {
+        "name": "org_id",
+        "dataType": "INTEGER",
+        "nullable": true
+      }
+    ],
+    "primaryKey": {
+      "columns": [
+        "id"
+      ]
+    },
+    "indexes": [
+      {
+        "name": "e2e_people_lower",
+        "definition": "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))"
+      }
+    ],
+    "checks": [
+      {
+        "expression": "age >= 0"
+      }
+    ],
+    "createSql": "CREATE TABLE e2e_people (id INTEGER PRIMARY KEY AUTOINCREMENT, nick TEXT COLLATE NOCASE, age INTEGER, email TEXT, legacy TEXT, org_id INTEGER, CHECK (age >= 0))",
+    "dependents": [
+      {
+        "kind": "index",
+        "name": "e2e_people_lower",
+        "sql": "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))"
+      },
+      {
+        "kind": "trigger",
+        "name": "e2e_people_touch",
+        "sql": "CREATE TRIGGER e2e_people_touch AFTER UPDATE ON e2e_people BEGIN SELECT 1; END"
+      },
+      {
+        "kind": "view",
+        "name": "e2e_people_v",
+        "sql": "CREATE VIEW e2e_people_v AS SELECT nick FROM e2e_people"
+      }
+    ]
+  },
+  "plan": [
+    "PRAGMA foreign_keys = OFF",
+    "BEGIN",
+    "CREATE TABLE \"barsql_new_e2e_people\" (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    nick TEXT COLLATE NOCASE,\n    \"age\" REAL,\n    \"email\" TEXT NOT NULL DEFAULT '',\n    org_id INTEGER,\n    \"created_at\" TEXT,\n    CHECK (age >= 0)\n)",
+    "INSERT INTO \"barsql_new_e2e_people\" (\"id\", \"nick\", \"age\", \"email\", \"org_id\") SELECT \"id\", \"nick\", \"age\", \"email\", \"org_id\" FROM \"e2e_people\"",
+    "DROP VIEW \"e2e_people_v\"",
+    "DROP TABLE \"e2e_people\"",
+    "ALTER TABLE \"barsql_new_e2e_people\" RENAME TO \"e2e_people\"",
+    "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))",
+    "CREATE TRIGGER e2e_people_touch AFTER UPDATE ON e2e_people BEGIN SELECT 1; END",
+    "CREATE VIEW e2e_people_v AS SELECT nick FROM e2e_people",
+    "ALTER TABLE \"e2e_people\" RENAME COLUMN \"nick\" TO \"nickname\"",
+    "PRAGMA foreign_key_check(\"e2e_people\")",
+    "COMMIT",
+    "PRAGMA foreign_keys = ON"
+  ],
+  "after": {
+    "schema": "main",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "INTEGER",
+        "nullable": true,
+        "identity": "autoIncrement"
+      },
+      {
+        "name": "nickname",
+        "dataType": "TEXT",
+        "nullable": true,
+        "collation": "NOCASE"
+      },
+      {
+        "name": "age",
+        "dataType": "REAL",
+        "nullable": true
+      },
+      {
+        "name": "email",
+        "dataType": "TEXT",
+        "default": "''"
+      },
+      {
+        "name": "org_id",
+        "dataType": "INTEGER",
+        "nullable": true
+      },
+      {
+        "name": "created_at",
+        "dataType": "TEXT",
+        "nullable": true
+      }
+    ],
+    "primaryKey": {
+      "columns": [
+        "id"
+      ]
+    },
+    "indexes": [
+      {
+        "name": "e2e_people_lower",
+        "definition": "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))"
+      }
+    ],
+    "checks": [
+      {
+        "expression": "age >= 0"
+      }
+    ],
+    "createSql": "CREATE TABLE \"e2e_people\" (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    \"nickname\" TEXT COLLATE NOCASE,\n    \"age\" REAL,\n    \"email\" TEXT NOT NULL DEFAULT '',\n    org_id INTEGER,\n    \"created_at\" TEXT,\n    CHECK (age >= 0)\n)",
+    "dependents": [
+      {
+        "kind": "index",
+        "name": "e2e_people_lower",
+        "sql": "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))"
+      },
+      {
+        "kind": "trigger",
+        "name": "e2e_people_touch",
+        "sql": "CREATE TRIGGER e2e_people_touch AFTER UPDATE ON e2e_people BEGIN SELECT 1; END"
+      },
+      {
+        "kind": "view",
+        "name": "e2e_people_v",
+        "sql": "CREATE VIEW e2e_people_v AS SELECT \"nickname\" FROM e2e_people"
+      }
+    ]
+  },
+  "counts": {
+    "e2e_people": "1",
+    "e2e_pets": "1",
+    "e2e_people_v": "1"
+  }
+}
