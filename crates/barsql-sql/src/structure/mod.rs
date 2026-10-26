@@ -1,4 +1,5 @@
 pub mod create_sql;
+mod postgres;
 
 use std::collections::{HashMap, HashSet};
 
@@ -7,7 +8,7 @@ use barsql_core::{
     Check, DriverType, ForeignKey, Identity, PrimaryKey, SqlDialect, StructColumn, StructIndex, TableStructure,
 };
 
-use crate::ddl::terminate_statement;
+use crate::ddl::{DdlColumn, terminate_statement};
 use crate::lang::tokens::{TokenKind, tokenize};
 
 // The structure editor's model of a change: the edited draft, what differs from the table as loaded, and the
@@ -439,10 +440,14 @@ pub fn plan_changes(driver: &DriverType, original: &TableStructure, draft: &Draf
     if !problems.is_empty() {
         return Err(problems);
     }
-    if changes(original, draft).is_empty() {
+    let found = changes(original, draft);
+    if found.is_empty() {
         return Ok(ChangePlan::default());
     }
-    Ok(ChangePlan::default())
+    Ok(match driver.dialect() {
+        Some(SqlDialect::Postgres) => transaction(postgres::alter(driver, original, &found)),
+        _ => ChangePlan::default(),
+    })
 }
 
 pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec<Problem>> {
@@ -450,7 +455,34 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
     if !problems.is_empty() {
         return Err(problems);
     }
-    Ok(ChangePlan::default())
+    Ok(match driver.dialect() {
+        Some(SqlDialect::Postgres) => transaction(postgres::create(driver, draft)),
+        _ => ChangePlan::default(),
+    })
+}
+
+fn transaction(statements: Vec<String>) -> ChangePlan {
+    let steps = std::iter::once("BEGIN".to_string()).chain(statements).chain(std::iter::once("COMMIT".to_string()));
+    ChangePlan { steps: steps.map(Step::sql).collect(), warnings: Vec::new() }
+}
+
+// The ddl.rs form of a column, for the dialects that render through it.
+fn ddl_column(column: &StructColumn) -> DdlColumn {
+    let identity = match column.identity {
+        Identity::ByDefault => "BY DEFAULT".to_string(),
+        Identity::Always => "ALWAYS".to_string(),
+        Identity::Seeded { seed, increment } => format!("{seed}, {increment}"),
+        Identity::None | Identity::AutoIncrement => String::new(),
+    };
+    DdlColumn {
+        name: column.name.clone(),
+        data_type: column.data_type.clone(),
+        not_null: !column.nullable,
+        default: column.default.clone(),
+        collation: column.collation.clone(),
+        identity,
+        generated: column.generated.clone(),
+    }
 }
 
 // "CHECK ((age > 0))" -> "(age > 0)": the keyword and one pair of parentheses around the whole expression.
@@ -568,41 +600,14 @@ pub fn type_suggestions(driver: &DriverType) -> &'static [&'static str] {
 }
 
 #[cfg(test)]
+mod fixtures;
+
+#[cfg(test)]
 mod tests {
-    use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
+    use barsql_core::{Check, ForeignKey, Identity, StructColumn, StructIndex, TableStructure};
 
+    use super::fixtures::*;
     use super::*;
-
-    const PG: DriverType = DriverType::Postgres;
-    const MS: DriverType = DriverType::SqlServer;
-
-    fn column(name: &str, data_type: &str) -> StructColumn {
-        StructColumn { name: name.into(), data_type: data_type.into(), nullable: true, ..Default::default() }
-    }
-
-    fn pk(name: &str, columns: &[&str]) -> PrimaryKey {
-        PrimaryKey { name: name.into(), columns: columns.iter().map(|c| c.to_string()).collect() }
-    }
-
-    fn users() -> TableStructure {
-        TableStructure {
-            schema: "public".into(),
-            name: "users".into(),
-            columns: vec![
-                StructColumn { nullable: false, identity: Identity::ByDefault, ..column("id", "bigint") },
-                column("name", "text"),
-                column("email", "text"),
-                StructColumn { default: "'new'::text".into(), ..column("status", "text") },
-                column("legacy", "text"),
-            ],
-            primary_key: Some(pk("users_pkey", &["id"])),
-            ..Default::default()
-        }
-    }
-
-    fn added(column: StructColumn) -> ColumnRow {
-        ColumnRow { origin: None, dropped: false, column, primary: false }
-    }
 
     #[test]
     fn an_unchanged_draft_plans_nothing() {
