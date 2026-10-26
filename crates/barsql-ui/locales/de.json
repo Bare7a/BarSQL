@@ -451,6 +451,21 @@
     "checkUpdates": "Nach Updates suchen"
   },
   "structure": {
+    "foreignKey": {
+      "name": "Name",
+      "columns": "Spalten",
+      "table": "Verweist auf",
+      "refColumns": "Referenzierte Spalten",
+      "onUpdate": "Bei Änderung",
+      "onDelete": "Beim Löschen"
+    },
+    "action": {
+      "noAction": "Keine Aktion",
+      "restrict": "Verhindern",
+      "cascade": "Weitergeben",
+      "setNull": "Auf NULL setzen",
+      "setDefault": "Auf Standardwert setzen"
+    },
     "check": {
       "name": "Name",
       "expression": "Bedingung"

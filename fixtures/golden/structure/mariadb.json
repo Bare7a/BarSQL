@@ -93,7 +93,8 @@
     ]
   },
   "plan": [
-    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL, ADD INDEX `idx_e2e_people_nickname` (`nickname`), ADD CHECK (age >= 0)"
+    "ALTER TABLE `barsql_test`.`e2e_people` DROP FOREIGN KEY `e2e_people_org_fk`",
+    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL, ADD INDEX `idx_e2e_people_nickname` (`nickname`), ADD CHECK (age >= 0), ADD CONSTRAINT `e2e_people_org_fk` FOREIGN KEY (`org_id`) REFERENCES `barsql_test`.`e2e_orgs` (`id`) ON UPDATE RESTRICT ON DELETE CASCADE"
   ],
   "after": {
     "schema": "barsql_test",
@@ -170,7 +171,7 @@
           "id"
         ],
         "onUpdate": "restrict",
-        "onDelete": "setNull"
+        "onDelete": "cascade"
       }
     ],
     "checks": [

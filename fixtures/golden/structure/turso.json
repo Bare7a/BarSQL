@@ -99,7 +99,7 @@
   "plan": [
     "PRAGMA foreign_keys = OFF",
     "BEGIN",
-    "CREATE TABLE \"barsql_new_e2e_people\" (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    nick TEXT COLLATE NOCASE,\n    \"age\" REAL,\n    \"email\" TEXT NOT NULL DEFAULT '',\n    org_id INTEGER,\n    \"created_at\" TEXT,\n    CHECK (age >= 0),\n    CHECK (age >= 0)\n)",
+    "CREATE TABLE \"barsql_new_e2e_people\" (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    nick TEXT COLLATE NOCASE,\n    \"age\" REAL,\n    \"email\" TEXT NOT NULL DEFAULT '',\n    org_id INTEGER,\n    \"created_at\" TEXT,\n    CHECK (age >= 0),\n    CHECK (age >= 0),\n    CONSTRAINT \"fk_e2e_people_e2e_orgs\" FOREIGN KEY (\"org_id\") REFERENCES \"e2e_orgs\" (\"id\") ON DELETE CASCADE\n)",
     "INSERT INTO \"barsql_new_e2e_people\" (\"id\", \"nick\", \"age\", \"email\", \"org_id\") SELECT \"id\", \"nick\", \"age\", \"email\", \"org_id\" FROM \"e2e_people\"",
     "DROP VIEW \"e2e_people_v\"",
     "DROP TABLE \"e2e_people\"",
@@ -167,6 +167,19 @@
         ]
       }
     ],
+    "foreignKeys": [
+      {
+        "columns": [
+          "org_id"
+        ],
+        "refTable": "e2e_orgs",
+        "refColumns": [
+          "id"
+        ],
+        "onUpdate": "noAction",
+        "onDelete": "cascade"
+      }
+    ],
     "checks": [
       {
         "expression": "age >= 0"
@@ -175,7 +188,7 @@
         "expression": "age >= 0"
       }
     ],
-    "createSql": "CREATE TABLE \"e2e_people\" (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    \"nickname\" TEXT COLLATE NOCASE,\n    \"age\" REAL,\n    \"email\" TEXT NOT NULL DEFAULT '',\n    org_id INTEGER,\n    \"created_at\" TEXT,\n    CHECK (age >= 0),\n    CHECK (age >= 0)\n)",
+    "createSql": "CREATE TABLE \"e2e_people\" (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    \"nickname\" TEXT COLLATE NOCASE,\n    \"age\" REAL,\n    \"email\" TEXT NOT NULL DEFAULT '',\n    org_id INTEGER,\n    \"created_at\" TEXT,\n    CHECK (age >= 0),\n    CHECK (age >= 0),\n    CONSTRAINT \"fk_e2e_people_e2e_orgs\" FOREIGN KEY (\"org_id\") REFERENCES \"e2e_orgs\" (\"id\") ON DELETE CASCADE\n)",
     "dependents": [
       {
         "kind": "index",

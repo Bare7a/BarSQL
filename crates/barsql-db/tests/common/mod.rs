@@ -604,6 +604,25 @@ pub fn structure_edit(driver: &DriverType, original: &barsql_core::TableStructur
         let check = barsql_core::Check { name: name.into(), expression: "age >= 0".into() };
         draft.checks.push(Row::added(check));
     }
+    // The server fixtures already link org_id, so theirs changes. A second cascade path would be refused.
+    if editing.foreign_keys {
+        let org = |key: &barsql_core::ForeignKey| key.columns == ["org_id"];
+        match draft.foreign_keys.iter_mut().find(|row| org(&row.value)) {
+            Some(row) => row.value.on_delete = barsql_core::RefAction::Cascade,
+            None => {
+                let columns = vec!["org_id".to_string()];
+                let name = suggested_name(driver, NameKind::ForeignKey, &original.name, &columns, "e2e_orgs");
+                draft.foreign_keys.push(Row::added(barsql_core::ForeignKey {
+                    name,
+                    columns,
+                    ref_table: "e2e_orgs".into(),
+                    ref_columns: vec!["id".into()],
+                    on_delete: barsql_core::RefAction::Cascade,
+                    ..Default::default()
+                }));
+            }
+        }
+    }
     draft
 }
 

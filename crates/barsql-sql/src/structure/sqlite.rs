@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use barsql_core::{Check, Dependent, DriverType, Identity, StructColumn, StructIndex, TableStructure};
+use barsql_core::{Check, Dependent, DriverType, ForeignKey, Identity, StructColumn, StructIndex, TableStructure};
 
 use super::create_sql::{column_item, item_column, names_in, paren_body, split_create_table};
-use super::{Changes, Draft, Step, Warning, check_clause};
+use super::{Changes, Draft, Step, Warning, check_clause, foreign_key_clause};
 use crate::alter::{drop_column, rename_column};
 use crate::lang::tokens::{TokenKind, tokenize};
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
@@ -139,9 +139,9 @@ fn starts_constraint(item: &str, kind: &str) -> bool {
     }
 }
 
-// The columns a UNIQUE (…) item names, lowercased.
-fn unique_columns(item: &str) -> Option<Vec<String>> {
-    if !starts_constraint(item, "unique") {
+// The columns a UNIQUE (…) or FOREIGN KEY (…) item names, lowercased.
+fn listed_columns(item: &str, kind: &str) -> Option<Vec<String>> {
+    if !starts_constraint(item, kind) {
         return None;
     }
     let first_name = |part: &str| {
@@ -150,6 +150,15 @@ fn unique_columns(item: &str) -> Option<Vec<String>> {
         Some(name.ident_text().to_lowercase())
     };
     paren_body(item)?.split(',').map(first_name).collect()
+}
+
+// The table after REFERENCES, lowercased.
+fn referenced(text: &str) -> Option<String> {
+    let tokens = tokenize(text, Some(&LITE));
+    let mut code = tokens.iter().filter(|t| t.kind != TokenKind::Comment);
+    code.find(|t| t.lower == "references")?;
+    let table = code.next().filter(|t| matches!(t.kind, TokenKind::Ident | TokenKind::Quoted))?;
+    Some(table.ident_text().to_lowercase())
 }
 
 // Takes one entry equal to `wanted` off the list.
@@ -215,6 +224,9 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
         .collect();
     let mut unchecked: Vec<String> =
         changes.dropped_checks.iter().map(|check| check.expression.trim().into()).collect();
+    let lower = |names: &[String]| names.iter().map(|name| name.to_lowercase()).collect::<Vec<_>>();
+    let mut unreferenced: Vec<(Vec<String>, String)> =
+        changes.dropped_foreign_keys.iter().map(|key| (lower(&key.columns), key.ref_table.to_lowercase())).collect();
     let mut items: Vec<String> = Vec::new();
     let mut after_columns = 0;
     let mut key_placed = !key_changed || new_key.len() < 2;
@@ -227,10 +239,14 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
                 }
                 continue;
             }
-            let unique = unique_columns(item).is_some_and(|columns| take(&mut unconstrained, columns.as_slice()));
+            let unique =
+                listed_columns(item, "unique").is_some_and(|columns| take(&mut unconstrained, columns.as_slice()));
+            let key = listed_columns(item, "foreign")
+                .zip(referenced(item))
+                .is_some_and(|wanted| take(&mut unreferenced, &wanted));
             let check =
                 starts_constraint(item, "check") && paren_body(item).is_some_and(|body| take(&mut unchecked, body));
-            if !unique && !check {
+            if !unique && !check && !key {
                 items.push(item.to_string());
             }
             continue;
@@ -245,7 +261,14 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
             gone.extend(clauses.iter().filter(|(kind, _)| *kind == "unique").map(|(_, text)| *text));
         }
         for (kind, text) in &clauses {
-            if *kind == "check" && paren_body(text).is_some_and(|body| take(&mut unchecked, body)) {
+            let found = match *kind {
+                "check" => paren_body(text).is_some_and(|body| take(&mut unchecked, body)),
+                "references" => {
+                    referenced(text).is_some_and(|table| take(&mut unreferenced, &(vec![lower.clone()], table)))
+                }
+                _ => false,
+            };
+            if found {
                 gone.push(text);
             }
         }
@@ -266,7 +289,7 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
         after_columns = items.len();
     }
     // A dropped constraint the definition doesn't show can't be taken out of it.
-    if !unconstrained.is_empty() || !unchecked.is_empty() {
+    if !unconstrained.is_empty() || !unchecked.is_empty() || !unreferenced.is_empty() {
         return None;
     }
     let added: Vec<String> = changes.added.iter().map(|c| render(c, &c.name, inline_key(&c.name), &[])).collect();
@@ -277,6 +300,13 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
     items.extend(changes.added_checks.iter().map(|check| {
         let check = Check { expression: under_old_names(&check.expression, &back), ..check.clone() };
         check_clause(driver, &check)
+    }));
+    // A key names this table's columns by their old names. One that refers to this table names its own columns so.
+    items.extend(changes.added_foreign_keys.iter().map(|key| {
+        let old = |names: &[String]| names.iter().map(|name| old_name(name)).collect();
+        let own = key.ref_table.eq_ignore_ascii_case(name);
+        let ref_columns = if own { old(&key.ref_columns) } else { key.ref_columns.clone() };
+        foreign_key_clause(driver, &ForeignKey { columns: old(&key.columns), ref_columns, ..key.clone() }, schema)
     }));
 
     let copied: Vec<String> = original
@@ -328,7 +358,9 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{Check, Dependent, DriverType, Identity, StructColumn, StructIndex, TableStructure};
+    use barsql_core::{
+        Check, Dependent, DriverType, ForeignKey, Identity, RefAction, StructColumn, StructIndex, TableStructure,
+    };
 
     use crate::structure::fixtures::*;
     use crate::structure::{Draft, Row, Warning, plan_changes, plan_create};
@@ -639,6 +671,43 @@ mod tests {
         let mut draft = Draft::from_structure(&original);
         draft.checks[0].dropped = true;
         assert!(plan_changes(&LITE, &original, &draft).is_err());
+    }
+
+    #[test]
+    fn sqlite_adds_and_drops_foreign_keys() {
+        let mut original = table(
+            "pets",
+            "CREATE TABLE pets (id INTEGER PRIMARY KEY, owner_id INTEGER REFERENCES people(id), team_id INTEGER, FOREIGN KEY (team_id) REFERENCES teams (id))",
+            vec![column("id", "INTEGER"), column("owner_id", "INTEGER"), column("team_id", "INTEGER")],
+            &["id"],
+        );
+        original.foreign_keys =
+            vec![foreign_key("", &["owner_id"], "people", &["id"]), foreign_key("", &["team_id"], "teams", &["id"])];
+        let mut draft = Draft::from_structure(&original);
+        draft.foreign_keys[0].dropped = true;
+        draft.foreign_keys[1].dropped = true;
+        let key = ForeignKey {
+            on_delete: RefAction::Cascade,
+            ..foreign_key("fk_pets_people", &["owner_id"], "people", &["id"])
+        };
+        draft.foreign_keys.push(Row::added(key));
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        assert_eq!(plan.warnings, [Warning::Rebuild]);
+        assert_eq!(
+            sql(&plan)[2],
+            "CREATE TABLE \"barsql_new_pets\" (\n    id INTEGER PRIMARY KEY,\n    \"owner_id\" INTEGER,\n    team_id INTEGER,\n    CONSTRAINT \"fk_pets_people\" FOREIGN KEY (\"owner_id\") REFERENCES \"people\" (\"id\") ON DELETE CASCADE\n)"
+        );
+    }
+
+    #[test]
+    fn sqlite_foreign_keys_name_renamed_columns_by_their_old_name() {
+        let original = simple();
+        let mut draft = Draft::from_structure(&original);
+        draft.rename_column(2, "team_id".into());
+        draft.foreign_keys.push(Row::added(foreign_key("", &["team_id"], "teams", &["id"])));
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert!(steps[2].ends_with("    FOREIGN KEY (\"legacy\") REFERENCES \"teams\" (\"id\")\n)"), "{}", steps[2]);
     }
 
     #[test]

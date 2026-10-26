@@ -1,9 +1,10 @@
 use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
 
-use super::{Changes, Draft, check_clause};
+use super::{Changes, Draft, check_clause, foreign_key_clause};
 use crate::quote::{qualified_table, quote_ident, quote_ident_list, table_ref};
 
-// MySQL can't roll DDL back, so every change goes into one ALTER TABLE that applies whole or not at all. MODIFY and
+// MySQL can't roll DDL back, so the changes go into one ALTER TABLE that applies whole or not at all. Only dropped
+// foreign keys go first, on their own: one statement can't drop a key and add one by the same name. MODIFY and
 // CHANGE replace the column's whole definition, so it is written out in full.
 pub(super) fn column_definition(column: &StructColumn) -> String {
     let mut out = column.data_type.clone();
@@ -73,12 +74,16 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         ));
     }
     clauses.extend(changes.added_checks.iter().map(|check| format!("ADD {}", check_clause(driver, check))));
-    match clauses.is_empty() {
-        true => Vec::new(),
-        false => {
-            vec![format!("ALTER TABLE {} {}", table_ref(driver, &original.schema, &original.name), clauses.join(", "))]
-        }
-    }
+    let keys = changes.added_foreign_keys.iter().map(|key| foreign_key_clause(driver, key, &original.schema));
+    clauses.extend(keys.map(|key| format!("ADD {key}")));
+    let table = table_ref(driver, &original.schema, &original.name);
+    let drops: Vec<String> =
+        changes.dropped_foreign_keys.iter().map(|key| format!("DROP FOREIGN KEY {}", quote(&key.name))).collect();
+    [drops, clauses]
+        .into_iter()
+        .filter(|list| !list.is_empty())
+        .map(|list| format!("ALTER TABLE {table} {}", list.join(", ")))
+        .collect()
 }
 
 pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
@@ -98,10 +103,10 @@ pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
+    use barsql_core::{DriverType, ForeignKey, Identity, RefAction, StructColumn, TableStructure};
 
     use crate::structure::fixtures::*;
-    use crate::structure::{Draft, Row, plan_changes, plan_create};
+    use crate::structure::{Draft, Row, Warning, plan_changes, plan_create};
 
     const MY: DriverType = DriverType::MySql;
 
@@ -181,6 +186,44 @@ mod tests {
                 "ALTER TABLE `shop`.`users` DROP CONSTRAINT `users_chk_1`, ADD CONSTRAINT `users_name_check` CHECK (name <> ''), ADD CHECK (id > 0)"
             ]
         );
+    }
+
+    #[test]
+    fn mysql_adds_and_drops_foreign_keys() {
+        let mut original = users();
+        original.foreign_keys = vec![foreign_key("fk_users_orgs", &["org_id"], "orgs", &["id"])];
+        let mut draft = Draft::from_structure(&original);
+        draft.foreign_keys[0].dropped = true;
+        let key = ForeignKey {
+            on_delete: RefAction::Cascade,
+            ..foreign_key("fk_users_teams", &["org_id"], "teams", &["id"])
+        };
+        draft.foreign_keys.push(Row::added(key));
+        let plan = plan_changes(&MY, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "ALTER TABLE `shop`.`users` DROP FOREIGN KEY `fk_users_orgs`",
+                "ALTER TABLE `shop`.`users` ADD CONSTRAINT `fk_users_teams` FOREIGN KEY (`org_id`) REFERENCES `shop`.`teams` (`id`) ON DELETE CASCADE",
+            ]
+        );
+    }
+
+    #[test]
+    fn mysql_drops_foreign_keys_in_their_own_statement() {
+        let mut original = users();
+        original.foreign_keys = vec![foreign_key("fk_users_orgs", &["org_id"], "orgs", &["id"])];
+        let mut draft = Draft::from_structure(&original);
+        draft.foreign_keys[0].value.on_delete = RefAction::Cascade;
+        let plan = plan_changes(&MY, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "ALTER TABLE `shop`.`users` DROP FOREIGN KEY `fk_users_orgs`",
+                "ALTER TABLE `shop`.`users` ADD CONSTRAINT `fk_users_orgs` FOREIGN KEY (`org_id`) REFERENCES `shop`.`orgs` (`id`) ON DELETE CASCADE",
+            ]
+        );
+        assert_eq!(plan.warnings, [Warning::NotAtomic]);
     }
 
     #[test]

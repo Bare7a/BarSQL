@@ -451,6 +451,21 @@
     "checkUpdates": "Check for updates"
   },
   "structure": {
+    "foreignKey": {
+      "name": "Name",
+      "columns": "Columns",
+      "table": "References",
+      "refColumns": "Referenced columns",
+      "onUpdate": "On update",
+      "onDelete": "On delete"
+    },
+    "action": {
+      "noAction": "No action",
+      "restrict": "Restrict",
+      "cascade": "Cascade",
+      "setNull": "Set null",
+      "setDefault": "Set default"
+    },
     "check": {
       "name": "Name",
       "expression": "Condition"

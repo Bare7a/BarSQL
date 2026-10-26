@@ -1,6 +1,6 @@
 use barsql_core::{DriverType, Identity, PrimaryKey, SqlDialect, StructColumn, StructIndex, TableStructure};
 
-use super::{Changes, Draft, check_clause, ddl_column};
+use super::{Changes, Draft, check_clause, ddl_column, foreign_key_clause};
 use crate::alter::{drop_column, rename_column};
 use crate::ddl::{compose_create_table, render_column};
 use crate::quote::{quote_ident, quote_ident_list, quote_literal_in, table_ref};
@@ -21,9 +21,9 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
             false => format!("DROP INDEX {}", table_ref(driver, schema, &index.name)),
         });
     }
-    for check in &changes.dropped_checks {
-        out.push(format!("ALTER TABLE {table} DROP CONSTRAINT {}", quote_ident(driver, &check.name)));
-    }
+    let named =
+        changes.dropped_checks.iter().map(|c| &c.name).chain(changes.dropped_foreign_keys.iter().map(|k| &k.name));
+    out.extend(named.map(|name| format!("ALTER TABLE {table} DROP CONSTRAINT {}", quote_ident(driver, name))));
     for (old, new) in &changes.renamed {
         out.push(rename_column(driver, schema, name, old, new));
     }
@@ -63,6 +63,8 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
     out.extend(
         changes.added_checks.iter().map(|check| format!("ALTER TABLE {table} ADD {}", check_clause(driver, check))),
     );
+    let keys = changes.added_foreign_keys.iter().map(|key| foreign_key_clause(driver, key, schema));
+    out.extend(keys.map(|key| format!("ALTER TABLE {table} ADD {key}")));
     let commented = changes.modified.iter().filter(|(old, new)| old.comment != new.comment).map(|(_, new)| new);
     let added = changes.added.iter().filter(|column| !column.comment.is_empty());
     out.extend(commented.chain(added).map(|column| comment(driver, schema, name, column)));
@@ -126,7 +128,7 @@ fn comment(driver: &DriverType, schema: &str, table: &str, column: &StructColumn
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{Identity, StructColumn, StructIndex};
+    use barsql_core::{ForeignKey, Identity, RefAction, StructColumn, StructIndex};
 
     use crate::structure::fixtures::*;
     use crate::structure::{Draft, Row, plan_changes, plan_create};
@@ -262,6 +264,31 @@ mod tests {
                 r#"ALTER TABLE "public"."users" DROP CONSTRAINT "users_status_check""#,
                 r#"ALTER TABLE "public"."users" ADD CONSTRAINT "users_email_check" CHECK (email LIKE '%@%')"#,
                 r#"ALTER TABLE "public"."users" ADD CHECK (id > 0)"#,
+                "COMMIT",
+            ]
+        );
+    }
+
+    #[test]
+    fn postgres_adds_and_drops_foreign_keys() {
+        let mut original = users();
+        original.columns.push(column("org_id", "bigint"));
+        original.foreign_keys = vec![foreign_key("users_org_id_fkey", &["org_id"], "orgs", &["id"])];
+        let mut draft = Draft::from_structure(&original);
+        draft.foreign_keys[0].dropped = true;
+        let key = ForeignKey {
+            ref_schema: "public".into(),
+            on_delete: RefAction::Cascade,
+            ..foreign_key("users_org_id_fkey2", &["org_id"], "orgs", &["id"])
+        };
+        draft.foreign_keys.push(Row::added(key));
+        let plan = plan_changes(&PG, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "BEGIN",
+                r#"ALTER TABLE "public"."users" DROP CONSTRAINT "users_org_id_fkey""#,
+                r#"ALTER TABLE "public"."users" ADD CONSTRAINT "users_org_id_fkey2" FOREIGN KEY ("org_id") REFERENCES "public"."orgs" ("id") ON DELETE CASCADE"#,
                 "COMMIT",
             ]
         );

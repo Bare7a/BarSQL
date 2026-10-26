@@ -1,4 +1,4 @@
-use barsql_core::{Check, DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
+use barsql_core::{Check, DriverType, ForeignKey, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
 use super::{ChangePlan, ColumnRow};
 
@@ -40,6 +40,17 @@ pub fn index(name: &str, columns: &[&str], unique: bool) -> StructIndex {
 
 pub fn check(name: &str, expression: &str) -> Check {
     Check { name: name.into(), expression: expression.into() }
+}
+
+pub fn foreign_key(name: &str, columns: &[&str], ref_table: &str, ref_columns: &[&str]) -> ForeignKey {
+    let names = |list: &[&str]| list.iter().map(|c| c.to_string()).collect();
+    ForeignKey {
+        name: name.into(),
+        columns: names(columns),
+        ref_table: ref_table.into(),
+        ref_columns: names(ref_columns),
+        ..Default::default()
+    }
 }
 
 pub fn added(column: StructColumn) -> ColumnRow {

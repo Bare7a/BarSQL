@@ -1,12 +1,13 @@
 mod checks;
 mod columns;
+mod foreign_keys;
 mod indexes;
 mod preview;
 #[cfg(test)]
 mod tests;
 
 use barsql_app::{EditorTab, StructureRef};
-use barsql_core::{Check, ConnectionConfig, Identity, StructColumn, StructIndex, TableStructure};
+use barsql_core::{Check, ConnectionConfig, ForeignKey, Identity, StructColumn, StructIndex, TableStructure};
 use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Section, changes, plan_changes, plan_create,
 };
@@ -19,6 +20,7 @@ use gpui_kit::*;
 
 use self::checks::CheckEditors;
 use self::columns::{Editors, Field};
+use self::foreign_keys::KeyEditors;
 use self::indexes::IndexEditors;
 use crate::form::{self, ToolButton as _};
 use crate::i18n::{t, t_count, t_with};
@@ -27,7 +29,7 @@ use crate::schema_tree::TableChange;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state;
 use crate::toast;
-use crate::tokens::{ICON_SM, TEXT_SM, TEXT_XS};
+use crate::tokens::{ICON_SM, TEXT_SM};
 
 const CONTEXT: &str = "StructureTab";
 
@@ -75,6 +77,7 @@ pub struct StructureTab {
     editors: Vec<Editors>,
     index_editors: Vec<IndexEditors>,
     check_editors: Vec<CheckEditors>,
+    key_editors: Vec<KeyEditors>,
     next_key: u64,
     preview: Entity<EditorState>,
     script: String,
@@ -126,6 +129,7 @@ impl StructureTab {
             editors: Vec::new(),
             index_editors: Vec::new(),
             check_editors: Vec::new(),
+            key_editors: Vec::new(),
             next_key: 0,
             preview,
             script: String::new(),
@@ -163,6 +167,7 @@ impl StructureTab {
                         this.original = Some(structure);
                         this.load = Load::Ready;
                         this.reset_editors(window, cx);
+                        this.load_targets(cx);
                         this.replan(window, cx);
                     }
                     Some(Err(error)) => this.load = Load::Failed(error.message),
@@ -307,6 +312,14 @@ impl StructureTab {
                 checks::editors(key, check, window, cx)
             })
             .collect();
+        let keys: Vec<ForeignKey> = self.draft.foreign_keys.iter().map(|row| row.value.clone()).collect();
+        self.key_editors = keys
+            .iter()
+            .map(|fk| {
+                let key = self.key();
+                foreign_keys::editors(key, fk, window, cx)
+            })
+            .collect();
     }
 
     fn replan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -412,7 +425,7 @@ impl StructureTab {
             Section::Columns | Section::Table => true,
             Section::Indexes => self.connection.driver.capabilities().structure.indexes,
             Section::Checks => self.connection.driver.capabilities().structure.checks,
-            Section::ForeignKeys => false,
+            Section::ForeignKeys => self.connection.driver.capabilities().structure.foreign_keys,
         }
     }
 
@@ -422,7 +435,7 @@ impl StructureTab {
             Section::Columns | Section::Table => self.add_column(window, cx),
             Section::Indexes => self.add_index(window, cx),
             Section::Checks => self.add_check(window, cx),
-            Section::ForeignKeys => {}
+            Section::ForeignKeys => self.add_foreign_key(window, cx),
         }
     }
 
@@ -612,7 +625,7 @@ impl StructureTab {
                 let rows = match self.section {
                     Section::Columns | Section::Table => columns::rows(self, window, cx).into_any_element(),
                     Section::Indexes => indexes::rows(self, window, cx),
-                    Section::ForeignKeys => self.foreign_keys(cx).into_any_element(),
+                    Section::ForeignKeys => foreign_keys::rows(self, window, cx),
                     Section::Checks => checks::rows(self, window, cx),
                 };
                 div()
@@ -634,19 +647,6 @@ impl StructureTab {
                     .into_any_element()
             }
         }
-    }
-
-    fn foreign_keys(&self, cx: &App) -> impl IntoElement {
-        let rows = self.draft.foreign_keys.iter().enumerate().filter(|(_, row)| !row.dropped).map(|(ix, row)| {
-            let key = &row.value;
-            let target = format!("{} → {}({})", key.columns.join(", "), key.ref_table, key.ref_columns.join(", "));
-            let actions = format!("ON UPDATE {} · ON DELETE {}", key.on_update.sql(), key.on_delete.sql());
-            line(move || format!("structure:foreign-key:{ix}"), cx)
-                .child(cell(&key.name, 14.))
-                .child(div().flex_1().min_w_0().child(target))
-                .child(div().text_size(TEXT_XS).text_color(cx.theme().muted_foreground).child(actions))
-        });
-        list(rows, "structure.noForeignKeys", cx)
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -725,14 +725,6 @@ fn line(selector: impl Fn() -> String + 'static, cx: &App) -> Div {
 
 fn cell(text: &str, width: f32) -> Div {
     div().flex_none().w(rems(width)).min_w_0().overflow_hidden().child(text.to_string())
-}
-
-fn list(rows: impl Iterator<Item = Div>, empty: &str, cx: &App) -> Div {
-    let rows: Vec<Div> = rows.collect();
-    match rows.is_empty() {
-        true => form::empty_state(None, t(cx, empty), cx),
-        false => v_flex().children(rows),
-    }
 }
 
 fn input(value: &str, window: &mut Window, cx: &mut Context<StructureTab>) -> Entity<InputState> {

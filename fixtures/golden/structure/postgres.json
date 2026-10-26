@@ -89,6 +89,7 @@
   },
   "plan": [
     "BEGIN",
+    "ALTER TABLE \"e2e_structure\".\"e2e_people\" DROP CONSTRAINT \"e2e_people_org_id_fkey\"",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" RENAME COLUMN \"nick\" TO \"nickname\"",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ALTER COLUMN \"age\" TYPE bigint USING \"age\"::bigint",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ALTER COLUMN \"email\" SET NOT NULL",
@@ -97,6 +98,7 @@
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ADD COLUMN \"created_at\" timestamp",
     "CREATE INDEX \"e2e_people_nickname_idx\" ON \"e2e_structure\".\"e2e_people\" (\"nickname\")",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ADD CHECK (age >= 0)",
+    "ALTER TABLE \"e2e_structure\".\"e2e_people\" ADD CONSTRAINT \"e2e_people_org_id_fkey\" FOREIGN KEY (\"org_id\") REFERENCES \"e2e_structure\".\"e2e_orgs\" (\"id\") ON DELETE CASCADE",
     "COMMENT ON COLUMN \"e2e_structure\".\"e2e_people\".\"email\" IS 'Login'",
     "COMMIT"
   ],
@@ -170,7 +172,7 @@
           "id"
         ],
         "onUpdate": "noAction",
-        "onDelete": "setNull"
+        "onDelete": "cascade"
       }
     ],
     "checks": [

@@ -290,3 +290,32 @@ fn adding_a_check_rebuilds_the_table_with_it(cx: &mut TestAppContext) {
     let ddl = format!("{:?}", app.query("SELECT sql FROM sqlite_master WHERE name = 'e2e_s'"));
     assert!(ddl.contains("CHECK (id > 0)"), "{ddl}");
 }
+
+#[gpui_kit::test]
+fn adding_a_foreign_key_shows_on_the_column(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        "CREATE TABLE e2e_o (id INTEGER PRIMARY KEY); CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT, org_id INTEGER)",
+    );
+    open_row(&mut app, "t:main.e2e_s", "c:main.e2e_s.org_id");
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    app.wait_shown("structure:column:org_id:name");
+    app.click("structure-section:2");
+    app.click("structure-add");
+    app.menu_pick("structure:foreign-key:new4:columns", 2);
+    app.menu_pick("structure:foreign-key:new4:table", 0);
+    let tab = app.structure();
+    app.settle(|cx| cx.update(|_, cx| tab.read(cx).draft.foreign_keys[0].value.ref_columns == ["id"]));
+    let sql = script(&mut app);
+    assert!(sql.contains(r#"CONSTRAINT "fk_e2e_s_e2e_o" FOREIGN KEY ("org_id") REFERENCES "e2e_o" ("id")"#), "{sql}");
+    app.click("structure-apply");
+    app.click("change-confirm");
+    app.settle_dialog_closed();
+    let id = app.connection.id.clone();
+    app.settle(|cx| {
+        cx.update(|_, cx| {
+            let columns = crate::schema::get(cx, &id).and_then(|schema| schema.columns("main", "e2e_s").cloned());
+            columns.is_some_and(|columns| columns.iter().any(|column| column.name == "org_id" && column.is_foreign))
+        })
+    });
+}

@@ -101,6 +101,7 @@
   "plan": [
     "SET XACT_ABORT ON",
     "BEGIN TRANSACTION",
+    "ALTER TABLE [dbo].[e2e_people] DROP CONSTRAINT [e2e_people_org_fk]",
     "EXEC sp_rename N'[dbo].[e2e_people].[nick]', N'nickname', 'COLUMN'",
     "ALTER TABLE [dbo].[e2e_people] ALTER COLUMN [age] bigint NULL",
     "ALTER TABLE [dbo].[e2e_people] ALTER COLUMN [email] nvarchar(255) NOT NULL",
@@ -109,6 +110,7 @@
     "ALTER TABLE [dbo].[e2e_people] ADD [created_at] DATETIME2 NULL",
     "CREATE INDEX [IX_e2e_people_nickname] ON [dbo].[e2e_people] ([nickname])",
     "ALTER TABLE [dbo].[e2e_people] ADD CONSTRAINT [CK_e2e_people_age] CHECK (age >= 0)",
+    "ALTER TABLE [dbo].[e2e_people] ADD CONSTRAINT [e2e_people_org_fk] FOREIGN KEY ([org_id]) REFERENCES [dbo].[e2e_orgs] ([id]) ON DELETE CASCADE",
     "COMMIT TRANSACTION"
   ],
   "after": {
@@ -192,7 +194,7 @@
           "id"
         ],
         "onUpdate": "noAction",
-        "onDelete": "setNull"
+        "onDelete": "cascade"
       }
     ],
     "checks": [

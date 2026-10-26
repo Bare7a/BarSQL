@@ -1,6 +1,6 @@
 use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
-use super::{Changes, Draft, NameKind, check_clause, ddl_column, suggested_name};
+use super::{Changes, Draft, NameKind, check_clause, ddl_column, foreign_key_clause, suggested_name};
 use crate::alter::{drop_column, rename_column};
 use crate::ddl::compose_create_table;
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
@@ -25,6 +25,7 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         });
     }
     out.extend(changes.dropped_checks.iter().map(|check| constraint("DROP", &check.name)));
+    out.extend(changes.dropped_foreign_keys.iter().map(|key| constraint("DROP", &key.name)));
     for (old, new) in &changes.renamed {
         out.push(rename_column(driver, schema, name, old, new));
     }
@@ -63,6 +64,8 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
     out.extend(
         changes.added_checks.iter().map(|check| format!("ALTER TABLE {table} ADD {}", check_clause(driver, check))),
     );
+    let keys = changes.added_foreign_keys.iter().map(|key| foreign_key_clause(driver, key, schema));
+    out.extend(keys.map(|key| format!("ALTER TABLE {table} ADD {key}")));
     out
 }
 
@@ -122,7 +125,7 @@ fn primary_key(driver: &DriverType, table: &str, key: &PrimaryKey) -> String {
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{Identity, StructColumn, StructIndex, TableStructure};
+    use barsql_core::{ForeignKey, Identity, RefAction, StructColumn, StructIndex, TableStructure};
 
     use crate::structure::fixtures::*;
     use crate::structure::{Draft, Row, plan_changes, plan_create};
@@ -242,6 +245,30 @@ mod tests {
                 "ALTER TABLE [dbo].[users] DROP CONSTRAINT [CK_users_status]",
                 "ALTER TABLE [dbo].[users] ADD CONSTRAINT [CK_users_name] CHECK (len(name) > 0)",
                 "ALTER TABLE [dbo].[users] ADD CHECK (id > 0)",
+            ]
+        );
+    }
+
+    #[test]
+    fn sql_server_adds_and_drops_foreign_keys() {
+        let mut original = users();
+        original.columns.push(column("team_id", "int"));
+        original.foreign_keys = vec![foreign_key("FK_users_orgs", &["team_id"], "orgs", &["id"])];
+        let mut draft = Draft::from_structure(&original);
+        draft.foreign_keys[0].dropped = true;
+        let key = ForeignKey {
+            on_update: RefAction::Cascade,
+            on_delete: RefAction::SetNull,
+            ..foreign_key("FK_users_teams", &["team_id"], "teams", &["id"])
+        };
+        draft.foreign_keys.push(Row::added(key));
+        let plan = plan_changes(&MS, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert_eq!(
+            steps[2..steps.len() - 1],
+            [
+                "ALTER TABLE [dbo].[users] DROP CONSTRAINT [FK_users_orgs]",
+                "ALTER TABLE [dbo].[users] ADD CONSTRAINT [FK_users_teams] FOREIGN KEY ([team_id]) REFERENCES [dbo].[teams] ([id]) ON UPDATE CASCADE ON DELETE SET NULL",
             ]
         );
     }

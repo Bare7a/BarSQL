@@ -451,6 +451,21 @@
     "checkUpdates": "Проверка за актуализации"
   },
   "structure": {
+    "foreignKey": {
+      "name": "Име",
+      "columns": "Колони",
+      "table": "Сочи към",
+      "refColumns": "Целеви колони",
+      "onUpdate": "При промяна",
+      "onDelete": "При изтриване"
+    },
+    "action": {
+      "noAction": "Без действие",
+      "restrict": "Забрани",
+      "cascade": "Каскадно",
+      "setNull": "Задай NULL",
+      "setDefault": "Задай по подразбиране"
+    },
     "check": {
       "name": "Име",
       "expression": "Условие"

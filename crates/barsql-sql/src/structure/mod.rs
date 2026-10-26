@@ -9,12 +9,13 @@ use std::collections::{HashMap, HashSet};
 
 use barsql_core::capabilities::{IdentityStyle, StructureEditing};
 use barsql_core::{
-    Check, DriverType, ForeignKey, Identity, PrimaryKey, SqlDialect, StructColumn, StructIndex, TableStructure,
+    Check, DriverType, ForeignKey, Identity, PrimaryKey, RefAction, SqlDialect, StructColumn, StructIndex,
+    TableStructure,
 };
 
 use crate::ddl::{DdlColumn, terminate_statement};
 use crate::lang::tokens::{TokenKind, tokenize};
-use crate::quote::quote_ident;
+use crate::quote::{quote_ident, quote_ident_list, table_ref};
 
 // The structure editor's model of a change: the edited draft, what differs from the table as loaded, and the
 // statements that make the difference.
@@ -513,6 +514,25 @@ fn check_clause(driver: &DriverType, check: &Check) -> String {
     match check.name.as_str() {
         "" => format!("CHECK ({})", check.expression),
         name => format!("CONSTRAINT {} CHECK ({})", quote_ident(driver, name), check.expression),
+    }
+}
+
+// FOREIGN KEY … REFERENCES …, named when the key has a name. NO ACTION is the default, so it's left out.
+fn foreign_key_clause(driver: &DriverType, key: &ForeignKey, schema: &str) -> String {
+    let ref_schema = if key.ref_schema.is_empty() { schema } else { &key.ref_schema };
+    let target = table_ref(driver, ref_schema, &key.ref_table);
+    let mut out = format!("FOREIGN KEY ({}) REFERENCES {target}", quote_ident_list(driver, &key.columns));
+    if !key.ref_columns.is_empty() {
+        out.push_str(&format!(" ({})", quote_ident_list(driver, &key.ref_columns)));
+    }
+    for (event, action) in [("UPDATE", key.on_update), ("DELETE", key.on_delete)] {
+        if action != RefAction::NoAction {
+            out.push_str(&format!(" ON {event} {}", action.sql()));
+        }
+    }
+    match key.name.as_str() {
+        "" => out,
+        name => format!("CONSTRAINT {} {out}", quote_ident(driver, name)),
     }
 }
 
