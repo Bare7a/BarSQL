@@ -31,7 +31,7 @@ use crate::schema_tree::TableChange;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state;
 use crate::toast;
-use crate::tokens::{ICON_SM, TEXT_SM};
+use crate::tokens::{ICON_MD, ICON_SM, TEXT_SM};
 
 const CONTEXT: &str = "StructureTab";
 
@@ -727,8 +727,25 @@ fn line(selector: impl Fn() -> String + 'static, cx: &App) -> Div {
 // form::input's height, so a row's selects and buttons line up with its inputs.
 const FIELD: f32 = 2.308;
 
-fn row_select(id: String, label: impl Into<SharedString>, cx: &App) -> Button {
-    form::select_small(SharedString::from(id.clone()), label, cx).h(rems(FIELD)).debug_selector(move || id.clone())
+// The dropdown the dialogs use. With nothing picked it shows `placeholder`, dimmed.
+fn row_select(id: String, label: SharedString, placeholder: &str, cx: &App) -> Button {
+    let select = match label.is_empty() {
+        true => form::select_placeholder(SharedString::from(id.clone()), t(cx, placeholder), cx),
+        false => form::select(SharedString::from(id.clone()), label, cx),
+    };
+    select.debug_selector(move || id.clone())
+}
+
+// A typed field's suggestions open from this, drawn like a dropdown's chevron.
+fn chevron(id: String, cx: &App) -> Button {
+    let theme = cx.theme();
+    Button::new(SharedString::from(id.clone()))
+        .debug_selector(move || id.clone())
+        .outline()
+        .size(rems(FIELD))
+        .p_0()
+        .bg(theme.background)
+        .child(Icon::new(IconName::ChevronDown).size(ICON_MD).text_color(theme.muted_foreground))
 }
 
 // A row's drop button, or its restore button once dropped. Plain until hovered, so the rows don't fence it in.

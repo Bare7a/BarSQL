@@ -7,7 +7,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{FIELD, StructureTab, cell, drop_button, input, line, problem_text, row_select};
+use super::{StructureTab, cell, chevron, drop_button, input, line, problem_text, row_select};
 use crate::form::{self, SelectMenu as _};
 use crate::i18n::{t, t_with};
 use crate::schema;
@@ -151,25 +151,19 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         let locked = !editable || !column.generated.is_empty() || row.dropped;
         let key = editors.key;
         let identity_shown = editing.identity != IdentityStyle::None && (old.is_none() || editing.identity_on_existing);
-        // A chevron alone, so it fits beside the type in its cell.
-        let picker = row_select(selector("types"), SharedString::default(), cx)
-            .min_w(rems(FIELD))
-            .w(rems(FIELD))
-            .px_0()
-            .disabled(locked)
-            .select_menu(window, cx, {
-                let this = this.clone();
-                move |mut menu: PopupMenu, _, cx| {
-                    let types = this.upgrade().map(|tab| suggestions(tab.read(cx), cx)).unwrap_or_default();
-                    for data_type in types {
-                        let this = this.clone();
-                        menu = menu.item(PopupMenuItem::new(data_type.clone()).on_click(move |_, window, cx| {
-                            let _ = this.update(cx, |tab, cx| tab.pick_type(key, data_type.clone(), window, cx));
-                        }));
-                    }
-                    menu
+        let picker = chevron(selector("types"), cx).disabled(locked).select_menu(window, cx, {
+            let this = this.clone();
+            move |mut menu: PopupMenu, _, cx| {
+                let types = this.upgrade().map(|tab| suggestions(tab.read(cx), cx)).unwrap_or_default();
+                for data_type in types {
+                    let this = this.clone();
+                    menu = menu.item(PopupMenuItem::new(data_type.clone()).on_click(move |_, window, cx| {
+                        let _ = this.update(cx, |tab, cx| tab.pick_type(key, data_type.clone(), window, cx));
+                    }));
                 }
-            });
+                menu
+            }
+        });
         let default = match column.generated.as_str() {
             "" => field(
                 &editors.default,
@@ -187,19 +181,23 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
             let choices = identity_choices(editing.identity);
             let label = identity_label(current, cx);
             div().flex_none().w(rems(9.)).child(
-                row_select(selector("identity"), label, cx).disabled(locked).select_menu(window, cx, {
-                    let this = this.clone();
-                    move |mut menu: PopupMenu, _, cx| {
-                        for &choice in choices {
-                            let this = this.clone();
-                            let item = PopupMenuItem::new(identity_label(choice, cx)).checked(choice == current);
-                            menu = menu.item(item.on_click(move |_, window, cx| {
-                                let _ = this.update(cx, |tab, cx| tab.set_identity(key, choice, window, cx));
-                            }));
+                row_select(selector("identity"), label, "structure.identity.label", cx).disabled(locked).select_menu(
+                    window,
+                    cx,
+                    {
+                        let this = this.clone();
+                        move |mut menu: PopupMenu, _, cx| {
+                            for &choice in choices {
+                                let this = this.clone();
+                                let item = PopupMenuItem::new(identity_label(choice, cx)).checked(choice == current);
+                                menu = menu.item(item.on_click(move |_, window, cx| {
+                                    let _ = this.update(cx, |tab, cx| tab.set_identity(key, choice, window, cx));
+                                }));
+                            }
+                            menu
                         }
-                        menu
-                    }
-                }),
+                    },
+                ),
             )
         });
         let comment = editing.comments.then(|| {

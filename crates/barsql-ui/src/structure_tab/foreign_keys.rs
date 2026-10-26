@@ -181,10 +181,6 @@ fn names_menu(
     }
 }
 
-fn joined(names: &[String], empty: &str, cx: &App) -> SharedString {
-    if names.is_empty() { t(cx, empty) } else { names.join(", ").into() }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn action_select(
     this: WeakEntity<StructureTab>,
@@ -197,7 +193,7 @@ fn action_select(
     window: &mut Window,
     cx: &mut Context<StructureTab>,
 ) -> Div {
-    let (slot, picker) = select(id, action_label(current, cx), locked, 8., cx);
+    let (slot, picker) = select(id, action_label(current, cx), "", locked, 8., cx);
     slot.child(picker.select_menu(window, cx, move |mut menu: PopupMenu, _, cx| {
         for &action in actions {
             let this = this.clone();
@@ -210,8 +206,8 @@ fn action_select(
     }))
 }
 
-fn select(id: String, label: SharedString, locked: bool, width: f32, cx: &App) -> (Div, Button) {
-    (div().flex_none().w(rems(width)), row_select(id, label, cx).disabled(locked))
+fn select(id: String, label: SharedString, placeholder: &str, locked: bool, width: f32, cx: &App) -> (Div, Button) {
+    (div().flex_none().w(rems(width)), row_select(id, label, placeholder, cx).disabled(locked))
 }
 
 pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<StructureTab>) -> AnyElement {
@@ -262,15 +258,14 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         let changed = !row.dropped && old.is_some_and(|old| replaced.as_ref().is_some_and(|gone| gone.contains(old)));
         let locked = !editable || row.dropped;
         let key = editors.key;
-        let label = joined(&fk.columns, "structure.foreignKey.columns", cx);
-        let (slot, picker) = select(selector("columns"), label, locked, 10., cx);
+        let label = fk.columns.join(", ").into();
+        let (slot, picker) = select(selector("columns"), label, "structure.foreignKey.columns", locked, 10., cx);
         let edit_columns: fn(&mut ForeignKey, String) = |fk, name| toggle(&mut fk.columns, name);
         let menu = names_menu(this.clone(), Some(columns.clone()), fk.columns.clone(), key, edit_columns);
         let column_pick = slot.child(picker.select_menu(window, cx, menu));
 
-        let label =
-            if fk.ref_table.is_empty() { t(cx, "structure.foreignKey.table") } else { fk.ref_table.clone().into() };
-        let (slot, picker) = select(selector("table"), label, locked, 10., cx);
+        let label = fk.ref_table.clone().into();
+        let (slot, picker) = select(selector("table"), label, "structure.foreignKey.table", locked, 10., cx);
         let table_pick = slot.child(picker.select_menu(window, cx, {
             let (this, tables, current) = (this.clone(), tables.clone(), fk.ref_table.clone());
             move |mut menu: PopupMenu, _, _| {
@@ -285,8 +280,9 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
             }
         }));
 
-        let label = joined(&fk.ref_columns, "structure.foreignKey.refColumns", cx);
-        let (slot, picker) = select(selector("ref-columns"), label, locked || fk.ref_table.is_empty(), 10., cx);
+        let (label, unpicked) = (fk.ref_columns.join(", ").into(), locked || fk.ref_table.is_empty());
+        let (slot, picker) =
+            select(selector("ref-columns"), label, "structure.foreignKey.refColumns", unpicked, 10., cx);
         let edit_targets: fn(&mut ForeignKey, String) = |fk, name| toggle(&mut fk.ref_columns, name);
         let menu = names_menu(this.clone(), names, fk.ref_columns.clone(), key, edit_targets);
         let target_pick = slot.child(picker.select_menu(window, cx, menu));

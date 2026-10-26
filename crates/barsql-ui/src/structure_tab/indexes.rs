@@ -158,27 +158,28 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         .when(changed, |el| el.bg(theme.warning.opacity(TINT)))
         .when(row.dropped, |el| el.bg(theme.danger.opacity(TINT)).line_through());
         if index.definition.is_empty() {
-            let label: SharedString = match index.columns.is_empty() {
-                true => t(cx, "structure.index.columns"),
-                false => index.columns.join(", ").into(),
-            };
-            let picker = row_select(selector("columns"), label, cx).disabled(locked).select_menu(window, cx, {
-                let (this, columns, chosen) = (this.clone(), columns.clone(), index.columns.clone());
-                move |mut menu: PopupMenu, _, _| {
-                    for column in &columns {
-                        let (this, column) = (this.clone(), column.clone());
-                        let item = PopupMenuItem::new(column.clone()).checked(chosen.contains(&column));
-                        menu = menu.item(item.on_click(move |_, window, cx| {
-                            let _ = this.update(cx, |tab, cx| tab.toggle_index_column(key, column.clone(), window, cx));
-                        }));
+            let label = index.columns.join(", ").into();
+            let picker = row_select(selector("columns"), label, "structure.index.columns", cx)
+                .disabled(locked)
+                .select_menu(window, cx, {
+                    let (this, columns, chosen) = (this.clone(), columns.clone(), index.columns.clone());
+                    move |mut menu: PopupMenu, _, _| {
+                        for column in &columns {
+                            let (this, column) = (this.clone(), column.clone());
+                            let item = PopupMenuItem::new(column.clone()).checked(chosen.contains(&column));
+                            menu = menu.item(item.on_click(move |_, window, cx| {
+                                let _ =
+                                    this.update(cx, |tab, cx| tab.toggle_index_column(key, column.clone(), window, cx));
+                            }));
+                        }
+                        menu
                     }
-                    menu
-                }
-            });
+                });
             let method = (!methods.is_empty()).then(|| {
                 let current = if index.method.is_empty() { methods[0].to_string() } else { index.method.clone() };
-                let select =
-                    row_select(selector("method"), current.clone(), cx).disabled(locked).select_menu(window, cx, {
+                let select = row_select(selector("method"), current.clone().into(), "structure.index.method", cx)
+                    .disabled(locked)
+                    .select_menu(window, cx, {
                         let this = this.clone();
                         move |mut menu: PopupMenu, _, _| {
                             for &method in methods {
