@@ -143,6 +143,7 @@
     "planHideQuiet": "Скрий 0 и false"
   },
   "sidebar": {
+    "newTable": "Нова таблица…",
     "editStructure": "Редактиране на структурата…",
     "viewStructure": "Преглед на структурата",
     "badge": {
@@ -450,6 +451,9 @@
     "checkUpdates": "Проверка за актуализации"
   },
   "structure": {
+    "newTableTitle": "Нова таблица",
+    "tableName": "Име на таблицата",
+    "tableNamePlaceholder": "напр. customers",
     "applyTitle": "Прилагане на промените в структурата",
     "applyConfirm": "Приложи",
     "applied": "Структурата на {{name}} е променена",

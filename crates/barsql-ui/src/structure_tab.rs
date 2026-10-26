@@ -9,7 +9,7 @@ use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Section, changes, plan_changes, plan_create,
 };
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{EditorState, InputState};
+use gpui_kit::component::input::{EditorState, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -78,7 +78,10 @@ pub struct StructureTab {
     // The table was dropped, or changed elsewhere, while this tab held changes.
     gone: bool,
     stale: bool,
+    // Only a new table has one.
+    name_field: Option<Entity<InputState>>,
     _load: Task<()>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<StructureTabEvent> for StructureTab {}
@@ -89,6 +92,21 @@ impl StructureTab {
         let draft = Draft::new_table(&connection.driver, &target.schema);
         let load = if target.table.is_empty() { Load::Ready } else { Load::Loading };
         let preview = cx.new(|cx| EditorState::new(window, cx).language("sql").line_number(false));
+        let name_field = target
+            .table
+            .is_empty()
+            .then(|| cx.new(|cx| InputState::new(window, cx).placeholder(t(cx, "structure.tableNamePlaceholder"))));
+        let subscriptions = name_field
+            .iter()
+            .map(|field| {
+                cx.subscribe_in(field, window, |tab: &mut Self, state, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        tab.draft.name = state.read(cx).value().trim().to_string();
+                        tab.changed(window, cx);
+                    }
+                })
+            })
+            .collect();
         let mut this = Self {
             id: tab.id,
             connection,
@@ -108,7 +126,9 @@ impl StructureTab {
             scroll: ScrollHandle::new(),
             gone: false,
             stale: false,
+            name_field,
             _load: Task::ready(()),
+            _subscriptions: subscriptions,
         };
         if this.table.is_empty() {
             this.reset_editors(window, cx);
@@ -145,8 +165,12 @@ impl StructureTab {
         });
     }
 
-    pub fn title(&self, _: &App) -> SharedString {
-        self.table.clone().into()
+    pub fn title(&self, cx: &App) -> SharedString {
+        if self.table.is_empty() { t(cx, "structure.newTableTitle") } else { self.table.clone().into() }
+    }
+
+    fn naming(&self) -> Option<&Entity<InputState>> {
+        self.name_field.as_ref().filter(|_| self.table.is_empty())
     }
 
     pub fn persisted(&self) -> bool {
@@ -166,7 +190,10 @@ impl StructureTab {
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
-        window.focus(&self.focus, cx);
+        match self.naming() {
+            Some(field) => field.update(cx, |state, cx| state.focus(window, cx)),
+            None => window.focus(&self.focus, cx),
+        }
     }
 
     pub fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
@@ -361,6 +388,9 @@ impl StructureTab {
             Some(original) => Draft::from_structure(original),
             None => Draft::new_table(&self.connection.driver, &self.schema),
         };
+        if let Some(field) = self.naming() {
+            field.update(cx, |state, cx| state.set_value("", window, cx));
+        }
         self.reset_editors(window, cx);
         self.changed(window, cx);
     }
@@ -406,7 +436,7 @@ impl StructureTab {
         }
     }
 
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn header(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let (marked, _) = self.pending();
         let switch = SECTIONS.iter().enumerate().fold(form::toggle_group(), |group, (ix, (section, key))| {
@@ -438,13 +468,26 @@ impl StructureTab {
             .py(rems(0.615))
             .border_b_1()
             .border_color(theme.border)
-            .child(
-                div()
+            .child(match self.naming() {
+                Some(field) => h_flex()
+                    .gap(rems(0.462))
+                    .text_size(TEXT_SM)
+                    .child(div().text_color(theme.muted_foreground).child(t(cx, "structure.tableName")))
+                    .child(format!("{}.", self.schema))
+                    .child(
+                        div()
+                            .w(rems(16.))
+                            .debug_selector(|| "structure:table-name".into())
+                            .child(form::input(field, window, cx).disabled(!self.editable())),
+                    )
+                    .into_any_element(),
+                None => div()
                     .text_size(TEXT_SM)
                     .font_semibold()
                     .debug_selector(|| "structure-title".into())
-                    .child(format!("{}.{}", self.schema, self.table)),
-            )
+                    .child(format!("{}.{}", self.schema, self.table))
+                    .into_any_element(),
+            })
             .child(div().w(rems(30.769)).child(switch))
     }
 
@@ -658,7 +701,12 @@ impl Render for StructureTab {
             .on_action(cx.listener(|this, _: &ApplyStructure, window, cx| this.apply(window, cx)))
             .bg(theme.background)
             .debug_selector(|| "structure-tab".into())
-            .child(self.header(cx))
+            .child(self.header(window, cx))
+            .children(
+                self.problems(Section::Table, 0)
+                    .map(|kind| form::error(problem_text(kind, cx), cx).mx(rems(1.231)).mt(rems(0.615)))
+                    .collect::<Vec<_>>(),
+            )
             .children(self.banner(cx))
             .child(div().flex_1().min_h_0().child(self.body(window, cx)))
             .when(self.editable(), |tab| tab.child(preview::panel(self, cx)))

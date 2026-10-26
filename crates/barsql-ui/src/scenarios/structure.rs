@@ -197,3 +197,27 @@ fn ctrl_s_opens_the_apply_dialog(cx: &mut TestAppContext) {
     app.keys("mod-s");
     assert!(app.dialog_open());
 }
+
+// Schema menu position, counted from the ER diagram at 0.
+const NEW_TABLE: usize = 3;
+
+#[gpui_kit::test]
+fn new_table_creates_and_becomes_its_structure_tab(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, TABLE);
+    app.context_menu("tree:s:main", NEW_TABLE);
+    app.wait_shown("structure:table-name");
+    retype(&mut app, "structure:table-name", "people");
+    app.click("structure-add");
+    app.type_text("email");
+    retype(&mut app, "structure:column:new2:type", "TEXT");
+    app.click("structure-apply");
+    app.click("change-confirm");
+    app.settle_dialog_closed();
+    listed_row(&mut app, "t:main.people", true);
+    app.query("SELECT email FROM people");
+    let active = app.active();
+    assert_eq!(app.titles()[active], "people");
+    let tab = app.structure();
+    app.settle(|cx| cx.update(|_, cx| tab.read(cx).persisted() && !tab.read(cx).has_changes()));
+    assert_eq!(names(&mut app), ["id", "email"]);
+}

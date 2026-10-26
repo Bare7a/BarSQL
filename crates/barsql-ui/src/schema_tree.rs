@@ -842,6 +842,8 @@ impl SchemaTree {
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let this = cx.entity().downgrade();
         let writable = self.writable();
+        let creatable =
+            writable && self.connection.as_ref().is_some_and(|c| c.driver.capabilities().structure.editable);
         move |menu, _, cx| {
             let refresh = {
                 let (this, name) = (this.clone(), name.clone());
@@ -867,10 +869,18 @@ impl SchemaTree {
                     let _ = this.update(cx, |tree, cx| tree.open_schema_diff(name.clone(), window, cx));
                 }
             };
+            let new_table = {
+                let (this, schema) = (this.clone(), name.clone());
+                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    let event = SchemaTreeEvent::OpenStructure { schema: schema.clone(), table: None };
+                    let _ = this.update(cx, |_, cx| cx.emit(event));
+                }
+            };
             menu.item(PopupMenuItem::new(t(cx, "erDiagram.menu")).on_click(diagram))
                 .item(PopupMenuItem::new(t(cx, "schemaDiff.menu")).on_click(compare))
                 .separator()
                 .item(PopupMenuItem::new(t(cx, "sidebar.refresh")).on_click(refresh))
+                .item(PopupMenuItem::new(t(cx, "sidebar.newTable")).disabled(!creatable).on_click(new_table))
                 .item(PopupMenuItem::new(t(cx, "sidebar.importIntoSchema")).disabled(!writable).on_click(import))
                 .separator()
                 .item(Self::copy_item(name.clone(), cx))

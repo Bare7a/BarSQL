@@ -143,6 +143,7 @@
     "planHideQuiet": "Hide 0 and false"
   },
   "sidebar": {
+    "newTable": "New table…",
     "editStructure": "Edit structure…",
     "viewStructure": "View structure",
     "badge": {
@@ -450,6 +451,9 @@
     "checkUpdates": "Check for updates"
   },
   "structure": {
+    "newTableTitle": "New table",
+    "tableName": "Table name",
+    "tableNamePlaceholder": "e.g. customers",
     "applyTitle": "Apply structure changes",
     "applyConfirm": "Apply",
     "applied": "Changed the structure of {{name}}",
