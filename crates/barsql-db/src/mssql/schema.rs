@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
     FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 use barsql_sql::ddl::{DdlColumn, compose_create_table, join_ddl, render_constraint, unsupported_ddl};
+use barsql_sql::structure::check_body;
 use barsql_sql::{enum_values, qualified_table, quote_ident, quote_ident_list};
 use tiberius::ToSql;
 
@@ -438,6 +440,175 @@ impl MsEngine {
                 Err(QueryError::message(unsupported_ddl(&MS, &object.kind)))
             }
         }
+    }
+
+    pub async fn table_structure(self: &Arc<Self>, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let params: [&str; 2] = [&schema, table];
+        let named_defaults = self
+            .rows(
+                &format!(
+                    "SELECT c.name, COALESCE(dc.name, '') FROM sys.columns c
+                    LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
+                    WHERE c.object_id = {TABLE_ID}"
+                ),
+                &params,
+            )
+            .await?;
+        let default_name = |column: &str| {
+            named_defaults.iter().find(|r| string(r, 0) == column).map(|r| string(r, 1)).unwrap_or_default()
+        };
+        let columns: Vec<StructColumn> = self
+            .ddl_columns(&schema, table)
+            .await?
+            .into_iter()
+            .map(|col| {
+                let mut seeded = col.identity.split(',').map(|part| part.trim().parse::<i64>());
+                let identity = match (seeded.next(), seeded.next()) {
+                    (Some(Ok(seed)), Some(Ok(increment))) => Identity::Seeded { seed, increment },
+                    _ => Identity::None,
+                };
+                StructColumn {
+                    default_name: default_name(&col.name),
+                    nullable: !col.not_null,
+                    identity,
+                    name: col.name,
+                    data_type: col.data_type,
+                    default: col.default,
+                    generated: col.generated,
+                    collation: col.collation,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        if columns.is_empty() {
+            return Err(QueryError::message(format!("table {table} not found")));
+        }
+        let keys = self
+            .rows(
+                &format!(
+                    "SELECT kc.name, kc.type, COL_NAME(ic.object_id, ic.column_id)
+                    FROM sys.key_constraints kc
+                    JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+                    WHERE kc.parent_object_id = {TABLE_ID} AND ic.is_included_column = 0
+                    ORDER BY kc.name, ic.key_ordinal"
+                ),
+                &params,
+            )
+            .await?;
+        let mut primary_key: Option<PrimaryKey> = None;
+        let mut indexes: Vec<StructIndex> = Vec::new();
+        for r in &keys {
+            let (name, column) = (string(r, 0), string(r, 2));
+            if string(r, 1).trim() == "PK" {
+                primary_key.get_or_insert_with(|| PrimaryKey { name, columns: Vec::new() }).columns.push(column);
+                continue;
+            }
+            if indexes.last().is_none_or(|index| index.name != name) {
+                indexes.push(StructIndex { name, unique: true, constraint: true, ..Default::default() });
+            }
+            indexes.last_mut().expect("pushed").columns.push(column);
+        }
+        let listed = self
+            .rows(
+                &format!(
+                    "SELECT i.name, CAST(i.is_unique AS int), COL_NAME(ic.object_id, ic.column_id), LOWER(i.type_desc),
+                        CAST(i.has_filter AS int) | IIF(EXISTS (SELECT 1 FROM sys.index_columns x
+                            WHERE x.object_id = i.object_id AND x.index_id = i.index_id AND x.is_included_column = 1), 1, 0)
+                    FROM sys.indexes i
+                    JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+                        AND ic.is_included_column = 0
+                    WHERE i.object_id = {TABLE_ID} AND i.is_primary_key = 0 AND i.is_unique_constraint = 0
+                        AND i.type > 0 AND i.name IS NOT NULL
+                    ORDER BY i.name, ic.key_ordinal"
+                ),
+                &params,
+            )
+            .await?;
+        let mut plain: Vec<(IndexInfo, bool)> = Vec::new();
+        for r in &listed {
+            let name = string(r, 0);
+            if plain.last().is_none_or(|(index, _)| index.name != name) {
+                let index = IndexInfo {
+                    name,
+                    schema: schema.clone(),
+                    table: table.to_string(),
+                    is_unique: flag(r, 1),
+                    method: string(r, 3),
+                    ..Default::default()
+                };
+                plain.push((index, flag(r, 4)));
+            }
+            plain.last_mut().expect("pushed").0.columns.push(string(r, 2));
+        }
+        for (index, unusual) in plain {
+            // A filtered index, or one with INCLUDE columns, is shown as the server would write it.
+            let definition = match unusual {
+                true => self.index_ddl(&index).await?.trim_end_matches(';').to_string(),
+                false => String::new(),
+            };
+            indexes.push(StructIndex {
+                name: index.name,
+                columns: index.columns,
+                unique: index.is_unique,
+                definition,
+                ..Default::default()
+            });
+        }
+        let keyed = self
+            .rows(
+                &format!(
+                    "SELECT fk.name, COL_NAME(fkc.parent_object_id, fkc.parent_column_id),
+                        OBJECT_SCHEMA_NAME(fk.referenced_object_id), OBJECT_NAME(fk.referenced_object_id),
+                        COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id),
+                        fk.update_referential_action_desc, fk.delete_referential_action_desc
+                    FROM sys.foreign_keys fk
+                    JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                    WHERE fk.parent_object_id = {TABLE_ID}
+                    ORDER BY fk.name, fkc.constraint_column_id"
+                ),
+                &params,
+            )
+            .await?;
+        let mut foreign_keys: Vec<ForeignKey> = Vec::new();
+        for r in &keyed {
+            let name = string(r, 0);
+            if foreign_keys.last().is_none_or(|fk| fk.name != name) {
+                foreign_keys.push(ForeignKey {
+                    name,
+                    ref_schema: string(r, 2),
+                    ref_table: string(r, 3),
+                    on_update: RefAction::parse(&string(r, 5)),
+                    on_delete: RefAction::parse(&string(r, 6)),
+                    ..Default::default()
+                });
+            }
+            let fk = foreign_keys.last_mut().expect("pushed");
+            fk.columns.push(string(r, 1));
+            fk.ref_columns.push(string(r, 4));
+        }
+        let checks = self
+            .rows(
+                &format!(
+                    "SELECT cc.name, cc.definition FROM sys.check_constraints cc
+                    WHERE cc.parent_object_id = {TABLE_ID} ORDER BY cc.name"
+                ),
+                &params,
+            )
+            .await?
+            .iter()
+            .map(|r| Check { name: string(r, 0), expression: check_body(&string(r, 1)) })
+            .collect();
+        Ok(TableStructure {
+            schema,
+            name: table.to_string(),
+            columns,
+            primary_key,
+            indexes,
+            foreign_keys,
+            checks,
+            ..Default::default()
+        })
     }
 
     // Columns and their keys, then the indexes no constraint stands for. With `split_foreign_keys`, the foreign keys

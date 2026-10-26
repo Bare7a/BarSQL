@@ -1,0 +1,200 @@
+{
+  "engine": "sqlserver",
+  "schema": "dbo",
+  "table": "e2e_people",
+  "setup": [
+    "IF OBJECT_ID(N'dbo.e2e_people', N'U') IS NOT NULL DROP TABLE dbo.e2e_people",
+    "IF OBJECT_ID(N'dbo.e2e_orgs', N'U') IS NOT NULL DROP TABLE dbo.e2e_orgs",
+    "CREATE TABLE dbo.e2e_orgs (id int PRIMARY KEY)",
+    "CREATE TABLE dbo.e2e_people (id int IDENTITY(1,1) CONSTRAINT PK_e2e_people PRIMARY KEY, nick nvarchar(50) COLLATE Latin1_General_BIN2, age int, email nvarchar(255), legacy nvarchar(50), org_id int CONSTRAINT e2e_people_org_fk REFERENCES dbo.e2e_orgs(id) ON DELETE SET NULL, status nvarchar(20) CONSTRAINT DF_e2e_people_status DEFAULT N'new', CONSTRAINT e2e_people_org_check CHECK (org_id > 0))",
+    "CREATE INDEX e2e_people_org ON dbo.e2e_people (org_id)",
+    "INSERT INTO dbo.e2e_orgs VALUES (1)",
+    "INSERT INTO dbo.e2e_people (nick, age, email, legacy, org_id) VALUES (N'ann', 30, N'ann@example.com', N'old', 1)"
+  ],
+  "countTables": [
+    "e2e_people"
+  ],
+  "structure": {
+    "schema": "dbo",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "int",
+        "identity": {
+          "seeded": {
+            "seed": 1,
+            "increment": 1
+          }
+        }
+      },
+      {
+        "name": "nick",
+        "dataType": "nvarchar(50)",
+        "nullable": true,
+        "collation": "Latin1_General_BIN2"
+      },
+      {
+        "name": "age",
+        "dataType": "int",
+        "nullable": true
+      },
+      {
+        "name": "email",
+        "dataType": "nvarchar(255)",
+        "nullable": true
+      },
+      {
+        "name": "legacy",
+        "dataType": "nvarchar(50)",
+        "nullable": true
+      },
+      {
+        "name": "org_id",
+        "dataType": "int",
+        "nullable": true
+      },
+      {
+        "name": "status",
+        "dataType": "nvarchar(20)",
+        "nullable": true,
+        "default": "(N'new')",
+        "defaultName": "DF_e2e_people_status"
+      }
+    ],
+    "primaryKey": {
+      "name": "PK_e2e_people",
+      "columns": [
+        "id"
+      ]
+    },
+    "indexes": [
+      {
+        "name": "e2e_people_org",
+        "columns": [
+          "org_id"
+        ]
+      }
+    ],
+    "foreignKeys": [
+      {
+        "name": "e2e_people_org_fk",
+        "columns": [
+          "org_id"
+        ],
+        "refSchema": "dbo",
+        "refTable": "e2e_orgs",
+        "refColumns": [
+          "id"
+        ],
+        "onUpdate": "noAction",
+        "onDelete": "setNull"
+      }
+    ],
+    "checks": [
+      {
+        "name": "e2e_people_org_check",
+        "expression": "[org_id]>(0)"
+      }
+    ]
+  },
+  "plan": [
+    "SET XACT_ABORT ON",
+    "BEGIN TRANSACTION",
+    "EXEC sp_rename N'[dbo].[e2e_people].[nick]', N'nickname', 'COLUMN'",
+    "ALTER TABLE [dbo].[e2e_people] ALTER COLUMN [age] bigint NULL",
+    "ALTER TABLE [dbo].[e2e_people] ALTER COLUMN [email] nvarchar(255) NOT NULL",
+    "ALTER TABLE [dbo].[e2e_people] ADD CONSTRAINT [DF_e2e_people_email] DEFAULT '' FOR [email]",
+    "ALTER TABLE [dbo].[e2e_people] DROP COLUMN [legacy]",
+    "ALTER TABLE [dbo].[e2e_people] ADD [created_at] DATETIME2 NULL",
+    "COMMIT TRANSACTION"
+  ],
+  "after": {
+    "schema": "dbo",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "int",
+        "identity": {
+          "seeded": {
+            "seed": 1,
+            "increment": 1
+          }
+        }
+      },
+      {
+        "name": "nickname",
+        "dataType": "nvarchar(50)",
+        "nullable": true,
+        "collation": "Latin1_General_BIN2"
+      },
+      {
+        "name": "age",
+        "dataType": "bigint",
+        "nullable": true
+      },
+      {
+        "name": "email",
+        "dataType": "nvarchar(255)",
+        "default": "('')",
+        "defaultName": "DF_e2e_people_email"
+      },
+      {
+        "name": "org_id",
+        "dataType": "int",
+        "nullable": true
+      },
+      {
+        "name": "status",
+        "dataType": "nvarchar(20)",
+        "nullable": true,
+        "default": "(N'new')",
+        "defaultName": "DF_e2e_people_status"
+      },
+      {
+        "name": "created_at",
+        "dataType": "datetime2(7)",
+        "nullable": true
+      }
+    ],
+    "primaryKey": {
+      "name": "PK_e2e_people",
+      "columns": [
+        "id"
+      ]
+    },
+    "indexes": [
+      {
+        "name": "e2e_people_org",
+        "columns": [
+          "org_id"
+        ]
+      }
+    ],
+    "foreignKeys": [
+      {
+        "name": "e2e_people_org_fk",
+        "columns": [
+          "org_id"
+        ],
+        "refSchema": "dbo",
+        "refTable": "e2e_orgs",
+        "refColumns": [
+          "id"
+        ],
+        "onUpdate": "noAction",
+        "onDelete": "setNull"
+      }
+    ],
+    "checks": [
+      {
+        "name": "e2e_people_org_check",
+        "expression": "[org_id]>(0)"
+      }
+    ]
+  },
+  "counts": {
+    "e2e_people": "1"
+  }
+}

@@ -110,3 +110,10 @@ async fn sqlserver_plans_are_recorded_on_request() {
         &serde_json::json!({ "engine": "sqlserver", "driver": "sqlserver", "plans": plans }),
     );
 }
+
+#[tokio::test]
+async fn sql_server_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    let Some(engine) = connect().await else { return };
+    common::structure_fixture_test(&engine, "structure/sqlserver.json").await;
+}
