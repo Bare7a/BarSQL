@@ -16,6 +16,7 @@ pub mod result;
 mod script;
 pub mod sqlite;
 pub mod ssh;
+pub mod structure;
 mod temporal;
 pub mod tls;
 pub mod turso;

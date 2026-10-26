@@ -5,6 +5,7 @@ use barsql_core::{
 };
 use barsql_db::sqlite::SqliteConnectOptions;
 use barsql_db::{Cancel, Engine, ScriptEvent};
+use barsql_sql::structure::Step;
 
 fn config(path: &std::path::Path, read_only: bool) -> ConnectionConfig {
     ConnectionConfig {
@@ -357,4 +358,39 @@ async fn a_plan_gives_the_connection_back() {
     assert!(!tab.plan_rows(&strategy, &Cancel::new()).await.unwrap().rows.is_empty());
     let next = tokio::time::timeout(std::time::Duration::from_secs(5), exec(&engine, "SELECT 1")).await;
     assert!(next.is_ok(), "the plan kept the connection");
+}
+
+#[tokio::test]
+async fn a_failed_plan_leaves_the_shared_connection_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("plan.db"), false).await;
+    let steps = [
+        "PRAGMA foreign_keys = OFF",
+        "BEGIN",
+        "CREATE TABLE t2 (a)",
+        "INSERT INTO missing VALUES (1)",
+        "COMMIT",
+        "PRAGMA foreign_keys = ON",
+    ]
+    .map(Step::sql);
+    let mut session = engine.session().await.unwrap();
+    assert!(barsql_db::structure::apply(&mut session, &steps, &Cancel::new()).await.is_err());
+    drop(session);
+
+    let mut session = engine.session().await.unwrap();
+    let keys = session.buffered("PRAGMA foreign_keys", &Cancel::new()).await.unwrap();
+    assert_eq!(keys.values(), [[Value::Int(1)]]);
+    let created = session.buffered("SELECT name FROM sqlite_master WHERE name = 't2'", &Cancel::new()).await.unwrap();
+    assert_eq!(created.rows(), 0, "the CREATE was rolled back");
+    session.buffered("BEGIN", &Cancel::new()).await.expect("no transaction left open");
+    session.buffered("COMMIT", &Cancel::new()).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_check_step_with_rows_fails_the_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("check.db"), false).await;
+    let mut session = engine.session().await.unwrap();
+    let steps = [Step { sql: "SELECT 1".into(), expect_no_rows: true }];
+    assert!(barsql_db::structure::apply(&mut session, &steps, &Cancel::new()).await.is_err());
 }
