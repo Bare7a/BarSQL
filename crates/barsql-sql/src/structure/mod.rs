@@ -1,6 +1,7 @@
 pub mod create_sql;
 mod mysql;
 mod postgres;
+mod sqlite;
 mod tsql;
 
 use std::collections::{HashMap, HashSet};
@@ -450,6 +451,10 @@ pub fn plan_changes(driver: &DriverType, original: &TableStructure, draft: &Draf
         Some(SqlDialect::Postgres) => transaction(postgres::alter(driver, original, &found)),
         Some(SqlDialect::TSql) => tsql_transaction(tsql::alter(driver, original, &found)),
         Some(SqlDialect::MySql) => statements(mysql::alter(driver, original, &found)),
+        Some(SqlDialect::Sqlite) => match sqlite::alter(driver, original, &found, draft) {
+            Some((steps, warnings)) => ChangePlan { steps, warnings },
+            None => return Err(vec![Problem { section: Section::Table, row: 0, kind: ProblemKind::Unsupported }]),
+        },
         _ => ChangePlan::default(),
     })
 }
@@ -463,6 +468,10 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
         Some(SqlDialect::Postgres) => transaction(postgres::create(driver, draft)),
         Some(SqlDialect::TSql) => tsql_transaction(tsql::create(driver, draft)),
         Some(SqlDialect::MySql) => statements(mysql::create(driver, draft)),
+        Some(SqlDialect::Sqlite) => ChangePlan {
+            steps: sqlite::create(driver, draft).into_iter().map(Step::sql).collect(),
+            warnings: Vec::new(),
+        },
         _ => ChangePlan::default(),
     })
 }
