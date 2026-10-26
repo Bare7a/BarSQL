@@ -287,6 +287,10 @@ impl Driver<'_> {
         self.cx.update(|_, cx| self.workspace.read(cx).query_tab()).expect("a query tab is active")
     }
 
+    pub fn structure(&mut self) -> Entity<crate::structure_tab::StructureTab> {
+        self.cx.update(|_, cx| self.workspace.read(cx).active_structure()).expect("a Structure tab is active")
+    }
+
     pub fn titles(&mut self) -> Vec<String> {
         self.cx.update(|_, cx| self.workspace.read(cx).titles(cx))
     }

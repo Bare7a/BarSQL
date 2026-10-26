@@ -834,7 +834,7 @@ impl Workspace {
         if tab.structure.is_some() {
             let view = cx.new(|cx| {
                 let mut view = StructureTab::new(tab, connection, window, cx);
-                view.load(cx);
+                view.load(window, cx);
                 view
             });
             let subscriptions = vec![
@@ -1944,6 +1944,14 @@ impl Workspace {
     fn stop_run(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(tab) = self.active_tab().and_then(TabView::query).cloned() {
             tab.update(cx, |tab, cx| tab.cancel(cx));
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_structure(&self) -> Option<Entity<StructureTab>> {
+        match self.active_tab()? {
+            TabView::Structure(tab) => Some(tab.clone()),
+            _ => None,
         }
     }
 

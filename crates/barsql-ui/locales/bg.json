@@ -450,6 +450,29 @@
     "checkUpdates": "Проверка за актуализации"
   },
   "structure": {
+    "add": "Добави",
+    "revert": "Отмени",
+    "apply": "Приложи",
+    "preview": "SQL преглед",
+    "defaultHint": "SQL, например 'pending' или now()",
+    "primaryKey": "Ключ",
+    "drop": "Изтрий",
+    "restore": "Възстанови",
+    "pendingChanges_one": "{{count}} промяна",
+    "pendingChanges_other": "{{count}} промени",
+    "problem": {
+      "emptyTableName": "Въведете име на таблицата",
+      "emptyName": "Въведете име",
+      "duplicateName": "Това име вече е заето",
+      "emptyType": "Изберете тип",
+      "noColumns": "Таблицата трябва да има поне една колона",
+      "noIndexColumns": "Изберете колоните за индекса",
+      "usesDroppedColumn": "Използва {{column}}, която се изтрива",
+      "foreignKeyColumnCount": "Посочете толкова колони, колкото сочи",
+      "noReferencedTable": "Изберете таблицата, към която сочи",
+      "emptyExpression": "Въведете условието",
+      "unsupported": "Тази база данни не може да направи тази промяна"
+    },
     "columns": "Колони",
     "indexes": "Индекси",
     "foreignKeys": "Външни ключове",
@@ -466,6 +489,7 @@
     "noForeignKeys": "Няма външни ключове",
     "noChecks": "Няма проверки",
     "identity": {
+      "label": "Идентичност",
       "none": "Без",
       "byDefault": "Идентичност, по подразбиране",
       "always": "Идентичност, винаги",

@@ -450,6 +450,29 @@
     "checkUpdates": "Check for updates"
   },
   "structure": {
+    "add": "Add",
+    "revert": "Revert",
+    "apply": "Apply",
+    "preview": "SQL preview",
+    "defaultHint": "SQL, like 'pending' or now()",
+    "primaryKey": "Key",
+    "drop": "Drop",
+    "restore": "Restore",
+    "pendingChanges_one": "{{count}} change",
+    "pendingChanges_other": "{{count}} changes",
+    "problem": {
+      "emptyTableName": "Name the table",
+      "emptyName": "Give it a name",
+      "duplicateName": "Another one already has this name",
+      "emptyType": "Pick a type",
+      "noColumns": "A table needs at least one column",
+      "noIndexColumns": "Pick the columns to index",
+      "usesDroppedColumn": "Uses {{column}}, which is being dropped",
+      "foreignKeyColumnCount": "Name as many columns as it references",
+      "noReferencedTable": "Pick the table it references",
+      "emptyExpression": "Write the condition",
+      "unsupported": "This database can't make this change"
+    },
     "columns": "Columns",
     "indexes": "Indexes",
     "foreignKeys": "Foreign keys",
@@ -466,6 +489,7 @@
     "noForeignKeys": "No foreign keys",
     "noChecks": "No checks",
     "identity": {
+      "label": "Identity",
       "none": "None",
       "byDefault": "Identity, by default",
       "always": "Identity, always",

@@ -450,6 +450,29 @@
     "checkUpdates": "Nach Updates suchen"
   },
   "structure": {
+    "add": "Hinzufügen",
+    "revert": "Verwerfen",
+    "apply": "Anwenden",
+    "preview": "SQL-Vorschau",
+    "defaultHint": "SQL, etwa 'offen' oder now()",
+    "primaryKey": "Schlüssel",
+    "drop": "Löschen",
+    "restore": "Wiederherstellen",
+    "pendingChanges_one": "{{count}} Änderung",
+    "pendingChanges_other": "{{count}} Änderungen",
+    "problem": {
+      "emptyTableName": "Tabellennamen eingeben",
+      "emptyName": "Namen eingeben",
+      "duplicateName": "Dieser Name ist schon vergeben",
+      "emptyType": "Typ wählen",
+      "noColumns": "Eine Tabelle braucht mindestens eine Spalte",
+      "noIndexColumns": "Spalten für den Index wählen",
+      "usesDroppedColumn": "Verwendet {{column}}, die gelöscht wird",
+      "foreignKeyColumnCount": "So viele Spalten angeben, wie referenziert werden",
+      "noReferencedTable": "Referenzierte Tabelle wählen",
+      "emptyExpression": "Bedingung eingeben",
+      "unsupported": "Diese Datenbank kann das nicht ändern"
+    },
     "columns": "Spalten",
     "indexes": "Indizes",
     "foreignKeys": "Fremdschlüssel",
@@ -466,6 +489,7 @@
     "noForeignKeys": "Keine Fremdschlüssel",
     "noChecks": "Keine Checks",
     "identity": {
+      "label": "Identität",
       "none": "Keine",
       "byDefault": "Identität, standardmäßig",
       "always": "Identität, immer",

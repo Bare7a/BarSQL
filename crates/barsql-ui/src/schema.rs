@@ -120,6 +120,16 @@ pub fn is_view(connection_id: &str, schema: &str, table: &str, cx: &App) -> bool
         .is_some_and(|t| is_view_kind(&t.kind))
 }
 
+// The column types the loaded tables use, so a new column can pick from them.
+pub fn column_types(cx: &App, connection_id: &str) -> Vec<String> {
+    let Some(loaded) = get(cx, connection_id) else { return Vec::new() };
+    let mut types: Vec<String> =
+        loaded.columns.values().flat_map(|columns| columns.iter().map(|c| c.data_type.clone())).collect();
+    types.sort();
+    types.dedup();
+    types
+}
+
 pub fn is_view_kind(kind: &str) -> bool {
     kind == "view" || kind == "materialized view"
 }
