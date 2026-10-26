@@ -275,3 +275,18 @@ fn adding_an_index_lands_in_the_tree(cx: &mut TestAppContext) {
     app.settle_dialog_closed();
     listed_row(&mut app, "o:main:e2e_s:indexes:idx_e2e_s_name", true);
 }
+
+#[gpui_kit::test]
+fn adding_a_check_rebuilds_the_table_with_it(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.click("structure-section:3");
+    app.click("structure-add");
+    app.type_text("id > 0");
+    let sql = script(&mut app);
+    assert!(sql.contains("    CHECK (id > 0)\n)"), "{sql}");
+    app.click("structure-apply");
+    app.click("change-confirm");
+    app.settle_dialog_closed();
+    let ddl = format!("{:?}", app.query("SELECT sql FROM sqlite_master WHERE name = 'e2e_s'"));
+    assert!(ddl.contains("CHECK (id > 0)"), "{ddl}");
+}

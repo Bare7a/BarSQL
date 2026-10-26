@@ -1,4 +1,4 @@
-use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
+use barsql_core::{Check, DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
 use super::{ChangePlan, ColumnRow};
 
@@ -36,6 +36,10 @@ pub fn index(name: &str, columns: &[&str], unique: bool) -> StructIndex {
         unique,
         ..Default::default()
     }
+}
+
+pub fn check(name: &str, expression: &str) -> Check {
+    Check { name: name.into(), expression: expression.into() }
 }
 
 pub fn added(column: StructColumn) -> ColumnRow {

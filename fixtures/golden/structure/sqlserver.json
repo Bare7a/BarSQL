@@ -108,6 +108,7 @@
     "ALTER TABLE [dbo].[e2e_people] DROP COLUMN [legacy]",
     "ALTER TABLE [dbo].[e2e_people] ADD [created_at] DATETIME2 NULL",
     "CREATE INDEX [IX_e2e_people_nickname] ON [dbo].[e2e_people] ([nickname])",
+    "ALTER TABLE [dbo].[e2e_people] ADD CONSTRAINT [CK_e2e_people_age] CHECK (age >= 0)",
     "COMMIT TRANSACTION"
   ],
   "after": {
@@ -195,6 +196,10 @@
       }
     ],
     "checks": [
+      {
+        "name": "CK_e2e_people_age",
+        "expression": "[age]>=(0)"
+      },
       {
         "name": "e2e_people_org_check",
         "expression": "[org_id]>(0)"

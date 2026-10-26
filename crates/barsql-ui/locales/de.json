@@ -451,6 +451,10 @@
     "checkUpdates": "Nach Updates suchen"
   },
   "structure": {
+    "check": {
+      "name": "Name",
+      "expression": "Bedingung"
+    },
     "index": {
       "name": "Name",
       "columns": "Spalten",

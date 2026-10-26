@@ -93,7 +93,7 @@
     ]
   },
   "plan": [
-    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL, ADD INDEX `idx_e2e_people_nickname` (`nickname`)"
+    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL, ADD INDEX `idx_e2e_people_nickname` (`nickname`), ADD CHECK (age >= 0)"
   ],
   "after": {
     "schema": "barsql_test",
@@ -176,6 +176,10 @@
     "checks": [
       {
         "name": "e2e_people_age_check",
+        "expression": "`age` >= 0"
+      },
+      {
+        "name": "e2e_people_chk_1",
         "expression": "`age` >= 0"
       }
     ]

@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use barsql_core::{Dependent, DriverType, Identity, StructColumn, StructIndex, TableStructure};
+use barsql_core::{Check, Dependent, DriverType, Identity, StructColumn, StructIndex, TableStructure};
 
 use super::create_sql::{column_item, item_column, names_in, paren_body, split_create_table};
-use super::{Changes, Draft, Step, Warning};
+use super::{Changes, Draft, Step, Warning, check_clause};
 use crate::alter::{drop_column, rename_column};
 use crate::lang::tokens::{TokenKind, tokenize};
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
@@ -152,10 +152,33 @@ fn unique_columns(item: &str) -> Option<Vec<String>> {
     paren_body(item)?.split(',').map(first_name).collect()
 }
 
-// Takes one dropped unique constraint on exactly these columns off the list.
-fn take(unconstrained: &mut Vec<Vec<String>>, columns: &[String]) -> bool {
-    let found = unconstrained.iter().position(|listed| listed == columns);
-    found.map(|at| unconstrained.remove(at)).is_some()
+// Takes one entry equal to `wanted` off the list.
+fn take<T: PartialEq<U>, U: ?Sized>(list: &mut Vec<T>, wanted: &U) -> bool {
+    let found = list.iter().position(|listed| listed == wanted);
+    found.map(|at| list.remove(at)).is_some()
+}
+
+// A rebuild writes the table with the old column names and renames them last, so a new check names them so too. A
+// name followed by `(` is a function's.
+fn under_old_names(expression: &str, back: &HashMap<&str, &str>) -> String {
+    let tokens = tokenize(expression, Some(&LITE));
+    let code: Vec<_> = tokens.iter().filter(|t| t.kind != TokenKind::Comment).collect();
+    let (mut out, mut at) = (String::new(), 0);
+    for (ix, token) in code.iter().enumerate() {
+        let called = code.get(ix + 1).is_some_and(|next| next.is_punct("("));
+        if !matches!(token.kind, TokenKind::Ident | TokenKind::Quoted) || called {
+            continue;
+        }
+        let name = token.ident_text();
+        let Some(old) = back.iter().find(|(new, _)| new.eq_ignore_ascii_case(&name)).map(|(_, old)| *old) else {
+            continue;
+        };
+        out.push_str(&expression[at..token.start]);
+        out.push_str(&quote_ident(&LITE, old));
+        at = token.end;
+    }
+    out.push_str(&expression[at..]);
+    out
 }
 
 // SQLite's 12-step rebuild. Renamed columns keep their old names until the last step renames them, so SQLite itself
@@ -183,13 +206,15 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
         .filter_map(|row| Some((original.columns.get(row.origin?)?.name.to_lowercase(), &row.column)))
         .collect();
 
-    // A dropped unique constraint is part of the definition, inline on its column or as a UNIQUE (…) item.
+    // Dropped unique constraints and checks are part of the definition, inline on a column or items of their own.
     let mut unconstrained: Vec<Vec<String>> = changes
         .dropped_indexes
         .iter()
         .filter(|index| index.constraint)
         .map(|index| index.columns.iter().map(|c| c.to_lowercase()).collect())
         .collect();
+    let mut unchecked: Vec<String> =
+        changes.dropped_checks.iter().map(|check| check.expression.trim().into()).collect();
     let mut items: Vec<String> = Vec::new();
     let mut after_columns = 0;
     let mut key_placed = !key_changed || new_key.len() < 2;
@@ -202,24 +227,36 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
                 }
                 continue;
             }
-            if unique_columns(item).is_some_and(|columns| take(&mut unconstrained, &columns)) {
-                continue;
+            let unique = unique_columns(item).is_some_and(|columns| take(&mut unconstrained, columns.as_slice()));
+            let check =
+                starts_constraint(item, "check") && paren_body(item).is_some_and(|body| take(&mut unchecked, body));
+            if !unique && !check {
+                items.push(item.to_string());
             }
-            items.push(item.to_string());
             continue;
         };
         let lower = column.to_lowercase();
+        let parsed = column_item(item);
+        let clauses: Vec<(&str, &str)> =
+            parsed.iter().flat_map(|parsed| parsed.clauses.iter()).map(|(kind, text)| (kind.as_str(), *text)).collect();
+        // The clauses of dropped constraints. A dropped column takes them along.
+        let mut gone: Vec<&str> = Vec::new();
+        if clauses.iter().any(|(kind, _)| *kind == "unique") && take(&mut unconstrained, std::slice::from_ref(&lower)) {
+            gone.extend(clauses.iter().filter(|(kind, _)| *kind == "unique").map(|(_, text)| *text));
+        }
+        for (kind, text) in &clauses {
+            if *kind == "check" && paren_body(text).is_some_and(|body| take(&mut unchecked, body)) {
+                gone.push(text);
+            }
+        }
         if dropped.contains(&lower) {
             continue;
         }
-        let parsed = column_item(item);
-        let clauses = parsed.iter().flat_map(|parsed| parsed.clauses.iter());
-        let inline_unique = clauses.clone().any(|(kind, _)| kind == "unique");
-        let unconstrain = inline_unique && take(&mut unconstrained, std::slice::from_ref(&lower));
-        if modified.contains(&lower) || key_members.contains(&lower) || unconstrain {
+        if modified.contains(&lower) || key_members.contains(&lower) || !gone.is_empty() {
             let new = current.get(&lower).copied()?;
             let kept: Vec<&str> = clauses
-                .filter(|(kind, _)| KEPT_CLAUSES.contains(&kind.as_str()) && !(unconstrain && kind == "unique"))
+                .iter()
+                .filter(|(kind, text)| KEPT_CLAUSES.contains(kind) && !gone.contains(text))
                 .map(|(_, text)| *text)
                 .collect();
             items.push(render(new, &column, inline_key(&column), &kept));
@@ -228,11 +265,19 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
         }
         after_columns = items.len();
     }
+    // A dropped constraint the definition doesn't show can't be taken out of it.
+    if !unconstrained.is_empty() || !unchecked.is_empty() {
+        return None;
+    }
     let added: Vec<String> = changes.added.iter().map(|c| render(c, &c.name, inline_key(&c.name), &[])).collect();
     items.splice(after_columns..after_columns, added);
     if !key_placed {
         items.push(format!("PRIMARY KEY ({})", quote_ident_list(driver, &new_key)));
     }
+    items.extend(changes.added_checks.iter().map(|check| {
+        let check = Check { expression: under_old_names(&check.expression, &back), ..check.clone() };
+        check_clause(driver, &check)
+    }));
 
     let copied: Vec<String> = original
         .columns
@@ -552,6 +597,48 @@ mod tests {
         let steps = sql(&plan);
         let rename = steps.iter().position(|step| step.contains("RENAME COLUMN")).expect("a rename");
         assert_eq!(steps[rename + 1], r#"CREATE INDEX "idx_users_full_name" ON "users" ("full_name")"#);
+    }
+
+    #[test]
+    fn sqlite_adds_and_drops_checks() {
+        let mut original = table(
+            "users",
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT CHECK (name <> ''), age INTEGER, CHECK (age >= 0))",
+            vec![column("id", "INTEGER"), column("name", "TEXT"), column("age", "INTEGER")],
+            &["id"],
+        );
+        original.checks = vec![check("", "name <> ''"), check("", "age >= 0")];
+        let mut draft = Draft::from_structure(&original);
+        draft.checks[0].dropped = true;
+        draft.checks[1].dropped = true;
+        draft.checks.push(Row::added(check("adult", "age >= 18")));
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        assert_eq!(plan.warnings, [Warning::Rebuild]);
+        assert_eq!(
+            sql(&plan)[2],
+            "CREATE TABLE \"barsql_new_users\" (\n    id INTEGER PRIMARY KEY,\n    \"name\" TEXT,\n    age INTEGER,\n    CONSTRAINT \"adult\" CHECK (age >= 18)\n)"
+        );
+    }
+
+    #[test]
+    fn sqlite_checks_name_renamed_columns_by_their_old_name() {
+        let original = simple();
+        let mut draft = Draft::from_structure(&original);
+        draft.rename_column(1, "full_name".into());
+        draft.checks.push(Row::added(check("", "length(full_name) > 0")));
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert!(steps[2].ends_with("    CHECK (length(\"name\") > 0)\n)"), "{}", steps[2]);
+        assert!(steps.contains(&r#"ALTER TABLE "users" RENAME COLUMN "name" TO "full_name""#), "{steps:?}");
+    }
+
+    #[test]
+    fn sqlite_refuses_a_dropped_check_it_cannot_find() {
+        let mut original = simple();
+        original.checks = vec![check("", "legacy <> ''")];
+        let mut draft = Draft::from_structure(&original);
+        draft.checks[0].dropped = true;
+        assert!(plan_changes(&LITE, &original, &draft).is_err());
     }
 
     #[test]

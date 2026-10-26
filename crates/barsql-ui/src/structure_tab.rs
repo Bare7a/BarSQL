@@ -1,3 +1,4 @@
+mod checks;
 mod columns;
 mod indexes;
 mod preview;
@@ -5,7 +6,7 @@ mod preview;
 mod tests;
 
 use barsql_app::{EditorTab, StructureRef};
-use barsql_core::{ConnectionConfig, Identity, StructColumn, StructIndex, TableStructure};
+use barsql_core::{Check, ConnectionConfig, Identity, StructColumn, StructIndex, TableStructure};
 use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Section, changes, plan_changes, plan_create,
 };
@@ -16,6 +17,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Sty
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use self::checks::CheckEditors;
 use self::columns::{Editors, Field};
 use self::indexes::IndexEditors;
 use crate::form::{self, ToolButton as _};
@@ -72,6 +74,7 @@ pub struct StructureTab {
     // One per draft column, in the same order.
     editors: Vec<Editors>,
     index_editors: Vec<IndexEditors>,
+    check_editors: Vec<CheckEditors>,
     next_key: u64,
     preview: Entity<EditorState>,
     script: String,
@@ -122,6 +125,7 @@ impl StructureTab {
             plan: Ok(ChangePlan::default()),
             editors: Vec::new(),
             index_editors: Vec::new(),
+            check_editors: Vec::new(),
             next_key: 0,
             preview,
             script: String::new(),
@@ -295,6 +299,14 @@ impl StructureTab {
                 indexes::editors(key, index, window, cx)
             })
             .collect();
+        let checks: Vec<Check> = self.draft.checks.iter().map(|row| row.value.clone()).collect();
+        self.check_editors = checks
+            .iter()
+            .map(|check| {
+                let key = self.key();
+                checks::editors(key, check, window, cx)
+            })
+            .collect();
     }
 
     fn replan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -399,7 +411,8 @@ impl StructureTab {
         match self.section {
             Section::Columns | Section::Table => true,
             Section::Indexes => self.connection.driver.capabilities().structure.indexes,
-            Section::ForeignKeys | Section::Checks => false,
+            Section::Checks => self.connection.driver.capabilities().structure.checks,
+            Section::ForeignKeys => false,
         }
     }
 
@@ -408,7 +421,8 @@ impl StructureTab {
         match self.section {
             Section::Columns | Section::Table => self.add_column(window, cx),
             Section::Indexes => self.add_index(window, cx),
-            Section::ForeignKeys | Section::Checks => {}
+            Section::Checks => self.add_check(window, cx),
+            Section::ForeignKeys => {}
         }
     }
 
@@ -480,11 +494,24 @@ impl StructureTab {
         }
     }
 
+    // Engines without checks or foreign keys don't get those sections.
+    fn shows(&self, section: Section) -> bool {
+        let editing = &self.connection.driver.capabilities().structure;
+        match section {
+            Section::ForeignKeys => editing.foreign_keys,
+            Section::Checks => editing.checks,
+            Section::Columns | Section::Table | Section::Indexes => true,
+        }
+    }
+
     fn header(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let (marked, _) = self.pending();
         let switch = SECTIONS.iter().enumerate().fold(form::toggle_group(), |group, (ix, (section, key))| {
             let section = *section;
+            if !self.shows(section) {
+                return group;
+            }
             let label = format!("{} {}", t(cx, key), self.count(section));
             let dot = marked.contains(&section).then(|| {
                 div()
@@ -586,7 +613,7 @@ impl StructureTab {
                     Section::Columns | Section::Table => columns::rows(self, window, cx).into_any_element(),
                     Section::Indexes => indexes::rows(self, window, cx),
                     Section::ForeignKeys => self.foreign_keys(cx).into_any_element(),
-                    Section::Checks => self.checks(cx).into_any_element(),
+                    Section::Checks => checks::rows(self, window, cx),
                 };
                 div()
                     .relative()
@@ -620,15 +647,6 @@ impl StructureTab {
                 .child(div().text_size(TEXT_XS).text_color(cx.theme().muted_foreground).child(actions))
         });
         list(rows, "structure.noForeignKeys", cx)
-    }
-
-    fn checks(&self, cx: &App) -> impl IntoElement {
-        let rows = self.draft.checks.iter().enumerate().filter(|(_, row)| !row.dropped).map(|(ix, row)| {
-            line(move || format!("structure:check:{ix}"), cx)
-                .child(cell(&row.value.name, 14.))
-                .child(div().flex_1().min_w_0().child(row.value.expression.clone()))
-        });
-        list(rows, "structure.noChecks", cx)
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {

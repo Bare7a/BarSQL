@@ -598,6 +598,12 @@ pub fn structure_edit(driver: &DriverType, original: &barsql_core::TableStructur
         let name = suggested_name(driver, NameKind::Index, &original.name, &columns, "");
         draft.indexes.push(Row::added(barsql_core::StructIndex { name, columns, ..Default::default() }));
     }
+    if editing.checks {
+        // SQL Server names an unnamed check with a suffix of its own, which would change on every run.
+        let name = if driver.dialect() == Some(SqlDialect::TSql) { "CK_e2e_people_age" } else { "" };
+        let check = barsql_core::Check { name: name.into(), expression: "age >= 0".into() };
+        draft.checks.push(Row::added(check));
+    }
     draft
 }
 

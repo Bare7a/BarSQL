@@ -14,6 +14,7 @@ use barsql_core::{
 
 use crate::ddl::{DdlColumn, terminate_statement};
 use crate::lang::tokens::{TokenKind, tokenize};
+use crate::quote::quote_ident;
 
 // The structure editor's model of a change: the edited draft, what differs from the table as loaded, and the
 // statements that make the difference.
@@ -505,6 +506,14 @@ fn tsql_transaction(statements: Vec<String>) -> ChangePlan {
     let open = ["SET XACT_ABORT ON", "BEGIN TRANSACTION"].map(String::from);
     let steps = open.into_iter().chain(statements).chain(std::iter::once("COMMIT TRANSACTION".to_string()));
     ChangePlan { steps: steps.map(Step::sql).collect(), warnings: Vec::new() }
+}
+
+// What ADD takes for a check. Without a name, the engine names it.
+fn check_clause(driver: &DriverType, check: &Check) -> String {
+    match check.name.as_str() {
+        "" => format!("CHECK ({})", check.expression),
+        name => format!("CONSTRAINT {} CHECK ({})", quote_ident(driver, name), check.expression),
+    }
 }
 
 // The ddl.rs form of a column, for the dialects that render through it.

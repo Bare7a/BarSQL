@@ -451,6 +451,10 @@
     "checkUpdates": "Проверка за актуализации"
   },
   "structure": {
+    "check": {
+      "name": "Име",
+      "expression": "Условие"
+    },
     "index": {
       "name": "Име",
       "columns": "Колони",

@@ -1,6 +1,6 @@
 use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
 
-use super::{Changes, Draft};
+use super::{Changes, Draft, check_clause};
 use crate::quote::{qualified_table, quote_ident, quote_ident_list, table_ref};
 
 // MySQL can't roll DDL back, so every change goes into one ALTER TABLE that applies whole or not at all. MODIFY and
@@ -35,6 +35,7 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
     let quote = |name: &str| quote_ident(driver, name);
     let mut clauses: Vec<String> =
         changes.dropped_indexes.iter().map(|index| format!("DROP INDEX {}", quote(&index.name))).collect();
+    clauses.extend(changes.dropped_checks.iter().map(|check| format!("DROP CONSTRAINT {}", quote(&check.name))));
     for (old, new) in &changes.renamed {
         let column = changes.modified.iter().find(|(_, column)| &column.name == new).map(|(_, column)| column.clone());
         let column = column.or_else(|| {
@@ -71,6 +72,7 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
             quote_ident_list(driver, &index.columns)
         ));
     }
+    clauses.extend(changes.added_checks.iter().map(|check| format!("ADD {}", check_clause(driver, check))));
     match clauses.is_empty() {
         true => Vec::new(),
         false => {
@@ -160,6 +162,23 @@ mod tests {
             sql(&plan),
             [
                 "ALTER TABLE `shop`.`users` DROP INDEX `idx_users_name`, ADD COLUMN `email` varchar(320) NULL, ADD UNIQUE INDEX `idx_users_email` (`email`)"
+            ]
+        );
+    }
+
+    #[test]
+    fn mysql_adds_and_drops_checks() {
+        let mut original = users();
+        original.checks = vec![check("users_chk_1", "`org_id` > 0")];
+        let mut draft = Draft::from_structure(&original);
+        draft.checks[0].dropped = true;
+        draft.checks.push(Row::added(check("users_name_check", "name <> ''")));
+        draft.checks.push(Row::added(check("", "id > 0")));
+        let plan = plan_changes(&MY, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "ALTER TABLE `shop`.`users` DROP CONSTRAINT `users_chk_1`, ADD CONSTRAINT `users_name_check` CHECK (name <> ''), ADD CHECK (id > 0)"
             ]
         );
     }

@@ -96,6 +96,7 @@
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" DROP COLUMN \"legacy\"",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ADD COLUMN \"created_at\" timestamp",
     "CREATE INDEX \"e2e_people_nickname_idx\" ON \"e2e_structure\".\"e2e_people\" (\"nickname\")",
+    "ALTER TABLE \"e2e_structure\".\"e2e_people\" ADD CHECK (age >= 0)",
     "COMMENT ON COLUMN \"e2e_structure\".\"e2e_people\".\"email\" IS 'Login'",
     "COMMIT"
   ],
@@ -175,6 +176,10 @@
     "checks": [
       {
         "name": "e2e_people_age_check",
+        "expression": "age >= 0"
+      },
+      {
+        "name": "e2e_people_age_check1",
         "expression": "age >= 0"
       }
     ]

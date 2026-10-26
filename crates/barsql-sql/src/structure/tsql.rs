@@ -1,6 +1,6 @@
 use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
-use super::{Changes, Draft, NameKind, ddl_column, suggested_name};
+use super::{Changes, Draft, NameKind, check_clause, ddl_column, suggested_name};
 use crate::alter::{drop_column, rename_column};
 use crate::ddl::compose_create_table;
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
@@ -24,6 +24,7 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
             false => format!("DROP INDEX {} ON {table}", quote_ident(driver, &index.name)),
         });
     }
+    out.extend(changes.dropped_checks.iter().map(|check| constraint("DROP", &check.name)));
     for (old, new) in &changes.renamed {
         out.push(rename_column(driver, schema, name, old, new));
     }
@@ -59,6 +60,9 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         out.push(format!("ALTER TABLE {table} ADD {}", primary_key(driver, name, key)));
     }
     out.extend(changes.added_indexes.iter().map(|index| create_index(driver, &table, index)));
+    out.extend(
+        changes.added_checks.iter().map(|check| format!("ALTER TABLE {table} ADD {}", check_clause(driver, check))),
+    );
     out
 }
 
@@ -218,6 +222,26 @@ mod tests {
             [
                 "DROP INDEX [IX_users_status] ON [dbo].[users]",
                 "CREATE UNIQUE CLUSTERED INDEX [IX_users_status] ON [dbo].[users] ([status])",
+            ]
+        );
+    }
+
+    #[test]
+    fn sql_server_adds_and_drops_checks() {
+        let mut original = users();
+        original.checks = vec![check("CK_users_status", "[status]<>N''")];
+        let mut draft = Draft::from_structure(&original);
+        draft.checks[0].dropped = true;
+        draft.checks.push(Row::added(check("CK_users_name", "len(name) > 0")));
+        draft.checks.push(Row::added(check("", "id > 0")));
+        let plan = plan_changes(&MS, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert_eq!(
+            steps[2..steps.len() - 1],
+            [
+                "ALTER TABLE [dbo].[users] DROP CONSTRAINT [CK_users_status]",
+                "ALTER TABLE [dbo].[users] ADD CONSTRAINT [CK_users_name] CHECK (len(name) > 0)",
+                "ALTER TABLE [dbo].[users] ADD CHECK (id > 0)",
             ]
         );
     }

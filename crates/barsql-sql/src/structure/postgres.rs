@@ -1,6 +1,6 @@
 use barsql_core::{DriverType, Identity, PrimaryKey, SqlDialect, StructColumn, StructIndex, TableStructure};
 
-use super::{Changes, Draft, ddl_column};
+use super::{Changes, Draft, check_clause, ddl_column};
 use crate::alter::{drop_column, rename_column};
 use crate::ddl::{compose_create_table, render_column};
 use crate::quote::{quote_ident, quote_ident_list, quote_literal_in, table_ref};
@@ -20,6 +20,9 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
             true => format!("ALTER TABLE {table} DROP CONSTRAINT {}", quote_ident(driver, &index.name)),
             false => format!("DROP INDEX {}", table_ref(driver, schema, &index.name)),
         });
+    }
+    for check in &changes.dropped_checks {
+        out.push(format!("ALTER TABLE {table} DROP CONSTRAINT {}", quote_ident(driver, &check.name)));
     }
     for (old, new) in &changes.renamed {
         out.push(rename_column(driver, schema, name, old, new));
@@ -57,6 +60,9 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         out.push(format!("ALTER TABLE {table} ADD {}", primary_key(driver, key)));
     }
     out.extend(changes.added_indexes.iter().map(|index| create_index(driver, &table, index)));
+    out.extend(
+        changes.added_checks.iter().map(|check| format!("ALTER TABLE {table} ADD {}", check_clause(driver, check))),
+    );
     let commented = changes.modified.iter().filter(|(old, new)| old.comment != new.comment).map(|(_, new)| new);
     let added = changes.added.iter().filter(|column| !column.comment.is_empty());
     out.extend(commented.chain(added).map(|column| comment(driver, schema, name, column)));
@@ -236,6 +242,27 @@ mod tests {
                 r#"ALTER TABLE "public"."users" RENAME COLUMN "name" TO "full_name""#,
                 r#"ALTER TABLE "public"."users" DROP COLUMN "legacy""#,
                 r#"CREATE INDEX "users_full_name_idx" ON "public"."users" ("full_name")"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn postgres_adds_and_drops_checks() {
+        let mut original = users();
+        original.checks = vec![check("users_status_check", "status <> ''")];
+        let mut draft = Draft::from_structure(&original);
+        draft.checks[0].dropped = true;
+        draft.checks.push(Row::added(check("users_email_check", "email LIKE '%@%'")));
+        draft.checks.push(Row::added(check("", "id > 0")));
+        let plan = plan_changes(&PG, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "BEGIN",
+                r#"ALTER TABLE "public"."users" DROP CONSTRAINT "users_status_check""#,
+                r#"ALTER TABLE "public"."users" ADD CONSTRAINT "users_email_check" CHECK (email LIKE '%@%')"#,
+                r#"ALTER TABLE "public"."users" ADD CHECK (id > 0)"#,
+                "COMMIT",
             ]
         );
     }
