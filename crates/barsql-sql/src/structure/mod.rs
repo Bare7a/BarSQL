@@ -1,3 +1,4 @@
+mod clickhouse;
 pub mod create_sql;
 mod mysql;
 mod postgres;
@@ -372,6 +373,16 @@ pub fn validate(driver: &DriverType, original: Option<&TableStructure>, draft: &
         let first = draft.columns.iter().position(|row| row.primary).unwrap_or(0);
         column_problems.push(problem(Section::Columns, first, ProblemKind::Unsupported));
     }
+    if driver.dialect() == Some(SqlDialect::ClickHouse) && !base.sorting_key.is_empty() {
+        let keyed = clickhouse::sorting_columns(&base.sorting_key);
+        for (ix, row) in draft.columns.iter().enumerate() {
+            let Some(old) = row.origin.and_then(|origin| base.columns.get(origin)) else { continue };
+            let reshaped = StructColumn { name: old.name.clone(), comment: old.comment.clone(), ..row.column.clone() };
+            if keyed.contains(&old.name) && (row.dropped || reshaped != *old) {
+                column_problems.push(problem(Section::Columns, ix, ProblemKind::Unsupported));
+            }
+        }
+    }
     column_problems.sort_by_key(|p| p.row);
     out.extend(column_problems);
 
@@ -451,6 +462,7 @@ pub fn plan_changes(driver: &DriverType, original: &TableStructure, draft: &Draf
         Some(SqlDialect::Postgres) => transaction(postgres::alter(driver, original, &found)),
         Some(SqlDialect::TSql) => tsql_transaction(tsql::alter(driver, original, &found)),
         Some(SqlDialect::MySql) => statements(mysql::alter(driver, original, &found)),
+        Some(SqlDialect::ClickHouse) => statements(clickhouse::alter(driver, original, &found)),
         Some(SqlDialect::Sqlite) => match sqlite::alter(driver, original, &found, draft) {
             Some((steps, warnings)) => ChangePlan { steps, warnings },
             None => return Err(vec![Problem { section: Section::Table, row: 0, kind: ProblemKind::Unsupported }]),
@@ -468,6 +480,7 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
         Some(SqlDialect::Postgres) => transaction(postgres::create(driver, draft)),
         Some(SqlDialect::TSql) => tsql_transaction(tsql::create(driver, draft)),
         Some(SqlDialect::MySql) => statements(mysql::create(driver, draft)),
+        Some(SqlDialect::ClickHouse) => statements(clickhouse::create(driver, draft)),
         Some(SqlDialect::Sqlite) => ChangePlan {
             steps: sqlite::create(driver, draft).into_iter().map(Step::sql).collect(),
             warnings: Vec::new(),
