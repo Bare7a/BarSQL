@@ -736,6 +736,31 @@ impl SchemaTree {
         self.rebuild(cx);
     }
 
+    // After a Structure tab applied. A new table reloads the schema's list, a changed one its columns and groups.
+    pub(crate) fn structure_changed(
+        &mut self,
+        connection_id: &str,
+        schema: &str,
+        table: &str,
+        created: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if created {
+            schema::reload_tables(connection_id, schema, cx);
+            self.rebuild(cx);
+            return;
+        }
+        self.forget_groups(connection_id, schema, table, true, cx);
+        schema::reload_columns(connection_id, schema, table, cx);
+        cx.emit(SchemaTreeEvent::TableChanged {
+            connection_id: connection_id.to_string(),
+            schema: schema.to_string(),
+            table: table.to_string(),
+            change: TableChange::Altered,
+        });
+        self.rebuild(cx);
+    }
+
     // Reloads now if the group is open, `reload` is set and its connection is still shown. Otherwise it loads on
     // the next expand.
     #[allow(clippy::too_many_arguments)]

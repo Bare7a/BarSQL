@@ -7,6 +7,7 @@ use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryErro
 use barsql_sql::Dialect;
 use barsql_sql::alter::{self, ConstraintKind};
 use barsql_sql::ddl::terminate_statement;
+use barsql_sql::structure::{ChangePlan, Warning};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable, WindowExt, h_flex, v_flex};
@@ -560,6 +561,126 @@ impl Render for BackupDialog {
                     ),
             )
     }
+}
+
+// Applies a Structure tab's plan, showing the script it runs. A refusal keeps the dialog open with the server's
+// message, and the tab keeps its draft.
+struct ApplyDialog {
+    connection: ConnectionConfig,
+    plan: ChangePlan,
+    running: bool,
+    error: Option<SharedString>,
+    job: String,
+    on_done: Rc<dyn Fn(&mut App)>,
+    sql_scroll: ScrollHandle,
+}
+
+impl ApplyDialog {
+    fn run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running {
+            return;
+        }
+        self.running = true;
+        self.error = None;
+        cx.notify();
+        let bar = state::bar(cx);
+        let (id, job, plan) = (self.connection.id.clone(), self.job.clone(), self.plan.clone());
+        let task = state::spawn(cx, async move { bar.apply_structure(&id, &job, &plan).await });
+        let on_done = self.on_done.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            if let Some(Ok(())) = &result {
+                cx.update(|_, cx| on_done(cx)).ok();
+            }
+            this.update_in(cx, |dialog, window, cx| {
+                dialog.running = false;
+                match result {
+                    Some(Ok(())) => window.close_dialog(cx),
+                    Some(Err(error)) if !error.cancelled => dialog.error = Some(message(&error).into()),
+                    _ => {}
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running {
+            state::bar(cx).cancel_query(&self.job);
+        }
+        window.close_dialog(cx);
+    }
+}
+
+impl Render for ApplyDialog {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let script = self.plan.script(&self.connection.driver);
+        let warning =
+            |kind: Warning, key: &str| self.plan.warnings.contains(&kind).then(|| modal::description(t(cx, key), cx));
+        let body = modal::body()
+            .children(warning(Warning::Rebuild, "structure.rebuildWarning"))
+            .children(warning(Warning::NotAtomic, "structure.notAtomicWarning"))
+            .child(form::group(
+                t(cx, "schemaChange.sql"),
+                modal::detail("structure-apply-sql", script, &self.sql_scroll, cx),
+                cx,
+            ))
+            .children(self.error.clone().map(|error| form::error(error, cx).debug_selector(|| "change-error".into())));
+        v_flex().child(body.debug_selector(|| "structure-apply-sql".into())).child(
+            modal::footer(cx)
+                .child(
+                    Button::new("change-cancel")
+                        .large()
+                        .debug_selector(|| "change-cancel".into())
+                        .label(t(cx, "common.cancel"))
+                        .on_click(cx.listener(|dialog, _, window, cx| dialog.dismiss(window, cx))),
+                )
+                .child(
+                    Button::new("change-confirm")
+                        .large()
+                        .debug_selector(|| "change-confirm".into())
+                        .primary()
+                        .label(t(cx, "structure.applyConfirm"))
+                        .disabled(self.running)
+                        .on_click(cx.listener(|dialog, _, window, cx| dialog.run(window, cx))),
+                ),
+        )
+    }
+}
+
+// `on_done` runs once the plan has applied.
+pub fn open_structure_apply(
+    connection: ConnectionConfig,
+    plan: ChangePlan,
+    window: &mut Window,
+    cx: &mut App,
+    on_done: impl Fn(&mut App) + 'static,
+) {
+    let dialog = cx.new(|_| ApplyDialog {
+        connection,
+        plan,
+        running: false,
+        error: None,
+        job: job_id("structure"),
+        on_done: Rc::new(on_done),
+        sql_scroll: ScrollHandle::new(),
+    });
+    window.open_dialog(cx, move |modal_dialog, window, cx| {
+        let entry = dialog.clone();
+        let running = dialog.read(cx).running;
+        Modal::new("structure-apply", t(cx, "structure.applyTitle"))
+            .size(modal::Size::Md)
+            .closable(!running)
+            .build(modal_dialog, dialog.clone(), window, cx)
+            .keyboard(!running)
+            .overlay_closable(false)
+            .on_ok(move |_, window, cx| {
+                entry.update(cx, |dialog, cx| dialog.run(window, cx));
+                false
+            })
+    });
 }
 
 pub fn open_backup(connection: ConnectionConfig, schema: String, table: String, window: &mut Window, cx: &mut App) {

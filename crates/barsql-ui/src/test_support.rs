@@ -70,6 +70,7 @@ impl Env {
             theme::init(cx);
             actions::init(cx);
             grid::init(cx);
+            crate::structure_tab::init(cx);
             plan_view::init(cx);
             schema_tree::init(cx);
             list_nav::init(cx);

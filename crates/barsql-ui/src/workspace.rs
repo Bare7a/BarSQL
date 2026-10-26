@@ -839,9 +839,18 @@ impl Workspace {
             });
             let subscriptions = vec![
                 cx.observe(&view, |_, _, cx| cx.notify()),
-                cx.subscribe_in(&view, window, |this, _, event: &StructureTabEvent, _, cx| match event {
+                cx.subscribe_in(&view, window, |this, view, event: &StructureTabEvent, window, cx| match event {
                     StructureTabEvent::Edited => this.schedule_save(cx),
-                    StructureTabEvent::Applied { .. } => this.schedule_save(cx),
+                    StructureTabEvent::Applied { created } => {
+                        let shown = view.read(cx);
+                        let table = created.clone().unwrap_or_else(|| shown.table.clone());
+                        let (id, schema) = (shown.connection.id.clone(), shown.schema.clone());
+                        // The tab reloads first, so the tree's Altered doesn't find its old draft stale.
+                        view.update(cx, |view, cx| view.after_apply(created.clone(), window, cx));
+                        let tree = this.sidebar.read(cx).schema_tree();
+                        tree.update(cx, |tree, cx| tree.structure_changed(&id, &schema, &table, created.is_some(), cx));
+                        this.schedule_save(cx);
+                    }
                 }),
             ];
             self.tabs.push(OpenTab { view: TabView::Structure(view), pinned, _subscriptions: subscriptions });
@@ -1023,6 +1032,27 @@ impl Workspace {
                     view.update(cx, |view, cx| view.table_changed(Some(name.clone()), window, cx))
                 }
                 TableChange::Altered => view.update(cx, |view, cx| view.table_changed(None, window, cx)),
+            }
+        }
+        let structures: Vec<(usize, Entity<StructureTab>)> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, tab)| match &tab.view {
+                TabView::Structure(view) => {
+                    let shown = view.read(cx);
+                    (shown.connection.id == connection_id && shown.schema == schema && shown.table == table)
+                        .then(|| (ix, view.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        // A dropped table closes its Structure tab, unless the tab holds changes to say it lost.
+        for (ix, view) in structures.into_iter().rev() {
+            if matches!(change, TableChange::Dropped) && !view.read(cx).has_changes() {
+                self.close_tab(ix, window, cx);
+            } else {
+                view.update(cx, |view, cx| view.table_changed(change, window, cx));
             }
         }
         // A rename keeps its tab, so the mark moves to the new name.
@@ -1945,6 +1975,14 @@ impl Workspace {
         if let Some(tab) = self.active_tab().and_then(TabView::query).cloned() {
             tab.update(cx, |tab, cx| tab.cancel(cx));
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn table_tab_named(&self, table: &str, cx: &App) -> Option<Entity<TableTab>> {
+        self.tabs.iter().find_map(|tab| match &tab.view {
+            TabView::Table(view) if view.read(cx).table == table => Some(view.clone()),
+            _ => None,
+        })
     }
 
     #[cfg(test)]

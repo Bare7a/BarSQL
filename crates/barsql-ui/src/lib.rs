@@ -126,6 +126,7 @@ pub fn run(bar: BarApp, options: LaunchOptions) {
         theme::init(cx);
         actions::init(cx);
         grid::init(cx);
+        structure_tab::init(cx);
         plan_view::init(cx);
         schema_tree::init(cx);
         list_nav::init(cx);

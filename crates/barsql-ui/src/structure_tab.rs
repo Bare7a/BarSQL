@@ -18,9 +18,25 @@ use gpui_kit::*;
 use self::columns::{Editors, Field};
 use crate::form::{self, ToolButton as _};
 use crate::i18n::{t, t_count, t_with};
+use crate::schema_actions;
+use crate::schema_tree::TableChange;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state;
+use crate::toast;
 use crate::tokens::{ICON_SM, TEXT_SM, TEXT_XS};
+
+const CONTEXT: &str = "StructureTab";
+
+actions!(structure_tab, [ApplyStructure]);
+
+#[cfg(target_os = "macos")]
+const MOD: &str = "cmd";
+#[cfg(not(target_os = "macos"))]
+const MOD: &str = "ctrl";
+
+pub fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new(&format!("{MOD}-s"), ApplyStructure, Some(CONTEXT))]);
+}
 
 pub enum StructureTabEvent {
     Edited,
@@ -59,6 +75,9 @@ pub struct StructureTab {
     preview_open: bool,
     section: Section,
     scroll: ScrollHandle,
+    // The table was dropped, or changed elsewhere, while this tab held changes.
+    gone: bool,
+    stale: bool,
     _load: Task<()>,
 }
 
@@ -87,6 +106,8 @@ impl StructureTab {
             preview_open: true,
             section: Section::Columns,
             scroll: ScrollHandle::new(),
+            gone: false,
+            stale: false,
             _load: Task::ready(()),
         };
         if this.table.is_empty() {
@@ -101,6 +122,7 @@ impl StructureTab {
             return;
         }
         self.load = Load::Loading;
+        self.stale = false;
         let bar = state::bar(cx);
         let (id, schema, table) = (self.connection.id.clone(), self.schema.clone(), self.table.clone());
         let loaded = state::spawn(cx, async move { bar.table_structure(&id, &schema, &table).await });
@@ -160,6 +182,7 @@ impl StructureTab {
     }
 
     // What the preview shows and Apply would run.
+    #[cfg(test)]
     pub fn script(&self) -> &str {
         &self.script
     }
@@ -172,7 +195,51 @@ impl StructureTab {
     }
 
     pub fn can_apply(&self) -> bool {
-        self.editable() && self.plan.as_ref().is_ok_and(|plan| !plan.is_empty())
+        !self.gone && self.editable() && self.plan.as_ref().is_ok_and(|plan| !plan.is_empty())
+    }
+
+    pub fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(plan) = self.plan.as_ref().ok().filter(|_| self.can_apply()).cloned() else { return };
+        let this = cx.entity().downgrade();
+        schema_actions::open_structure_apply(self.connection.clone(), plan, window, cx, move |cx| {
+            let _ = this.update(cx, |tab, cx| {
+                let created = tab.table.is_empty().then(|| tab.draft.name.clone());
+                let name = created.clone().unwrap_or_else(|| tab.table.clone());
+                toast::success(t_with(cx, "structure.applied", &[("name", &name)]), cx);
+                cx.emit(StructureTabEvent::Applied { created });
+            });
+        });
+    }
+
+    // The draft went in, so the tab shows the table as it now is.
+    pub fn after_apply(&mut self, created: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(name) = created {
+            self.table = name;
+        }
+        // Until the reload lands, the old structure would make the applied draft look pending.
+        self.original = None;
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    // A dropped table's tab is closed by the workspace when it holds no changes.
+    pub fn table_changed(&mut self, change: &TableChange, window: &mut Window, cx: &mut Context<Self>) {
+        match change {
+            TableChange::Renamed(name) => {
+                self.table = name.clone();
+                self.draft.name = name.clone();
+                if let Some(original) = &mut self.original {
+                    original.name = name.clone();
+                }
+                self.replan(window, cx);
+                cx.emit(StructureTabEvent::Edited);
+            }
+            TableChange::Dropped => self.gone = true,
+            TableChange::Altered if matches!(self.load, Load::Loading) => {}
+            TableChange::Altered if self.has_changes() => self.stale = true,
+            TableChange::Altered => self.load(window, cx),
+        }
+        cx.notify();
     }
 
     fn key(&mut self) -> u64 {
@@ -381,6 +448,35 @@ impl StructureTab {
             .child(div().w(rems(30.769)).child(switch))
     }
 
+    fn banner(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let theme = cx.theme().clone();
+        if self.gone {
+            let text = t(cx, "structure.gone");
+            return Some(
+                form::error(text, cx).mx(rems(1.231)).mt(rems(0.615)).debug_selector(|| "structure-gone".into()),
+            );
+        }
+        self.stale.then(|| {
+            form::alert(theme.warning)
+                .mx(rems(1.231))
+                .mt(rems(0.615))
+                .debug_selector(|| "structure-stale".into())
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .gap(rems(0.923))
+                        .child(div().flex_1().min_w_0().child(t(cx, "structure.stale")))
+                        .child(
+                            Button::new("structure-reload")
+                                .small()
+                                .debug_selector(|| "structure-reload".into())
+                                .label(t(cx, "structure.reload"))
+                                .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
+                        ),
+                )
+        })
+    }
+
     fn body(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         match &self.load {
@@ -489,7 +585,8 @@ impl StructureTab {
                                 .debug_selector(|| "structure-apply".into())
                                 .primary()
                                 .tool_label(t(cx, "structure.apply"))
-                                .disabled(!self.can_apply()),
+                                .disabled(!self.can_apply())
+                                .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
                         )
                     })
                     .when(pending > 0, |bar| {
@@ -556,10 +653,13 @@ impl Render for StructureTab {
         let theme = cx.theme().clone();
         v_flex()
             .size_full()
+            .key_context(CONTEXT)
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &ApplyStructure, window, cx| this.apply(window, cx)))
             .bg(theme.background)
             .debug_selector(|| "structure-tab".into())
             .child(self.header(cx))
+            .children(self.banner(cx))
             .child(div().flex_1().min_h_0().child(self.body(window, cx)))
             .when(self.editable(), |tab| tab.child(preview::panel(self, cx)))
             .child(self.toolbar(cx))

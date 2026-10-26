@@ -450,6 +450,14 @@
     "checkUpdates": "Check for updates"
   },
   "structure": {
+    "applyTitle": "Apply structure changes",
+    "applyConfirm": "Apply",
+    "applied": "Changed the structure of {{name}}",
+    "rebuildWarning": "SQLite can't change this in place, so the table is rebuilt and its rows copied over.",
+    "notAtomicWarning": "This database can't undo schema changes: if a statement fails, the ones before it stay.",
+    "gone": "This table no longer exists.",
+    "stale": "The table was changed elsewhere. Reload to see it, which drops your changes here.",
+    "reload": "Reload",
     "add": "Add",
     "revert": "Revert",
     "apply": "Apply",

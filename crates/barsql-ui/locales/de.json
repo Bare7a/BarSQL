@@ -450,6 +450,14 @@
     "checkUpdates": "Nach Updates suchen"
   },
   "structure": {
+    "applyTitle": "Strukturänderungen anwenden",
+    "applyConfirm": "Anwenden",
+    "applied": "Struktur von {{name}} geändert",
+    "rebuildWarning": "SQLite kann das nicht direkt ändern, daher wird die Tabelle neu aufgebaut und ihre Zeilen werden kopiert.",
+    "notAtomicWarning": "Diese Datenbank kann Schemaänderungen nicht rückgängig machen: Schlägt eine Anweisung fehl, bleiben die vorherigen bestehen.",
+    "gone": "Diese Tabelle existiert nicht mehr.",
+    "stale": "Die Tabelle wurde anderswo geändert. Neu laden, um sie zu sehen – die Änderungen hier gehen dabei verloren.",
+    "reload": "Neu laden",
     "add": "Hinzufügen",
     "revert": "Verwerfen",
     "apply": "Anwenden",
