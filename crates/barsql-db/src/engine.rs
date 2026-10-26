@@ -230,14 +230,7 @@ impl Engine {
     }
 
     pub async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
-        match self {
-            Self::Postgres(e) => e.table_structure(schema, table).await,
-            Self::MySql(e) => e.table_structure(schema, table).await,
-            Self::SqlServer(e) => e.table_structure(schema, table).await,
-            Self::Sqlite(e) => e.table_structure(schema, table).await,
-            Self::Turso(e) => e.table_structure(schema, table).await,
-            _ => Err(QueryError::message(format!("{} has no structure loader yet", self.driver()))),
-        }
+        dispatch!(self, e => e.table_structure(schema, table).await)
     }
 
     pub async fn list_triggers(&self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>, QueryError> {

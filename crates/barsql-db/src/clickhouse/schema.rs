@@ -6,6 +6,7 @@ use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,
     IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
+use barsql_core::{StructColumn, StructIndex, TableStructure};
 use barsql_sql::ddl::{terminate_statement, unsupported_ddl};
 use barsql_sql::{enum_values, qualified_table, quote_ident};
 
@@ -14,6 +15,18 @@ use crate::dump::DumpColumn;
 
 fn text(row: &[Option<String>], i: usize) -> String {
     row.get(i).cloned().flatten().unwrap_or_default()
+}
+
+// The model keeps nullability apart from the type, as the editor's checkbox does: Nullable(T) is T, nullable, and
+// LowCardinality(Nullable(T)) is LowCardinality(T).
+fn without_nullable(data_type: &str) -> (bool, String) {
+    if let Some(inner) = data_type.strip_prefix("LowCardinality(Nullable(").and_then(|t| t.strip_suffix("))")) {
+        return (true, format!("LowCardinality({inner})"));
+    }
+    match data_type.strip_prefix("Nullable(").and_then(|t| t.strip_suffix(')')) {
+        Some(inner) => (true, inner.to_string()),
+        None => (false, data_type.to_string()),
+    }
 }
 
 // The engine decides what a relation is. Views of every sort read as views.
@@ -174,6 +187,73 @@ impl ChEngine {
                 }
             })
             .collect())
+    }
+
+    pub async fn table_structure(self: &Arc<Self>, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let params = [("db", schema.as_str()), ("t", table)];
+        let rows = self
+            .rows(
+                "SELECT name, type, default_kind, default_expression, comment
+                FROM system.columns
+                WHERE database = {db:String} AND table = {t:String}
+                ORDER BY position",
+                &params,
+            )
+            .await?;
+        if rows.is_empty() {
+            return Err(QueryError::message(format!("table {table} not found")));
+        }
+        let columns = rows
+            .iter()
+            .map(|r| {
+                let (nullable, data_type) = without_nullable(&text(r, 1));
+                let (kind, expression) = (text(r, 2), text(r, 3));
+                let computed = matches!(kind.as_str(), "MATERIALIZED" | "ALIAS");
+                StructColumn {
+                    name: text(r, 0),
+                    data_type,
+                    nullable,
+                    default: if computed { String::new() } else { expression.clone() },
+                    generated: if computed { expression } else { String::new() },
+                    comment: text(r, 4),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let sorting = self
+            .rows("SELECT sorting_key FROM system.tables WHERE database = {db:String} AND name = {t:String}", &params)
+            .await?;
+        let skipping = self
+            .rows(
+                "SELECT name, expr, type, granularity FROM system.data_skipping_indices
+                WHERE database = {db:String} AND table = {t:String}
+                ORDER BY name",
+                &params,
+            )
+            .await?;
+        let indexes = skipping
+            .iter()
+            .map(|r| StructIndex {
+                name: text(r, 0),
+                definition: format!(
+                    "INDEX {} {} TYPE {} GRANULARITY {}",
+                    text(r, 0),
+                    text(r, 1),
+                    text(r, 2),
+                    text(r, 3)
+                ),
+                ..Default::default()
+            })
+            .collect();
+        Ok(TableStructure {
+            schema,
+            name: table.to_string(),
+            columns,
+            indexes,
+            sorting_key: sorting.first().map(|r| text(r, 0)).unwrap_or_default(),
+            ..Default::default()
+        })
     }
 
     // The sorting key orders the data and the primary key indexes a prefix of it. Data-skipping indexes come after.

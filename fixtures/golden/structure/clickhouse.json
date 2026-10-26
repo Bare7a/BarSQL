@@ -1,0 +1,116 @@
+{
+  "engine": "clickhouse",
+  "schema": "barsql_test",
+  "table": "e2e_people",
+  "setup": [
+    "DROP TABLE IF EXISTS e2e_people",
+    "CREATE TABLE e2e_people (id UInt64, nick String COMMENT 'Display', age Int32, email Nullable(String), legacy String, tag LowCardinality(Nullable(String)), score Int32 DEFAULT 0, INDEX e2e_people_score score TYPE minmax GRANULARITY 1) ENGINE = MergeTree ORDER BY id",
+    "INSERT INTO e2e_people (id, nick, age, email, legacy, tag) VALUES (1, 'ann', 30, 'ann@example.com', 'old', 'x')"
+  ],
+  "countTables": [
+    "e2e_people"
+  ],
+  "structure": {
+    "schema": "barsql_test",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "UInt64"
+      },
+      {
+        "name": "nick",
+        "dataType": "String",
+        "comment": "Display"
+      },
+      {
+        "name": "age",
+        "dataType": "Int32"
+      },
+      {
+        "name": "email",
+        "dataType": "String",
+        "nullable": true
+      },
+      {
+        "name": "legacy",
+        "dataType": "String"
+      },
+      {
+        "name": "tag",
+        "dataType": "LowCardinality(String)",
+        "nullable": true
+      },
+      {
+        "name": "score",
+        "dataType": "Int32",
+        "default": "0"
+      }
+    ],
+    "indexes": [
+      {
+        "name": "e2e_people_score",
+        "definition": "INDEX e2e_people_score score TYPE minmax GRANULARITY 1"
+      }
+    ],
+    "sortingKey": "id"
+  },
+  "plan": [
+    "ALTER TABLE `barsql_test`.`e2e_people` RENAME COLUMN `nick` TO `nickname`",
+    "ALTER TABLE `barsql_test`.`e2e_people` MODIFY COLUMN `age` Int64",
+    "ALTER TABLE `barsql_test`.`e2e_people` MODIFY COLUMN `email` String DEFAULT ''",
+    "ALTER TABLE `barsql_test`.`e2e_people` DROP COLUMN `legacy`",
+    "ALTER TABLE `barsql_test`.`e2e_people` ADD COLUMN `created_at` Nullable(DateTime64(6))",
+    "ALTER TABLE `barsql_test`.`e2e_people` COMMENT COLUMN `email` 'Login'"
+  ],
+  "after": {
+    "schema": "barsql_test",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "UInt64"
+      },
+      {
+        "name": "nickname",
+        "dataType": "String",
+        "comment": "Display"
+      },
+      {
+        "name": "age",
+        "dataType": "Int64"
+      },
+      {
+        "name": "email",
+        "dataType": "String",
+        "default": "''",
+        "comment": "Login"
+      },
+      {
+        "name": "tag",
+        "dataType": "LowCardinality(String)",
+        "nullable": true
+      },
+      {
+        "name": "score",
+        "dataType": "Int32",
+        "default": "0"
+      },
+      {
+        "name": "created_at",
+        "dataType": "DateTime64(6)",
+        "nullable": true
+      }
+    ],
+    "indexes": [
+      {
+        "name": "e2e_people_score",
+        "definition": "INDEX e2e_people_score score TYPE minmax GRANULARITY 1"
+      }
+    ],
+    "sortingKey": "id"
+  },
+  "counts": {
+    "e2e_people": "1"
+  }
+}

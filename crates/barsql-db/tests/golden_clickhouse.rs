@@ -119,3 +119,9 @@ async fn clickhouse_plans_are_recorded_on_request() {
         &serde_json::json!({ "engine": "clickhouse", "driver": "clickhouse", "plans": plans }),
     );
 }
+
+#[tokio::test]
+async fn clickhouse_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    common::structure_fixture_test(&connect().await, "structure/clickhouse.json").await;
+}
