@@ -14,11 +14,14 @@ use crate::stores::storage_error;
 use crate::{BarApp, PooledEngine, lock};
 
 // A saturated pool must not wedge the sidebar, which loads these lazily.
-const SCHEMA_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const SCHEMA_TIMEOUT: Duration = Duration::from_secs(15);
 // Completion and hover call this on cache misses.
 const COLUMNS_TIMEOUT: Duration = Duration::from_secs(5);
 
-async fn within<T>(limit: Duration, work: impl Future<Output = Result<T, QueryError>>) -> Result<T, QueryError> {
+pub(crate) async fn within<T>(
+    limit: Duration,
+    work: impl Future<Output = Result<T, QueryError>>,
+) -> Result<T, QueryError> {
     tokio::time::timeout(limit, work).await.map_err(|_| QueryError::message("context deadline exceeded"))?
 }
 

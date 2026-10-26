@@ -7,6 +7,7 @@ use barsql_app::{
 };
 use barsql_core::{DriverType, ObjectKind, Row, RowDelete, RowUpdate, SavedQuery, TableDataRequest, Value};
 use barsql_sql::alter;
+use barsql_sql::structure::{ChangePlan, Draft, Step, plan_changes};
 use support::{Fixture, collect, import_outcome, results, rows};
 
 fn row(pairs: &[(&str, Value)]) -> Row {
@@ -1120,4 +1121,47 @@ async fn sidebar_statements_run_and_respect_read_only() {
     let drop = alter::drop_relation(&lite, &ObjectKind::Table, "main", "b", false);
     assert!(f.app.execute_statement(&id, "change", &drop).await.unwrap_err().message.contains("read-only"));
     assert_eq!(f.app.count_rows(&id, "main", "b").await.unwrap(), 1, "counting still works");
+}
+
+#[tokio::test]
+async fn structure_applies_and_lands_in_history() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT)").await;
+    let original = f.app.table_structure(&id, "main", "t").await.unwrap();
+    let mut draft = Draft::from_structure(&original);
+    draft.rename_column(1, "b".into());
+    let plan = plan_changes(&DriverType::Sqlite, &original, &draft).unwrap();
+    f.app.apply_structure(&id, "structure", &plan).await.unwrap();
+    assert_eq!(f.app.query_history(&id, 1)[0].sql, plan.script(&DriverType::Sqlite));
+    f.query(&id, "SELECT b FROM t").await;
+}
+
+#[tokio::test]
+async fn read_only_connections_refuse_structure_changes() {
+    let f = Fixture::new();
+    let writable = f.sqlite().await;
+    f.exec(&writable, "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT)").await;
+    let mut cfg = f.sqlite_config();
+    cfg.read_only = true;
+    let id = f.app.save_connection(cfg).await.unwrap().id;
+    let original = f.app.table_structure(&id, "main", "t").await.unwrap();
+    let mut draft = Draft::from_structure(&original);
+    draft.rename_column(1, "b".into());
+    let plan = plan_changes(&DriverType::Sqlite, &original, &draft).unwrap();
+    assert!(f.app.apply_structure(&id, "structure", &plan).await.is_err());
+    f.query(&writable, "SELECT a FROM t").await;
+}
+
+#[tokio::test]
+async fn a_refused_structure_change_keeps_the_table() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT)").await;
+    let steps =
+        ["PRAGMA foreign_keys = OFF", "BEGIN", "CREATE INDEX ix ON t (missing)", "COMMIT", "PRAGMA foreign_keys = ON"];
+    let plan = ChangePlan { steps: steps.map(Step::sql).into(), warnings: Vec::new() };
+    assert!(f.app.apply_structure(&id, "structure", &plan).await.is_err());
+    assert_eq!(f.query(&id, "PRAGMA foreign_keys").await, [["1"]]);
+    f.exec(&id, "INSERT INTO t (a) VALUES ('x')").await;
 }

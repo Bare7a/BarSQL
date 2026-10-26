@@ -10,6 +10,7 @@ mod info;
 mod jobs;
 mod runs;
 mod stores;
+mod structure;
 mod tabs;
 pub mod update;
 

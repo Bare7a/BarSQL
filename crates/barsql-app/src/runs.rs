@@ -29,7 +29,7 @@ pub struct BufferedResult {
 }
 
 impl BarApp {
-    fn guard_execute(&self, connection_id: &str, sql: &str) -> Result<DriverType, QueryError> {
+    pub(crate) fn guard_execute(&self, connection_id: &str, sql: &str) -> Result<DriverType, QueryError> {
         let cfg = self.config(connection_id)?;
         if cfg.read_only {
             assert_read_only(&cfg.driver, sql).map_err(QueryError::message)?;
