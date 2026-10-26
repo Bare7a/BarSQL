@@ -451,6 +451,14 @@
     "checkUpdates": "Nach Updates suchen"
   },
   "structure": {
+    "index": {
+      "name": "Name",
+      "columns": "Spalten",
+      "unique": "Eindeutig",
+      "method": "Methode",
+      "definition": "Definition",
+      "constraint": "Constraint"
+    },
     "discardTitle": "Strukturänderungen verwerfen?",
     "discardDescription_one": "Ein Tab hat Strukturänderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
     "discardDescription_other": "{{count}} Tabs haben Strukturänderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",

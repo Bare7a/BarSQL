@@ -107,6 +107,7 @@
     "ALTER TABLE [dbo].[e2e_people] ADD CONSTRAINT [DF_e2e_people_email] DEFAULT '' FOR [email]",
     "ALTER TABLE [dbo].[e2e_people] DROP COLUMN [legacy]",
     "ALTER TABLE [dbo].[e2e_people] ADD [created_at] DATETIME2 NULL",
+    "CREATE INDEX [IX_e2e_people_nickname] ON [dbo].[e2e_people] ([nickname])",
     "COMMIT TRANSACTION"
   ],
   "after": {
@@ -169,6 +170,12 @@
         "name": "e2e_people_org",
         "columns": [
           "org_id"
+        ]
+      },
+      {
+        "name": "IX_e2e_people_nickname",
+        "columns": [
+          "nickname"
         ]
       }
     ],

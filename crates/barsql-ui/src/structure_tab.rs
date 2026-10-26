@@ -1,10 +1,11 @@
 mod columns;
+mod indexes;
 mod preview;
 #[cfg(test)]
 mod tests;
 
 use barsql_app::{EditorTab, StructureRef};
-use barsql_core::{ConnectionConfig, Identity, StructColumn, TableStructure};
+use barsql_core::{ConnectionConfig, Identity, StructColumn, StructIndex, TableStructure};
 use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Section, changes, plan_changes, plan_create,
 };
@@ -16,6 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use self::columns::{Editors, Field};
+use self::indexes::IndexEditors;
 use crate::form::{self, ToolButton as _};
 use crate::i18n::{t, t_count, t_with};
 use crate::schema_actions;
@@ -69,6 +71,7 @@ pub struct StructureTab {
     plan: Result<ChangePlan, Vec<Problem>>,
     // One per draft column, in the same order.
     editors: Vec<Editors>,
+    index_editors: Vec<IndexEditors>,
     next_key: u64,
     preview: Entity<EditorState>,
     script: String,
@@ -118,6 +121,7 @@ impl StructureTab {
             draft,
             plan: Ok(ChangePlan::default()),
             editors: Vec::new(),
+            index_editors: Vec::new(),
             next_key: 0,
             preview,
             script: String::new(),
@@ -283,6 +287,14 @@ impl StructureTab {
                 columns::editors(key, column, window, cx)
             })
             .collect();
+        let indexes: Vec<StructIndex> = self.draft.indexes.iter().map(|row| row.value.clone()).collect();
+        self.index_editors = indexes
+            .iter()
+            .map(|index| {
+                let key = self.key();
+                indexes::editors(key, index, window, cx)
+            })
+            .collect();
     }
 
     fn replan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -383,6 +395,23 @@ impl StructureTab {
         self.changed(window, cx);
     }
 
+    fn can_add(&self) -> bool {
+        match self.section {
+            Section::Columns | Section::Table => true,
+            Section::Indexes => self.connection.driver.capabilities().structure.indexes,
+            Section::ForeignKeys | Section::Checks => false,
+        }
+    }
+
+    // Adds to the section on show.
+    fn add_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.section {
+            Section::Columns | Section::Table => self.add_column(window, cx),
+            Section::Indexes => self.add_index(window, cx),
+            Section::ForeignKeys | Section::Checks => {}
+        }
+    }
+
     pub fn revert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.draft = match &self.original {
             Some(original) => Draft::from_structure(original),
@@ -416,11 +445,26 @@ impl StructureTab {
             })
             .count()
             + usize::from(found.primary_key.is_some());
+        // A changed row is dropped and added again, so the dropped ones and the new rows count each row once.
+        let new = |rows: &mut dyn Iterator<Item = (bool, bool)>| {
+            rows.filter(|&(loaded, dropped)| !loaded && !dropped).count()
+        };
+        let draft = &self.draft;
         let counts = [
             (Section::Columns, columns),
-            (Section::Indexes, found.added_indexes.len() + found.dropped_indexes.len()),
-            (Section::ForeignKeys, found.added_foreign_keys.len() + found.dropped_foreign_keys.len()),
-            (Section::Checks, found.added_checks.len() + found.dropped_checks.len()),
+            (
+                Section::Indexes,
+                found.dropped_indexes.len() + new(&mut draft.indexes.iter().map(|r| (r.origin.is_some(), r.dropped))),
+            ),
+            (
+                Section::ForeignKeys,
+                found.dropped_foreign_keys.len()
+                    + new(&mut draft.foreign_keys.iter().map(|r| (r.origin.is_some(), r.dropped))),
+            ),
+            (
+                Section::Checks,
+                found.dropped_checks.len() + new(&mut draft.checks.iter().map(|r| (r.origin.is_some(), r.dropped))),
+            ),
         ];
         let marked = counts.iter().filter(|(_, n)| *n > 0).map(|(section, _)| *section).collect();
         (marked, counts.iter().map(|(_, n)| n).sum())
@@ -540,7 +584,7 @@ impl StructureTab {
             Load::Ready => {
                 let rows = match self.section {
                     Section::Columns | Section::Table => columns::rows(self, window, cx).into_any_element(),
-                    Section::Indexes => self.indexes(cx).into_any_element(),
+                    Section::Indexes => indexes::rows(self, window, cx),
                     Section::ForeignKeys => self.foreign_keys(cx).into_any_element(),
                     Section::Checks => self.checks(cx).into_any_element(),
                 };
@@ -563,19 +607,6 @@ impl StructureTab {
                     .into_any_element()
             }
         }
-    }
-
-    fn indexes(&self, cx: &App) -> impl IntoElement {
-        let rows = self.draft.indexes.iter().filter(|row| !row.dropped).map(|row| {
-            let index = &row.value;
-            let name = index.name.clone();
-            let what = if index.definition.is_empty() { index.columns.join(", ") } else { index.definition.clone() };
-            line(move || format!("structure:index:{name}"), cx)
-                .child(cell(&index.name, 14.))
-                .child(div().flex_1().min_w_0().child(what))
-                .when(index.unique, |row| row.child(form::badge("UNIQUE", cx.theme().primary)))
-        });
-        list(rows, "structure.noIndexes", cx)
     }
 
     fn foreign_keys(&self, cx: &App) -> impl IntoElement {
@@ -643,8 +674,8 @@ impl StructureTab {
                         .debug_selector(|| "structure-add".into())
                         .tool_icon(Icon::new(IconName::Plus), ICON_SM)
                         .tooltip(t(cx, "structure.add"))
-                        .disabled(!matches!(self.section, Section::Columns))
-                        .on_click(cx.listener(|this, _, window, cx| this.add_column(window, cx))),
+                        .disabled(!self.can_add())
+                        .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx))),
                 )
             })
     }

@@ -93,7 +93,7 @@
     ]
   },
   "plan": [
-    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL"
+    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL, ADD INDEX `idx_e2e_people_nickname` (`nickname`)"
   ],
   "after": {
     "schema": "barsql_test",
@@ -149,6 +149,12 @@
         "name": "e2e_people_email",
         "columns": [
           "email"
+        ]
+      },
+      {
+        "name": "idx_e2e_people_nickname",
+        "columns": [
+          "nickname"
         ]
       }
     ],

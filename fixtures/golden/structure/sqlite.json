@@ -97,6 +97,7 @@
     "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))",
     "CREATE TRIGGER e2e_people_touch AFTER UPDATE ON e2e_people BEGIN SELECT 1; END",
     "ALTER TABLE \"e2e_people\" RENAME COLUMN \"nick\" TO \"nickname\"",
+    "CREATE INDEX \"idx_e2e_people_nickname\" ON \"e2e_people\" (\"nickname\")",
     "PRAGMA foreign_key_check(\"e2e_people\")",
     "COMMIT",
     "PRAGMA foreign_keys = ON"
@@ -147,6 +148,12 @@
       {
         "name": "e2e_people_lower",
         "definition": "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))"
+      },
+      {
+        "name": "idx_e2e_people_nickname",
+        "columns": [
+          "nickname"
+        ]
       }
     ],
     "checks": [
@@ -160,6 +167,11 @@
         "kind": "index",
         "name": "e2e_people_lower",
         "sql": "CREATE INDEX e2e_people_lower ON e2e_people (lower(email))"
+      },
+      {
+        "kind": "index",
+        "name": "idx_e2e_people_nickname",
+        "sql": "CREATE INDEX \"idx_e2e_people_nickname\" ON \"e2e_people\" (\"nickname\")"
       },
       {
         "kind": "trigger",

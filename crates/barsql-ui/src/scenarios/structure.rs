@@ -256,3 +256,22 @@ fn quitting_with_a_draft_asks_once(cx: &mut TestAppContext) {
     assert_eq!(quits(&mut app), 1);
     app.query("SELECT name FROM e2e_s");
 }
+
+#[gpui_kit::test]
+fn adding_an_index_lands_in_the_tree(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    open_row(&mut app, "t:main.e2e_s", "g:main:e2e_s:indexes");
+    open_row(&mut app, "g:main:e2e_s:indexes", "n:main:e2e_s:indexes");
+    app.click("structure-section:1");
+    app.click("structure-add");
+    app.menu_pick("structure:index:new3:columns", 1);
+    let tab = app.structure();
+    let named =
+        app.cx.update(|_, cx| tab.read(cx).draft.indexes.iter().map(|row| row.value.name.clone()).collect::<Vec<_>>());
+    assert_eq!(named, ["idx_e2e_s_name"]);
+    assert!(script(&mut app).contains(r#"CREATE INDEX "idx_e2e_s_name" ON "e2e_s" ("name")"#));
+    app.click("structure-apply");
+    app.click("change-confirm");
+    app.settle_dialog_closed();
+    listed_row(&mut app, "o:main:e2e_s:indexes:idx_e2e_s_name", true);
+}

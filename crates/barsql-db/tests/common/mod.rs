@@ -9,7 +9,7 @@ use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryErro
 use barsql_db::{Cancel, Cell, Engine, ScriptEvent, Session};
 use barsql_sql::Dialect;
 use barsql_sql::split_statement_texts;
-use barsql_sql::structure::{ColumnRow, Draft, plan_changes};
+use barsql_sql::structure::{ColumnRow, Draft, NameKind, Row, plan_changes, suggested_name};
 use serde_json::{Map, Value as Json, json};
 
 // "kind: like, love" for each column, so a test reads the values the catalog found at a glance.
@@ -593,6 +593,11 @@ pub fn structure_edit(driver: &DriverType, original: &barsql_core::TableStructur
         ..Default::default()
     };
     draft.columns.push(ColumnRow { origin: None, dropped: false, column: created_at, primary: false });
+    if editing.indexes {
+        let columns = vec!["nickname".to_string()];
+        let name = suggested_name(driver, NameKind::Index, &original.name, &columns, "");
+        draft.indexes.push(Row::added(barsql_core::StructIndex { name, columns, ..Default::default() }));
+    }
     draft
 }
 

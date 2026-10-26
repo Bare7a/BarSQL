@@ -94,7 +94,7 @@ fn suggestions(tab: &StructureTab, cx: &App) -> Vec<String> {
     out
 }
 
-fn field(
+pub(super) fn field(
     state: &Entity<InputState>,
     selector: String,
     changed: bool,
@@ -112,9 +112,16 @@ fn field(
         .child(form::input(state, window, cx).disabled(locked))
 }
 
-type Toggle = fn(&mut StructureTab, u64, &mut Window, &mut Context<StructureTab>);
+pub(super) type Toggle = fn(&mut StructureTab, u64, &mut Window, &mut Context<StructureTab>);
 
-fn check(id: String, checked: bool, locked: bool, key: u64, toggle: Toggle, cx: &mut Context<StructureTab>) -> Div {
+pub(super) fn check(
+    id: String,
+    checked: bool,
+    locked: bool,
+    key: u64,
+    toggle: Toggle,
+    cx: &mut Context<StructureTab>,
+) -> Div {
     let selector = id.clone();
     let mut checkbox = form::checkbox(id, checked, "", locked, cx);
     if !locked {

@@ -1,4 +1,4 @@
-use barsql_core::{DriverType, Identity, PrimaryKey, SqlDialect, StructColumn, TableStructure};
+use barsql_core::{DriverType, Identity, PrimaryKey, SqlDialect, StructColumn, StructIndex, TableStructure};
 
 use super::{Changes, Draft, ddl_column};
 use crate::alter::{drop_column, rename_column};
@@ -13,6 +13,13 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         && !old.name.is_empty()
     {
         out.push(format!("ALTER TABLE {table} DROP CONSTRAINT {}", quote_ident(driver, &old.name)));
+    }
+    // Indexes go before the columns they cover and come back after the columns they need.
+    for index in &changes.dropped_indexes {
+        out.push(match index.constraint {
+            true => format!("ALTER TABLE {table} DROP CONSTRAINT {}", quote_ident(driver, &index.name)),
+            false => format!("DROP INDEX {}", table_ref(driver, schema, &index.name)),
+        });
     }
     for (old, new) in &changes.renamed {
         out.push(rename_column(driver, schema, name, old, new));
@@ -49,6 +56,7 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
     if let Some((_, Some(key))) = &changes.primary_key {
         out.push(format!("ALTER TABLE {table} ADD {}", primary_key(driver, key)));
     }
+    out.extend(changes.added_indexes.iter().map(|index| create_index(driver, &table, index)));
     let commented = changes.modified.iter().filter(|(old, new)| old.comment != new.comment).map(|(_, new)| new);
     let added = changes.added.iter().filter(|column| !column.comment.is_empty());
     out.extend(commented.chain(added).map(|column| comment(driver, schema, name, column)));
@@ -81,6 +89,19 @@ fn identity_change(old: Identity, new: Identity) -> Option<&'static str> {
     })
 }
 
+fn create_index(driver: &DriverType, table: &str, index: &StructIndex) -> String {
+    let (name, columns) = (quote_ident(driver, &index.name), quote_ident_list(driver, &index.columns));
+    if index.constraint && index.unique {
+        return format!("ALTER TABLE {table} ADD CONSTRAINT {name} UNIQUE ({columns})");
+    }
+    let unique = if index.unique { "UNIQUE " } else { "" };
+    let method = match index.method.as_str() {
+        "" => String::new(),
+        method => format!(" USING {method}"),
+    };
+    format!("CREATE {unique}INDEX {name} ON {table}{method} ({columns})")
+}
+
 fn primary_key(driver: &DriverType, key: &PrimaryKey) -> String {
     let columns = quote_ident_list(driver, &key.columns);
     match key.name.as_str() {
@@ -99,10 +120,10 @@ fn comment(driver: &DriverType, schema: &str, table: &str, column: &StructColumn
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{Identity, StructColumn};
+    use barsql_core::{Identity, StructColumn, StructIndex};
 
     use crate::structure::fixtures::*;
-    use crate::structure::{Draft, plan_changes, plan_create};
+    use crate::structure::{Draft, Row, plan_changes, plan_create};
 
     #[test]
     fn postgres_alters_columns_and_comments() {
@@ -169,6 +190,53 @@ mod tests {
         assert!(
             steps.contains(&r#"ALTER TABLE "public"."users" ADD COLUMN "order" int DEFAULT nextval('s'::regclass)"#),
             "{steps:?}"
+        );
+    }
+
+    #[test]
+    fn postgres_adds_and_drops_indexes() {
+        let mut original = users();
+        original.indexes = vec![
+            StructIndex { method: "btree".into(), ..index("users_name_idx", &["name"], false) },
+            StructIndex { constraint: true, ..index("users_status_key", &["status"], true) },
+        ];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].dropped = true;
+        draft.indexes[1].dropped = true;
+        let email = StructIndex { method: "btree".into(), ..index("users_email_idx", &["email"], true) };
+        draft.indexes.push(Row::added(email));
+        let plan = plan_changes(&PG, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "BEGIN",
+                r#"DROP INDEX "public"."users_name_idx""#,
+                r#"ALTER TABLE "public"."users" DROP CONSTRAINT "users_status_key""#,
+                r#"CREATE UNIQUE INDEX "users_email_idx" ON "public"."users" USING btree ("email")"#,
+                "COMMIT",
+            ]
+        );
+    }
+
+    #[test]
+    fn postgres_drops_indexes_before_columns_and_creates_them_last() {
+        let mut original = users();
+        original.indexes = vec![index("users_legacy_idx", &["legacy"], false)];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].dropped = true;
+        draft.columns[4].dropped = true;
+        draft.rename_column(1, "full_name".into());
+        draft.indexes.push(Row::added(index("users_full_name_idx", &["full_name"], false)));
+        let plan = plan_changes(&PG, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert_eq!(
+            steps[1..steps.len() - 1],
+            [
+                r#"DROP INDEX "public"."users_legacy_idx""#,
+                r#"ALTER TABLE "public"."users" RENAME COLUMN "name" TO "full_name""#,
+                r#"ALTER TABLE "public"."users" DROP COLUMN "legacy""#,
+                r#"CREATE INDEX "users_full_name_idx" ON "public"."users" ("full_name")"#,
+            ]
         );
     }
 

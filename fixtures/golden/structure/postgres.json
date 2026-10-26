@@ -95,6 +95,7 @@
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ALTER COLUMN \"email\" SET DEFAULT ''",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" DROP COLUMN \"legacy\"",
     "ALTER TABLE \"e2e_structure\".\"e2e_people\" ADD COLUMN \"created_at\" timestamp",
+    "CREATE INDEX \"e2e_people_nickname_idx\" ON \"e2e_structure\".\"e2e_people\" (\"nickname\")",
     "COMMENT ON COLUMN \"e2e_structure\".\"e2e_people\".\"email\" IS 'Login'",
     "COMMIT"
   ],
@@ -147,6 +148,13 @@
         "name": "e2e_people_lower",
         "method": "btree",
         "definition": "CREATE INDEX e2e_people_lower ON e2e_structure.e2e_people USING btree (lower(email))"
+      },
+      {
+        "name": "e2e_people_nickname_idx",
+        "columns": [
+          "nickname"
+        ],
+        "method": "btree"
       }
     ],
     "foreignKeys": [

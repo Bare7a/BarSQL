@@ -1,4 +1,4 @@
-use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, TableStructure};
+use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
 use super::{Changes, Draft, NameKind, ddl_column, suggested_name};
 use crate::alter::{drop_column, rename_column};
@@ -16,6 +16,13 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         && !old.name.is_empty()
     {
         out.push(constraint("DROP", &old.name));
+    }
+    // An index blocks changes to the columns it covers, so it goes first and comes back last.
+    for index in &changes.dropped_indexes {
+        out.push(match index.constraint {
+            true => constraint("DROP", &index.name),
+            false => format!("DROP INDEX {} ON {table}", quote_ident(driver, &index.name)),
+        });
     }
     for (old, new) in &changes.renamed {
         out.push(rename_column(driver, schema, name, old, new));
@@ -51,7 +58,18 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
     if let Some((_, Some(key))) = &changes.primary_key {
         out.push(format!("ALTER TABLE {table} ADD {}", primary_key(driver, name, key)));
     }
+    out.extend(changes.added_indexes.iter().map(|index| create_index(driver, &table, index)));
     out
+}
+
+fn create_index(driver: &DriverType, table: &str, index: &StructIndex) -> String {
+    let (name, columns) = (quote_ident(driver, &index.name), quote_ident_list(driver, &index.columns));
+    if index.constraint && index.unique {
+        return format!("ALTER TABLE {table} ADD CONSTRAINT {name} UNIQUE ({columns})");
+    }
+    let unique = if index.unique { "UNIQUE " } else { "" };
+    let clustered = if index.method.eq_ignore_ascii_case("clustered") { "CLUSTERED " } else { "" };
+    format!("CREATE {unique}{clustered}INDEX {name} ON {table} ({columns})")
 }
 
 pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
@@ -100,10 +118,10 @@ fn primary_key(driver: &DriverType, table: &str, key: &PrimaryKey) -> String {
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{Identity, StructColumn, TableStructure};
+    use barsql_core::{Identity, StructColumn, StructIndex, TableStructure};
 
     use crate::structure::fixtures::*;
-    use crate::structure::{Draft, plan_changes, plan_create};
+    use crate::structure::{Draft, Row, plan_changes, plan_create};
 
     fn users() -> TableStructure {
         TableStructure {
@@ -157,6 +175,49 @@ mod tests {
                 "ALTER TABLE [dbo].[users] DROP COLUMN [legacy]",
                 "ALTER TABLE [dbo].[users] ADD [age] int CONSTRAINT [DF_users_age] DEFAULT 0 NOT NULL",
                 "COMMIT TRANSACTION",
+            ]
+        );
+    }
+
+    #[test]
+    fn sql_server_adds_and_drops_indexes() {
+        let mut original = users();
+        original.indexes = vec![
+            StructIndex { method: "nonclustered".into(), ..index("IX_users_name", &["name"], false) },
+            StructIndex { constraint: true, ..index("UQ_users_status", &["status"], true) },
+        ];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].dropped = true;
+        draft.indexes[1].dropped = true;
+        draft.columns.push(added(column("email", "nvarchar(320)")));
+        draft.indexes.push(Row::added(index("IX_users_email", &["email"], true)));
+        let plan = plan_changes(&MS, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert_eq!(
+            steps[2..steps.len() - 1],
+            [
+                "DROP INDEX [IX_users_name] ON [dbo].[users]",
+                "ALTER TABLE [dbo].[users] DROP CONSTRAINT [UQ_users_status]",
+                "ALTER TABLE [dbo].[users] ADD [email] nvarchar(320) NULL",
+                "CREATE UNIQUE INDEX [IX_users_email] ON [dbo].[users] ([email])",
+            ]
+        );
+    }
+
+    #[test]
+    fn sql_server_keeps_a_clustered_index_clustered() {
+        let mut original = users();
+        original.indexes =
+            vec![StructIndex { method: "clustered".into(), ..index("IX_users_status", &["status"], false) }];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].value.unique = true;
+        let plan = plan_changes(&MS, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert_eq!(
+            steps[2..steps.len() - 1],
+            [
+                "DROP INDEX [IX_users_status] ON [dbo].[users]",
+                "CREATE UNIQUE CLUSTERED INDEX [IX_users_status] ON [dbo].[users] ([status])",
             ]
         );
     }

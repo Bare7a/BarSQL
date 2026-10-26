@@ -1,4 +1,4 @@
-use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, TableStructure};
+use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
 use super::{ChangePlan, ColumnRow};
 
@@ -25,6 +25,15 @@ pub fn users() -> TableStructure {
             column("legacy", "text"),
         ],
         primary_key: Some(pk("users_pkey", &["id"])),
+        ..Default::default()
+    }
+}
+
+pub fn index(name: &str, columns: &[&str], unique: bool) -> StructIndex {
+    StructIndex {
+        name: name.into(),
+        columns: columns.iter().map(|c| c.to_string()).collect(),
+        unique,
         ..Default::default()
     }
 }

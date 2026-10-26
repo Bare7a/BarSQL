@@ -33,7 +33,8 @@ fn string(text: &str) -> String {
 
 pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Changes) -> Vec<String> {
     let quote = |name: &str| quote_ident(driver, name);
-    let mut clauses = Vec::new();
+    let mut clauses: Vec<String> =
+        changes.dropped_indexes.iter().map(|index| format!("DROP INDEX {}", quote(&index.name))).collect();
     for (old, new) in &changes.renamed {
         let column = changes.modified.iter().find(|(_, column)| &column.name == new).map(|(_, column)| column.clone());
         let column = column.or_else(|| {
@@ -61,6 +62,14 @@ pub(super) fn alter(driver: &DriverType, original: &TableStructure, changes: &Ch
         if let Some(key) = new {
             clauses.push(format!("ADD PRIMARY KEY ({})", quote_ident_list(driver, &key.columns)));
         }
+    }
+    for index in &changes.added_indexes {
+        let unique = if index.unique { "UNIQUE " } else { "" };
+        clauses.push(format!(
+            "ADD {unique}INDEX {} ({})",
+            quote(&index.name),
+            quote_ident_list(driver, &index.columns)
+        ));
     }
     match clauses.is_empty() {
         true => Vec::new(),
@@ -90,7 +99,7 @@ mod tests {
     use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
 
     use crate::structure::fixtures::*;
-    use crate::structure::{Draft, plan_changes, plan_create};
+    use crate::structure::{Draft, Row, plan_changes, plan_create};
 
     const MY: DriverType = DriverType::MySql;
 
@@ -136,6 +145,23 @@ mod tests {
             ]
         );
         assert!(plan.warnings.is_empty());
+    }
+
+    #[test]
+    fn mysql_adds_and_drops_indexes() {
+        let mut original = users();
+        original.indexes = vec![index("idx_users_name", &["name"], false)];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].dropped = true;
+        draft.columns.push(added(column("email", "varchar(320)")));
+        draft.indexes.push(Row::added(index("idx_users_email", &["email"], true)));
+        let plan = plan_changes(&MY, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "ALTER TABLE `shop`.`users` DROP INDEX `idx_users_name`, ADD COLUMN `email` varchar(320) NULL, ADD UNIQUE INDEX `idx_users_email` (`email`)"
+            ]
+        );
     }
 
     #[test]

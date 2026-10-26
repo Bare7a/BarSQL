@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use barsql_core::{Dependent, DriverType, Identity, StructColumn, TableStructure};
+use barsql_core::{Dependent, DriverType, Identity, StructColumn, StructIndex, TableStructure};
 
-use super::create_sql::{column_item, item_column, names_in, split_create_table};
+use super::create_sql::{column_item, item_column, names_in, paren_body, split_create_table};
 use super::{Changes, Draft, Step, Warning};
 use crate::alter::{drop_column, rename_column};
 use crate::lang::tokens::{TokenKind, tokenize};
@@ -23,11 +23,17 @@ pub(super) fn alter(
         let (schema, name) = (original.schema.as_str(), original.name.as_str());
         let table = table_ref(driver, schema, name);
         let mut steps = vec![Step::sql("BEGIN")];
+        let dropped = changes
+            .dropped_indexes
+            .iter()
+            .map(|index| format!("DROP INDEX {}", table_ref(driver, schema, &index.name)));
+        steps.extend(dropped.map(Step::sql));
         steps.extend(changes.renamed.iter().map(|(old, new)| Step::sql(rename_column(driver, schema, name, old, new))));
         steps.extend(changes.dropped.iter().map(|c| Step::sql(drop_column(driver, schema, name, &c.name, false))));
         let added =
             changes.added.iter().map(|c| format!("ALTER TABLE {table} ADD COLUMN {}", render(c, &c.name, false, &[])));
         steps.extend(added.map(Step::sql));
+        steps.extend(changes.added_indexes.iter().map(|index| Step::sql(create_index(driver, schema, name, index))));
         steps.push(Step::sql("COMMIT"));
         return Some((steps, Vec::new()));
     }
@@ -43,6 +49,12 @@ pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
     }
     let table = table_ref(driver, &draft.schema, &draft.name);
     vec![format!("CREATE TABLE {table} (\n    {}\n)", items.join(",\n    "))]
+}
+
+fn create_index(driver: &DriverType, schema: &str, table: &str, index: &StructIndex) -> String {
+    let unique = if index.unique { "UNIQUE " } else { "" };
+    let (name, on) = (table_ref(driver, schema, &index.name), quote_ident(driver, table));
+    format!("CREATE {unique}INDEX {name} ON {on} ({})", quote_ident_list(driver, &index.columns))
 }
 
 fn render(column: &StructColumn, name: &str, inline_key: bool, kept: &[&str]) -> String {
@@ -116,14 +128,34 @@ fn plain(original: &TableStructure, changes: &Changes, draft: &Draft) -> bool {
         && changes.dropped.iter().all(|c| !used.contains(&c.name.to_lowercase()))
 }
 
-fn starts_primary_key(item: &str) -> bool {
+// A table constraint item of this kind, like PRIMARY KEY (…) or CONSTRAINT name UNIQUE (…).
+fn starts_constraint(item: &str, kind: &str) -> bool {
     let tokens = tokenize(item, Some(&LITE));
     let mut words = tokens.iter().filter(|t| t.kind != TokenKind::Comment);
     match words.next() {
-        Some(first) if first.lower == "primary" => true,
-        Some(first) if first.lower == "constraint" => words.nth(1).is_some_and(|kind| kind.lower == "primary"),
+        Some(first) if first.lower == kind => true,
+        Some(first) if first.lower == "constraint" => words.nth(1).is_some_and(|next| next.lower == kind),
         _ => false,
     }
+}
+
+// The columns a UNIQUE (…) item names, lowercased.
+fn unique_columns(item: &str) -> Option<Vec<String>> {
+    if !starts_constraint(item, "unique") {
+        return None;
+    }
+    let first_name = |part: &str| {
+        let tokens = tokenize(part, Some(&LITE));
+        let name = tokens.iter().find(|t| matches!(t.kind, TokenKind::Ident | TokenKind::Quoted))?;
+        Some(name.ident_text().to_lowercase())
+    };
+    paren_body(item)?.split(',').map(first_name).collect()
+}
+
+// Takes one dropped unique constraint on exactly these columns off the list.
+fn take(unconstrained: &mut Vec<Vec<String>>, columns: &[String]) -> bool {
+    let found = unconstrained.iter().position(|listed| listed == columns);
+    found.map(|at| unconstrained.remove(at)).is_some()
 }
 
 // SQLite's 12-step rebuild. Renamed columns keep their old names until the last step renames them, so SQLite itself
@@ -151,16 +183,26 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
         .filter_map(|row| Some((original.columns.get(row.origin?)?.name.to_lowercase(), &row.column)))
         .collect();
 
+    // A dropped unique constraint is part of the definition, inline on its column or as a UNIQUE (…) item.
+    let mut unconstrained: Vec<Vec<String>> = changes
+        .dropped_indexes
+        .iter()
+        .filter(|index| index.constraint)
+        .map(|index| index.columns.iter().map(|c| c.to_lowercase()).collect())
+        .collect();
     let mut items: Vec<String> = Vec::new();
     let mut after_columns = 0;
     let mut key_placed = !key_changed || new_key.len() < 2;
     for item in &split.items {
         let Some(column) = item_column(item) else {
-            if key_changed && starts_primary_key(item) {
+            if key_changed && starts_constraint(item, "primary") {
                 if !key_placed {
                     items.push(format!("PRIMARY KEY ({})", quote_ident_list(driver, &new_key)));
                     key_placed = true;
                 }
+                continue;
+            }
+            if unique_columns(item).is_some_and(|columns| take(&mut unconstrained, &columns)) {
                 continue;
             }
             items.push(item.to_string());
@@ -170,13 +212,14 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
         if dropped.contains(&lower) {
             continue;
         }
-        if modified.contains(&lower) || key_members.contains(&lower) {
+        let parsed = column_item(item);
+        let clauses = parsed.iter().flat_map(|parsed| parsed.clauses.iter());
+        let inline_unique = clauses.clone().any(|(kind, _)| kind == "unique");
+        let unconstrain = inline_unique && take(&mut unconstrained, std::slice::from_ref(&lower));
+        if modified.contains(&lower) || key_members.contains(&lower) || unconstrain {
             let new = current.get(&lower).copied()?;
-            let parsed = column_item(item);
-            let kept: Vec<&str> = parsed
-                .iter()
-                .flat_map(|parsed| parsed.clauses.iter())
-                .filter(|(kind, _)| KEPT_CLAUSES.contains(&kind.as_str()))
+            let kept: Vec<&str> = clauses
+                .filter(|(kind, _)| KEPT_CLAUSES.contains(&kind.as_str()) && !(unconstrain && kind == "unique"))
                 .map(|(_, text)| *text)
                 .collect();
             items.push(render(new, &column, inline_key(&column), &kept));
@@ -230,6 +273,7 @@ fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, dr
     });
     steps.extend(own.chain(referring.iter().copied()).map(|dependent| Step::sql(dependent.sql.clone())));
     steps.extend(changes.renamed.iter().map(|(old, new)| Step::sql(rename_column(driver, schema, name, old, new))));
+    steps.extend(changes.added_indexes.iter().map(|index| Step::sql(create_index(driver, schema, name, index))));
     let check = format!("PRAGMA foreign_key_check({})", quote_ident(driver, name));
     steps.push(Step { sql: check, expect_no_rows: true });
     steps.push(Step::sql("COMMIT"));
@@ -242,7 +286,7 @@ mod tests {
     use barsql_core::{Check, Dependent, DriverType, Identity, StructColumn, StructIndex, TableStructure};
 
     use crate::structure::fixtures::*;
-    use crate::structure::{Draft, Warning, plan_changes, plan_create};
+    use crate::structure::{Draft, Row, Warning, plan_changes, plan_create};
 
     const LITE: DriverType = DriverType::Sqlite;
 
@@ -450,6 +494,64 @@ mod tests {
         let plan = plan_changes(&LITE, &original, &draft).expect("valid");
         assert_eq!(plan.warnings, [Warning::Rebuild]);
         assert!(sql(&plan)[2].contains(r#""created" TEXT NOT NULL DEFAULT (datetime('now'))"#), "{:?}", sql(&plan));
+    }
+
+    #[test]
+    fn sqlite_adds_and_drops_indexes() {
+        let mut original = simple();
+        original.indexes = vec![index("idx_users_name", &["name"], false)];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].dropped = true;
+        draft.columns.push(added(column("email", "TEXT")));
+        draft.indexes.push(Row::added(index("idx_users_email", &["email"], true)));
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "BEGIN",
+                r#"DROP INDEX "idx_users_name""#,
+                r#"ALTER TABLE "users" ADD COLUMN "email" TEXT"#,
+                r#"CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email")"#,
+                "COMMIT",
+            ]
+        );
+        assert!(plan.warnings.is_empty());
+    }
+
+    #[test]
+    fn sqlite_rebuilds_to_drop_a_unique_constraint() {
+        let mut original = table(
+            "users",
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE CHECK (email <> ''), code TEXT, UNIQUE (code))",
+            vec![column("id", "INTEGER"), column("email", "TEXT"), column("code", "TEXT")],
+            &["id"],
+        );
+        original.indexes = vec![
+            StructIndex { constraint: true, ..index("sqlite_autoindex_users_1", &["email"], true) },
+            StructIndex { constraint: true, ..index("sqlite_autoindex_users_2", &["code"], true) },
+        ];
+        let mut draft = Draft::from_structure(&original);
+        draft.indexes[0].dropped = true;
+        draft.indexes[1].dropped = true;
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        assert_eq!(plan.warnings, [Warning::Rebuild]);
+        assert_eq!(
+            sql(&plan)[2],
+            "CREATE TABLE \"barsql_new_users\" (\n    id INTEGER PRIMARY KEY,\n    \"email\" TEXT CHECK (email <> ''),\n    code TEXT\n)"
+        );
+    }
+
+    #[test]
+    fn sqlite_creates_new_indexes_after_a_rebuild_renames_columns() {
+        let original = simple();
+        let mut draft = Draft::from_structure(&original);
+        draft.columns[1].column.data_type = "VARCHAR(20)".into();
+        draft.rename_column(1, "full_name".into());
+        draft.indexes.push(Row::added(index("idx_users_full_name", &["full_name"], false)));
+        let plan = plan_changes(&LITE, &original, &draft).expect("valid");
+        let steps = sql(&plan);
+        let rename = steps.iter().position(|step| step.contains("RENAME COLUMN")).expect("a rename");
+        assert_eq!(steps[rename + 1], r#"CREATE INDEX "idx_users_full_name" ON "users" ("full_name")"#);
     }
 
     #[test]

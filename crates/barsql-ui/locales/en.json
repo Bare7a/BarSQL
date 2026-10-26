@@ -451,6 +451,14 @@
     "checkUpdates": "Check for updates"
   },
   "structure": {
+    "index": {
+      "name": "Name",
+      "columns": "Columns",
+      "unique": "Unique",
+      "method": "Method",
+      "definition": "Definition",
+      "constraint": "Constraint"
+    },
     "discardTitle": "Discard structure changes?",
     "discardDescription_one": "One tab has structure changes that weren't applied. They're lost when it closes.",
     "discardDescription_other": "{{count}} tabs have structure changes that weren't applied. They're lost when they close.",
