@@ -103,13 +103,10 @@ pub(super) fn field(
     window: &Window,
     cx: &App,
 ) -> Div {
-    div()
-        .flex_none()
-        .w(rems(width))
-        .rounded(RADIUS)
-        .when(changed, |el| el.bg(cx.theme().warning.opacity(TINT)))
-        .debug_selector(move || selector.clone())
-        .child(form::input(state, window, cx).disabled(locked))
+    // The input paints its own background, so a change tints the input itself.
+    let input = form::input(state, window, cx).disabled(locked);
+    let input = if changed { input.bg(cx.theme().warning.opacity(TINT)) } else { input };
+    div().flex_none().w(rems(width)).debug_selector(move || selector.clone()).child(input)
 }
 
 pub(super) type Toggle = fn(&mut StructureTab, u64, &mut Window, &mut Context<StructureTab>);
@@ -158,7 +155,11 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         let key = editors.key;
         let identity_shown = editing.identity != IdentityStyle::None && (old.is_none() || editing.identity_on_existing);
         let types = types.clone();
+        // A chevron alone, so it fits beside the type in its cell.
         let picker = form::select_small(SharedString::from(selector("types")), SharedString::default(), cx)
+            .min_w(rems(1.846))
+            .w(rems(1.846))
+            .px_0()
             .debug_selector({
                 let id = selector("types");
                 move || id.clone()
