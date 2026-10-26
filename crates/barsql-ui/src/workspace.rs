@@ -133,6 +133,11 @@ impl TabView {
         self.query().is_some_and(|tab| tab.read(cx).is_dirty(cx))
     }
 
+    // Structure changes live only in the tab, so closing it loses them.
+    fn holds_draft(&self, cx: &App) -> bool {
+        matches!(self, Self::Structure(tab) if tab.read(cx).has_changes())
+    }
+
     fn focus(&self, window: &mut Window, cx: &mut App) {
         match self {
             Self::Query(tab) => tab.update(cx, |tab, cx| tab.focus_editor(window, cx)),
@@ -1414,11 +1419,26 @@ impl Workspace {
         if asking.is_some_and(|dialog| dialog.contains_focused(window, cx)) {
             return;
         }
+        let ids = self.tab_ids(cx);
         let keys = ["tabs.quitTitle", "tabs.quitDescription", "tabs.quitConfirm"];
-        let Some(confirm) = self.confirm_rollback(&self.tab_ids(cx), keys, cx) else {
-            return window.defer(cx, then);
-        };
-        dialogs::confirm(confirm, window, cx, then);
+        let discard = self.confirm_discard(&self.drafts(&ids, cx), cx);
+        match (self.confirm_rollback(&ids, keys, cx), discard) {
+            (None, None) => return window.defer(cx, then),
+            (None, Some(discard)) => dialogs::confirm(discard, window, cx, then),
+            (Some(rollback), discard) => {
+                let (this, then) = (cx.entity().downgrade(), Rc::new(then));
+                // Confirming the rollback leads to the drafts' question.
+                dialogs::confirm(rollback, window, cx, move |window, cx| match discard.clone() {
+                    Some(discard) => {
+                        let then = then.clone();
+                        dialogs::confirm(discard, window, cx, move |window, cx| then(window, cx));
+                        let _ =
+                            this.update(cx, |this, cx| this.quit_dialog = window.focused(cx).map(|d| d.downgrade()));
+                    }
+                    None => then(window, cx),
+                });
+            }
+        }
         // A dialog takes focus as it opens.
         self.quit_dialog = window.focused(cx).map(|dialog| dialog.downgrade());
     }
@@ -1427,20 +1447,58 @@ impl Workspace {
     // AccessKit adapter, which resets the class of the content view while the Touch Bar observes it through KVO, and
     // AppKit aborts on the Touch Bar's next update.
     fn close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if cfg!(target_os = "macos") || state::bar(cx).any_transaction_open() {
+        let drafts = self.tabs.iter().any(|tab| tab.view.holds_draft(cx));
+        if cfg!(target_os = "macos") || drafts || state::bar(cx).any_transaction_open() {
             self.quit(window, cx);
             return false;
         }
         true
     }
 
-    // Tabs without changes close at once, and the rest ask together.
+    // Tabs without changes close at once. Structure drafts can't be saved, so they ask first with Discard alone, and
+    // then the query tabs ask together.
     fn close_tabs_saving(&mut self, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let drafts = self.drafts(&ids, cx);
         let dirty = |this: &Self, id: &String| this.index_of(id, cx).is_some_and(|ix| this.tabs[ix].view.is_dirty(cx));
-        let (dirty, clean): (Vec<String>, Vec<String>) = ids.into_iter().partition(|id| dirty(self, id));
+        let (dirty, clean): (Vec<String>, Vec<String>) =
+            ids.into_iter().filter(|id| !drafts.contains(id)).partition(|id| dirty(self, id));
         for id in &clean {
             self.close_tab_by_id(id, window, cx);
         }
+        let Some(confirm) = self.confirm_discard(&drafts, cx) else {
+            return self.close_unsaved(dirty, window, cx);
+        };
+        let this = cx.entity().downgrade();
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            let _ = this.update(cx, |this, cx| {
+                for id in &drafts {
+                    this.close_tab_by_id(id, window, cx);
+                }
+                this.close_unsaved(dirty.clone(), window, cx);
+            });
+        });
+    }
+
+    fn drafts(&self, ids: &[String], cx: &App) -> Vec<String> {
+        let held = |id: &&String| self.index_of(id, cx).is_some_and(|ix| self.tabs[ix].view.holds_draft(cx));
+        ids.iter().filter(held).cloned().collect()
+    }
+
+    fn confirm_discard(&self, drafts: &[String], cx: &App) -> Option<Confirm> {
+        let titles: Vec<String> = drafts
+            .iter()
+            .filter_map(|id| self.index_of(id, cx).map(|ix| self.tabs[ix].view.title(cx).to_string()))
+            .collect();
+        (!titles.is_empty()).then(|| Confirm {
+            title: t(cx, "structure.discardTitle"),
+            description: t_count(cx, "structure.discardDescription", titles.len() as i64, &[]),
+            detail: Some(titles.join("\n").into()),
+            confirm: t(cx, "structure.discardConfirm"),
+            danger: true,
+        })
+    }
+
+    fn close_unsaved(&mut self, dirty: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         if dirty.is_empty() {
             return;
         }

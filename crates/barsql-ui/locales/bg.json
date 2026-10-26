@@ -451,6 +451,10 @@
     "checkUpdates": "Проверка за актуализации"
   },
   "structure": {
+    "discardTitle": "Отхвърляне на промените в структурата?",
+    "discardDescription_one": "Един раздел има неприложени промени в структурата. При затваряне те се губят.",
+    "discardDescription_other": "{{count}} раздела имат неприложени промени в структурата. При затваряне те се губят.",
+    "discardConfirm": "Отхвърли промените",
     "newTableTitle": "Нова таблица",
     "tableName": "Име на таблицата",
     "tableNamePlaceholder": "напр. customers",

@@ -451,6 +451,10 @@
     "checkUpdates": "Nach Updates suchen"
   },
   "structure": {
+    "discardTitle": "Strukturänderungen verwerfen?",
+    "discardDescription_one": "Ein Tab hat Strukturänderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
+    "discardDescription_other": "{{count}} Tabs haben Strukturänderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
+    "discardConfirm": "Änderungen verwerfen",
     "newTableTitle": "Neue Tabelle",
     "tableName": "Tabellenname",
     "tableNamePlaceholder": "z. B. customers",

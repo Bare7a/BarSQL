@@ -117,6 +117,7 @@ pub fn prompt(
 }
 
 // Enter presses OK, as in every dialog. `danger` only colours it.
+#[derive(Clone)]
 pub struct Confirm {
     pub title: SharedString,
     pub description: SharedString,

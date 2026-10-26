@@ -2,7 +2,9 @@ use barsql_core::{ConnectionConfig, Value};
 use gpui_kit::{Entity, TestAppContext};
 
 use super::driver::{Driver, open, open_with, selector};
+use crate::actions::{CloseTab, Quit};
 use crate::schema_tree::SchemaTree;
+use crate::workspace::QuitRequests;
 
 // Table menu positions, counted from Browse data at 0.
 const BROWSE: usize = 0;
@@ -220,4 +222,37 @@ fn new_table_creates_and_becomes_its_structure_tab(cx: &mut TestAppContext) {
     let tab = app.structure();
     app.settle(|cx| cx.update(|_, cx| tab.read(cx).persisted() && !tab.read(cx).has_changes()));
     assert_eq!(names(&mut app), ["id", "email"]);
+}
+
+#[gpui_kit::test]
+fn closing_a_dirty_structure_tab_asks_to_discard(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let tabs = app.titles().len();
+    retype(&mut app, "structure:column:name:name", "full_name");
+    app.dispatch(CloseTab);
+    assert!(app.dialog_open());
+    assert_eq!(app.asked(), ("Discard structure changes?".into(), Some("e2e_s".into())));
+    app.confirm_dialog();
+    assert_eq!(app.titles().len(), tabs - 1);
+    app.query("SELECT name FROM e2e_s");
+}
+
+fn quits(app: &mut Driver) -> usize {
+    app.cx.update(|_, cx| cx.try_global::<QuitRequests>().map_or(0, |quits| quits.0))
+}
+
+#[gpui_kit::test]
+fn quitting_with_a_draft_asks_once(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    retype(&mut app, "structure:column:name:name", "full_name");
+    assert!(!app.close_window(), "the window stays open");
+    assert!(app.dialog_open());
+    app.dispatch(Quit);
+    app.keys("escape");
+    assert!(!app.dialog_open(), "Quit again didn't stack a second confirmation");
+    assert_eq!(quits(&mut app), 0);
+    app.dispatch(Quit);
+    app.confirm_dialog();
+    assert_eq!(quits(&mut app), 1);
+    app.query("SELECT name FROM e2e_s");
 }

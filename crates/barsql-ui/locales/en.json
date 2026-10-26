@@ -451,6 +451,10 @@
     "checkUpdates": "Check for updates"
   },
   "structure": {
+    "discardTitle": "Discard structure changes?",
+    "discardDescription_one": "One tab has structure changes that weren't applied. They're lost when it closes.",
+    "discardDescription_other": "{{count}} tabs have structure changes that weren't applied. They're lost when they close.",
+    "discardConfirm": "Discard changes",
     "newTableTitle": "New table",
     "tableName": "Table name",
     "tableNamePlaceholder": "e.g. customers",
