@@ -11,6 +11,7 @@ use barsql_core::{Check, ConnectionConfig, ForeignKey, Identity, StructColumn, S
 use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Section, changes, plan_changes, plan_create,
 };
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{EditorState, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollbarAxis;
@@ -22,6 +23,7 @@ use self::checks::CheckEditors;
 use self::columns::{Editors, Field};
 use self::foreign_keys::KeyEditors;
 use self::indexes::IndexEditors;
+use self::preview::PreviewDrag;
 use crate::form::{self, ToolButton as _};
 use crate::i18n::{t, t_count, t_with};
 use crate::schema_actions;
@@ -434,6 +436,7 @@ impl StructureTab {
             Section::Checks => self.add_check(window, cx),
             Section::ForeignKeys => self.add_foreign_key(window, cx),
         }
+        self.scroll.scroll_to_bottom();
     }
 
     pub fn revert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -542,11 +545,12 @@ impl StructureTab {
             )
         });
         h_flex()
+            .debug_selector(|| "structure-header".into())
             .flex_none()
             .justify_between()
             .gap(rems(0.923))
             .px(rems(1.231))
-            .py(rems(0.615))
+            .h(rems(3.077))
             .border_b_1()
             .border_color(theme.border)
             .child(match self.naming() {
@@ -631,6 +635,7 @@ impl StructureTab {
                     .child(
                         div()
                             .id("structure-body")
+                            .debug_selector(|| "structure-body".into())
                             .size_full()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
@@ -719,6 +724,25 @@ fn line(selector: impl Fn() -> String + 'static, cx: &App) -> Div {
     h_flex().gap(rems(0.923)).py(rems(0.462)).border_b_1().border_color(cx.theme().border).debug_selector(selector)
 }
 
+// form::input's height, so a row's selects and buttons line up with its inputs.
+const FIELD: f32 = 2.308;
+
+fn row_select(id: String, label: impl Into<SharedString>, cx: &App) -> Button {
+    form::select_small(SharedString::from(id.clone()), label, cx).h(rems(FIELD)).debug_selector(move || id.clone())
+}
+
+// A row's drop button, or its restore button once dropped. Plain until hovered, so the rows don't fence it in.
+fn drop_button(id: String, dropped: bool, cx: &App) -> Button {
+    let (icon, tip) = if dropped { (Lucide::Undo2, "structure.restore") } else { (Lucide::Trash, "structure.drop") };
+    Button::new(SharedString::from(id.clone()))
+        .debug_selector(move || id.clone())
+        .ghost()
+        .size(rems(FIELD))
+        .p_0()
+        .child(Icon::new(icon).size(ICON_SM).text_color(cx.theme().muted_foreground))
+        .tooltip(t(cx, tip))
+}
+
 fn cell(text: &str, width: f32) -> Div {
     div().flex_none().w(rems(width)).min_w_0().overflow_hidden().child(text.to_string())
 }
@@ -745,8 +769,17 @@ impl Render for StructureTab {
                     .collect::<Vec<_>>(),
             )
             .children(self.banner(cx))
-            .child(div().flex_1().min_h_0().child(self.body(window, cx)))
-            .when(self.editable(), |tab| tab.child(preview::panel(self, cx)))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .on_drag_move(cx.listener(|_, event: &DragMoveEvent<PreviewDrag>, window, cx| {
+                        preview::resize(event, window, cx);
+                        cx.notify();
+                    }))
+                    .child(div().flex_1().min_h_0().child(self.body(window, cx)))
+                    .when(self.editable(), |tab| tab.child(preview::panel(self, cx))),
+            )
             .child(self.toolbar(cx))
     }
 }

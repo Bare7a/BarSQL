@@ -1,5 +1,5 @@
 use barsql_core::{ConnectionConfig, Value};
-use gpui_kit::{Entity, TestAppContext};
+use gpui_kit::{Entity, Modifiers, MouseButton, TestAppContext, point, px};
 
 use super::driver::{Driver, open, open_with, selector};
 use crate::actions::{CloseTab, EditTableStructure, Quit, ReopenClosedTab};
@@ -383,4 +383,53 @@ fn picking_a_type_from_the_menu_sets_it(cx: &mut TestAppContext) {
     let first = barsql_sql::structure::type_suggestions(&barsql_core::DriverType::Sqlite)[0];
     let tab = app.structure();
     assert_eq!(app.cx.update(|_, cx| tab.read(cx).draft.columns[1].column.data_type.clone()), first);
+}
+
+#[gpui_kit::test]
+fn the_header_lines_up_with_the_sidebar_tabs(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let header = app.bounds("structure-header").expect("the header");
+    let tabs = app.bounds("sidebar-tabs").expect("the sidebar's tabs");
+    assert_eq!((header.origin.y, header.size.height), (tabs.origin.y, tabs.size.height));
+}
+
+#[gpui_kit::test]
+fn row_controls_are_as_tall_as_the_inputs(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let mut height = |part: &str| {
+        let bounds = app.bounds(selector(format!("structure:column:name:{part}")));
+        bounds.unwrap_or_else(|| panic!("no {part}")).size.height
+    };
+    let input = height("name");
+    for part in ["types", "identity", "drop"] {
+        assert_eq!(height(part), input, "{part}");
+    }
+}
+
+#[gpui_kit::test]
+fn dragging_the_preview_edge_resizes_it(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let before = app.bounds("structure-preview").expect("the preview").size.height;
+    let panel = app.bounds("structure-preview-panel").expect("the preview panel");
+    let edge = point(panel.center().x, panel.origin.y);
+    app.cx.simulate_mouse_down(edge, MouseButton::Left, Modifiers::none());
+    for step in 1..=4 {
+        app.cx.simulate_mouse_move(point(edge.x, edge.y - px(30. * step as f32)), MouseButton::Left, Modifiers::none());
+    }
+    app.cx.simulate_mouse_up(point(edge.x, edge.y - px(120.)), MouseButton::Left, Modifiers::none());
+    let after = app.bounds("structure-preview").expect("the preview").size.height;
+    assert!(after > before + px(100.), "{before:?} -> {after:?}");
+}
+
+#[gpui_kit::test]
+fn adding_a_row_scrolls_to_it(cx: &mut TestAppContext) {
+    let columns: Vec<String> = (0..40).map(|ix| format!("c{ix} TEXT")).collect();
+    let mut app = prepared(cx, &format!("CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, {})", columns.join(", ")));
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    app.wait_shown("structure:column:id:name");
+    app.click("structure-add");
+    app.draw();
+    let body = app.bounds("structure-body").expect("the rows");
+    let row = app.bounds("structure:column:new42:name").expect("the new row");
+    assert!(row.bottom() <= body.bottom() && row.top() >= body.top(), "{row:?} outside {body:?}");
 }

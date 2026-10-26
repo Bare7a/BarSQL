@@ -431,8 +431,13 @@ impl Sidebar {
             ("sidebar.saved", Lucide::Bookmark),
             ("sidebar.recent", Lucide::Clock),
         ];
-        h_flex().flex_none().h(rems(3.077)).border_b_1().border_color(theme.border).children(
-            tabs.into_iter().enumerate().map(|(ix, (key, icon))| {
+        h_flex()
+            .debug_selector(|| "sidebar-tabs".into())
+            .flex_none()
+            .h(rems(3.077))
+            .border_b_1()
+            .border_color(theme.border)
+            .children(tabs.into_iter().enumerate().map(|(ix, (key, icon))| {
                 let active = PANELS[ix] == self.panel;
                 h_flex()
                     .id(key)
@@ -459,8 +464,7 @@ impl Sidebar {
                         this.panel = PANELS[ix];
                         cx.notify();
                     }))
-            }),
-        )
+            }))
     }
 
     fn empty(&self, message: SharedString, cx: &App) -> impl IntoElement {

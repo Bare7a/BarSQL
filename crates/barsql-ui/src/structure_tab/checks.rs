@@ -1,17 +1,15 @@
 use barsql_core::Check;
 use barsql_sql::structure::{Row, Section};
-use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme, Icon, v_flex};
+use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::columns::field;
-use super::{StructureTab, cell, input, line, problem_text};
-use crate::form::{self, ToolButton as _};
+use super::{StructureTab, cell, drop_button, input, line, problem_text};
+use crate::form::{self};
 use crate::i18n::t;
-use crate::tokens::{ICON_SM, RADIUS, TEXT_XS, TINT};
+use crate::tokens::{RADIUS, TEXT_XS, TINT};
 
 #[derive(Debug, Clone, Copy)]
 enum Part {
@@ -118,15 +116,7 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         let locked = !editable || row.dropped;
         let key = editors.key;
         let drop = editable.then(|| {
-            let icon = if row.dropped { Lucide::Undo2 } else { Lucide::Trash };
-            let tip = if row.dropped { "structure.restore" } else { "structure.drop" };
-            Button::new(SharedString::from(selector("drop")))
-                .debug_selector({
-                    let id = selector("drop");
-                    move || id.clone()
-                })
-                .tool_icon(Icon::new(icon), ICON_SM)
-                .tooltip(t(cx, tip))
+            drop_button(selector("drop"), row.dropped, cx)
                 .on_click(cx.listener(move |tab, _, window, cx| tab.drop_check(key, window, cx)))
         });
         let name = field(&editors.name, selector("name"), changed(|a, b| a.name != b.name), locked, 14., window, cx);

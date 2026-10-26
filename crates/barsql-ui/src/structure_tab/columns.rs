@@ -1,19 +1,17 @@
 use barsql_core::capabilities::IdentityStyle;
 use barsql_core::{Identity, StructColumn};
 use barsql_sql::structure::{Section, type_suggestions};
-use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{StructureTab, cell, input, line, problem_text};
-use crate::form::{self, SelectMenu as _, ToolButton as _};
+use super::{FIELD, StructureTab, cell, drop_button, input, line, problem_text, row_select};
+use crate::form::{self, SelectMenu as _};
 use crate::i18n::{t, t_with};
 use crate::schema;
-use crate::tokens::{ICON_SM, RADIUS, TEXT_XS, TINT};
+use crate::tokens::{RADIUS, TEXT_XS, TINT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Field {
@@ -154,14 +152,10 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         let key = editors.key;
         let identity_shown = editing.identity != IdentityStyle::None && (old.is_none() || editing.identity_on_existing);
         // A chevron alone, so it fits beside the type in its cell.
-        let picker = form::select_small(SharedString::from(selector("types")), SharedString::default(), cx)
-            .min_w(rems(1.846))
-            .w(rems(1.846))
+        let picker = row_select(selector("types"), SharedString::default(), cx)
+            .min_w(rems(FIELD))
+            .w(rems(FIELD))
             .px_0()
-            .debug_selector({
-                let id = selector("types");
-                move || id.clone()
-            })
             .disabled(locked)
             .select_menu(window, cx, {
                 let this = this.clone();
@@ -193,25 +187,19 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
             let choices = identity_choices(editing.identity);
             let label = identity_label(current, cx);
             div().flex_none().w(rems(9.)).child(
-                form::select_small(SharedString::from(selector("identity")), label, cx)
-                    .debug_selector({
-                        let id = selector("identity");
-                        move || id.clone()
-                    })
-                    .disabled(locked)
-                    .select_menu(window, cx, {
-                        let this = this.clone();
-                        move |mut menu: PopupMenu, _, cx| {
-                            for &choice in choices {
-                                let this = this.clone();
-                                let item = PopupMenuItem::new(identity_label(choice, cx)).checked(choice == current);
-                                menu = menu.item(item.on_click(move |_, window, cx| {
-                                    let _ = this.update(cx, |tab, cx| tab.set_identity(key, choice, window, cx));
-                                }));
-                            }
-                            menu
+                row_select(selector("identity"), label, cx).disabled(locked).select_menu(window, cx, {
+                    let this = this.clone();
+                    move |mut menu: PopupMenu, _, cx| {
+                        for &choice in choices {
+                            let this = this.clone();
+                            let item = PopupMenuItem::new(identity_label(choice, cx)).checked(choice == current);
+                            menu = menu.item(item.on_click(move |_, window, cx| {
+                                let _ = this.update(cx, |tab, cx| tab.set_identity(key, choice, window, cx));
+                            }));
                         }
-                    }),
+                        menu
+                    }
+                }),
             )
         });
         let comment = editing.comments.then(|| {
@@ -220,15 +208,7 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
                 .w_auto()
         });
         let drop = editable.then(|| {
-            let icon = if row.dropped { Lucide::Undo2 } else { Lucide::Trash };
-            let tip = if row.dropped { "structure.restore" } else { "structure.drop" };
-            Button::new(SharedString::from(selector("drop")))
-                .debug_selector({
-                    let id = selector("drop");
-                    move || id.clone()
-                })
-                .tool_icon(Icon::new(icon), ICON_SM)
-                .tooltip(t(cx, tip))
+            drop_button(selector("drop"), row.dropped, cx)
                 .disabled(!column.generated.is_empty())
                 .on_click(cx.listener(move |tab, _, window, cx| tab.drop_row(key, window, cx)))
         });
@@ -254,7 +234,7 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
                     selector("type"),
                     changed(|a, b| a.data_type != b.data_type),
                     locked,
-                    9.5,
+                    9.384,
                     window,
                     cx,
                 ))

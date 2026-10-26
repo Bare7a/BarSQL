@@ -1,19 +1,18 @@
 use barsql_core::{ForeignKey, RefAction};
 use barsql_sql::structure::{NameKind, Row, Section, changes, suggested_name};
-use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::columns::field;
-use super::{StructureTab, cell, input, line, problem_text};
-use crate::form::{self, SelectMenu as _, ToolButton as _};
+use super::{StructureTab, cell, drop_button, input, line, problem_text, row_select};
+use crate::form::{self, SelectMenu as _};
 use crate::i18n::t;
 use crate::schema;
-use crate::tokens::{ICON_SM, RADIUS, TEXT_XS, TINT};
+use crate::tokens::{RADIUS, TEXT_XS, TINT};
 
 pub(super) struct KeyEditors {
     pub key: u64,
@@ -212,8 +211,7 @@ fn action_select(
 }
 
 fn select(id: String, label: SharedString, locked: bool, width: f32, cx: &App) -> (Div, Button) {
-    let picker = form::select_small(SharedString::from(id.clone()), label, cx).debug_selector(move || id.clone());
-    (div().flex_none().w(rems(width)), picker.disabled(locked))
+    (div().flex_none().w(rems(width)), row_select(id, label, cx).disabled(locked))
 }
 
 pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<StructureTab>) -> AnyElement {
@@ -317,15 +315,7 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         );
 
         let drop = editable.then(|| {
-            let icon = if row.dropped { Lucide::Undo2 } else { Lucide::Trash };
-            let tip = if row.dropped { "structure.restore" } else { "structure.drop" };
-            Button::new(SharedString::from(selector("drop")))
-                .debug_selector({
-                    let id = selector("drop");
-                    move || id.clone()
-                })
-                .tool_icon(Icon::new(icon), ICON_SM)
-                .tooltip(t(cx, tip))
+            drop_button(selector("drop"), row.dropped, cx)
                 .on_click(cx.listener(move |tab, _, window, cx| tab.drop_foreign_key(key, window, cx)))
         });
         let line = line(

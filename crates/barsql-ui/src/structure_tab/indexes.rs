@@ -1,18 +1,16 @@
 use barsql_core::StructIndex;
 use barsql_sql::structure::{NameKind, Row, Section, changes, suggested_name};
-use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::columns::{check, field};
-use super::{StructureTab, cell, input, line, problem_text};
-use crate::form::{self, SelectMenu as _, ToolButton as _};
+use super::{StructureTab, cell, drop_button, input, line, problem_text, row_select};
+use crate::form::{self, SelectMenu as _};
 use crate::i18n::t;
-use crate::tokens::{ICON_SM, RADIUS, TEXT_XS, TINT};
+use crate::tokens::{RADIUS, TEXT_XS, TINT};
 
 pub(super) struct IndexEditors {
     pub key: u64,
@@ -164,35 +162,23 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
                 true => t(cx, "structure.index.columns"),
                 false => index.columns.join(", ").into(),
             };
-            let picker = form::select_small(SharedString::from(selector("columns")), label, cx)
-                .debug_selector({
-                    let id = selector("columns");
-                    move || id.clone()
-                })
-                .disabled(locked)
-                .select_menu(window, cx, {
-                    let (this, columns, chosen) = (this.clone(), columns.clone(), index.columns.clone());
-                    move |mut menu: PopupMenu, _, _| {
-                        for column in &columns {
-                            let (this, column) = (this.clone(), column.clone());
-                            let item = PopupMenuItem::new(column.clone()).checked(chosen.contains(&column));
-                            menu = menu.item(item.on_click(move |_, window, cx| {
-                                let _ =
-                                    this.update(cx, |tab, cx| tab.toggle_index_column(key, column.clone(), window, cx));
-                            }));
-                        }
-                        menu
+            let picker = row_select(selector("columns"), label, cx).disabled(locked).select_menu(window, cx, {
+                let (this, columns, chosen) = (this.clone(), columns.clone(), index.columns.clone());
+                move |mut menu: PopupMenu, _, _| {
+                    for column in &columns {
+                        let (this, column) = (this.clone(), column.clone());
+                        let item = PopupMenuItem::new(column.clone()).checked(chosen.contains(&column));
+                        menu = menu.item(item.on_click(move |_, window, cx| {
+                            let _ = this.update(cx, |tab, cx| tab.toggle_index_column(key, column.clone(), window, cx));
+                        }));
                     }
-                });
+                    menu
+                }
+            });
             let method = (!methods.is_empty()).then(|| {
                 let current = if index.method.is_empty() { methods[0].to_string() } else { index.method.clone() };
-                let select = form::select_small(SharedString::from(selector("method")), current.clone(), cx)
-                    .debug_selector({
-                        let id = selector("method");
-                        move || id.clone()
-                    })
-                    .disabled(locked)
-                    .select_menu(window, cx, {
+                let select =
+                    row_select(selector("method"), current.clone(), cx).disabled(locked).select_menu(window, cx, {
                         let this = this.clone();
                         move |mut menu: PopupMenu, _, _| {
                             for &method in methods {
@@ -219,15 +205,7 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
                 .child(div().flex_1().min_w_0().text_color(theme.muted_foreground).child(definition));
         }
         let drop = editable.then(|| {
-            let icon = if row.dropped { Lucide::Undo2 } else { Lucide::Trash };
-            let tip = if row.dropped { "structure.restore" } else { "structure.drop" };
-            Button::new(SharedString::from(selector("drop")))
-                .debug_selector({
-                    let id = selector("drop");
-                    move || id.clone()
-                })
-                .tool_icon(Icon::new(icon), ICON_SM)
-                .tooltip(t(cx, tip))
+            drop_button(selector("drop"), row.dropped, cx)
                 .on_click(cx.listener(move |tab, _, window, cx| tab.drop_index(key, window, cx)))
         });
         line = line
