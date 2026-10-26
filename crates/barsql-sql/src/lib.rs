@@ -15,6 +15,7 @@ pub mod readonly;
 pub mod schema_diff;
 pub mod split;
 pub mod sql_text;
+pub mod structure;
 pub mod system_views;
 pub mod type_name;
 
