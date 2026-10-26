@@ -350,3 +350,15 @@ async fn mariadb_ed25519_login_works() {
         .unwrap();
     assert_eq!(plugin.text(0, 0), Some("ed25519"));
 }
+
+#[tokio::test]
+async fn mysql_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    common::structure_fixture_test(&connect("MYSQL", "33306").await, "structure/mysql.json").await;
+}
+
+#[tokio::test]
+async fn mariadb_structure_and_edit_match_the_fixture() {
+    let _serial = common::serial().await;
+    common::structure_fixture_test(&connect("MARIADB", "33307").await, "structure/mariadb.json").await;
+}

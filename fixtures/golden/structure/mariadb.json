@@ -1,0 +1,180 @@
+{
+  "engine": "mariadb",
+  "schema": "barsql_test",
+  "table": "e2e_people",
+  "setup": [
+    "DROP TABLE IF EXISTS e2e_people",
+    "DROP TABLE IF EXISTS e2e_orgs",
+    "CREATE TABLE e2e_orgs (id int PRIMARY KEY)",
+    "CREATE TABLE e2e_people (id bigint NOT NULL AUTO_INCREMENT PRIMARY KEY, nick varchar(50) COLLATE utf8mb4_bin COMMENT 'Display', age int, email varchar(255), legacy text, org_id int, updated timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT e2e_people_age_check CHECK (age >= 0), CONSTRAINT e2e_people_org_fk FOREIGN KEY (org_id) REFERENCES e2e_orgs (id) ON DELETE SET NULL)",
+    "CREATE INDEX e2e_people_email ON e2e_people (email)",
+    "INSERT INTO e2e_orgs VALUES (1)",
+    "INSERT INTO e2e_people (nick, age, email, legacy, org_id) VALUES ('ann', 30, 'ann@example.com', 'old', 1)"
+  ],
+  "countTables": [
+    "e2e_people"
+  ],
+  "structure": {
+    "schema": "barsql_test",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "bigint(20)",
+        "identity": "autoIncrement"
+      },
+      {
+        "name": "nick",
+        "dataType": "varchar(50)",
+        "nullable": true,
+        "collation": "utf8mb4_bin",
+        "comment": "Display"
+      },
+      {
+        "name": "age",
+        "dataType": "int(11)",
+        "nullable": true
+      },
+      {
+        "name": "email",
+        "dataType": "varchar(255)",
+        "nullable": true
+      },
+      {
+        "name": "legacy",
+        "dataType": "text",
+        "nullable": true
+      },
+      {
+        "name": "org_id",
+        "dataType": "int(11)",
+        "nullable": true
+      },
+      {
+        "name": "updated",
+        "dataType": "timestamp",
+        "default": "current_timestamp()",
+        "extra": "on update current_timestamp()"
+      }
+    ],
+    "primaryKey": {
+      "columns": [
+        "id"
+      ]
+    },
+    "indexes": [
+      {
+        "name": "e2e_people_email",
+        "columns": [
+          "email"
+        ]
+      }
+    ],
+    "foreignKeys": [
+      {
+        "name": "e2e_people_org_fk",
+        "columns": [
+          "org_id"
+        ],
+        "refSchema": "barsql_test",
+        "refTable": "e2e_orgs",
+        "refColumns": [
+          "id"
+        ],
+        "onUpdate": "restrict",
+        "onDelete": "setNull"
+      }
+    ],
+    "checks": [
+      {
+        "name": "e2e_people_age_check",
+        "expression": "`age` >= 0"
+      }
+    ]
+  },
+  "plan": [
+    "ALTER TABLE `barsql_test`.`e2e_people` CHANGE COLUMN `nick` `nickname` varchar(50) COLLATE utf8mb4_bin NULL COMMENT 'Display', MODIFY COLUMN `age` bigint NULL, MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT '' COMMENT 'Login', DROP COLUMN `legacy`, ADD COLUMN `created_at` DATETIME NULL"
+  ],
+  "after": {
+    "schema": "barsql_test",
+    "name": "e2e_people",
+    "columns": [
+      {
+        "name": "id",
+        "dataType": "bigint(20)",
+        "identity": "autoIncrement"
+      },
+      {
+        "name": "nickname",
+        "dataType": "varchar(50)",
+        "nullable": true,
+        "collation": "utf8mb4_bin",
+        "comment": "Display"
+      },
+      {
+        "name": "age",
+        "dataType": "bigint(20)",
+        "nullable": true
+      },
+      {
+        "name": "email",
+        "dataType": "varchar(255)",
+        "default": "''",
+        "comment": "Login"
+      },
+      {
+        "name": "org_id",
+        "dataType": "int(11)",
+        "nullable": true
+      },
+      {
+        "name": "updated",
+        "dataType": "timestamp",
+        "default": "current_timestamp()",
+        "extra": "on update current_timestamp()"
+      },
+      {
+        "name": "created_at",
+        "dataType": "datetime",
+        "nullable": true
+      }
+    ],
+    "primaryKey": {
+      "columns": [
+        "id"
+      ]
+    },
+    "indexes": [
+      {
+        "name": "e2e_people_email",
+        "columns": [
+          "email"
+        ]
+      }
+    ],
+    "foreignKeys": [
+      {
+        "name": "e2e_people_org_fk",
+        "columns": [
+          "org_id"
+        ],
+        "refSchema": "barsql_test",
+        "refTable": "e2e_orgs",
+        "refColumns": [
+          "id"
+        ],
+        "onUpdate": "restrict",
+        "onDelete": "setNull"
+      }
+    ],
+    "checks": [
+      {
+        "name": "e2e_people_age_check",
+        "expression": "`age` >= 0"
+      }
+    ]
+  },
+  "counts": {
+    "e2e_people": "1"
+  }
+}
