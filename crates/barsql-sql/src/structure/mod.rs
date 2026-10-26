@@ -1,4 +1,5 @@
 pub mod create_sql;
+mod mysql;
 mod postgres;
 mod tsql;
 
@@ -448,6 +449,7 @@ pub fn plan_changes(driver: &DriverType, original: &TableStructure, draft: &Draf
     Ok(match driver.dialect() {
         Some(SqlDialect::Postgres) => transaction(postgres::alter(driver, original, &found)),
         Some(SqlDialect::TSql) => tsql_transaction(tsql::alter(driver, original, &found)),
+        Some(SqlDialect::MySql) => statements(mysql::alter(driver, original, &found)),
         _ => ChangePlan::default(),
     })
 }
@@ -460,6 +462,7 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
     Ok(match driver.dialect() {
         Some(SqlDialect::Postgres) => transaction(postgres::create(driver, draft)),
         Some(SqlDialect::TSql) => tsql_transaction(tsql::create(driver, draft)),
+        Some(SqlDialect::MySql) => statements(mysql::create(driver, draft)),
         _ => ChangePlan::default(),
     })
 }
@@ -467,6 +470,12 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
 fn transaction(statements: Vec<String>) -> ChangePlan {
     let steps = std::iter::once("BEGIN".to_string()).chain(statements).chain(std::iter::once("COMMIT".to_string()));
     ChangePlan { steps: steps.map(Step::sql).collect(), warnings: Vec::new() }
+}
+
+// For the engines that can't roll DDL back. More than one statement can stop halfway.
+fn statements(statements: Vec<String>) -> ChangePlan {
+    let warnings = if statements.len() > 1 { vec![Warning::NotAtomic] } else { Vec::new() };
+    ChangePlan { steps: statements.into_iter().map(Step::sql).collect(), warnings }
 }
 
 // XACT_ABORT rolls the whole transaction back on the first error, which a batch-by-batch run needs.
