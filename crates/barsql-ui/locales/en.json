@@ -283,6 +283,8 @@
     "exportStopped_other": "Export stopped - {{fileName}} holds only the first {{count}} rows"
   },
   "menu": {
+    "editTableStructure": "Edit table structure",
+    "newTable": "New table",
     "toggleSidebar": "Sidebar",
     "toggleJsonPanel": "JSON viewer",
     "undo": "Undo",

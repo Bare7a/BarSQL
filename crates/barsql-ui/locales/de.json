@@ -283,6 +283,8 @@
     "exportStopped_other": "Export abgebrochen - {{fileName}} enthält nur die ersten {{count}} Zeilen"
   },
   "menu": {
+    "editTableStructure": "Tabellenstruktur bearbeiten",
+    "newTable": "Neue Tabelle",
     "toggleSidebar": "Seitenleiste",
     "toggleJsonPanel": "JSON-Viewer",
     "undo": "Widerrufen",

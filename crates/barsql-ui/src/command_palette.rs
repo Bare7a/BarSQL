@@ -47,6 +47,8 @@ fn catalog(cx: &App) -> Vec<(String, Box<dyn Action>)> {
         (item("shortcuts.items.nextTab"), Box::new(NextTab)),
         (item("shortcuts.items.prevTab"), Box::new(PrevTab)),
         (item("shortcuts.items.quickSearch"), Box::new(QuickSearch)),
+        (item("menu.editTableStructure"), Box::new(EditTableStructure)),
+        (item("menu.newTable"), Box::new(NewTable)),
         (item("shortcuts.items.toggleSidebar"), Box::new(ToggleSidebar)),
         (item("shortcuts.items.toggleJsonPanel"), Box::new(ToggleJsonPanel)),
         (item("menu.stripedRows"), Box::new(ToggleGridStripes)),

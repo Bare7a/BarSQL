@@ -283,6 +283,8 @@
     "exportStopped_other": "Експортирането е спряно - {{fileName}} съдържа само първите {{count}} реда"
   },
   "menu": {
+    "editTableStructure": "Редактиране на структурата на таблицата",
+    "newTable": "Нова таблица",
     "toggleSidebar": "Странична лента",
     "toggleJsonPanel": "JSON преглед",
     "undo": "Отмени",

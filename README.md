@@ -269,6 +269,26 @@ Every change opens a dialog that shows the **exact SQL** it will run, written fo
 - Read-only connections show the menu items but can't run them
 - What an engine can't do isn't offered - SQLite can't rename a view or drop a constraint, for example
 
+#### 🧱 Structure Editor
+
+**Edit structure…** on a table (or the **Structure** button in its data tab, or **Edit table structure** in the command palette) opens it in a **Structure** tab of its own, with its columns, indexes, foreign keys and checks in sections you switch between. **New table…** on a schema opens an empty one, with an `id` key column to start from.
+
+- **Columns** - name, type (typed, or picked from the engine's usual types and the ones your tables already use), nullable, primary key, default, identity / auto-increment and, where the engine keeps them, comments
+- **Indexes** - columns in the order you pick them, unique, and the index method on PostgreSQL. A new index is named after its columns until you name it; expression and partial indexes are kept as written and can be dropped
+- **Foreign keys** - columns, the referenced table and its columns (its primary key, once you pick the table), and `ON UPDATE` / `ON DELETE` with only the actions the engine supports
+- **Checks** - a name and a condition
+- Added rows show green, changed fields yellow, dropped rows red and struck through, and the toolbar counts what's pending. **Revert** drops it all
+- The **SQL preview** under the rows is the exact script **Apply** (or `⌘/Ctrl`+`S`) runs, and the Apply dialog shows it once more first. If the server refuses, the dialog stays open with its message and your edits stay as they are
+
+Each engine gets a script it can run safely:
+
+- **PostgreSQL** and **SQL Server** run the whole change in one transaction, so it applies completely or not at all. On SQL Server a column's default constraint is dropped and added back around a type change
+- **MySQL / MariaDB** can't roll DDL back, so the change goes into **one `ALTER TABLE`** that applies whole or not at all. Only dropping or changing a foreign key takes a statement of its own first, and the dialog says so
+- **SQLite / libSQL** use a plain `ALTER TABLE` where it can do the job, and otherwise **rebuild the table**: a new table in the new shape, the rows copied over, the old one swapped out, its indexes and triggers recreated - all in one transaction, checked with `PRAGMA foreign_key_check`. The dialog says when it rebuilds
+- **ClickHouse** edits columns, with `Nullable(…)` for the nullable ones, and keeps the sorting key's columns as they are
+
+After Apply the tab shows the table as it now is, and the tree, autocomplete and an open data tab of the table follow. Changes made elsewhere are noticed too: a tab with no edits reloads, one with edits says the table changed and offers **Reload**, and closing it or quitting with unapplied edits asks first. Read-only connections get the same tab as a viewer.
+
 ### 💾 Table Backups
 
 **Back up to file…** writes a table to a `.sql` file - its structure, its rows, or both - that recreates it when you run the file or load it with **Import → SQL script**.
@@ -495,7 +515,7 @@ For a single screenshot, build with `cargo build -p barsql --features snapshot`,
 - the grid: `cell`, `export`, `json`
 - dialogs: `connection-dialog`, `import`, `about`, `shortcuts`, `tips`
 - the update dialog: `update`, `update-current`, `update-downloading`, `update-ready`, `update-failed`
-- other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`, `palette` (the command palette), `chart` (the first result as a chart, with `BARSQL_SNAPSHOT_RUN=1`), `er` (the `main` schema's ER diagram)
+- other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`, `palette` (the command palette), `chart` (the first result as a chart, with `BARSQL_SNAPSHOT_RUN=1`), `er` (the `main` schema's ER diagram), `structure` (a table's Structure tab: the first in `main`, or `structure=<table>`)
 
 ---
 

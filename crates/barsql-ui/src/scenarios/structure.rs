@@ -2,7 +2,7 @@ use barsql_core::{ConnectionConfig, Value};
 use gpui_kit::{Entity, TestAppContext};
 
 use super::driver::{Driver, open, open_with, selector};
-use crate::actions::{CloseTab, Quit};
+use crate::actions::{CloseTab, EditTableStructure, Quit};
 use crate::schema_tree::SchemaTree;
 use crate::workspace::QuitRequests;
 
@@ -318,4 +318,35 @@ fn adding_a_foreign_key_shows_on_the_column(cx: &mut TestAppContext) {
             columns.is_some_and(|columns| columns.iter().any(|column| column.name == "org_id" && column.is_foreign))
         })
     });
+}
+
+fn palette_labels(app: &mut Driver) -> Vec<String> {
+    let palette = app.workspace.update_in(app.cx, |ws, window, cx| ws.open_command_palette(window, cx));
+    let palette = palette.expect("the palette opens");
+    app.cx.run_until_parked();
+    let labels = app.cx.update(|_, cx| palette.read(cx).labels());
+    app.keys("escape");
+    labels
+}
+
+#[gpui_kit::test]
+fn the_palette_lists_structure_commands(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, TABLE);
+    app.context_menu("tree:t:main.e2e_s", BROWSE);
+    app.wait_shown("table-structure");
+    let labels = palette_labels(&mut app);
+    let has = |label: &str| labels.iter().any(|listed| listed == label);
+    assert!(has("Edit table structure") && has("New table"), "{labels:?}");
+}
+
+#[gpui_kit::test]
+fn palette_edit_structure_focuses_the_tab(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.context_menu("tree:t:main.e2e_s", BROWSE);
+    app.wait_shown("table-structure");
+    let tabs = app.titles().len();
+    app.dispatch(EditTableStructure);
+    assert_eq!(app.titles().len(), tabs, "the open Structure tab is reused");
+    let workspace = app.workspace.clone();
+    assert!(app.cx.update(|_, cx| workspace.read(cx).active_structure().is_some()));
 }

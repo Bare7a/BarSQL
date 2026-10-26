@@ -7,6 +7,7 @@ use barsql_app::{
     AppEvent, DiagramRef, EditorSession, EditorTab, StructureRef, TableViewRef, Unsaved, is_sqlite_file,
     sqlite_file_payload,
 };
+use barsql_core::capabilities::DefaultSchema;
 use barsql_core::{ConnectionConfig, SavedQuery};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -310,6 +311,13 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
                     }));
                 }
                 Some("about") => after = Some(Box::new(about_dialog::open)),
+                // The first table of `main`, or of the connection's default schema. `structure=<table>` picks one.
+                Some(structure) if structure.starts_with("structure") => {
+                    let (view, table) = (view.clone(), structure.strip_prefix("structure=").map(str::to_string));
+                    after = Some(Box::new(move |window, cx| {
+                        view.update(cx, |workspace, cx| workspace.snapshot_structure(table.clone(), window, cx))
+                    }));
+                }
                 Some("er") => {
                     let view = view.clone();
                     after = Some(Box::new(move |_, cx| {
@@ -467,6 +475,17 @@ pub fn quit(cx: &mut App) {
             quit_now(cx);
         }
     });
+}
+
+// What an empty schema setting means for the connection's engine.
+fn default_schema(connection: &ConnectionConfig) -> String {
+    if !connection.schema.is_empty() {
+        return connection.schema.clone();
+    }
+    match connection.driver.capabilities().default_schema {
+        DefaultSchema::Named(name) => name.into(),
+        DefaultSchema::Database => connection.database.clone(),
+    }
 }
 
 // For views that quit, like the updater's Restart. `then` runs after the caller's update, or on the quit
@@ -936,6 +955,52 @@ impl Workspace {
         };
         self.add_tab(tab, connection, window, cx);
         self.activate(self.tabs.len() - 1, window, cx);
+    }
+
+    // The table the active tab shows, for Edit table structure.
+    fn structure_target(&self, cx: &App) -> Option<(ConnectionConfig, String, String)> {
+        match self.active_tab()? {
+            TabView::Table(view) => {
+                let tab = view.read(cx);
+                Some((tab.connection.clone(), tab.schema.clone(), tab.table.clone()))
+            }
+            TabView::Structure(view) => {
+                let tab = view.read(cx);
+                tab.persisted().then(|| (tab.connection.clone(), tab.schema.clone(), tab.table.clone()))
+            }
+            TabView::Query(_) | TabView::Diagram(_) => None,
+        }
+    }
+
+    // The active tab's connection, when it takes new tables.
+    fn creatable_connection(&self, cx: &App) -> Option<ConnectionConfig> {
+        let connection = self.active_tab()?.connection(cx);
+        let editable = connection.driver.capabilities().structure.editable;
+        (editable && !connection.read_only).then(|| connection.clone())
+    }
+
+    fn new_table(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(connection) = self.creatable_connection(cx) {
+            let schema = default_schema(&connection);
+            self.open_structure(connection, schema, None, window, cx);
+        }
+    }
+
+    fn snapshot_structure(&mut self, table: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.active_tab().map(|tab| tab.connection(cx).clone()) else { return };
+        let (schema, first) = {
+            let loaded = schema::get(cx, &connection.id).map(|cached| cached.loaded_tables()).unwrap_or_default();
+            let schema = match loaded.iter().any(|(name, _)| *name == "main") {
+                true => "main".to_string(),
+                false => default_schema(&connection),
+            };
+            let tables = loaded.iter().find(|(name, _)| *name == schema).map(|(_, tables)| *tables).unwrap_or_default();
+            let first = tables.iter().find(|t| !schema::is_view_kind(&t.kind)).map(|t| t.name.clone());
+            (schema, first)
+        };
+        if let Some(table) = table.or(first) {
+            self.open_structure(connection, schema, Some(table), window, cx);
+        }
     }
 
     // One tab per table, as for diagrams. A new table (no `table`) always gets a tab of its own.
@@ -2229,6 +2294,16 @@ impl Render for Workspace {
                 window.refresh();
             }))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
+            .when(self.structure_target(cx).is_some(), |el| {
+                el.on_action(cx.listener(|this, _: &EditTableStructure, window, cx| {
+                    if let Some((connection, schema, table)) = this.structure_target(cx) {
+                        this.open_structure(connection, schema, Some(table), window, cx);
+                    }
+                }))
+            })
+            .when(self.creatable_connection(cx).is_some(), |el| {
+                el.on_action(cx.listener(|this, _: &NewTable, window, cx| this.new_table(window, cx)))
+            })
             .on_action(cx.listener(|_, _: &About, window, cx| {
                 if !window.has_active_dialog(cx) {
                     about_dialog::open(window, cx);

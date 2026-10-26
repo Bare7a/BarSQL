@@ -21,6 +21,8 @@ actions!(
         ReopenClosedTab,
         QuickSearch,
         CommandPalette,
+        EditTableStructure,
+        NewTable,
         ThemeDark,
         ThemeLight,
         ThemeSystem,
