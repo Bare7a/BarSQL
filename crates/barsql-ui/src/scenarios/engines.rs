@@ -17,7 +17,8 @@ use crate::grid::Grid;
 use crate::i18n::t;
 use crate::table_tab::TableTab;
 
-// In a table's menu, after Browse data, SELECT in new tab and Count rows.
+// In a table's menu, after Browse data, Edit structure, SELECT in new tab and Count rows.
+const SELECT_IN_NEW_TAB: usize = 2;
 const SYSTEM_VIEWS: usize = 4;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -194,7 +195,7 @@ fn browse(app: &mut Driver, name: &str) {
 
 // Drop is a table menu's last item, one further down where the System views submenu comes first.
 fn drop_item(engine: Engine) -> usize {
-    12 + usize::from(views(&engine.driver(), ViewScope::Table).next().is_some())
+    13 + usize::from(views(&engine.driver(), ViewScope::Table).next().is_some())
 }
 
 fn label(app: &mut Driver, view: &SystemView) -> String {
@@ -708,7 +709,7 @@ mod sqlserver_only {
     use barsql_core::MessageLevel;
     use gpui_kit::TestAppContext;
 
-    use super::{Engine, open_on, table, temp, tree_row};
+    use super::{Engine, SELECT_IN_NEW_TAB, open_on, table, temp, tree_row};
 
     // A batch of PRINTs returns no rows, so the run opens on its Messages.
     #[gpui_kit::test]
@@ -739,7 +740,7 @@ mod sqlserver_only {
         app.refresh_schema();
         let row = table(&mut app, &name);
         let row = tree_row(&mut app, &row);
-        app.context_menu(row, 1);
+        app.context_menu(row, SELECT_IN_NEW_TAB);
         let sql = app.sql();
         assert!(sql.starts_with("SELECT TOP (100) "), "{sql}");
         app.dispatch(crate::actions::RunAll);

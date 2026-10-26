@@ -398,10 +398,10 @@ mod tests {
 
     #[test]
     fn structure_editing_matches_each_engine() {
-        assert!(!CLICKHOUSE.structure.foreign_keys && CLICKHOUSE.structure.nullable_wrapper);
+        const { assert!(!CLICKHOUSE.structure.foreign_keys && CLICKHOUSE.structure.nullable_wrapper) };
         assert!(!SQL_SERVER.structure.ref_actions.contains(&RefAction::Restrict));
         assert!(!MYSQL.structure.ref_actions.contains(&RefAction::SetDefault));
-        assert!(!SQL_SERVER.structure.identity_on_existing);
-        assert!(!UNSUPPORTED.structure.editable);
+        const { assert!(!SQL_SERVER.structure.identity_on_existing) };
+        const { assert!(!UNSUPPORTED.structure.editable) };
     }
 }
