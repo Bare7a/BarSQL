@@ -69,6 +69,8 @@ pub enum SchemaTreeEvent {
     Browse { schema: String, table: String },
     // The ER diagram of a schema, in its own tab.
     OpenDiagram { schema: String },
+    // A table's Structure tab, or a new table's without `table`.
+    OpenStructure { schema: String, table: Option<String> },
     // SQL for another connection, like a schema comparison's sync script. Opens without running.
     OpenScript { connection: Box<ConnectionConfig>, sql: String, title: String },
     // Connect button succeeded for this connection id, so land in a tab for it.
@@ -946,7 +948,11 @@ impl SchemaTree {
                     Self::view_items(menu, &this, &driver, Some((&schema, &name)), cx)
                 }
             };
+            let structure =
+                SchemaTreeEvent::OpenStructure { schema: schema_name.clone(), table: Some(table.name.clone()) };
+            let structure_label = if writable { "sidebar.editStructure" } else { "sidebar.viewStructure" };
             menu.item(PopupMenuItem::new(t(cx, "sidebar.browseData")).on_click(emit(browse)))
+                .when(is_table, |menu| menu.item(PopupMenuItem::new(t(cx, structure_label)).on_click(emit(structure))))
                 .item(PopupMenuItem::new(t(cx, "sidebar.selectInNewTab")).on_click(emit(select)))
                 .item(PopupMenuItem::new(t(cx, "sidebar.countRows")).on_click(count))
                 .when(table_views, |menu| menu.submenu(t(cx, "sidebar.systemViews"), window, cx, system_views))

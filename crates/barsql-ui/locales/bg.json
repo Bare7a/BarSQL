@@ -143,6 +143,8 @@
     "planHideQuiet": "Скрий 0 и false"
   },
   "sidebar": {
+    "editStructure": "Редактиране на структурата…",
+    "viewStructure": "Преглед на структурата",
     "badge": {
       "matview": "MATVIEW"
     },
@@ -224,6 +226,7 @@
     "showAllColumns": "Покажи всички колони"
   },
   "tableView": {
+    "structure": "Структура",
     "markRows": "Маркирай {{count}} ред за изтриване",
     "markRows_other": "Маркирай {{count}} реда за изтриване",
     "unmarkRows": "Премахни маркировката за изтриване от {{count}} ред",
@@ -445,5 +448,29 @@
     "license": "Лиценз {{name}}",
     "madeWith": "Създаден с",
     "checkUpdates": "Проверка за актуализации"
+  },
+  "structure": {
+    "columns": "Колони",
+    "indexes": "Индекси",
+    "foreignKeys": "Външни ключове",
+    "checks": "Проверки",
+    "loadFailed": "Структурата на таблицата не можа да се зареди",
+    "retry": "Опитай отново",
+    "name": "Име",
+    "type": "Тип",
+    "nullable": "Допуска NULL",
+    "default": "Стойност по подразбиране",
+    "comment": "Коментар",
+    "generated": "Генерирана:",
+    "noIndexes": "Няма индекси",
+    "noForeignKeys": "Няма външни ключове",
+    "noChecks": "Няма проверки",
+    "identity": {
+      "none": "Без",
+      "byDefault": "Идентичност, по подразбиране",
+      "always": "Идентичност, винаги",
+      "autoIncrement": "Автоинкремент",
+      "seeded": "Идентичност ({{seed}}, {{increment}})"
+    }
   }
 }

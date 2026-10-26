@@ -143,6 +143,8 @@
     "planHideQuiet": "Hide 0 and false"
   },
   "sidebar": {
+    "editStructure": "Edit structure…",
+    "viewStructure": "View structure",
     "badge": {
       "matview": "MATVIEW"
     },
@@ -224,6 +226,7 @@
     "showAllColumns": "Show all columns"
   },
   "tableView": {
+    "structure": "Structure",
     "markRows": "Mark {{count}} row for delete",
     "markRows_other": "Mark {{count}} rows for delete",
     "unmarkRows": "Unmark {{count}} row for delete",
@@ -445,5 +448,29 @@
     "license": "{{name}} license",
     "madeWith": "Made with",
     "checkUpdates": "Check for updates"
+  },
+  "structure": {
+    "columns": "Columns",
+    "indexes": "Indexes",
+    "foreignKeys": "Foreign keys",
+    "checks": "Checks",
+    "loadFailed": "Couldn't load the table's structure",
+    "retry": "Try Again",
+    "name": "Name",
+    "type": "Type",
+    "nullable": "Nullable",
+    "default": "Default",
+    "comment": "Comment",
+    "generated": "Generated:",
+    "noIndexes": "No indexes",
+    "noForeignKeys": "No foreign keys",
+    "noChecks": "No checks",
+    "identity": {
+      "none": "None",
+      "byDefault": "Identity, by default",
+      "always": "Identity, always",
+      "autoIncrement": "Auto-increment",
+      "seeded": "Identity ({{seed}}, {{increment}})"
+    }
   }
 }

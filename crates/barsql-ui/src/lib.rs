@@ -53,6 +53,7 @@ mod spinner;
 mod sql_language;
 pub mod state;
 mod status_bar;
+mod structure_tab;
 mod syntax;
 #[cfg(target_os = "macos")]
 mod system_quit;

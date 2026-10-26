@@ -6,14 +6,14 @@ use super::driver::{Driver, open, selector};
 use crate::schema_tree::SchemaTree;
 
 // Table menu positions, counted from Browse data at 0.
-const SELECT_IN_NEW_TAB: usize = 1;
-const COUNT_ROWS: usize = 2;
-const BACKUP: usize = 4;
-const COPY_DDL: usize = 5;
-const OPEN_DDL: usize = 6;
-const RENAME: usize = 10;
-const TRUNCATE: usize = 11;
-const DROP: usize = 12;
+const SELECT_IN_NEW_TAB: usize = 2;
+const COUNT_ROWS: usize = 3;
+const BACKUP: usize = 5;
+const COPY_DDL: usize = 6;
+const OPEN_DDL: usize = 7;
+const RENAME: usize = 11;
+const TRUNCATE: usize = 12;
+const DROP: usize = 13;
 // Column menus start with Insert name and Copy name. Object menus start with Copy DDL, Open DDL and Copy name.
 const COLUMN_INSERT: usize = 0;
 const COLUMN_RENAME: usize = 2;

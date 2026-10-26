@@ -143,6 +143,8 @@
     "planHideQuiet": "0 und false ausblenden"
   },
   "sidebar": {
+    "editStructure": "Struktur bearbeiten…",
+    "viewStructure": "Struktur anzeigen",
     "badge": {
       "matview": "MATVIEW"
     },
@@ -224,6 +226,7 @@
     "showAllColumns": "Alle Spalten einblenden"
   },
   "tableView": {
+    "structure": "Struktur",
     "markRows": "{{count}} Zeile zum Löschen markieren",
     "markRows_other": "{{count}} Zeilen zum Löschen markieren",
     "unmarkRows": "Löschmarkierung von {{count}} Zeile entfernen",
@@ -445,5 +448,29 @@
     "license": "Lizenz {{name}}",
     "madeWith": "Erstellt mit",
     "checkUpdates": "Nach Updates suchen"
+  },
+  "structure": {
+    "columns": "Spalten",
+    "indexes": "Indizes",
+    "foreignKeys": "Fremdschlüssel",
+    "checks": "Checks",
+    "loadFailed": "Die Struktur der Tabelle konnte nicht geladen werden",
+    "retry": "Erneut versuchen",
+    "name": "Name",
+    "type": "Typ",
+    "nullable": "NULL erlaubt",
+    "default": "Standardwert",
+    "comment": "Kommentar",
+    "generated": "Generiert:",
+    "noIndexes": "Keine Indizes",
+    "noForeignKeys": "Keine Fremdschlüssel",
+    "noChecks": "Keine Checks",
+    "identity": {
+      "none": "Keine",
+      "byDefault": "Identität, standardmäßig",
+      "always": "Identität, immer",
+      "autoIncrement": "Auto-Inkrement",
+      "seeded": "Identität ({{seed}}, {{increment}})"
+    }
   }
 }

@@ -18,7 +18,7 @@ use crate::i18n::t;
 use crate::table_tab::TableTab;
 
 // In a table's menu, after Browse data, SELECT in new tab and Count rows.
-const SYSTEM_VIEWS: usize = 3;
+const SYSTEM_VIEWS: usize = 4;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Engine {

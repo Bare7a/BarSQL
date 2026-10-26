@@ -35,6 +35,8 @@ pub enum SidebarEvent {
     OpenQuery { connection: ConnectionConfig, sql: String, title: String, run: bool },
     Browse { connection: ConnectionConfig, schema: String, table: String },
     OpenDiagram { connection: ConnectionConfig, schema: String },
+    // No `table` for a new one.
+    OpenStructure { connection: ConnectionConfig, schema: String, table: Option<String> },
     // SQL from history. Goes into the connection's plain query tab.
     OpenSql { connection: ConnectionConfig, sql: String },
     OpenSaved(SavedQuery),
@@ -88,6 +90,10 @@ impl Sidebar {
                     SchemaTreeEvent::OpenDiagram { schema } => {
                         let Some(connection) = this.selected().cloned() else { return };
                         SidebarEvent::OpenDiagram { connection, schema: schema.clone() }
+                    }
+                    SchemaTreeEvent::OpenStructure { schema, table } => {
+                        let Some(connection) = this.selected().cloned() else { return };
+                        SidebarEvent::OpenStructure { connection, schema: schema.clone(), table: table.clone() }
                     }
                     SchemaTreeEvent::OpenScript { connection, sql, title } => SidebarEvent::OpenQuery {
                         connection: (**connection).clone(),

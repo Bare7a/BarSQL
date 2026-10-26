@@ -294,6 +294,7 @@ impl QueryTab {
             saved_sql_baseline: self.saved_sql_baseline.clone(),
             table_view: None,
             diagram: None,
+            structure: None,
             // The workspace knows.
             pinned: false,
         }

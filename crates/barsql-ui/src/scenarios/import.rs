@@ -6,7 +6,7 @@ use super::driver::{Driver, open};
 use crate::file_dialogs::Stub;
 use crate::import_dialog::{ImportDialog, Opened, Shown};
 
-const IMPORT_INTO_TABLE: usize = 3;
+const IMPORT_INTO_TABLE: usize = 4;
 
 fn dialog(app: &mut Driver) -> Entity<ImportDialog> {
     app.cx.update(|_, cx| cx.try_global::<Opened>().and_then(|opened| opened.0.upgrade())).expect("the import dialog")

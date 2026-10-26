@@ -31,6 +31,16 @@ pub struct DiagramRef {
     pub schema: String,
 }
 
+// A Structure tab, by the table it shows. A new table's tab has none, so it isn't restored.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureRef {
+    #[serde(default)]
+    pub schema: String,
+    #[serde(default)]
+    pub table: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorTab {
@@ -52,6 +62,8 @@ pub struct EditorTab {
     pub table_view: Option<TableViewRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagram: Option<DiagramRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structure: Option<StructureRef>,
     // Pinned tabs sit first and stay open through Close Others, To the Right and All.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
