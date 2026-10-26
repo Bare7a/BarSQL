@@ -5,6 +5,7 @@ pub mod dialect;
 pub mod paths;
 pub mod query;
 pub mod schema;
+pub mod structure;
 
 pub use capabilities::Capabilities;
 pub use config::{ConfigError, ConnectionConfig, DriverType, SshConfig};
@@ -16,4 +17,7 @@ pub use query::{
 pub use schema::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,
     IndexInfo, ObjectKind, ObjectRef, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TriggerInfo,
+};
+pub use structure::{
+    Check, Dependent, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure,
 };
