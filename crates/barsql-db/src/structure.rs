@@ -5,8 +5,7 @@ use crate::{Cancel, Session};
 
 const PAUSE_FOREIGN_KEYS: &str = "PRAGMA foreign_keys = OFF";
 
-// A structure plan's steps, in order on one session. A failure rolls back what the plan opened and restores the
-// pragmas a SQLite rebuild changed, since a SQLite file shares its one connection with every tab.
+// Runs the steps on one session. A failure rolls back and restores the pragmas, as SQLite tabs share a connection.
 pub async fn apply(session: &mut Session, steps: &[Step], cancel: &Cancel) -> Result<(), QueryError> {
     let Err(error) = run(session, steps, cancel).await else { return Ok(()) };
     let sqlite_recovery: &[&str] = match paused_foreign_keys(steps) {
@@ -19,7 +18,7 @@ pub async fn apply(session: &mut Session, steps: &[Step], cancel: &Cancel) -> Re
         Some(SqlDialect::TSql) => &["IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION"],
         Some(SqlDialect::MySql | SqlDialect::ClickHouse) | None => &[],
     };
-    // A cancelled plan still has to clean up, so the recovery runs uncancelled. Its own errors don't matter.
+    // Recovery runs uncancelled, even for a cancelled plan, and its own errors don't matter.
     for sql in recovery {
         let _ = session.buffered(sql, &Cancel::new()).await;
     }

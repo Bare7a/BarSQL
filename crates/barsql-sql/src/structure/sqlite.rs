@@ -164,14 +164,12 @@ fn referenced(text: &str) -> Option<String> {
     Some(table.ident_text().to_lowercase())
 }
 
-// Takes one entry equal to `wanted` off the list.
 fn take<T: PartialEq<U>, U: ?Sized>(list: &mut Vec<T>, wanted: &U) -> bool {
     let found = list.iter().position(|listed| listed == wanted);
     found.map(|at| list.remove(at)).is_some()
 }
 
-// A rebuild writes the table with the old column names and renames them last, so a new check names them so too. A
-// name followed by `(` is a function's.
+// A rebuild renames columns last, so a new check uses their old names. A name followed by `(` is a function.
 fn under_old_names(expression: &str, back: &HashMap<&str, &str>) -> String {
     let tokens = tokenize(expression, Some(&LITE));
     let code: Vec<_> = tokens.iter().filter(|t| t.kind != TokenKind::Comment).collect();
@@ -193,8 +191,7 @@ fn under_old_names(expression: &str, back: &HashMap<&str, &str>) -> String {
     out
 }
 
-// SQLite's 12-step rebuild. Renamed columns keep their old names until the last step renames them, so SQLite itself
-// rewrites the indexes, triggers and checks that use them.
+// SQLite's 12-step rebuild. Columns are renamed last, so SQLite rewrites the indexes, triggers and checks using them.
 fn rebuild(driver: &DriverType, original: &TableStructure, changes: &Changes, draft: &Draft) -> Option<Vec<Step>> {
     let split = split_create_table(&original.create_sql)?;
     let (schema, name) = (original.schema.as_str(), original.name.as_str());

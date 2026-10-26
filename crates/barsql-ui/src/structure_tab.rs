@@ -221,7 +221,6 @@ impl StructureTab {
         }
     }
 
-    // What the preview shows and Apply would run.
     #[cfg(test)]
     pub fn script(&self) -> &str {
         &self.script
@@ -251,7 +250,6 @@ impl StructureTab {
         });
     }
 
-    // The draft went in, so the tab shows the table as it now is.
     pub fn after_apply(&mut self, created: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(name) = created {
             self.table = name;
@@ -429,7 +427,6 @@ impl StructureTab {
         }
     }
 
-    // Adds to the section on show.
     fn add_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.section {
             Section::Columns | Section::Table => self.add_column(window, cx),
@@ -718,7 +715,6 @@ fn problem_text(kind: &ProblemKind, cx: &App) -> SharedString {
     t(cx, &format!("structure.problem.{key}"))
 }
 
-// One row of a section, laid out like the others.
 fn line(selector: impl Fn() -> String + 'static, cx: &App) -> Div {
     h_flex().gap(rems(0.923)).py(rems(0.462)).border_b_1().border_color(cx.theme().border).debug_selector(selector)
 }

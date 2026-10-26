@@ -122,7 +122,7 @@ impl TabView {
         }
     }
 
-    // A new table's Structure tab has nothing to come back to, so the session leaves it out.
+    // A new table's Structure tab has nothing to come back to, so the session and Reopen leave it out.
     fn persisted(&self, cx: &App) -> bool {
         match self {
             Self::Structure(tab) => tab.read(cx).persisted(),
@@ -1393,11 +1393,15 @@ impl Workspace {
         if ix >= self.tabs.len() {
             return;
         }
-        let closing = self.tabs.remove(ix).view.stored(cx);
+        let open = self.tabs.remove(ix);
+        let (closing, persisted) = (open.view.stored(cx), open.view.persisted(cx));
+        drop(open);
         let id = closing.id.clone();
-        self.closed.push(closing);
-        if self.closed.len() > CLOSED_TABS_LIMIT {
-            self.closed.remove(0);
+        if persisted {
+            self.closed.push(closing);
+            if self.closed.len() > CLOSED_TABS_LIMIT {
+                self.closed.remove(0);
+            }
         }
         let bar = state::bar(cx);
         state::spawn(cx, async move { bar.cleanup_tab(&id).await }).detach();
@@ -1521,8 +1525,7 @@ impl Workspace {
         true
     }
 
-    // Tabs without changes close at once. Structure drafts can't be saved, so they ask first with Discard alone, and
-    // then the query tabs ask together.
+    // Clean tabs close at once. Structure drafts can't be saved, so they ask first, Discard only; then query tabs.
     fn close_tabs_saving(&mut self, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         let drafts = self.drafts(&ids, cx);
         let dirty = |this: &Self, id: &String| this.index_of(id, cx).is_some_and(|ix| this.tabs[ix].view.is_dirty(cx));

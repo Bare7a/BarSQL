@@ -76,8 +76,7 @@ pub fn paren_body(text: &str) -> Option<&str> {
     None
 }
 
-// One column definition: its name, its type, and each constraint clause as written, keyed by the clause's kind (the
-// keyword after CONSTRAINT <name> for a named one).
+// A column definition: name, type, and each clause as written, keyed by kind (the keyword after CONSTRAINT <name>).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnItem<'a> {
     pub name: String,

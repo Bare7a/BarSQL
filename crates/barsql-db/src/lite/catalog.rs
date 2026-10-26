@@ -178,8 +178,7 @@ pub(crate) fn constraints(src: &mut dyn LiteSource, table: &str) -> Result<Vec<C
     Ok(out)
 }
 
-// What the structure editor loads. The pragmas give the shape, and the table's own CREATE TABLE gives what they leave
-// out: collations, AUTOINCREMENT, generated expressions and checks.
+// The pragmas give the shape, the CREATE TABLE the rest: collations, AUTOINCREMENT, generated expressions, checks.
 pub(crate) fn structure(src: &mut dyn LiteSource, table: &str) -> Result<TableStructure, QueryError> {
     let master = src.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1", &[text(table)])?;
     let create_sql = master.rows.first().map(|r| r.text(0)).unwrap_or_default();
@@ -299,8 +298,7 @@ pub(crate) fn structure(src: &mut dyn LiteSource, table: &str) -> Result<TableSt
     })
 }
 
-// The views that use the table, directly or through another view, each after the views it uses. Then the other
-// tables' triggers that name the table or one of those views.
+// Views using the table, directly or via other views, in dependency order; then other tables' triggers naming them.
 fn referring(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Dependent>, QueryError> {
     let rows = src.query(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') AND sql IS NOT NULL ORDER BY name",

@@ -2,7 +2,7 @@ use barsql_core::{ConnectionConfig, Value};
 use gpui_kit::{Entity, TestAppContext};
 
 use super::driver::{Driver, open, open_with, selector};
-use crate::actions::{CloseTab, EditTableStructure, Quit};
+use crate::actions::{CloseTab, EditTableStructure, Quit, ReopenClosedTab};
 use crate::schema_tree::SchemaTree;
 use crate::workspace::QuitRequests;
 
@@ -362,4 +362,25 @@ fn a_view_has_no_structure_tab(cx: &mut TestAppContext) {
     assert!(!app.shown("table-structure"));
     let labels = palette_labels(&mut app);
     assert!(!labels.iter().any(|label| label == "Edit table structure"), "{labels:?}");
+}
+
+#[gpui_kit::test]
+fn a_closed_new_table_is_not_reopened(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, TABLE);
+    let tabs = app.titles().len();
+    app.context_menu("tree:s:main", NEW_TABLE);
+    app.wait_shown("structure:table-name");
+    app.dispatch(CloseTab);
+    assert_eq!(app.titles().len(), tabs);
+    app.dispatch(ReopenClosedTab);
+    assert_eq!(app.titles().len(), tabs, "an unapplied new table has nothing to come back as");
+}
+
+#[gpui_kit::test]
+fn picking_a_type_from_the_menu_sets_it(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.menu_pick("structure:column:name:types", 0);
+    let first = barsql_sql::structure::type_suggestions(&barsql_core::DriverType::Sqlite)[0];
+    let tab = app.structure();
+    assert_eq!(app.cx.update(|_, cx| tab.read(cx).draft.columns[1].column.data_type.clone()), first);
 }

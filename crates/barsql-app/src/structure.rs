@@ -12,8 +12,7 @@ impl BarApp {
         within(SCHEMA_TIMEOUT, engine.table_structure(schema, table)).await
     }
 
-    // As execute_statement runs a rename or a drop: a session of its own, cancellable under `job`, and the whole
-    // script as one history entry.
+    // Like execute_statement: a session of its own, cancellable as `job`, and one history entry for the script.
     pub async fn apply_structure(&self, connection_id: &str, job: &str, plan: &ChangePlan) -> Result<(), QueryError> {
         let driver = self.config(connection_id)?.driver;
         let script = plan.script(&driver);

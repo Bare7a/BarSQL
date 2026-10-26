@@ -563,8 +563,7 @@ impl Render for BackupDialog {
     }
 }
 
-// Applies a Structure tab's plan, showing the script it runs. A refusal keeps the dialog open with the server's
-// message, and the tab keeps its draft.
+// Runs a Structure tab's plan after showing it. A refusal keeps the dialog open with the server's message.
 struct ApplyDialog {
     connection: ConnectionConfig,
     plan: ChangePlan,

@@ -591,8 +591,7 @@ fn column_index(columns: &[String], def_column: &str) -> Option<usize> {
     })
 }
 
-// MariaDB reports a default as SQL, and NULL for none. MySQL leaves a literal bare and flags an expression
-// DEFAULT_GENERATED, which takes parentheses unless it is CURRENT_TIMESTAMP.
+// MariaDB gives a default as SQL (NULL for none); MySQL gives a bare literal, or a DEFAULT_GENERATED expression.
 fn column_default(value: Option<String>, extra: &str, mariadb: bool) -> String {
     let Some(value) = value else { return String::new() };
     if mariadb {

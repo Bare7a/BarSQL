@@ -17,8 +17,7 @@ fn text(row: &[Option<String>], i: usize) -> String {
     row.get(i).cloned().flatten().unwrap_or_default()
 }
 
-// The model keeps nullability apart from the type, as the editor's checkbox does: Nullable(T) is T, nullable, and
-// LowCardinality(Nullable(T)) is LowCardinality(T).
+// Nullability stays apart from the type: Nullable(T) loads as nullable T, LowCardinality(Nullable(T)) likewise.
 fn without_nullable(data_type: &str) -> (bool, String) {
     if let Some(inner) = data_type.strip_prefix("LowCardinality(Nullable(").and_then(|t| t.strip_suffix("))")) {
         return (true, format!("LowCardinality({inner})"));

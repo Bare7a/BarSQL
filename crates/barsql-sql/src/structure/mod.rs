@@ -17,8 +17,7 @@ use crate::ddl::{DdlColumn, terminate_statement};
 use crate::lang::tokens::{TokenKind, tokenize};
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
 
-// The structure editor's model of a change: the edited draft, what differs from the table as loaded, and the
-// statements that make the difference.
+// The structure editor's model: the edited draft, how it differs from the loaded table, and the SQL for that.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row<T> {

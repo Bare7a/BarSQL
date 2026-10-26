@@ -131,7 +131,6 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
     let theme = cx.theme().clone();
     let editing = &tab.connection.driver.capabilities().structure;
     let editable = tab.editable();
-    let types = suggestions(tab, cx);
     let heading = |key: &str, width: f32| cell(&t(cx, key), width);
     let header = line(|| "structure:columns-header".into(), cx)
         .text_size(TEXT_XS)
@@ -154,7 +153,6 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
         let locked = !editable || !column.generated.is_empty() || row.dropped;
         let key = editors.key;
         let identity_shown = editing.identity != IdentityStyle::None && (old.is_none() || editing.identity_on_existing);
-        let types = types.clone();
         // A chevron alone, so it fits beside the type in its cell.
         let picker = form::select_small(SharedString::from(selector("types")), SharedString::default(), cx)
             .min_w(rems(1.846))
@@ -167,9 +165,10 @@ pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<Str
             .disabled(locked)
             .select_menu(window, cx, {
                 let this = this.clone();
-                move |mut menu: PopupMenu, _, _| {
-                    for data_type in &types {
-                        let (this, data_type) = (this.clone(), data_type.clone());
+                move |mut menu: PopupMenu, _, cx| {
+                    let types = this.upgrade().map(|tab| suggestions(tab.read(cx), cx)).unwrap_or_default();
+                    for data_type in types {
+                        let this = this.clone();
                         menu = menu.item(PopupMenuItem::new(data_type.clone()).on_click(move |_, window, cx| {
                             let _ = this.update(cx, |tab, cx| tab.pick_type(key, data_type.clone(), window, cx));
                         }));

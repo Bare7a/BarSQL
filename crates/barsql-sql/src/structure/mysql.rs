@@ -3,9 +3,8 @@ use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
 use super::{Changes, Draft, check_clause, created_constraints, created_indexes, foreign_key_clause};
 use crate::quote::{qualified_table, quote_ident, quote_ident_list, table_ref};
 
-// MySQL can't roll DDL back, so the changes go into one ALTER TABLE that applies whole or not at all. Only dropped
-// foreign keys go first, on their own: one statement can't drop a key and add one by the same name. MODIFY and
-// CHANGE replace the column's whole definition, so it is written out in full.
+// MySQL can't roll DDL back, so the changes go in one ALTER TABLE that applies whole or not at all. Dropped foreign
+// keys go first on their own: one statement can't drop a key and re-add it. MODIFY and CHANGE restate a column.
 pub(super) fn column_definition(column: &StructColumn) -> String {
     let mut out = column.data_type.clone();
     if !column.collation.is_empty() {

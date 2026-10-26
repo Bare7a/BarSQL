@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-// A table's shape as the structure editor reads and writes it.
-
 fn is_false(v: &bool) -> bool {
     !*v
 }
