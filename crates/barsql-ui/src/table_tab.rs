@@ -805,13 +805,15 @@ impl TableTab {
             .child(
                 h_flex()
                     .gap(rems(0.462))
-                    .child(
-                        Button::new("table-structure")
-                            .debug_selector(|| "table-structure".into())
-                            .tool_icon(Icon::new(Lucide::Columns3), ICON_SM)
-                            .tooltip(t(cx, "tableView.structure"))
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(TableTabEvent::OpenStructure))),
-                    )
+                    .when(!schema::is_view(&self.connection.id, &self.schema, &self.table, cx), |el| {
+                        el.child(
+                            Button::new("table-structure")
+                                .debug_selector(|| "table-structure".into())
+                                .tool_icon(Icon::new(Lucide::Columns3), ICON_SM)
+                                .tooltip(t(cx, "tableView.structure"))
+                                .on_click(cx.listener(|_, _, _, cx| cx.emit(TableTabEvent::OpenStructure))),
+                        )
+                    })
                     .child(
                         Button::new("table-refresh")
                             .debug_selector(|| "table-refresh".into())

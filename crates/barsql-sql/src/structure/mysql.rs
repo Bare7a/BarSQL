@@ -1,6 +1,6 @@
 use barsql_core::{DriverType, Identity, StructColumn, TableStructure};
 
-use super::{Changes, Draft, check_clause, foreign_key_clause};
+use super::{Changes, Draft, check_clause, created_constraints, created_indexes, foreign_key_clause};
 use crate::quote::{qualified_table, quote_ident, quote_ident_list, table_ref};
 
 // MySQL can't roll DDL back, so the changes go into one ALTER TABLE that applies whole or not at all. Only dropped
@@ -97,6 +97,12 @@ pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
     if !keys.is_empty() {
         items.push(format!("PRIMARY KEY ({})", quote_ident_list(driver, &keys)));
     }
+    for index in created_indexes(draft) {
+        let unique = if index.unique { "UNIQUE " } else { "" };
+        let columns = quote_ident_list(driver, &index.columns);
+        items.push(format!("{unique}INDEX {} ({columns})", quote_ident(driver, &index.name)));
+    }
+    items.extend(created_constraints(driver, draft));
     let table = qualified_table(driver, &draft.schema, &draft.name);
     vec![format!("CREATE TABLE {table} (\n    {}\n)", items.join(",\n    "))]
 }
@@ -224,6 +230,23 @@ mod tests {
             ]
         );
         assert_eq!(plan.warnings, [Warning::NotAtomic]);
+    }
+
+    #[test]
+    fn mysql_creates_a_table_with_its_indexes_checks_and_keys() {
+        let mut draft = Draft::new_table(&MY, "shop");
+        draft.name = "people".into();
+        draft.columns.push(added(column("org_id", "bigint")));
+        draft.checks.push(Row::added(check("people_id_check", "id > 0")));
+        draft.foreign_keys.push(Row::added(foreign_key("fk_people_orgs", &["org_id"], "orgs", &["id"])));
+        draft.indexes.push(Row::added(index("idx_people_org_id", &["org_id"], false)));
+        let plan = plan_create(&MY, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "CREATE TABLE `shop`.`people` (\n    `id` BIGINT NOT NULL AUTO_INCREMENT,\n    `org_id` bigint NULL,\n    PRIMARY KEY (`id`),\n    INDEX `idx_people_org_id` (`org_id`),\n    CONSTRAINT `people_id_check` CHECK (id > 0),\n    CONSTRAINT `fk_people_orgs` FOREIGN KEY (`org_id`) REFERENCES `shop`.`orgs` (`id`)\n)"
+            ]
+        );
     }
 
     #[test]

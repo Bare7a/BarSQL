@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use barsql_core::{Check, Dependent, DriverType, ForeignKey, Identity, StructColumn, StructIndex, TableStructure};
 
 use super::create_sql::{column_item, item_column, names_in, paren_body, split_create_table};
-use super::{Changes, Draft, Step, Warning, check_clause, foreign_key_clause};
+use super::{Changes, Draft, Step, Warning, check_clause, created_constraints, created_indexes, foreign_key_clause};
 use crate::alter::{drop_column, rename_column};
 use crate::lang::tokens::{TokenKind, tokenize};
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
@@ -47,8 +47,11 @@ pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
     if keys.len() > 1 {
         items.push(format!("PRIMARY KEY ({})", quote_ident_list(driver, &keys)));
     }
+    items.extend(created_constraints(driver, draft));
     let table = table_ref(driver, &draft.schema, &draft.name);
-    vec![format!("CREATE TABLE {table} (\n    {}\n)", items.join(",\n    "))]
+    let create = format!("CREATE TABLE {table} (\n    {}\n)", items.join(",\n    "));
+    let indexes = created_indexes(draft).map(|index| create_index(driver, &draft.schema, &draft.name, index));
+    std::iter::once(create).chain(indexes).collect()
 }
 
 fn create_index(driver: &DriverType, schema: &str, table: &str, index: &StructIndex) -> String {
@@ -708,6 +711,26 @@ mod tests {
         let plan = plan_changes(&LITE, &original, &draft).expect("valid");
         let steps = sql(&plan);
         assert!(steps[2].ends_with("    FOREIGN KEY (\"legacy\") REFERENCES \"teams\" (\"id\")\n)"), "{}", steps[2]);
+    }
+
+    #[test]
+    fn sqlite_creates_a_table_with_its_indexes_checks_and_keys() {
+        let mut draft = Draft::new_table(&LITE, "main");
+        draft.name = "people".into();
+        draft.columns.push(added(column("org_id", "INTEGER")));
+        draft.checks.push(Row::added(check("people_id_check", "id > 0")));
+        draft.foreign_keys.push(Row::added(foreign_key("fk_people_orgs", &["org_id"], "orgs", &["id"])));
+        draft.indexes.push(Row::added(index("idx_people_org_id", &["org_id"], false)));
+        let plan = plan_create(&LITE, &draft).expect("valid");
+        assert_eq!(
+            sql(&plan),
+            [
+                "BEGIN",
+                "CREATE TABLE \"people\" (\n    \"id\" INTEGER PRIMARY KEY NOT NULL,\n    \"org_id\" INTEGER,\n    CONSTRAINT \"people_id_check\" CHECK (id > 0),\n    CONSTRAINT \"fk_people_orgs\" FOREIGN KEY (\"org_id\") REFERENCES \"orgs\" (\"id\")\n)",
+                r#"CREATE INDEX "idx_people_org_id" ON "people" ("org_id")"#,
+                "COMMIT",
+            ]
+        );
     }
 
     #[test]

@@ -962,7 +962,8 @@ impl Workspace {
         match self.active_tab()? {
             TabView::Table(view) => {
                 let tab = view.read(cx);
-                Some((tab.connection.clone(), tab.schema.clone(), tab.table.clone()))
+                let view = schema::is_view(&tab.connection.id, &tab.schema, &tab.table, cx);
+                (!view).then(|| (tab.connection.clone(), tab.schema.clone(), tab.table.clone()))
             }
             TabView::Structure(view) => {
                 let tab = view.read(cx);

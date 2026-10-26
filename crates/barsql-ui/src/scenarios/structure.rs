@@ -350,3 +350,16 @@ fn palette_edit_structure_focuses_the_tab(cx: &mut TestAppContext) {
     let workspace = app.workspace.clone();
     assert!(app.cx.update(|_, cx| workspace.read(cx).active_structure().is_some()));
 }
+
+#[gpui_kit::test]
+fn a_view_has_no_structure_tab(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        "CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT); CREATE VIEW e2e_v AS SELECT name FROM e2e_s",
+    );
+    app.context_menu("tree:t:main.e2e_v", BROWSE);
+    app.wait_shown("table-refresh");
+    assert!(!app.shown("table-structure"));
+    let labels = palette_labels(&mut app);
+    assert!(!labels.iter().any(|label| label == "Edit table structure"), "{labels:?}");
+}

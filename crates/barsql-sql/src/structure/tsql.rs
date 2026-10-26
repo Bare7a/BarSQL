@@ -1,6 +1,9 @@
 use barsql_core::{DriverType, Identity, PrimaryKey, StructColumn, StructIndex, TableStructure};
 
-use super::{Changes, Draft, NameKind, check_clause, ddl_column, foreign_key_clause, suggested_name};
+use super::{
+    Changes, Draft, NameKind, check_clause, created_constraints, created_indexes, ddl_column, foreign_key_clause,
+    suggested_name,
+};
 use crate::alter::{drop_column, rename_column};
 use crate::ddl::compose_create_table;
 use crate::quote::{quote_ident, quote_ident_list, table_ref};
@@ -82,12 +85,15 @@ fn create_index(driver: &DriverType, table: &str, index: &StructIndex) -> String
 pub(super) fn create(driver: &DriverType, draft: &Draft) -> Vec<String> {
     let columns: Vec<_> = draft.columns.iter().filter(|row| !row.dropped).map(|row| ddl_column(&row.column)).collect();
     let keys = draft.primary_columns();
-    let constraints = match keys.is_empty() {
+    let mut constraints = match keys.is_empty() {
         true => Vec::new(),
         false => vec![primary_key(driver, &draft.name, &PrimaryKey { name: String::new(), columns: keys })],
     };
+    constraints.extend(created_constraints(driver, draft));
     let create = compose_create_table(driver, &draft.schema, &draft.name, &columns, &constraints);
-    vec![create.trim_end_matches(';').to_string()]
+    let table = table_ref(driver, &draft.schema, &draft.name);
+    let indexes = created_indexes(draft).map(|index| create_index(driver, &table, index));
+    std::iter::once(create.trim_end_matches(';').to_string()).chain(indexes).collect()
 }
 
 fn type_and_null(column: &StructColumn) -> String {
@@ -271,6 +277,24 @@ mod tests {
                 "ALTER TABLE [dbo].[users] ADD CONSTRAINT [FK_users_teams] FOREIGN KEY ([team_id]) REFERENCES [dbo].[teams] ([id]) ON UPDATE CASCADE ON DELETE SET NULL",
             ]
         );
+    }
+
+    #[test]
+    fn sql_server_creates_a_table_with_its_indexes_checks_and_keys() {
+        let mut draft = Draft::new_table(&MS, "dbo");
+        draft.name = "people".into();
+        draft.columns.push(added(column("org_id", "bigint")));
+        draft.checks.push(Row::added(check("people_id_check", "id > 0")));
+        draft.foreign_keys.push(Row::added(foreign_key("FK_people_orgs", &["org_id"], "orgs", &["id"])));
+        draft.indexes.push(Row::added(index("IX_people_org_id", &["org_id"], false)));
+        let plan = plan_create(&MS, &draft).expect("valid");
+        let steps = sql(&plan);
+        assert_eq!(steps.len(), 5, "{steps:?}");
+        assert!(steps[2].starts_with("CREATE TABLE [dbo].[people]"), "{steps:?}");
+        assert!(steps[2].contains(",\n    CONSTRAINT [people_id_check] CHECK (id > 0)"), "{}", steps[2]);
+        let key = ",\n    CONSTRAINT [FK_people_orgs] FOREIGN KEY ([org_id]) REFERENCES [dbo].[orgs] ([id])\n)";
+        assert!(steps[2].ends_with(key), "{}", steps[2]);
+        assert_eq!(steps[3], "CREATE INDEX [IX_people_org_id] ON [dbo].[people] ([org_id])");
     }
 
     #[test]

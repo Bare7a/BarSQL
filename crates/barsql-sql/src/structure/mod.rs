@@ -483,9 +483,10 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
         Some(SqlDialect::TSql) => tsql_transaction(tsql::create(driver, draft)),
         Some(SqlDialect::MySql) => statements(mysql::create(driver, draft)),
         Some(SqlDialect::ClickHouse) => statements(clickhouse::create(driver, draft)),
-        Some(SqlDialect::Sqlite) => ChangePlan {
-            steps: sqlite::create(driver, draft).into_iter().map(Step::sql).collect(),
-            warnings: Vec::new(),
+        // A table with indexes takes more than one statement, so they go in together.
+        Some(SqlDialect::Sqlite) => match sqlite::create(driver, draft) {
+            statements if statements.len() > 1 => transaction(statements),
+            statements => ChangePlan { steps: statements.into_iter().map(Step::sql).collect(), warnings: Vec::new() },
         },
         _ => ChangePlan::default(),
     })
@@ -534,6 +535,17 @@ fn foreign_key_clause(driver: &DriverType, key: &ForeignKey, schema: &str) -> St
         "" => out,
         name => format!("CONSTRAINT {} {out}", quote_ident(driver, name)),
     }
+}
+
+// A new table's checks and foreign keys, as items of its CREATE TABLE.
+fn created_constraints(driver: &DriverType, draft: &Draft) -> Vec<String> {
+    let checks = draft.checks.iter().filter(|row| !row.dropped).map(|row| check_clause(driver, &row.value));
+    let keys = draft.foreign_keys.iter().filter(|row| !row.dropped);
+    checks.chain(keys.map(|row| foreign_key_clause(driver, &row.value, &draft.schema))).collect()
+}
+
+fn created_indexes(draft: &Draft) -> impl Iterator<Item = &StructIndex> {
+    draft.indexes.iter().filter(|row| !row.dropped).map(|row| &row.value)
 }
 
 // The ddl.rs form of a column, for the dialects that render through it.
