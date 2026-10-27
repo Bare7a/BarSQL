@@ -149,7 +149,6 @@ impl ChangePlan {
         self.wrapper() != (0, 0)
     }
 
-    // The body as the preview shows it, without blank lines between statements.
     pub fn preview(&self, driver: &DriverType) -> String {
         formatted(driver, self.body()).join("\n")
     }

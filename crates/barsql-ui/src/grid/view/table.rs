@@ -296,8 +296,7 @@ impl Grid {
         cx.notify();
     }
 
-    // Tab and Shift+Tab: commits the cell and opens the next text cell in the row, or the one before. Checkboxes take
-    // Space instead, so they're passed over.
+    // Tab and Shift+Tab. Checkboxes take Space instead, so they're passed over.
     pub(super) fn step_edit(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editing) = &self.editing else { return };
         let (row, column) = (editing.row, editing.column);

@@ -773,8 +773,7 @@ fn invalid_cells_and_marks_come_from_the_overlay(cx: &mut TestAppContext) {
     assert!(read(&grid, cx, |g| g.marks(1, 1)).is_empty());
 }
 
-// Tab commits the cell and opens the next text cell in the row, past checkboxes and locked cells, and Shift+Tab the
-// one before. With no such cell left, Tab only commits.
+// Tab moves the editor along the row past checkboxes and locked cells, Shift+Tab back, and at the end only commits.
 #[gpui_kit::test]
 fn tab_moves_the_editor_along_the_row(cx: &mut TestAppContext) {
     let _env = Env::new(cx);
@@ -784,9 +783,9 @@ fn tab_moves_the_editor_along_the_row(cx: &mut TestAppContext) {
         .into();
     let mut builder = ChunkBuilder::new(4, 1);
     builder.push_text(|s| s.push_str("ann"));
-    builder.push_number(|s| s.push_str("1"));
-    builder.push_text(|s| s.push_str("n"));
-    builder.push_text(|s| s.push_str("x"));
+    builder.push_number(|s| s.push('1'));
+    builder.push_text(|s| s.push('n'));
+    builder.push_text(|s| s.push('x'));
     builder.end_row();
     let (grid, cx) = mount_with(columns, builder, cx);
     let overlay = TableOverlay { editable: true, locked: HashSet::from([(0, 3)]), ..Default::default() };
@@ -808,6 +807,19 @@ fn the_fit_height_is_the_header_and_rows(cx: &mut TestAppContext) {
     draw(cx);
     let m = read(&grid, cx, |g| g.metrics);
     assert_eq!(fit, m.header_height + m.row_height * 3.);
+}
+
+// A fitted column makes room for its cells' marks beside its text, as it does for a header's key icon.
+#[gpui_kit::test]
+fn a_fitted_column_makes_room_for_its_marks(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    draw(cx);
+    let plain = read(&grid, cx, |g| g.col_x[2] - g.col_x[1]);
+    let marks = HashMap::from([((0, 1), vec![Lucide::Link, Lucide::ListTree])]);
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { marks, ..Default::default() }, cx));
+    draw(cx);
+    let (marked, m) = read(&grid, cx, |g| (g.col_x[2] - g.col_x[1], g.metrics));
+    assert_eq!(marked, plain + (m.icon + m.gap) * 2.);
 }
 
 // A locked cell keeps its value: its checkbox doesn't flip and Enter opens no editor, where the next row's does.

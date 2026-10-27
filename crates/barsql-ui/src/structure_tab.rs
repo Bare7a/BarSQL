@@ -525,7 +525,6 @@ impl StructureTab {
         self.record(before, window, cx);
     }
 
-    // The grid columns a problem is about, in its section's grid.
     fn problem_columns(&self, problem: &Problem) -> Vec<usize> {
         match problem.section {
             Section::Table => Vec::new(),
@@ -808,7 +807,6 @@ impl StructureTab {
             .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx)))
     }
 
-    // What keeps the draft from applying, or how much it changes, and the buttons that act on it.
     fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let (_, pending) = self.pending();

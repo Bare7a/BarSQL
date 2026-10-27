@@ -436,8 +436,7 @@ impl Grid {
         }
     }
 
-    // The header and every row, from the rem size so an owner can size the grid before it first paints. A horizontal
-    // bar's lane counts once a layout has one.
+    // From the rem size, so an owner can size the grid to its rows before it first paints.
     pub fn fit_height(&self, window: &Window) -> Pixels {
         let rem = f32::from(window.rem_size());
         header_height(rem) + px(row_height(rem)) * self.order.len() as f32 + self.scroll.lanes().height
@@ -604,12 +603,15 @@ impl Grid {
         self.sampled = Some(want);
     }
 
-    // A fitted width makes room for the header's key icon. A dragged one is as dragged.
+    // A fitted width makes room for the header's key icon, or the most marks a cell has. A dragged one is as dragged.
     fn width_px(&self, column: usize) -> Pixels {
         match self.widths[column] {
             Width::Ch(ch) => {
-                let icon = self.key_icon(column).map_or(px(0.), |_| self.metrics.icon + self.metrics.gap);
-                (self.metrics.ch * ch as f32 + icon).round()
+                let marks = self.overlay.as_ref().and_then(|overlay| {
+                    overlay.marks.iter().filter(|((_, c), _)| *c == column).map(|(_, icons)| icons.len()).max()
+                });
+                let icons = marks.unwrap_or(0).max(usize::from(self.key_icon(column).is_some()));
+                (self.metrics.ch * ch as f32 + (self.metrics.icon + self.metrics.gap) * icons as f32).round()
             }
             Width::Px(width) => width,
         }
@@ -1548,7 +1550,6 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                     barsql_db::Cell::Number(text) => Some(shown_number(text)),
                     _ => None,
                 };
-                // A dropped row's values stay readable, struck through.
                 let shape = |shaper: &mut Shaper, text: &str, color: Hsla| match deleted {
                     true => shaper.shape_struck(text, colors.muted, text_width, window),
                     false => shaper.shape(text, color, text_width, window),
@@ -1660,7 +1661,6 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         if grid.order.global_at(row).is_some_and(|global| grid.is_added(global)) {
             gutter.quads.push(fill(cell, colors.added));
         }
-        // A dropped or added row shows that in place of its number.
         let global = grid.order.global_at(row);
         let (label, text_color) = match global {
             Some(global) if grid.is_deleted(global) => ("\u{2212}".to_string(), colors.danger),

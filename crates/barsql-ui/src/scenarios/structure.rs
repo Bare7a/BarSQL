@@ -63,7 +63,6 @@ fn pick(app: &mut Driver, row: usize, col: usize, nth: usize) {
     app.keys(&format!("up {}enter", "down ".repeat(nth)));
 }
 
-// The height the grid's header and rows take.
 fn fit(app: &mut Driver) -> Pixels {
     let grid = grid(app);
     app.draw();
@@ -225,7 +224,6 @@ fn a_long_table_scrolls_its_rows_and_keeps_the_preview(cx: &mut TestAppContext) 
     assert!(add.bottom() <= footer.top(), "{add:?} under {footer:?}");
 }
 
-// A new column with no name or type outlines both cells until they're filled.
 #[gpui_kit::test]
 fn a_problem_outlines_its_cells(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
