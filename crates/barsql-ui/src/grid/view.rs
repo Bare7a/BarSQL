@@ -235,6 +235,10 @@ pub struct TableOverlay {
     pub fixed: bool,
     // (row, column) cells the owner keeps as they are, like a generated column's.
     pub locked: HashSet<(usize, usize)>,
+    // (row, column) cells outlined as invalid.
+    pub invalid: HashSet<(usize, usize)>,
+    // (row, column) -> icons at the cell's right edge.
+    pub marks: HashMap<(usize, usize), Vec<Lucide>>,
 }
 
 // A column's values from a fixed list: an enum's, or the ones a CHECK lists. NULL is one more where the column
@@ -1259,6 +1263,8 @@ struct Colors {
     // A ticked checkbox's tick, on the accent, and an empty one's border.
     on_accent: Hsla,
     check_border: Hsla,
+    danger: Hsla,
+    success: Hsla,
 }
 
 // Mixes `amount` of `a` into `b`, in sRGB.
@@ -1294,10 +1300,12 @@ impl Colors {
             link: accent,
             staged: mix(theme.warning, background, 0.22),
             staged_border: theme.warning.opacity(0.55),
-            deleted: theme.danger.opacity(0.22),
+            deleted: theme.danger.opacity(0.11),
             added: theme.success.opacity(0.22),
             on_accent: theme.primary_foreground,
             check_border: theme.muted_foreground.opacity(0.7),
+            danger: theme.danger,
+            success: theme.success,
         }
     }
 }
@@ -1366,6 +1374,21 @@ impl Shaper {
 
     // Cut with an ellipsis to fit `width`.
     fn shape(&mut self, text: &str, color: Hsla, width: Pixels, window: &Window) -> ShapedLine {
+        self.shape_run(text, color, width, None, window)
+    }
+
+    fn shape_struck(&mut self, text: &str, color: Hsla, width: Pixels, window: &Window) -> ShapedLine {
+        self.shape_run(text, color, width, Some(StrikethroughStyle { thickness: px(1.), color: Some(color) }), window)
+    }
+
+    fn shape_run(
+        &mut self,
+        text: &str,
+        color: Hsla,
+        width: Pixels,
+        strikethrough: Option<StrikethroughStyle>,
+        window: &Window,
+    ) -> ShapedLine {
         let text: SharedString = match self.wrapper.should_truncate_line(text, width, "…", TruncateFrom::End) {
             Some(ix) => format!("{}…", &text[..ix]).into(),
             None => text.to_string().into(),
@@ -1376,7 +1399,7 @@ impl Shaper {
             color,
             background_color: None,
             underline: None,
-            strikethrough: None,
+            strikethrough,
         };
         window.text_system().shape_line(text, self.size, &[run], None)
     }
@@ -1475,7 +1498,10 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             let jump = overlay.is_some_and(|overlay| overlay.foreign.contains_key(&column))
                 && !value.is_null()
                 && matches!(grid.hover, Some(Target::Cell { row: r, col: c } | Target::Jump { row: r, col: c }) if r == row && c == col);
-            let text_width = width - m.cell_pad_x * 2. - if jump { m.chevron } else { px(0.) };
+            let marks = overlay.and_then(|overlay| overlay.marks.get(&(global, column))).map_or(&[][..], Vec::as_slice);
+            let marks_width = (m.icon + m.gap) * marks.len() as f32;
+            let jump_width = if jump { m.chevron } else { px(0.) };
+            let text_width = width - m.cell_pad_x * 2. - jump_width - marks_width;
             // Booleans are checkboxes in every grid. Only an editable table view's take clicks.
             if let Some(on) = copy::flag(value, &grid.set.columns[column].type_name) {
                 let check = grid.check_box(row, col);
@@ -1502,10 +1528,15 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                     barsql_db::Cell::Number(text) => Some(shown_number(text)),
                     _ => None,
                 };
+                // A dropped row's values stay readable, struck through.
+                let shape = |shaper: &mut Shaper, text: &str, color: Hsla| match deleted {
+                    true => shaper.shape_struck(text, colors.muted, text_width, window),
+                    false => shaper.shape(text, color, text_width, window),
+                };
                 let line = match (&number, value.display()) {
-                    (Some(number), _) => plain.shape(number, colors.text, text_width, window),
-                    (None, Some(text)) => plain.shape(&display_text(text), colors.text, text_width, window),
-                    (None, None) => italic.shape(&null, colors.muted, text_width, window),
+                    (Some(number), _) => shape(&mut plain, number, colors.text),
+                    (None, Some(text)) => shape(&mut plain, &display_text(text), colors.text),
+                    (None, None) => shape(&mut italic, &null, colors.muted),
                 };
                 // Numbers line up on their decimal point, as in a spreadsheet: a shorter fraction leaves room on the
                 // right.
@@ -1528,6 +1559,15 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                     colors.staged_border,
                     BorderStyle::Solid,
                 ));
+            }
+            if overlay.is_some_and(|overlay| overlay.invalid.contains(&(global, column))) {
+                cells.quads.push(quad(inner, px(0.), transparent_black(), px(1.), colors.danger, BorderStyle::Solid));
+            }
+            let right = left + width - m.cell_pad_x - jump_width;
+            for (ix, icon) in marks.iter().enumerate() {
+                let x = right - (m.icon + m.gap) * (marks.len() - ix) as f32 + m.gap;
+                let y = top + (m.row_height - px(1.) - m.icon) / 2.;
+                cells.icons.push((Bounds::new(point(x, y), size(m.icon, m.icon)), icon.path(), colors.muted));
             }
             if jump {
                 let button = grid.jump_box(row, col);
@@ -1600,8 +1640,14 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         if grid.order.global_at(row).is_some_and(|global| grid.is_added(global)) {
             gutter.quads.push(fill(cell, colors.added));
         }
-        let text_color = if hovered_cell { colors.text } else { colors.muted };
-        let line = plain.shape(&(row + 1).to_string(), text_color, m.gutter_width - m.gutter_pad_x * 2., window);
+        // A dropped or added row shows that in place of its number.
+        let global = grid.order.global_at(row);
+        let (label, text_color) = match global {
+            Some(global) if grid.is_deleted(global) => ("\u{2212}".to_string(), colors.danger),
+            Some(global) if grid.is_added(global) => ("+".to_string(), colors.success),
+            _ => ((row + 1).to_string(), if hovered_cell { colors.text } else { colors.muted }),
+        };
+        let line = plain.shape(&label, text_color, m.gutter_width - m.gutter_pad_x * 2., window);
         let x = cell.right() - px(1.) - m.gutter_pad_x - line.width;
         gutter.texts.push((line, point(x, top + m.cell_pad_y)));
         gutter.quads.push(fill(
@@ -1877,6 +1923,14 @@ impl Grid {
 
     pub(crate) fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    pub(crate) fn is_invalid(&self, row: usize, column: usize) -> bool {
+        self.overlay.as_ref().is_some_and(|overlay| overlay.invalid.contains(&(row, column)))
+    }
+
+    pub(crate) fn marks(&self, row: usize, column: usize) -> Vec<Lucide> {
+        self.overlay.as_ref().and_then(|overlay| overlay.marks.get(&(row, column)).cloned()).unwrap_or_default()
     }
 
     // What the open list of an enum's values holds, NULL as None, and the one Enter takes.

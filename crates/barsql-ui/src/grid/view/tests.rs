@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use barsql_db::{ChunkBuilder, ColumnMeta};
 use barsql_io::ExportFormat;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Root;
 use gpui_kit::{
     AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
@@ -753,6 +754,23 @@ fn a_cells_own_values_win_over_its_columns(cx: &mut TestAppContext) {
     assert_eq!(picker(&grid, cx), Some((kinds(&["like", "love", "wow"]), 0)));
     cx.simulate_keystrokes("escape down enter");
     assert_eq!(picker(&grid, cx), Some((kinds(&["meh"]), 0)));
+}
+
+// Cells the owner marks invalid, and the icons it puts on cells, are the overlay's.
+#[gpui_kit::test]
+fn invalid_cells_and_marks_come_from_the_overlay(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (grid, cx) = reactions(false, cx);
+    let overlay = TableOverlay {
+        editable: true,
+        invalid: HashSet::from([(1, 1)]),
+        marks: HashMap::from([((0, 1), vec![Lucide::Link, Lucide::ListTree])]),
+        ..Default::default()
+    };
+    grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
+    assert!(read(&grid, cx, |g| g.is_invalid(1, 1) && !g.is_invalid(0, 1)));
+    assert_eq!(read(&grid, cx, |g| g.marks(0, 1)), [Lucide::Link, Lucide::ListTree]);
+    assert!(read(&grid, cx, |g| g.marks(1, 1)).is_empty());
 }
 
 // A locked cell keeps its value: its checkbox doesn't flip and Enter opens no editor, where the next row's does.
