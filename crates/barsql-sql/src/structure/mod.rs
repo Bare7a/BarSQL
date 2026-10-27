@@ -153,7 +153,6 @@ impl ChangePlan {
         formatted(driver, self.body()).join("\n")
     }
 
-    // How many steps open and close that transaction.
     fn wrapper(&self) -> (usize, usize) {
         let sql: Vec<&str> = self.steps.iter().map(|step| step.sql.as_str()).collect();
         let wraps = |(open, close): &&(&[&str], &str)| {

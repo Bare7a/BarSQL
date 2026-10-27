@@ -146,7 +146,6 @@ fn typing_a_column_change_updates_the_preview(cx: &mut TestAppContext) {
     assert_eq!(cell(&mut app, 1, NAME).as_deref(), Some("full_name"), "the grid shows the draft");
 }
 
-// The preview shows what changes the table, without the transaction around it, and says how many statements.
 #[gpui_kit::test]
 fn the_preview_shows_the_statements_alone(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
@@ -164,7 +163,6 @@ fn an_empty_name_disables_apply_and_shows_why(cx: &mut TestAppContext) {
     assert!(!app.cx.update(|_, cx| tab.read(cx).can_apply()));
 }
 
-// The preview lists what keeps the draft from applying, and a click on one shows its row.
 #[gpui_kit::test]
 fn a_problem_shows_its_row(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
@@ -180,7 +178,6 @@ fn a_problem_shows_its_row(cx: &mut TestAppContext) {
     assert!(row == 0 && app.cx.update(|_, cx| grid.read(cx).is_invalid(0, column)), "{focused:?} isn't outlined");
 }
 
-// The rows take the height they need and the preview the rest, folded or not.
 #[gpui_kit::test]
 fn the_rows_take_their_height_and_the_preview_the_rest(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
@@ -209,7 +206,6 @@ fn the_add_button_adds_a_row_and_opens_it(cx: &mut TestAppContext) {
     assert_eq!(editing, (true, Some((2, NAME))));
 }
 
-// More rows than fit scroll, and the preview stays in view.
 #[gpui_kit::test]
 fn a_long_table_scrolls_its_rows_and_keeps_the_preview(cx: &mut TestAppContext) {
     let mut app = long_table(cx);
@@ -222,7 +218,6 @@ fn a_long_table_scrolls_its_rows_and_keeps_the_preview(cx: &mut TestAppContext) 
     assert!(preview.bottom() <= footer.top(), "{preview:?} under {footer:?}");
 }
 
-// The footer counts the rows to add, change and drop, as the Table View counts its edits.
 #[gpui_kit::test]
 fn the_footer_counts_what_the_draft_adds_changes_and_drops(cx: &mut TestAppContext) {
     let mut app = prepared(cx, "CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT, note TEXT)");
@@ -241,6 +236,23 @@ fn the_footer_counts_what_the_draft_adds_changes_and_drops(cx: &mut TestAppConte
     let tab = app.structure();
     assert_eq!(app.cx.update(|_, cx| tab.read(cx).tally_counts()), (1, 1, 1));
     assert!(app.shown("structure-to-add") && app.shown("structure-to-change") && app.shown("structure-to-drop"));
+}
+
+// A section with rows to add, change or drop carries a dot, and a rename alone dots only Columns.
+#[gpui_kit::test]
+fn sections_with_changes_carry_a_dot(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, "CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT); CREATE INDEX e2e_s_name ON e2e_s(name)");
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    loaded(&mut app);
+    assert!(!app.shown("structure:section-dot:0") && !app.shown("structure:section-dot:1"));
+    edit_cell(&mut app, 1, NAME, "full_name");
+    assert!(app.shown("structure:section-dot:0") && !app.shown("structure:section-dot:1"));
+    app.click("structure-section:3");
+    app.click("structure-add");
+    app.type_text("id > 0");
+    app.keys("enter");
+    assert!(app.shown("structure:section-dot:3") && !app.shown("structure:section-dot:1"));
 }
 
 // An index follows its column's rename, which alone changes only the column.
@@ -308,7 +320,6 @@ fn the_footer_problem_link_shows_the_cell(cx: &mut TestAppContext) {
     assert_eq!((names[2].as_str(), focused), ("References", Some((0, 2))));
 }
 
-// A new column takes its name, then Tab to its type, as in a spreadsheet.
 #[gpui_kit::test]
 fn name_tab_type_adds_a_typed_column(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
@@ -325,7 +336,6 @@ fn name_tab_type_adds_a_typed_column(cx: &mut TestAppContext) {
     assert_eq!(last, ("email".to_string(), "TEXT".to_string()));
 }
 
-// The Apply dialog is wide, and its SQL grows with the script it runs, all of it.
 #[gpui_kit::test]
 fn the_apply_dialog_shows_the_whole_script_wide_and_tall(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
@@ -582,7 +592,6 @@ fn adding_a_foreign_key_shows_on_the_column(cx: &mut TestAppContext) {
     });
 }
 
-// A new key follows its columns and table until it's named by hand.
 #[gpui_kit::test]
 fn a_key_named_by_hand_keeps_its_name(cx: &mut TestAppContext) {
     let mut app = prepared(
@@ -669,7 +678,6 @@ fn picking_a_type_from_the_list_sets_it(cx: &mut TestAppContext) {
     assert_eq!(app.cx.update(|_, cx| tab.read(cx).draft.columns[1].column.data_type.clone()), first);
 }
 
-// The title is the tab's icon, then the table's name, then its schema.
 #[gpui_kit::test]
 fn the_title_shows_the_table_then_its_schema(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);

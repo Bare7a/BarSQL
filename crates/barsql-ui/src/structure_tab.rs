@@ -76,7 +76,6 @@ fn slot(section: Section) -> usize {
     }
 }
 
-// Undo and redo, as whole drafts.
 #[derive(Default)]
 struct History {
     past: Vec<Draft>,
@@ -256,7 +255,7 @@ impl StructureTab {
 
     #[cfg(test)]
     pub fn tally_counts(&self) -> (usize, usize, usize) {
-        self.tally()
+        self.total()
     }
 
     #[cfg(test)]
@@ -338,7 +337,6 @@ impl StructureTab {
         &self.sheets[slot(section)]
     }
 
-    // The grids show the draft over the loaded structure.
     fn sync(&mut self, cx: &mut Context<Self>) {
         if !matches!(self.load, Load::Ready) {
             return;
@@ -574,8 +572,8 @@ impl StructureTab {
         cx.notify();
     }
 
-    // The rows the draft adds, changes and drops. A new table adds all of its rows.
-    fn tally(&self) -> (usize, usize, usize) {
+    // The rows the draft adds, changes and drops, by section in SECTIONS' order. A new table adds all of its rows.
+    fn tally(&self) -> [(usize, usize, usize); 4] {
         let (draft, original) = (&self.draft, self.original.as_ref());
         let keys = original.and_then(|original| original.primary_key.as_ref()).map_or(&[][..], |key| &key.columns[..]);
         // Indexes and keys take a renamed column's new name, which alone changes only the column.
@@ -590,75 +588,40 @@ impl StructureTab {
                 .map(|name| renamed.get(name.as_str()).map_or_else(|| name.clone(), |new| new.to_string()))
                 .collect()
         };
-        let mut tally = (0, 0, 0);
-        let mut count = |origin: Option<usize>, dropped: bool, changed: bool| match (origin, dropped) {
+        let count = |tally: &mut (usize, usize, usize), origin: Option<usize>, dropped: bool, changed: bool| match (
+            origin, dropped,
+        ) {
             (None, _) => tally.0 += 1,
             (Some(_), true) => tally.2 += 1,
             (Some(_), false) => tally.1 += usize::from(changed),
         };
+        let mut tallies = [(0, 0, 0); 4];
         for row in &draft.columns {
             let old = row.origin.and_then(|ix| original?.columns.get(ix));
             let changed = old.is_some_and(|old| *old != row.column || keys.contains(&old.name) != row.primary);
-            count(row.origin, row.dropped, changed);
+            count(&mut tallies[0], row.origin, row.dropped, changed);
         }
         for row in &draft.indexes {
             let old = row.origin.and_then(|ix| original?.indexes.get(ix));
             let changed =
                 old.is_some_and(|old| StructIndex { columns: follow(&old.columns), ..old.clone() } != row.value);
-            count(row.origin, row.dropped, changed);
+            count(&mut tallies[1], row.origin, row.dropped, changed);
         }
         for row in &draft.foreign_keys {
             let old = row.origin.and_then(|ix| original?.foreign_keys.get(ix));
             let changed =
                 old.is_some_and(|old| ForeignKey { columns: follow(&old.columns), ..old.clone() } != row.value);
-            count(row.origin, row.dropped, changed);
+            count(&mut tallies[2], row.origin, row.dropped, changed);
         }
         for row in &draft.checks {
             let old = row.origin.and_then(|ix| original?.checks.get(ix));
-            count(row.origin, row.dropped, old.is_some_and(|old| *old != row.value));
+            count(&mut tallies[3], row.origin, row.dropped, old.is_some_and(|old| *old != row.value));
         }
-        tally
+        tallies
     }
 
-    // The sections with rows added, changed or dropped, and how many such rows in all.
-    fn pending(&self) -> (Vec<Section>, usize) {
-        let Some(original) = &self.original else {
-            return (Vec::new(), 0);
-        };
-        let found = changes(original, &self.draft);
-        let columns = self
-            .draft
-            .columns
-            .iter()
-            .filter(|row| match row.origin.and_then(|origin| original.columns.get(origin)) {
-                Some(old) => row.dropped || *old != row.column,
-                None => true,
-            })
-            .count()
-            + usize::from(found.primary_key.is_some());
-        // A changed row is dropped and added again, so the dropped ones and the new rows count each row once.
-        let new = |rows: &mut dyn Iterator<Item = (bool, bool)>| {
-            rows.filter(|&(loaded, dropped)| !loaded && !dropped).count()
-        };
-        let draft = &self.draft;
-        let counts = [
-            (Section::Columns, columns),
-            (
-                Section::Indexes,
-                found.dropped_indexes.len() + new(&mut draft.indexes.iter().map(|r| (r.origin.is_some(), r.dropped))),
-            ),
-            (
-                Section::ForeignKeys,
-                found.dropped_foreign_keys.len()
-                    + new(&mut draft.foreign_keys.iter().map(|r| (r.origin.is_some(), r.dropped))),
-            ),
-            (
-                Section::Checks,
-                found.dropped_checks.len() + new(&mut draft.checks.iter().map(|r| (r.origin.is_some(), r.dropped))),
-            ),
-        ];
-        let marked = counts.iter().filter(|(_, n)| *n > 0).map(|(section, _)| *section).collect();
-        (marked, counts.iter().map(|(_, n)| n).sum())
+    fn total(&self) -> (usize, usize, usize) {
+        self.tally().iter().fold((0, 0, 0), |sum, tally| (sum.0 + tally.0, sum.1 + tally.1, sum.2 + tally.2))
     }
 
     fn count(&self, section: Section) -> usize {
@@ -683,14 +646,14 @@ impl StructureTab {
 
     fn header(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let (marked, _) = self.pending();
+        let tallies = self.tally();
         let switch = SECTIONS.iter().enumerate().fold(form::toggle_group(), |group, (ix, (section, key))| {
             let section = *section;
             if !self.shows(section) {
                 return group;
             }
             let label = format!("{} {}", t(cx, key), self.count(section));
-            let dot = marked.contains(&section).then(|| {
+            let dot = (tallies[slot(section)] != (0, 0, 0)).then(|| {
                 div()
                     .size(rems(0.462))
                     .ml(rems(0.308))
@@ -710,7 +673,6 @@ impl StructureTab {
                     })),
             )
         });
-        // The tab's own icon, in its connection's color as the tab strip shows it.
         let color = parse_color(&self.connection.color).unwrap_or(theme.muted_foreground);
         let icon = div()
             .flex_none()
@@ -830,10 +792,9 @@ impl StructureTab {
         }
     }
 
-    // As the Table View's: Revert and Apply with what they'd do, and the buttons that add and drop rows.
     fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let (added, changed, dropped) = self.tally();
+        let (added, changed, dropped) = self.total();
         let problems = self.plan.as_ref().err().map(Vec::as_slice).unwrap_or_default();
         let rows = self.section_editable(self.section);
         let focused = self.focused_row(cx);

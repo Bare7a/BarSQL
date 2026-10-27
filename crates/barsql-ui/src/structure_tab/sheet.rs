@@ -14,12 +14,10 @@ pub(super) enum Value {
     Flag(bool),
 }
 
-// A checkbox's flip, or pasted text, as a flag.
 pub(super) fn flag(value: Option<&str>) -> bool {
     value.is_some_and(|text| ["true", "t", "1", "yes"].iter().any(|word| text.trim().eq_ignore_ascii_case(word)))
 }
 
-// A comma-separated list of names, as an index's or a key's columns are typed.
 pub(super) fn names(value: Option<&str>) -> Vec<String> {
     value.unwrap_or_default().split(',').map(str::trim).filter(|name| !name.is_empty()).map(String::from).collect()
 }
@@ -30,7 +28,6 @@ type Headings = Vec<(SharedString, bool)>;
 // Each row's values as loaded, or None for an added row.
 type Loaded = Vec<Option<Vec<Value>>>;
 
-// A section's headings, and each row as loaded and as drafted.
 #[derive(Default)]
 pub(super) struct Shape {
     pub columns: Headings,
@@ -62,8 +59,7 @@ impl Shape {
     }
 }
 
-// One section's rows on the Table View's grid. The loaded values are the grid's rows and the draft's are staged
-// over them, so a change shows as an edit does there.
+// The loaded values are the grid's rows and the draft's are staged over them, so a change shows as an edit does.
 pub(super) struct Sheet {
     pub grid: Entity<Grid>,
     loaded: Option<(Headings, Loaded)>,
