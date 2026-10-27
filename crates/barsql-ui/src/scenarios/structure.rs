@@ -294,6 +294,22 @@ fn name_tab_type_adds_a_typed_column(cx: &mut TestAppContext) {
     assert_eq!(last, ("email".to_string(), "TEXT".to_string()));
 }
 
+// The Apply dialog is wide, and its SQL grows with the script it runs, all of it.
+#[gpui_kit::test]
+fn the_apply_dialog_shows_the_whole_script_wide_and_tall(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.click("structure-section:3");
+    app.click("structure-add");
+    app.type_text("id > 0");
+    app.keys("enter");
+    app.click("structure-apply");
+    let shown = app.cx.update(|_, cx| cx.global::<crate::modal::ShownSql>().0.clone());
+    assert!(shown.starts_with("PRAGMA foreign_keys = OFF;") && shown.contains("CHECK (id > 0)"), "{shown}");
+    let rem = app.cx.update(|window, _| window.rem_size());
+    let sql = bounds_of(&mut app, "dialog-sql");
+    assert!(sql.size.width > rem * 49. && sql.size.height > rem * 12.308, "{sql:?}");
+}
+
 #[gpui_kit::test]
 fn revert_discards_the_draft(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);

@@ -17,7 +17,7 @@ use gpui_kit::*;
 use crate::file_dialogs::pick_save_path;
 use crate::form;
 use crate::i18n::{count, t, t_count, t_with};
-use crate::modal::{self, Modal};
+use crate::modal::{self, Modal, SqlView};
 use crate::spinner::Spinner;
 use crate::state;
 use crate::toast;
@@ -157,7 +157,7 @@ struct ChangeDialog {
     error: Option<SharedString>,
     job: String,
     on_done: OnDone,
-    sql_scroll: ScrollHandle,
+    sql: SqlView,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -179,6 +179,11 @@ impl ChangeDialog {
     fn preview(&self, cx: &App) -> Option<String> {
         let new_name = Some(self.new_name(cx)).filter(|n| !n.is_empty()).unwrap_or_else(|| self.change.name().into());
         self.change.sql(&self.connection.driver, &new_name, self.options).map(|sql| terminate_statement(&sql))
+    }
+
+    fn refresh_sql(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let sql = self.preview(cx).unwrap_or_default();
+        self.sql.show(&sql, window, cx);
     }
 
     // The tree catches up even if the dialog was closed while the statement ran.
@@ -243,10 +248,11 @@ impl ChangeDialog {
         v_flex()
             .child(
                 form::checkbox(id, checked, t(cx, label), self.running, cx).debug_selector(move || id.into()).on_click(
-                    cx.listener(move |dialog, _, _, cx| {
+                    cx.listener(move |dialog, _, window, cx| {
                         if !dialog.running {
                             flip(&mut dialog.options);
                             dialog.error = None;
+                            dialog.refresh_sql(window, cx);
                             cx.notify();
                         }
                     }),
@@ -292,9 +298,8 @@ impl Render for ChangeDialog {
                 cx,
             ));
         }
-        if let Some(sql) = self.preview(cx) {
-            let detail = modal::detail("change-sql", sql, &self.sql_scroll, cx);
-            body = body.child(form::group(t(cx, "schemaChange.sql"), detail, cx));
+        if !self.sql.is_empty() {
+            body = body.child(form::group(t(cx, "schemaChange.sql"), self.sql.element(1, 0.4, window, cx), cx));
         }
         let error = self.error.clone().map(|error| form::error(error, cx).debug_selector(|| "change-error".into()));
         let body = body.children(error);
@@ -336,15 +341,16 @@ pub fn open_change(
         let subscriptions = name
             .iter()
             .map(|name| {
-                cx.subscribe(name, |dialog: &mut ChangeDialog, _, event: &InputEvent, cx| {
+                cx.subscribe_in(name, window, |dialog: &mut ChangeDialog, _, event: &InputEvent, window, cx| {
                     if matches!(event, InputEvent::Change) {
                         dialog.error = None;
+                        dialog.refresh_sql(window, cx);
                         cx.notify();
                     }
                 })
             })
             .collect();
-        ChangeDialog {
+        let mut dialog = ChangeDialog {
             connection,
             change,
             name,
@@ -353,9 +359,11 @@ pub fn open_change(
             error: None,
             job: job_id("schema-change"),
             on_done: Rc::new(on_done),
-            sql_scroll: ScrollHandle::new(),
+            sql: SqlView::new(window, cx),
             _subscriptions: subscriptions,
-        }
+        };
+        dialog.refresh_sql(window, cx);
+        dialog
     });
     let (title, danger) = {
         let dialog = dialog.read(cx);
@@ -571,7 +579,7 @@ struct ApplyDialog {
     error: Option<SharedString>,
     job: String,
     on_done: Rc<dyn Fn(&mut App)>,
-    sql_scroll: ScrollHandle,
+    sql: SqlView,
 }
 
 impl ApplyDialog {
@@ -614,18 +622,13 @@ impl ApplyDialog {
 }
 
 impl Render for ApplyDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let script = self.plan.script(&self.connection.driver);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let warning =
             |kind: Warning, key: &str| self.plan.warnings.contains(&kind).then(|| modal::description(t(cx, key), cx));
         let body = modal::body()
             .children(warning(Warning::Rebuild, "structure.rebuildWarning"))
             .children(warning(Warning::NotAtomic, "structure.notAtomicWarning"))
-            .child(form::group(
-                t(cx, "schemaChange.sql"),
-                modal::detail("structure-apply-sql", script, &self.sql_scroll, cx),
-                cx,
-            ))
+            .child(form::group(t(cx, "schemaChange.sql"), self.sql.element(6, 0.6, window, cx), cx))
             .children(self.error.clone().map(|error| form::error(error, cx).debug_selector(|| "change-error".into())));
         v_flex().child(body.debug_selector(|| "structure-apply-sql".into())).child(
             modal::footer(cx)
@@ -657,20 +660,24 @@ pub fn open_structure_apply(
     cx: &mut App,
     on_done: impl Fn(&mut App) + 'static,
 ) {
-    let dialog = cx.new(|_| ApplyDialog {
-        connection,
-        plan,
-        running: false,
-        error: None,
-        job: job_id("structure"),
-        on_done: Rc::new(on_done),
-        sql_scroll: ScrollHandle::new(),
+    let dialog = cx.new(|cx| {
+        let mut sql = SqlView::new(window, cx);
+        sql.show(&plan.script(&connection.driver), window, cx);
+        ApplyDialog {
+            connection,
+            plan,
+            running: false,
+            error: None,
+            job: job_id("structure"),
+            on_done: Rc::new(on_done),
+            sql,
+        }
     });
     window.open_dialog(cx, move |modal_dialog, window, cx| {
         let entry = dialog.clone();
         let running = dialog.read(cx).running;
         Modal::new("structure-apply", t(cx, "structure.applyTitle"))
-            .size(modal::Size::Md)
+            .size(modal::Size::Xl)
             .closable(!running)
             .build(modal_dialog, dialog.clone(), window, cx)
             .keyboard(!running)

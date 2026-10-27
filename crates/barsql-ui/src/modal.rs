@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, StyledExt, WindowExt, h_flex, v_flex};
@@ -9,7 +10,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::i18n::t;
-use crate::scrollbars::HoverScrollbar as _;
+use crate::scrollbars::{HoverScrollbar as _, ScrollbarsOnHover as _};
+use crate::theme;
 use crate::tokens::{ICON_MD, RADIUS, RADIUS_LG, TEXT_BASE, TEXT_MD, TEXT_XS};
 
 #[derive(Clone, Copy)]
@@ -217,6 +219,64 @@ pub fn footer(cx: &App) -> Div {
 
 pub fn description(text: impl Into<SharedString>, cx: &App) -> Div {
     div().text_size(TEXT_BASE).text_color(cx.theme().muted_foreground).child(text.into())
+}
+
+// The SQL a dialog shows, for the tests to read.
+#[cfg(test)]
+pub struct ShownSql(pub String);
+
+#[cfg(test)]
+impl Global for ShownSql {}
+
+pub struct SqlView {
+    editor: Entity<EditorState>,
+    text: String,
+}
+
+impl SqlView {
+    pub fn new(window: &mut Window, cx: &mut App) -> Self {
+        // One row per line, so the view's height matches its lines.
+        let editor =
+            cx.new(|cx| EditorState::new(window, cx).language("sql").line_number(true).folding(false).soft_wrap(false));
+        Self { editor, text: String::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    // Setting the editor's text re-shapes it, so only changed SQL goes in.
+    pub fn show(&mut self, sql: &str, window: &mut Window, cx: &mut App) {
+        if self.text != sql {
+            self.text = sql.to_string();
+            self.editor.update(cx, |state, cx| state.set_value(sql.to_string(), window, cx));
+        }
+        #[cfg(test)]
+        cx.set_global(ShownSql(self.text.clone()));
+    }
+
+    // As tall as its lines, `least` of them at the start, up to `most` of the window's height, then it scrolls.
+    pub fn element(&self, least: usize, most: f32, window: &Window, cx: &App) -> impl IntoElement {
+        let theme = cx.theme();
+        let font = px(theme::editor_font_size(cx));
+        let lines = self.text.lines().count().max(least) as f32;
+        let height = (font * 1.5 * lines + window.rem_size() * 1.231).min(window.viewport_size().height * most);
+        div()
+            .debug_selector(|| "dialog-sql".into())
+            .h(height)
+            .overflow_hidden()
+            .rounded(RADIUS)
+            .border_1()
+            .border_color(theme.border)
+            .child(
+                Editor::new(&self.editor)
+                    .readonly(true)
+                    .size_full()
+                    .bordered(false)
+                    .text_size(font)
+                    .scrollbars_on_hover(),
+            )
+    }
 }
 
 pub fn detail(

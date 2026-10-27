@@ -109,6 +109,16 @@ fn count_rows_says_how_many_without_a_tab(cx: &mut TestAppContext) {
     assert_eq!(app.titles().len(), tabs);
 }
 
+#[gpui_kit::test]
+fn a_rename_shows_its_sql_as_the_name_is_typed(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_old (id INTEGER PRIMARY KEY)");
+    app.context_menu("tree:t:main.e2e_old", RENAME);
+    app.type_text("e2e_new");
+    let shown = app.cx.update(|_, cx| cx.global::<crate::modal::ShownSql>().0.clone());
+    assert!(shown.contains("RENAME") && shown.contains("e2e_new"), "{shown}");
+    assert!(app.shown("dialog-sql"));
+}
+
 // Rename opens with the name selected, so typing replaces it.
 #[gpui_kit::test]
 fn a_renamed_table_is_followed_by_the_tree_and_its_view(cx: &mut TestAppContext) {
