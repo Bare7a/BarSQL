@@ -499,7 +499,6 @@
     "revert": "Revert",
     "apply": "Apply",
     "preview": "SQL preview",
-    "defaultHint": "SQL, like 'pending' or now()",
     "primaryKey": "Key",
     "drop": "Drop",
     "restore": "Restore",
@@ -533,6 +532,9 @@
     "noIndexes": "No indexes",
     "noForeignKeys": "No foreign keys",
     "noChecks": "No checks",
+    "problemRow": "Row {{row}}: {{problem}}",
+    "problems_one": "{{count}} problem",
+    "problems_other": "{{count}} problems",
     "identity": {
       "label": "Identity",
       "none": "None",

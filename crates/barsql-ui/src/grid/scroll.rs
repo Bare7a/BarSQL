@@ -90,6 +90,11 @@ impl GridScroll {
         state.viewport
     }
 
+    // Rows pushed since the last layout, so a reveal before the next one can reach them.
+    pub fn set_rows_height(&self, height: Pixels) {
+        self.0.borrow_mut().content.height = height;
+    }
+
     // Whether the position moved.
     pub fn scroll_to(&self, position: Point<Pixels>) -> bool {
         let mut state = self.0.borrow_mut();

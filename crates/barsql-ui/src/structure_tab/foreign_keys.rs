@@ -1,34 +1,41 @@
 use barsql_core::{ForeignKey, RefAction};
-use barsql_sql::structure::{NameKind, Row, Section, changes, suggested_name};
-use gpui_kit::component::button::Button;
-use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, v_flex};
-use gpui_kit::prelude::FluentBuilder as _;
+use barsql_sql::structure::{NameKind, suggested_name};
 use gpui_kit::*;
 
-use super::columns::field;
-use super::{StructureTab, cell, drop_button, input, line, problem_text, row_select};
-use crate::form::{self, SelectMenu as _};
+use super::StructureTab;
+use super::sheet::{Shape, Value, names};
+use crate::grid::Choices;
 use crate::i18n::t;
 use crate::schema;
-use crate::tokens::{RADIUS, TEXT_XS, TINT};
 
-pub(super) struct KeyEditors {
-    pub key: u64,
-    pub name: Entity<InputState>,
-    _subscription: Subscription,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Name,
+    Columns,
+    Table,
+    RefColumns,
+    OnUpdate,
+    OnDelete,
 }
 
-pub(super) fn editors(key: u64, fk: &ForeignKey, window: &mut Window, cx: &mut Context<StructureTab>) -> KeyEditors {
-    let name = input(&fk.name, window, cx);
-    let subscription = cx.subscribe_in(&name, window, move |tab, state, event: &InputEvent, window, cx| {
-        if matches!(event, InputEvent::Change) {
-            let value = state.read(cx).value().trim().to_string();
-            tab.rename_foreign_key(key, value, window, cx);
-        }
-    });
-    KeyEditors { key, name, _subscription: subscription }
+fn fields(tab: &StructureTab) -> Vec<Field> {
+    let mut fields = vec![Field::Name, Field::Columns, Field::Table, Field::RefColumns];
+    if !tab.connection.driver.capabilities().structure.ref_actions.is_empty() {
+        fields.extend([Field::OnUpdate, Field::OnDelete]);
+    }
+    fields
+}
+
+fn heading(field: Field, cx: &App) -> (SharedString, bool) {
+    let key = match field {
+        Field::Name => "structure.foreignKey.name",
+        Field::Columns => "structure.foreignKey.columns",
+        Field::Table => "structure.foreignKey.table",
+        Field::RefColumns => "structure.foreignKey.refColumns",
+        Field::OnUpdate => "structure.foreignKey.onUpdate",
+        Field::OnDelete => "structure.foreignKey.onDelete",
+    };
+    (t(cx, key), false)
 }
 
 fn action_label(action: RefAction, cx: &App) -> SharedString {
@@ -42,302 +49,149 @@ fn action_label(action: RefAction, cx: &App) -> SharedString {
     t(cx, &format!("structure.action.{key}"))
 }
 
-fn toggle(names: &mut Vec<String>, name: String) {
-    match names.iter().position(|listed| *listed == name) {
-        Some(at) => {
-            names.remove(at);
+fn value(field: Field, fk: &ForeignKey, cx: &App) -> Value {
+    Value::Text(match field {
+        Field::Name => fk.name.clone(),
+        Field::Columns => fk.columns.join(", "),
+        Field::Table => fk.ref_table.clone(),
+        Field::RefColumns => fk.ref_columns.join(", "),
+        Field::OnUpdate => action_label(fk.on_update, cx).to_string(),
+        Field::OnDelete => action_label(fk.on_delete, cx).to_string(),
+    })
+}
+
+fn listed(values: Vec<String>) -> Choices {
+    Choices { values: values.into(), nullable: false, open: true }
+}
+
+// The referenced columns wait for a table, and list that table's once its columns are loaded.
+pub(super) fn shape(tab: &StructureTab, cx: &App) -> Shape {
+    let actions = tab.connection.driver.capabilities().structure.ref_actions;
+    let fields = fields(tab);
+    let at = |wanted: Field| fields.iter().position(|&field| field == wanted);
+    let cached = schema::get(cx, &tab.connection.id);
+    let mut shape = Shape::new(fields.iter().map(|&field| heading(field, cx)).collect());
+    for (ix, row) in tab.draft.foreign_keys.iter().enumerate() {
+        let fk = &row.value;
+        let old = row.origin.and_then(|origin| tab.original.as_ref()?.foreign_keys.get(origin));
+        let base = old.map(|old| fields.iter().map(|&field| value(field, old, cx)).collect());
+        let shown = fields.iter().map(|&field| value(field, fk, cx)).collect();
+        let locked: Vec<usize> = at(Field::RefColumns).filter(|_| fk.ref_table.is_empty()).into_iter().collect();
+        shape.row(base, shown, row.dropped, &locked);
+        let targets = cached.and_then(|cached| cached.columns(&tab.target_schema(fk), &fk.ref_table));
+        if let (Some(column), Some(targets)) = (at(Field::RefColumns), targets) {
+            shape.cell_choices.insert((ix, column), listed(targets.iter().map(|c| c.name.clone()).collect()));
         }
-        None => names.push(name),
+    }
+    let columns = tab.draft.columns.iter().filter(|row| !row.dropped).map(|row| row.column.name.clone()).collect();
+    let tables = cached
+        .map(|cached| cached.loaded_tables())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(schema, _)| *schema == tab.schema)
+        .flat_map(|(_, tables)| tables.iter().filter(|t| !schema::is_view_kind(&t.kind)).map(|t| t.name.clone()))
+        .collect();
+    let labels: Vec<String> = actions.iter().map(|&action| action_label(action, cx).to_string()).collect();
+    let lists = [
+        (Field::Columns, listed(columns)),
+        (Field::Table, listed(tables)),
+        (Field::OnUpdate, Choices { values: labels.clone().into(), nullable: false, open: false }),
+        (Field::OnDelete, Choices { values: labels.into(), nullable: false, open: false }),
+    ];
+    for (field, choices) in lists {
+        if let Some(ix) = at(field) {
+            shape.choices.insert(ix, choices);
+        }
+    }
+    shape
+}
+
+pub(super) fn edit(
+    tab: &mut StructureTab,
+    row: usize,
+    column: usize,
+    value: Option<String>,
+    window: &mut Window,
+    cx: &mut Context<StructureTab>,
+) {
+    let Some(&field) = fields(tab).get(column) else { return };
+    let actions = tab.connection.driver.capabilities().structure.ref_actions;
+    let text = value.as_deref().unwrap_or_default().trim().to_string();
+    let action = || actions.iter().copied().find(|&action| action_label(action, cx).as_ref() == text);
+    let Some(fk) = tab.draft.foreign_keys.get_mut(row).map(|line| &mut line.value) else { return };
+    match field {
+        // Named by hand, it no longer follows its columns.
+        Field::Name => fk.name = text,
+        Field::Columns => tab.edit_foreign_key(row, |fk| fk.columns = names(value.as_deref())),
+        // The same table again keeps the columns picked from it.
+        Field::Table if fk.ref_table == text => {}
+        Field::Table => tab.pick_target(row, text, window, cx),
+        Field::RefColumns => tab.edit_foreign_key(row, |fk| fk.ref_columns = names(value.as_deref())),
+        Field::OnUpdate => {
+            if let Some(action) = action() {
+                tab.edit_foreign_key(row, |fk| fk.on_update = action);
+            }
+        }
+        Field::OnDelete => {
+            if let Some(action) = action() {
+                tab.edit_foreign_key(row, |fk| fk.on_delete = action);
+            }
+        }
     }
 }
 
 impl StructureTab {
-    fn keys_editable(&self) -> bool {
-        self.editable() && self.connection.driver.capabilities().structure.foreign_keys
-    }
-
-    fn key_row(&self, key: u64) -> Option<usize> {
-        self.key_editors.iter().position(|editors| editors.key == key).filter(|_| self.keys_editable())
-    }
-
     fn target_schema(&self, fk: &ForeignKey) -> String {
         if fk.ref_schema.is_empty() { self.schema.clone() } else { fk.ref_schema.clone() }
     }
 
-    fn rename_foreign_key(&mut self, key: u64, name: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ix) = self.key_row(key) else { return };
-        if self.draft.foreign_keys[ix].value.name != name {
-            self.draft.foreign_keys[ix].value.name = name;
-            self.changed(window, cx);
-        }
-    }
-
     // A new key is named after its columns and target until it's named by hand.
-    fn edit_foreign_key(
-        &mut self,
-        key: u64,
-        edit: impl FnOnce(&mut ForeignKey),
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(ix) = self.key_row(key) else { return };
+    fn edit_foreign_key(&mut self, row: usize, edit: impl FnOnce(&mut ForeignKey)) {
         let driver = self.connection.driver.clone();
         let table = if self.table.is_empty() { self.draft.name.clone() } else { self.table.clone() };
         let suggested = |fk: &ForeignKey| match fk.columns.is_empty() || fk.ref_table.is_empty() {
             true => String::new(),
             false => suggested_name(&driver, NameKind::ForeignKey, &table, &fk.columns, &fk.ref_table),
         };
-        let row = &mut self.draft.foreign_keys[ix];
-        let follows = row.origin.is_none() && row.value.name == suggested(&row.value);
-        edit(&mut row.value);
+        let Some(line) = self.draft.foreign_keys.get_mut(row) else { return };
+        let follows = line.origin.is_none() && line.value.name == suggested(&line.value);
+        edit(&mut line.value);
         if follows {
-            let name = suggested(&row.value);
-            row.value.name = name.clone();
-            self.key_editors[ix].name.update(cx, |state, cx| state.set_value(name, window, cx));
+            line.value.name = suggested(&line.value);
         }
-        self.changed(window, cx);
     }
 
     // Loads the referenced table's columns, and fills an empty column list with its primary key.
-    fn pick_target(&mut self, key: u64, table: String, window: &mut Window, cx: &mut Context<Self>) {
+    fn pick_target(&mut self, row: usize, table: String, window: &mut Window, cx: &mut Context<Self>) {
         let schema = self.schema.clone();
         let target = (schema.clone(), table.clone());
-        self.edit_foreign_key(
-            key,
-            |fk| {
-                (fk.ref_schema, fk.ref_table) = target;
-                fk.ref_columns.clear();
-            },
-            window,
-            cx,
-        );
+        self.edit_foreign_key(row, |fk| {
+            (fk.ref_schema, fk.ref_table) = target;
+            fk.ref_columns.clear();
+        });
+        if table.is_empty() {
+            return;
+        }
         let load = schema::columns(&self.connection.id, &schema, &table, cx);
         cx.spawn_in(window, async move |this, cx| {
             let Ok(columns) = load.await else { return };
             let keys: Vec<String> = columns.iter().filter(|c| c.is_primary).map(|c| c.name.clone()).collect();
             let _ = this.update_in(cx, |tab, window, cx| {
-                let empty = tab.key_row(key).is_some_and(|ix| tab.draft.foreign_keys[ix].value.ref_columns.is_empty());
-                if empty && !keys.is_empty() {
-                    tab.edit_foreign_key(key, |fk| fk.ref_columns = keys, window, cx);
+                // Rows may have moved meanwhile, so only one still waiting on this table is filled.
+                let waiting = tab.draft.foreign_keys.get(row).map(|line| &line.value);
+                if waiting.is_some_and(|fk| fk.ref_table == table && fk.ref_columns.is_empty()) && !keys.is_empty() {
+                    tab.edit_foreign_key(row, |fk| fk.ref_columns = keys);
+                    tab.changed(window, cx);
                 }
-                cx.notify();
             });
         })
         .detach();
     }
 
-    fn drop_foreign_key(&mut self, key: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ix) = self.key_row(key) else { return };
-        if self.draft.foreign_keys[ix].origin.is_none() {
-            self.draft.foreign_keys.remove(ix);
-            self.key_editors.remove(ix);
-        } else {
-            let row = &mut self.draft.foreign_keys[ix];
-            row.dropped = !row.dropped;
-        }
-        self.changed(window, cx);
-    }
-
-    pub(super) fn add_foreign_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.keys_editable() {
-            return;
-        }
-        let key = self.key();
-        let fk = ForeignKey::default();
-        self.key_editors.push(editors(key, &fk, window, cx));
-        self.draft.foreign_keys.push(Row::added(fk));
-        self.changed(window, cx);
-    }
-
-    // So the referenced-column menus have their lists when first opened.
+    // So the referenced-column lists are there when first opened.
     pub(super) fn load_targets(&self, cx: &mut App) {
         for fk in self.draft.foreign_keys.iter().map(|row| &row.value) {
             drop(schema::columns(&self.connection.id, &self.target_schema(fk), &fk.ref_table, cx));
         }
     }
-}
-
-// A menu that toggles names in or out of a list, in the order they're picked.
-fn names_menu(
-    this: WeakEntity<StructureTab>,
-    names: Option<Vec<String>>,
-    chosen: Vec<String>,
-    key: u64,
-    edit: fn(&mut ForeignKey, String),
-) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
-    move |mut menu, _, cx| {
-        let Some(names) = &names else {
-            return menu.item(PopupMenuItem::new(t(cx, "tableView.loading")).disabled(true));
-        };
-        for name in names {
-            let (this, name) = (this.clone(), name.clone());
-            let item = PopupMenuItem::new(name.clone()).checked(chosen.contains(&name));
-            menu = menu.item(item.on_click(move |_, window, cx| {
-                let name = name.clone();
-                let _ = this.update(cx, |tab, cx| tab.edit_foreign_key(key, |fk| edit(fk, name), window, cx));
-            }));
-        }
-        menu
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn action_select(
-    this: WeakEntity<StructureTab>,
-    id: String,
-    current: RefAction,
-    actions: &'static [RefAction],
-    locked: bool,
-    key: u64,
-    set: fn(&mut ForeignKey, RefAction),
-    window: &mut Window,
-    cx: &mut Context<StructureTab>,
-) -> Div {
-    let (slot, picker) = select(id, action_label(current, cx), "", locked, 8., cx);
-    slot.child(picker.select_menu(window, cx, move |mut menu: PopupMenu, _, cx| {
-        for &action in actions {
-            let this = this.clone();
-            let item = PopupMenuItem::new(action_label(action, cx)).checked(action == current);
-            menu = menu.item(item.on_click(move |_, window, cx| {
-                let _ = this.update(cx, |tab, cx| tab.edit_foreign_key(key, |fk| set(fk, action), window, cx));
-            }));
-        }
-        menu
-    }))
-}
-
-fn select(id: String, label: SharedString, placeholder: &str, locked: bool, width: f32, cx: &App) -> (Div, Button) {
-    (div().flex_none().w(rems(width)), row_select(id, label, placeholder, cx).disabled(locked))
-}
-
-pub(super) fn rows(tab: &StructureTab, window: &mut Window, cx: &mut Context<StructureTab>) -> AnyElement {
-    if tab.draft.foreign_keys.is_empty() {
-        return form::empty_state(None, t(cx, "structure.noForeignKeys"), cx).into_any_element();
-    }
-    let theme = cx.theme().clone();
-    let actions = tab.connection.driver.capabilities().structure.ref_actions;
-    let editable = tab.keys_editable();
-    let heading = |key: &str, width: f32| cell(&t(cx, key), width);
-    let header = line(|| "structure:foreign-keys-header".into(), cx)
-        .text_size(TEXT_XS)
-        .text_color(theme.muted_foreground)
-        .child(heading("structure.foreignKey.name", 12.))
-        .child(heading("structure.foreignKey.columns", 10.))
-        .child(heading("structure.foreignKey.table", 10.))
-        .child(heading("structure.foreignKey.refColumns", 10.))
-        .child(heading("structure.foreignKey.onUpdate", 8.))
-        .child(heading("structure.foreignKey.onDelete", 8.));
-    // A changed key is dropped and added again, so its old self is among the dropped ones.
-    let replaced = tab.original.as_ref().map(|original| changes(original, &tab.draft).dropped_foreign_keys);
-    // The schema's tables, and each key's referenced columns once they're loaded.
-    let (tables, targets): (Vec<String>, Vec<Option<Vec<String>>>) = {
-        let cached = schema::get(cx, &tab.connection.id);
-        let tables = cached
-            .map(|cached| cached.loaded_tables())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(schema, _)| *schema == tab.schema)
-            .flat_map(|(_, tables)| tables.iter().filter(|t| !schema::is_view_kind(&t.kind)).map(|t| t.name.clone()))
-            .collect();
-        let target = |fk: &ForeignKey| {
-            let columns = cached?.columns(&tab.target_schema(fk), &fk.ref_table)?;
-            Some(columns.iter().map(|c| c.name.clone()).collect())
-        };
-        (tables, tab.draft.foreign_keys.iter().map(|row| target(&row.value)).collect())
-    };
-    let columns: Vec<String> =
-        tab.draft.columns.iter().filter(|row| !row.dropped).map(|row| row.column.name.clone()).collect();
-    let this = cx.entity().downgrade();
-    let mut list = v_flex().child(header);
-    for (ix, ((row, editors), names)) in tab.draft.foreign_keys.iter().zip(&tab.key_editors).zip(targets).enumerate() {
-        let fk = &row.value;
-        let old = row.origin.and_then(|origin| tab.original.as_ref()?.foreign_keys.get(origin));
-        // A key may have no name, so a loaded one goes by its place.
-        let stable = row.origin.map_or_else(|| format!("new{}", editors.key), |origin| origin.to_string());
-        let selector = |part: &str| format!("structure:foreign-key:{stable}:{part}");
-        let changed = !row.dropped && old.is_some_and(|old| replaced.as_ref().is_some_and(|gone| gone.contains(old)));
-        let locked = !editable || row.dropped;
-        let key = editors.key;
-        let label = fk.columns.join(", ").into();
-        let (slot, picker) = select(selector("columns"), label, "structure.foreignKey.columns", locked, 10., cx);
-        let edit_columns: fn(&mut ForeignKey, String) = |fk, name| toggle(&mut fk.columns, name);
-        let menu = names_menu(this.clone(), Some(columns.clone()), fk.columns.clone(), key, edit_columns);
-        let column_pick = slot.child(picker.select_menu(window, cx, menu));
-
-        let label = fk.ref_table.clone().into();
-        let (slot, picker) = select(selector("table"), label, "structure.foreignKey.table", locked, 10., cx);
-        let table_pick = slot.child(picker.select_menu(window, cx, {
-            let (this, tables, current) = (this.clone(), tables.clone(), fk.ref_table.clone());
-            move |mut menu: PopupMenu, _, _| {
-                for table in &tables {
-                    let (this, table) = (this.clone(), table.clone());
-                    let item = PopupMenuItem::new(table.clone()).checked(*table == current);
-                    menu = menu.item(item.on_click(move |_, window, cx| {
-                        let _ = this.update(cx, |tab, cx| tab.pick_target(key, table.clone(), window, cx));
-                    }));
-                }
-                menu
-            }
-        }));
-
-        let (label, unpicked) = (fk.ref_columns.join(", ").into(), locked || fk.ref_table.is_empty());
-        let (slot, picker) =
-            select(selector("ref-columns"), label, "structure.foreignKey.refColumns", unpicked, 10., cx);
-        let edit_targets: fn(&mut ForeignKey, String) = |fk, name| toggle(&mut fk.ref_columns, name);
-        let menu = names_menu(this.clone(), names, fk.ref_columns.clone(), key, edit_targets);
-        let target_pick = slot.child(picker.select_menu(window, cx, menu));
-
-        let on_update = action_select(
-            this.clone(),
-            selector("on-update"),
-            fk.on_update,
-            actions,
-            locked,
-            key,
-            |fk, action| fk.on_update = action,
-            window,
-            cx,
-        );
-        let on_delete = action_select(
-            this.clone(),
-            selector("on-delete"),
-            fk.on_delete,
-            actions,
-            locked,
-            key,
-            |fk, action| fk.on_delete = action,
-            window,
-            cx,
-        );
-
-        let drop = editable.then(|| {
-            drop_button(selector("drop"), row.dropped, cx)
-                .on_click(cx.listener(move |tab, _, window, cx| tab.drop_foreign_key(key, window, cx)))
-        });
-        let line = line(
-            {
-                let id = format!("structure:foreign-key:{stable}");
-                move || id.clone()
-            },
-            cx,
-        )
-        .px(rems(0.462))
-        .rounded(RADIUS)
-        .when(old.is_none(), |el| el.bg(theme.success.opacity(TINT)))
-        .when(changed, |el| el.bg(theme.warning.opacity(TINT)))
-        .when(row.dropped, |el| el.bg(theme.danger.opacity(TINT)).line_through())
-        .child(field(&editors.name, selector("name"), false, locked, 12., window, cx))
-        .child(column_pick)
-        .child(table_pick)
-        .child(target_pick)
-        .child(on_update)
-        .child(on_delete)
-        .children(drop);
-        list = list.child(line);
-        for kind in tab.problems(Section::ForeignKeys, ix) {
-            let id = format!("structure:problem:foreign-keys:{ix}");
-            list = list.child(form::error(problem_text(kind, cx), cx).debug_selector(move || id.clone()));
-        }
-    }
-    list.into_any_element()
 }

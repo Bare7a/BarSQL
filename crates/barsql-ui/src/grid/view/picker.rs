@@ -16,6 +16,8 @@ pub(super) struct Picker {
     // What the text keeps: indices into the values, and None for NULL.
     shown: Vec<Option<usize>>,
     highlighted: usize,
+    // The arrows moved the highlight, so an open list's Enter takes the value, not the text.
+    stepped: bool,
     scroll: ScrollHandle,
 }
 
@@ -28,7 +30,7 @@ impl Picker {
         }
         let highlighted =
             shown.iter().position(|&choice| choice.map(|ix| choices.values[ix].as_str()) == held).unwrap_or_default();
-        Self { choices, shown, highlighted, scroll: ScrollHandle::new() }
+        Self { choices, shown, highlighted, stepped: false, scroll: ScrollHandle::new() }
     }
 
     // The values holding the text, ignoring case, and NULL while the text could still be the start of it.
@@ -40,7 +42,12 @@ impl Picker {
             self.shown.push(None);
         }
         self.highlighted = 0;
+        self.stepped = false;
         self.scroll.scroll_to_item(0);
+    }
+
+    pub(super) fn takes_text(&self) -> bool {
+        self.choices.open && !self.stepped
     }
 
     // The value at `ix` in the list, Some(None) for NULL.
@@ -82,6 +89,7 @@ impl Grid {
         let Some(picker) = self.editing.as_mut().and_then(|editing| editing.picker.as_mut()) else { return };
         let Some(last) = picker.shown.len().checked_sub(1) else { return };
         picker.highlighted = picker.highlighted.saturating_add_signed(by).min(last);
+        picker.stepped = true;
         picker.scroll.scroll_to_item(picker.highlighted);
         cx.notify();
     }

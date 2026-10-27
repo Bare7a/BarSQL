@@ -320,7 +320,10 @@ impl TableTab {
                     .iter()
                     .filter(|c| !c.enum_values.is_empty())
                     .map(|c| {
-                        (c.name.clone(), Choices { values: c.enum_values.clone().into(), nullable: c.is_nullable })
+                        (
+                            c.name.clone(),
+                            Choices { values: c.enum_values.clone().into(), nullable: c.is_nullable, open: false },
+                        )
                     })
                     .collect();
                 this.sync_overlay(cx);
@@ -464,6 +467,7 @@ impl TableTab {
             primary,
             choices,
             editable: self.editable(),
+            ..Default::default()
         };
         self.grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
         cx.notify();

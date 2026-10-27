@@ -110,11 +110,12 @@ impl Grid {
         };
         let null = this.shown(row, column).is_null();
         let deleted = this.is_deleted(row);
+        let locked = deleted || this.locked(row, column);
         let menu = if overlay.editable {
             menu.item(
                 item(t(cx, "tableView.contextEdit"), emit(grid, move || GridEvent::EditInViewer { row, column }))
                     .action(Box::new(ViewCellValue))
-                    .disabled(deleted),
+                    .disabled(locked),
             )
         } else {
             let view = item(t(cx, "results.contextViewCell"), emit(grid, move || GridEvent::ViewCell { row, column }));
@@ -130,8 +131,12 @@ impl Grid {
             ),
             None => menu,
         };
-        let menu =
-            menu.item(item(t(cx, "grid.filterByValue"), emit(grid, move || GridEvent::FilterBy { row, column })));
+        let menu = match overlay.fixed {
+            true => menu,
+            false => {
+                menu.item(item(t(cx, "grid.filterByValue"), emit(grid, move || GridEvent::FilterBy { row, column })))
+            }
+        };
         if !overlay.editable {
             return Self::selection_items(grid, menu, cx);
         }
@@ -149,7 +154,7 @@ impl Grid {
                     emit(grid, move || GridEvent::EditCell { row, column, value: None }),
                 )
                 .action(Box::new(SetNull))
-                .disabled(null || deleted),
+                .disabled(null || locked),
             )
             .item(item(t(cx, "tableView.contextRestore"), restore).disabled(!staged))
             .separator()
@@ -201,17 +206,20 @@ impl Grid {
                 false => grid.sort_to(to, cx),
             })
         };
-        let menu = menu
-            .item(
-                item(t(cx, "grid.sortAscending"), sort(grid, Some((column, false))))
-                    .checked(sorted == Some((column, false))),
-            )
-            .item(
-                item(t(cx, "grid.sortDescending"), sort(grid, Some((column, true))))
-                    .checked(sorted == Some((column, true))),
-            )
-            .item(item(t(cx, "grid.clearSort"), sort(grid, None)).disabled(sorted.is_none()))
-            .separator();
+        let menu = match this.fixed() {
+            true => menu,
+            false => menu
+                .item(
+                    item(t(cx, "grid.sortAscending"), sort(grid, Some((column, false))))
+                        .checked(sorted == Some((column, false))),
+                )
+                .item(
+                    item(t(cx, "grid.sortDescending"), sort(grid, Some((column, true))))
+                        .checked(sorted == Some((column, true))),
+                )
+                .item(item(t(cx, "grid.clearSort"), sort(grid, None)).disabled(sorted.is_none()))
+                .separator(),
+        };
         let menu = Self::copy_items(grid, menu, window, cx)
             .item(PopupMenuItem::new(t(cx, "grid.copyColumnName")).on_click(move |_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(name.clone()));

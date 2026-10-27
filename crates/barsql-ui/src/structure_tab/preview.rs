@@ -5,12 +5,15 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::StructureTab;
-use crate::form::ToolButton as _;
-use crate::i18n::t;
-use crate::scrollbars::ScrollbarsOnHover as _;
+use barsql_sql::structure::Section;
+use gpui_kit::component::scroll::ScrollbarAxis;
+
+use super::{StructureTab, section_id};
+use crate::form::{self, ToolButton as _};
+use crate::i18n::{t, t_count};
+use crate::scrollbars::{HoverScrollbar as _, ScrollbarsOnHover as _};
 use crate::theme;
-use crate::tokens::{ICON_SM, TEXT_XS};
+use crate::tokens::{ICON_SM, TEXT_SM, TEXT_XS};
 
 // The script's height in rems: as it opens, its least, and the least of the rows that stays above it.
 const HEIGHT: (f32, f32, f32) = (9.231, 3.077, 6.154);
@@ -42,10 +45,41 @@ pub(super) fn resize(event: &DragMoveEvent<PreviewDrag>, window: &Window, cx: &m
     cx.set_global(PreviewHeight(wanted.clamp(HEIGHT.1, most)));
 }
 
-// The plan's script as it would run, read-only. It folds away, or its top edge drags, to give the rows the room.
+fn problems(
+    tab: &StructureTab,
+    lines: Vec<(Section, usize, SharedString)>,
+    cx: &mut Context<StructureTab>,
+) -> impl IntoElement {
+    let list = v_flex()
+        .id("structure-problems")
+        .size_full()
+        .overflow_y_scroll()
+        .track_scroll(&tab.problems_scroll)
+        .px(rems(0.923))
+        .py(rems(0.462))
+        .gap(rems(0.308))
+        .text_size(TEXT_SM)
+        .text_color(cx.theme().danger)
+        .children(lines.into_iter().enumerate().map(|(ix, (section, row, line))| {
+            let id = format!("structure:problem:{}:{row}", section_id(section));
+            div()
+                .id(("structure-problem", ix))
+                .debug_selector(move || id.clone())
+                .cursor_pointer()
+                .hover(|style| style.underline())
+                .child(line)
+                .on_click(cx.listener(move |tab, _, window, cx| tab.show_problem(section, row, window, cx)))
+        }));
+    div().relative().size_full().child(list).hover_scrollbar(&tab.problems_scroll, ScrollbarAxis::Vertical)
+}
+
+// The script as it would run, or what keeps it from running. It folds away, or its edge drags, to give the rows room.
 pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let open = tab.preview_open;
+    let lines = tab.problem_lines(cx);
+    let count = (!lines.is_empty())
+        .then(|| form::badge(t_count(cx, "structure.problems", lines.len() as i64, &[]), theme.danger));
     let toggle = Button::new("structure-preview-toggle")
         .debug_selector(|| "structure-preview-toggle".into())
         .tool_icon(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronUp }), ICON_SM)
@@ -66,27 +100,28 @@ pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl 
                 .px(rems(0.923))
                 .text_size(TEXT_XS)
                 .text_color(theme.muted_foreground)
-                .child(t(cx, "structure.preview"))
+                .child(h_flex().gap(rems(0.462)).child(t(cx, "structure.preview")).children(count))
                 .child(toggle),
         )
         .when(open, |panel| {
-            panel
-                .child(
-                    div().h(rems(height(cx))).debug_selector(|| "structure-preview".into()).child(
-                        Editor::new(&tab.preview)
-                            .readonly(true)
-                            .size_full()
-                            .bordered(false)
-                            .text_size(px(theme::editor_font_size(cx)))
-                            .scrollbars_on_hover(),
-                    ),
-                )
-                .child(resize_handle::<PreviewDrag, PreviewDrag>("structure-preview-splitter", Axis::Vertical).on_drag(
+            let body = match lines.is_empty() {
+                true => Editor::new(&tab.preview)
+                    .readonly(true)
+                    .size_full()
+                    .bordered(false)
+                    .text_size(px(theme::editor_font_size(cx)))
+                    .scrollbars_on_hover()
+                    .into_any_element(),
+                false => problems(tab, lines, cx).into_any_element(),
+            };
+            panel.child(div().h(rems(height(cx))).debug_selector(|| "structure-preview".into()).child(body)).child(
+                resize_handle::<PreviewDrag, PreviewDrag>("structure-preview-splitter", Axis::Vertical).on_drag(
                     PreviewDrag,
                     |drag, _, _, cx| {
                         cx.stop_propagation();
                         cx.new(|_| drag.clone())
                     },
-                ))
+                ),
+            )
         })
 }

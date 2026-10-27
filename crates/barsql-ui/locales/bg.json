@@ -499,7 +499,6 @@
     "revert": "Отмени",
     "apply": "Приложи",
     "preview": "SQL преглед",
-    "defaultHint": "SQL, например 'pending' или now()",
     "primaryKey": "Ключ",
     "drop": "Изтрий",
     "restore": "Възстанови",
@@ -533,6 +532,9 @@
     "noIndexes": "Няма индекси",
     "noForeignKeys": "Няма външни ключове",
     "noChecks": "Няма проверки",
+    "problemRow": "Ред {{row}}: {{problem}}",
+    "problems_one": "{{count}} проблем",
+    "problems_other": "{{count}} проблема",
     "identity": {
       "label": "Идентичност",
       "none": "Без",

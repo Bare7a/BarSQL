@@ -499,7 +499,6 @@
     "revert": "Verwerfen",
     "apply": "Anwenden",
     "preview": "SQL-Vorschau",
-    "defaultHint": "SQL, etwa 'offen' oder now()",
     "primaryKey": "Schlüssel",
     "drop": "Löschen",
     "restore": "Wiederherstellen",
@@ -533,6 +532,9 @@
     "noIndexes": "Keine Indizes",
     "noForeignKeys": "Keine Fremdschlüssel",
     "noChecks": "Keine Checks",
+    "problemRow": "Zeile {{row}}: {{problem}}",
+    "problems_one": "{{count}} Problem",
+    "problems_other": "{{count}} Probleme",
     "identity": {
       "label": "Identität",
       "none": "Keine",

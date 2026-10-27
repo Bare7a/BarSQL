@@ -42,7 +42,7 @@ impl Grid {
 
     // Stages the flip as the column holds it: 1/0 where it holds numbers, as SQLite does, true/false otherwise.
     pub(super) fn toggle(&mut self, row: usize, column: usize, cx: &mut Context<Self>) {
-        if !self.editable() || self.is_deleted(row) {
+        if !self.editable() || self.is_deleted(row) || self.locked(row, column) {
             return;
         }
         let Some(on) = copy::flag(self.shown(row, column), &self.set.columns[column].type_name) else { return };
@@ -78,6 +78,36 @@ impl Grid {
 
     pub fn is_deleted(&self, row: usize) -> bool {
         self.overlay.as_ref().is_some_and(|overlay| overlay.deleted.contains(&row))
+    }
+
+    pub fn is_added(&self, row: usize) -> bool {
+        self.overlay.as_ref().is_some_and(|overlay| overlay.added.contains(&row))
+    }
+
+    pub(super) fn fixed(&self) -> bool {
+        self.overlay.as_ref().is_some_and(|overlay| overlay.fixed)
+    }
+
+    pub(super) fn locked(&self, row: usize, column: usize) -> bool {
+        self.overlay.as_ref().is_some_and(|overlay| overlay.locked.contains(&(row, column)))
+    }
+
+    // Focuses a cell and scrolls to it, as a click does.
+    pub(crate) fn focus_cell(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let col = self.columns.iter().position(|&c| c == column).map_or(0, |p| p as isize);
+        self.selection.clear();
+        self.selection.focus(row, col);
+        if let Some(display) = self.order.display_of(row) {
+            self.reveal(display, col);
+        }
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    // Opens the editor on a cell, as a double-click does, and leaves the focus there.
+    pub(crate) fn edit_cell(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_cell(row, column, window, cx);
+        self.start_edit(row, column, window, cx);
     }
 
     // For a replacing page load. Hidden columns and widths survive only if the column names match.
@@ -163,6 +193,9 @@ impl Grid {
         }
         if self.editable() {
             if let Some((display, row, column)) = self.focused_data_cell() {
+                if self.locked(row, column) {
+                    return self.view_focused(cx);
+                }
                 // A boolean flips, where anything else opens its editor.
                 if self.checkable(display, self.selection.focus_col as usize) {
                     return self.toggle(row, column, cx);
@@ -178,7 +211,9 @@ impl Grid {
     // Shift+Enter. In an editable table view the viewer opens as an editor.
     pub(super) fn view_value(&mut self, cx: &mut Context<Self>) {
         match self.focused_data_cell() {
-            Some((_, row, column)) if self.editable() => cx.emit(GridEvent::EditInViewer { row, column }),
+            Some((_, row, column)) if self.editable() && !self.locked(row, column) => {
+                cx.emit(GridEvent::EditInViewer { row, column })
+            }
             _ => self.view_focused(cx),
         }
     }
@@ -197,6 +232,7 @@ impl Grid {
         }
         if let Some((_, row, column)) = self.focused_data_cell()
             && !self.is_deleted(row)
+            && !self.locked(row, column)
         {
             cx.emit(GridEvent::EditCell { row, column, value: None });
         }
@@ -222,6 +258,7 @@ impl Grid {
         let cells: Vec<_> = paste_cells(&grid, row, col, self.order.len(), &self.columns)
             .into_iter()
             .filter_map(|(display, column, value)| Some((self.order.global_at(display)?, column, value)))
+            .filter(|&(row, column, _)| !self.locked(row, column))
             .collect();
         if !cells.is_empty() {
             cx.emit(GridEvent::PasteCells(cells));
@@ -233,7 +270,7 @@ impl Grid {
         let picker = self
             .overlay
             .as_ref()
-            .and_then(|overlay| overlay.choices.get(&column))
+            .and_then(|overlay| overlay.cell_choices.get(&(row, column)).or_else(|| overlay.choices.get(&column)))
             .map(|choices| Picker::new(choices.clone(), held.as_deref()));
         let input = cx.new(|cx| InputState::new(window, cx).default_value(held.unwrap_or_default()));
         let subscription = cx.subscribe_in(&input, window, |grid, input, event: &InputEvent, window, cx| match event {
@@ -262,7 +299,7 @@ impl Grid {
     // Enter: a picker takes its highlighted value, and a blank editor stages NULL. The owner drops unchanged values.
     fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editing) = &self.editing else { return };
-        let value = match editing.picker.as_ref().and_then(Picker::highlighted) {
+        let value = match editing.picker.as_ref().filter(|picker| !picker.takes_text()).and_then(Picker::highlighted) {
             Some(value) => value,
             None => Some(editing.input.read(cx).value().to_string()).filter(|text| !text.is_empty()),
         };
@@ -272,7 +309,9 @@ impl Grid {
     // A click away commits a plain editor's text, but a picker's only when it names one of the values.
     fn blur_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editing) = &self.editing else { return };
-        let Some(picker) = &editing.picker else { return self.commit_edit(window, cx) };
+        let Some(picker) = editing.picker.as_ref().filter(|picker| !picker.takes_text()) else {
+            return self.commit_edit(window, cx);
+        };
         let named = picker.named(&editing.input.read(cx).value());
         self.finish_edit(named.map(Some), window, cx);
     }

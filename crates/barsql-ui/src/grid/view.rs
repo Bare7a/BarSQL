@@ -226,7 +226,15 @@ pub struct TableOverlay {
     pub primary: HashSet<usize>,
     // Column -> the values it takes from a list.
     pub choices: HashMap<usize, Choices>,
+    // (row, column) -> values for that cell alone, like a foreign key's referenced columns.
+    pub cell_choices: HashMap<(usize, usize), Choices>,
     pub editable: bool,
+    // Rows the owner added, shown as new.
+    pub added: HashSet<usize>,
+    // A list in its own order, like a table's structure: no sorting, filtering by value or type names.
+    pub fixed: bool,
+    // (row, column) cells the owner keeps as they are, like a generated column's.
+    pub locked: HashSet<(usize, usize)>,
 }
 
 // A column's values from a fixed list: an enum's, or the ones a CHECK lists. NULL is one more where the column
@@ -235,6 +243,8 @@ pub struct TableOverlay {
 pub struct Choices {
     pub values: Arc<[String]>,
     pub nullable: bool,
+    // Typed text that names no value is taken too, so the values only suggest.
+    pub open: bool,
 }
 
 struct Editing {
@@ -757,6 +767,7 @@ impl Grid {
     }
 
     fn reveal(&mut self, row: usize, col: isize) {
+        self.scroll.set_rows_height(self.metrics.row_height * self.order.len() as f32);
         let size = self.scroll.viewport().size;
         let mut position = self.scroll.position();
         let top = self.metrics.row_height * row as f32;
@@ -866,7 +877,8 @@ impl Grid {
                 let chevron_top = (m.header_height - m.chevron) / 2.;
                 let zone = if x >= width - px(RESIZE_HANDLE_PX) {
                     Zone::Resize
-                } else if x >= chevron_left
+                } else if !self.fixed()
+                    && x >= chevron_left
                     && x < chevron_left + m.chevron
                     && local.y >= chevron_top
                     && local.y < chevron_top + m.chevron
@@ -910,6 +922,7 @@ impl Grid {
         let (Some(global), Some(&column)) = (self.order.global_at(row), self.columns.get(col)) else { return false };
         self.editable()
             && !self.is_deleted(global)
+            && !self.locked(global, column)
             && copy::flag(self.shown(global, column), &self.set.columns[column].type_name).is_some()
     }
 
@@ -975,7 +988,7 @@ impl Grid {
                     self.press = None;
                     match self.order.global_at(row) {
                         Some(global) if self.checkable(row, col) => self.toggle(global, self.columns[col], cx),
-                        Some(global) if editable => {
+                        Some(global) if editable && !self.locked(global, self.columns[col]) => {
                             self.selection.clear();
                             self.start_edit(global, self.columns[col], window, cx);
                         }
@@ -1242,6 +1255,7 @@ struct Colors {
     staged: Hsla,
     staged_border: Hsla,
     deleted: Hsla,
+    added: Hsla,
     // A ticked checkbox's tick, on the accent, and an empty one's border.
     on_accent: Hsla,
     check_border: Hsla,
@@ -1281,6 +1295,7 @@ impl Colors {
             staged: mix(theme.warning, background, 0.22),
             staged_border: theme.warning.opacity(0.55),
             deleted: theme.danger.opacity(0.22),
+            added: theme.success.opacity(0.22),
             on_accent: theme.primary_foreground,
             check_border: theme.muted_foreground.opacity(0.7),
         }
@@ -1435,6 +1450,10 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         if deleted {
             cells.quads.push(fill(row_band, colors.deleted));
         }
+        let added = grid.is_added(global);
+        if added {
+            cells.quads.push(fill(row_band, colors.added));
+        }
         for col in visible_cols.clone() {
             let column = grid.columns[col];
             let left = col_left(col);
@@ -1443,7 +1462,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             let edges =
                 range::highlight(row, col, selection.range.as_ref(), &band_rows, &band_cols, rows, grid.columns.len());
             let focus_here = focus_display == Some(row) && selection.focus_col == col as isize;
-            let staged = overlay.is_some_and(|overlay| overlay.staged.contains_key(&(global, column)));
+            let staged = !added && overlay.is_some_and(|overlay| overlay.staged.contains_key(&(global, column)));
             if edges.is_some() {
                 let color = if hover_row == Some(row) { colors.selected_hover } else { colors.selected };
                 cells.quads.push(fill(cell, color));
@@ -1460,7 +1479,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             // Booleans are checkboxes in every grid. Only an editable table view's take clicks.
             if let Some(on) = copy::flag(value, &grid.set.columns[column].type_name) {
                 let check = grid.check_box(row, col);
-                if editable && !deleted {
+                if editable && !deleted && !grid.locked(global, column) {
                     checks.push(check);
                 }
                 match on {
@@ -1578,6 +1597,9 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         if grid.order.global_at(row).is_some_and(|global| grid.is_deleted(global)) {
             gutter.quads.push(fill(cell, colors.deleted));
         }
+        if grid.order.global_at(row).is_some_and(|global| grid.is_added(global)) {
+            gutter.quads.push(fill(cell, colors.added));
+        }
         let text_color = if hovered_cell { colors.text } else { colors.muted };
         let line = plain.shape(&(row + 1).to_string(), text_color, m.gutter_width - m.gutter_pad_x * 2., window);
         let x = cell.right() - px(1.) - m.gutter_pad_x - line.width;
@@ -1646,7 +1668,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         // The type follows faintly, when the name leaves room for all of it. A cut `var…` says nothing.
         let room = title_width - line.width - m.gap;
         let type_name = display_type(grid.dialect, &meta.type_name);
-        if !type_name.is_empty() && room > px(0.) && plain.fits(&type_name, room) {
+        if !grid.fixed() && !type_name.is_empty() && room > px(0.) && plain.fits(&type_name, room) {
             let type_name = plain.shape(&type_name, colors.faint, room, window);
             header.texts.push((type_name, point(title_left + line.width + m.gap, title_top)));
         }
@@ -1661,7 +1683,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
         }
         // An unsorted column shows its sort button only under the pointer, so a wide result isn't a row of chevrons.
         // The space stays reserved, so names don't shift as the pointer moves.
-        if sorted || hover.is_some() {
+        if !grid.fixed() && (sorted || hover.is_some()) {
             let icon = match (sorted, desc) {
                 (true, false) => Lucide::ChevronUp,
                 (true, true) => Lucide::ChevronDown,
