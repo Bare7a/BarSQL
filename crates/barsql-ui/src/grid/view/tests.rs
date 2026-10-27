@@ -773,6 +773,33 @@ fn invalid_cells_and_marks_come_from_the_overlay(cx: &mut TestAppContext) {
     assert!(read(&grid, cx, |g| g.marks(1, 1)).is_empty());
 }
 
+// Tab commits the cell and opens the next text cell in the row, past checkboxes and locked cells, and Shift+Tab the
+// one before. With no such cell left, Tab only commits.
+#[gpui_kit::test]
+fn tab_moves_the_editor_along_the_row(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let columns: Arc<[ColumnMeta]> = [("name", "TEXT"), ("active", "BOOLEAN"), ("note", "TEXT"), ("extra", "TEXT")]
+        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+        .to_vec()
+        .into();
+    let mut builder = ChunkBuilder::new(4, 1);
+    builder.push_text(|s| s.push_str("ann"));
+    builder.push_number(|s| s.push_str("1"));
+    builder.push_text(|s| s.push_str("n"));
+    builder.push_text(|s| s.push_str("x"));
+    builder.end_row();
+    let (grid, cx) = mount_with(columns, builder, cx);
+    let overlay = TableOverlay { editable: true, locked: HashSet::from([(0, 3)]), ..Default::default() };
+    grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
+    let edits = edits(&grid, cx);
+    cx.simulate_keystrokes("enter x tab y tab");
+    assert_eq!(*edits.borrow(), [(0, 0, Some("annx".into())), (0, 2, Some("ny".into()))]);
+    assert!(!read(&grid, cx, |g| g.is_editing()), "the locked last cell takes no editor");
+    cx.simulate_keystrokes("enter shift-tab escape");
+    assert_eq!(edits.borrow().last(), Some(&(0, 2, Some("n".into()))));
+    assert_eq!(read(&grid, cx, |g| (g.focused_cell(), g.is_editing())), (Some((0, 0)), false));
+}
+
 // A locked cell keeps its value: its checkbox doesn't flip and Enter opens no editor, where the next row's does.
 #[gpui_kit::test]
 fn a_locked_cell_does_not_edit(cx: &mut TestAppContext) {

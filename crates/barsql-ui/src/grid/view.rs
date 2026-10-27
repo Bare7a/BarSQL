@@ -108,6 +108,8 @@ actions!(
         ToggleValue,
         PrevChoice,
         NextChoice,
+        NextCell,
+        PrevCell,
         ApplyChanges,
         RefreshData,
     ]
@@ -154,6 +156,11 @@ pub fn init(cx: &mut App) {
         // The editor would take them, as it does with its own list of suggestions.
         KeyBinding::new("up", PrevChoice, Some(&format!("{PICKING} > Input"))),
         KeyBinding::new("down", NextChoice, Some(&format!("{PICKING} > Input"))),
+        // From a cell's editor, with or without its list, to the next cell's.
+        KeyBinding::new("tab", NextCell, Some(&format!("{CONTEXT} > Input"))),
+        KeyBinding::new("shift-tab", PrevCell, Some(&format!("{CONTEXT} > Input"))),
+        KeyBinding::new("tab", NextCell, Some(&format!("{PICKING} > Input"))),
+        KeyBinding::new("shift-tab", PrevCell, Some(&format!("{PICKING} > Input"))),
     ]);
 }
 
@@ -1138,6 +1145,8 @@ impl Render for Grid {
                 .bg(theme.background)
                 // Its own Cut/Copy/Paste menu, not the grid's, which would also take focus and commit the edit.
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .on_action(cx.listener(|this, _: &NextCell, window, cx| this.step_edit(true, window, cx)))
+                .on_action(cx.listener(|this, _: &PrevCell, window, cx| this.step_edit(false, window, cx)))
                 .when(picker.is_some(), |editor| {
                     editor
                         .key_context(PICKING)

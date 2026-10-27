@@ -296,6 +296,24 @@ impl Grid {
         cx.notify();
     }
 
+    // Tab and Shift+Tab: commits the cell and opens the next text cell in the row, or the one before. Checkboxes take
+    // Space instead, so they're passed over.
+    pub(super) fn step_edit(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = &self.editing else { return };
+        let (row, column) = (editing.row, editing.column);
+        let typed = |&c: &usize| {
+            !self.locked(row, c) && copy::flag(self.shown(row, c), &self.set.columns[c].type_name).is_none()
+        };
+        let next = self.columns.iter().position(|&c| c == column).and_then(|at| match forward {
+            true => self.columns[at + 1..].iter().find(|c| typed(c)).copied(),
+            false => self.columns[..at].iter().rev().find(|c| typed(c)).copied(),
+        });
+        self.commit_edit(window, cx);
+        if let Some(next) = next {
+            self.edit_cell(row, next, window, cx);
+        }
+    }
+
     // Enter: a picker takes its highlighted value, and a blank editor stages NULL. The owner drops unchanged values.
     fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editing) = &self.editing else { return };
