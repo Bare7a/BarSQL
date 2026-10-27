@@ -5,7 +5,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use barsql_sql::structure::Section;
+use barsql_sql::structure::Problem;
 use gpui_kit::component::scroll::ScrollbarAxis;
 
 use super::{StructureTab, section_id};
@@ -47,7 +47,7 @@ pub(super) fn resize(event: &DragMoveEvent<PreviewDrag>, window: &Window, cx: &m
 
 fn problems(
     tab: &StructureTab,
-    lines: Vec<(Section, usize, SharedString)>,
+    lines: Vec<(Problem, SharedString)>,
     cx: &mut Context<StructureTab>,
 ) -> impl IntoElement {
     let list = v_flex()
@@ -60,15 +60,15 @@ fn problems(
         .gap(rems(0.308))
         .text_size(TEXT_SM)
         .text_color(cx.theme().danger)
-        .children(lines.into_iter().enumerate().map(|(ix, (section, row, line))| {
-            let id = format!("structure:problem:{}:{row}", section_id(section));
+        .children(lines.into_iter().enumerate().map(|(ix, (problem, line))| {
+            let id = format!("structure:problem:{}:{}", section_id(problem.section), problem.row);
             div()
                 .id(("structure-problem", ix))
                 .debug_selector(move || id.clone())
                 .cursor_pointer()
                 .hover(|style| style.underline())
                 .child(line)
-                .on_click(cx.listener(move |tab, _, window, cx| tab.show_problem(section, row, window, cx)))
+                .on_click(cx.listener(move |tab, _, window, cx| tab.show_problem(&problem, window, cx)))
         }));
     div().relative().size_full().child(list).hover_scrollbar(&tab.problems_scroll, ScrollbarAxis::Vertical)
 }

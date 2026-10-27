@@ -1,5 +1,5 @@
 use barsql_core::{ForeignKey, RefAction};
-use barsql_sql::structure::{NameKind, suggested_name};
+use barsql_sql::structure::{NameKind, ProblemKind, suggested_name};
 use gpui_kit::*;
 
 use super::StructureTab;
@@ -104,6 +104,18 @@ pub(super) fn shape(tab: &StructureTab, cx: &App) -> Shape {
         }
     }
     shape
+}
+
+pub(super) fn problem_columns(tab: &StructureTab, kind: &ProblemKind) -> Vec<usize> {
+    let named: &[Field] = match kind {
+        ProblemKind::EmptyName | ProblemKind::DuplicateName => &[Field::Name],
+        ProblemKind::ForeignKeyColumnCount => &[Field::Columns, Field::RefColumns],
+        ProblemKind::NoReferencedTable => &[Field::Table],
+        ProblemKind::UsesDroppedColumn(_) => &[Field::Columns],
+        _ => &[],
+    };
+    let fields = fields(tab);
+    named.iter().filter_map(|field| fields.iter().position(|f| f == field)).collect()
 }
 
 pub(super) fn edit(

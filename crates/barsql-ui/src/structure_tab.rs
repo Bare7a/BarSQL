@@ -7,6 +7,7 @@ mod sheet;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use barsql_app::{EditorTab, StructureRef};
@@ -253,6 +254,11 @@ impl StructureTab {
     }
 
     #[cfg(test)]
+    pub fn section_count(&self, section: Section) -> usize {
+        self.count(section)
+    }
+
+    #[cfg(test)]
     pub fn grid(&self) -> Entity<Grid> {
         self.sheet(self.section).grid.clone()
     }
@@ -338,7 +344,10 @@ impl StructureTab {
             checks::shape(self, cx),
         ];
         let editable = SECTIONS.map(|(section, _)| self.section_editable(section));
-        for ((sheet, shape), editable) in self.sheets.iter_mut().zip(shapes).zip(editable) {
+        let outlined = SECTIONS.map(|(section, _)| self.outlined(section));
+        for (((sheet, mut shape), editable), invalid) in self.sheets.iter_mut().zip(shapes).zip(editable).zip(outlined)
+        {
+            shape.invalid = invalid;
             sheet.show(shape, editable, cx);
         }
     }
@@ -516,7 +525,24 @@ impl StructureTab {
         self.record(before, window, cx);
     }
 
-    fn problem_lines(&self, cx: &App) -> Vec<(Section, usize, SharedString)> {
+    // The grid columns a problem is about, in its section's grid.
+    fn problem_columns(&self, problem: &Problem) -> Vec<usize> {
+        match problem.section {
+            Section::Table => Vec::new(),
+            Section::Columns => columns::problem_columns(self, &problem.kind),
+            Section::Indexes => indexes::problem_columns(self, &problem.kind),
+            Section::ForeignKeys => foreign_keys::problem_columns(self, &problem.kind),
+            Section::Checks => checks::problem_columns(&problem.kind),
+        }
+    }
+
+    fn outlined(&self, section: Section) -> HashSet<(usize, usize)> {
+        let problems = self.plan.as_ref().err().map(Vec::as_slice).unwrap_or_default();
+        let here = problems.iter().filter(|problem| problem.section == section);
+        here.flat_map(|problem| self.problem_columns(problem).into_iter().map(|column| (problem.row, column))).collect()
+    }
+
+    fn problem_lines(&self, cx: &App) -> Vec<(Problem, SharedString)> {
         let problems = self.plan.as_ref().err().map(Vec::as_slice).unwrap_or_default();
         let line = |problem: &Problem| {
             let text = problem_text(&problem.kind, cx);
@@ -525,20 +551,21 @@ impl StructureTab {
             let at = t_with(cx, "structure.problemRow", &[("row", &row), ("problem", &text)]);
             format!("{} \u{b7} {at}", t(cx, key)).into()
         };
-        problems.iter().map(|problem| (problem.section, problem.row, line(problem))).collect()
+        problems.iter().map(|problem| (problem.clone(), line(problem))).collect()
     }
 
-    // A problem's row, focused in its section, or the new table's name.
-    fn show_problem(&mut self, section: Section, row: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if section == Section::Table {
+    // A problem's cell, focused in its section, or the new table's name.
+    fn show_problem(&mut self, problem: &Problem, window: &mut Window, cx: &mut Context<Self>) {
+        if problem.section == Section::Table {
             if let Some(field) = self.naming() {
                 field.update(cx, |state, cx| state.focus(window, cx));
             }
             return;
         }
-        self.section = section;
-        let grid = self.sheet(section).grid.clone();
-        grid.update(cx, |grid, cx| grid.focus_cell(row, 0, window, cx));
+        let column = self.problem_columns(problem).first().copied().unwrap_or(0);
+        self.section = problem.section;
+        let grid = self.sheet(problem.section).grid.clone();
+        grid.update(cx, |grid, cx| grid.focus_cell(problem.row, column, window, cx));
         cx.notify();
     }
 
@@ -586,10 +613,10 @@ impl StructureTab {
     fn count(&self, section: Section) -> usize {
         let draft = &self.draft;
         match section {
-            Section::Columns | Section::Table => draft.columns.iter().filter(|row| !row.dropped).count(),
-            Section::Indexes => draft.indexes.iter().filter(|row| !row.dropped).count(),
-            Section::ForeignKeys => draft.foreign_keys.iter().filter(|row| !row.dropped).count(),
-            Section::Checks => draft.checks.iter().filter(|row| !row.dropped).count(),
+            Section::Columns | Section::Table => draft.columns.len(),
+            Section::Indexes => draft.indexes.len(),
+            Section::ForeignKeys => draft.foreign_keys.len(),
+            Section::Checks => draft.checks.len(),
         }
     }
 
@@ -788,7 +815,7 @@ impl StructureTab {
         let problems = self.plan.as_ref().err().map(Vec::as_slice).unwrap_or_default();
         let status = match problems.first() {
             Some(first) => {
-                let (section, row) = (first.section, first.row);
+                let first = first.clone();
                 div()
                     .id("structure-problems-link")
                     .debug_selector(|| "structure-problems-link".into())
@@ -796,7 +823,7 @@ impl StructureTab {
                     .text_color(theme.danger)
                     .hover(|style| style.underline())
                     .child(t_count(cx, "structure.problems", problems.len() as i64, &[]))
-                    .on_click(cx.listener(move |this, _, window, cx| this.show_problem(section, row, window, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.show_problem(&first, window, cx)))
                     .into_any_element()
             }
             None if pending > 0 => div()

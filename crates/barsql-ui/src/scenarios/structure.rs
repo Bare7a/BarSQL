@@ -1,4 +1,6 @@
 use barsql_core::{ConnectionConfig, Value};
+use barsql_sql::structure::Section;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::{Entity, Modifiers, MouseButton, Pixels, TestAppContext, point, px};
 
 use super::driver::{Driver, open, open_with, selector};
@@ -165,7 +167,9 @@ fn a_problem_shows_its_row(cx: &mut TestAppContext) {
     app.click("structure:problem:indexes:0");
     let grid = grid(&mut app);
     let (names, focused) = app.cx.update(|_, cx| (grid.read(cx).visible_names(), grid.read(cx).focused_cell()));
-    assert_eq!((names[1].as_str(), focused), ("Columns", Some((0, 0))));
+    assert_eq!(names[1], "Columns");
+    let (row, column) = focused.expect("a focused cell");
+    assert!(row == 0 && app.cx.update(|_, cx| grid.read(cx).is_invalid(0, column)), "{focused:?} isn't outlined");
 }
 
 // The rows take the height they need and the preview the rest, folded or not.
@@ -210,6 +214,60 @@ fn a_long_table_scrolls_its_rows_and_keeps_the_preview(cx: &mut TestAppContext) 
     assert!(body.size.height < fit, "{body:?} fits {fit:?}");
     assert!(preview.size.height > px(100.), "{preview:?}");
     assert!(add.bottom() <= footer.top(), "{add:?} under {footer:?}");
+}
+
+// A new column with no name or type outlines both cells until they're filled.
+#[gpui_kit::test]
+fn a_problem_outlines_its_cells(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.click("structure-add");
+    app.keys("escape");
+    let grid = grid(&mut app);
+    let outlined = |app: &mut Driver, col| app.cx.update(|_, cx| grid.read(cx).is_invalid(2, col));
+    assert!(outlined(&mut app, NAME) && outlined(&mut app, TYPE));
+    edit_cell(&mut app, 2, NAME, "email");
+    edit_cell(&mut app, 2, TYPE, "TEXT");
+    assert!(!outlined(&mut app, NAME) && !outlined(&mut app, TYPE));
+}
+
+#[gpui_kit::test]
+fn columns_show_their_keys_and_indexes(cx: &mut TestAppContext) {
+    let mut app = prepared(
+        cx,
+        "CREATE TABLE e2e_o (id INTEGER PRIMARY KEY); \
+         CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT, org_id INTEGER REFERENCES e2e_o(id)); \
+         CREATE INDEX e2e_s_name ON e2e_s(name)",
+    );
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    loaded(&mut app);
+    let grid = grid(&mut app);
+    let marks = app.cx.update(|_, cx| (0..3).map(|row| grid.read(cx).marks(row, NAME)).collect::<Vec<_>>());
+    assert_eq!(marks, [vec![], vec![Lucide::ListTree], vec![Lucide::Link]]);
+}
+
+#[gpui_kit::test]
+fn counts_include_dropped_rows(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.cell_point(1, NAME));
+    app.click_at(at, Modifiers::none());
+    app.keys("delete");
+    let tab = app.structure();
+    assert_eq!(app.cx.update(|_, cx| tab.read(cx).section_count(Section::Columns)), 2);
+}
+
+// A new key's first problem is its missing table, so the link opens Foreign keys at that cell.
+#[gpui_kit::test]
+fn the_footer_problem_link_shows_the_cell(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.click("structure-section:2");
+    app.click("structure-add");
+    app.keys("escape");
+    app.click("structure-section:0");
+    app.click("structure-problems-link");
+    let grid = grid(&mut app);
+    let (names, focused) = app.cx.update(|_, cx| (grid.read(cx).visible_names(), grid.read(cx).focused_cell()));
+    assert_eq!((names[2].as_str(), focused), ("References", Some((0, 2))));
 }
 
 #[gpui_kit::test]

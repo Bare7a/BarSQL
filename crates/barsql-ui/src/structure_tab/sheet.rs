@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use barsql_db::{ChunkBuilder, ColumnMeta};
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::*;
 
 use crate::grid::{Choices, Grid, TableOverlay};
@@ -39,6 +40,8 @@ pub(super) struct Shape {
     locked: HashSet<(usize, usize)>,
     pub choices: HashMap<usize, Choices>,
     pub cell_choices: HashMap<(usize, usize), Choices>,
+    pub invalid: HashSet<(usize, usize)>,
+    pub marks: HashMap<(usize, usize), Vec<Lucide>>,
 }
 
 impl Shape {
@@ -119,6 +122,8 @@ impl Sheet {
             deleted: shape.dropped,
             choices: shape.choices,
             cell_choices: shape.cell_choices,
+            invalid: shape.invalid,
+            marks: shape.marks,
             editable,
             added,
             fixed: true,

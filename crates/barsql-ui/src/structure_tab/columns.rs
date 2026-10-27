@@ -1,6 +1,7 @@
 use barsql_core::capabilities::IdentityStyle;
 use barsql_core::{Identity, StructColumn};
-use barsql_sql::structure::type_suggestions;
+use barsql_sql::structure::{ProblemKind, type_suggestions};
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::*;
 
 use super::StructureTab;
@@ -104,7 +105,17 @@ pub(super) fn shape(tab: &StructureTab, cx: &App) -> Shape {
     let mut shape = Shape::new(fields.iter().map(|&field| heading(field, cx)).collect());
     let original = tab.original.as_ref();
     let keys = original.and_then(|original| original.primary_key.as_ref()).map_or(&[][..], |key| &key.columns[..]);
-    for row in &tab.draft.columns {
+    for (ix, row) in tab.draft.columns.iter().enumerate() {
+        let name = &row.column.name;
+        let in_key = tab.draft.foreign_keys.iter().any(|key| !key.dropped && key.value.columns.contains(name));
+        let in_index = tab.draft.indexes.iter().any(|index| !index.dropped && index.value.columns.contains(name));
+        let marks: Vec<Lucide> = [(in_key, Lucide::Link), (in_index, Lucide::ListTree)]
+            .into_iter()
+            .filter_map(|(used, icon)| used.then_some(icon))
+            .collect();
+        if !marks.is_empty() {
+            shape.marks.insert((ix, 0), marks);
+        }
         let old = row.origin.and_then(|origin| original?.columns.get(origin));
         let base = old.map(|old| fields.iter().map(|&field| value(field, old, keys.contains(&old.name), cx)).collect());
         let shown = fields.iter().map(|&field| value(field, &row.column, row.primary, cx)).collect();
@@ -124,6 +135,16 @@ pub(super) fn shape(tab: &StructureTab, cx: &App) -> Shape {
         shape.choices.insert(ix, Choices { values: labels.collect::<Vec<_>>().into(), nullable: false, open: false });
     }
     shape
+}
+
+pub(super) fn problem_columns(tab: &StructureTab, kind: &ProblemKind) -> Vec<usize> {
+    let named: &[Field] = match kind {
+        ProblemKind::EmptyName | ProblemKind::DuplicateName => &[Field::Name],
+        ProblemKind::EmptyType => &[Field::Type],
+        _ => &[],
+    };
+    let fields = fields(tab);
+    named.iter().filter_map(|field| fields.iter().position(|f| f == field)).collect()
 }
 
 pub(super) fn edit(tab: &mut StructureTab, row: usize, column: usize, value: Option<String>, cx: &App) {
