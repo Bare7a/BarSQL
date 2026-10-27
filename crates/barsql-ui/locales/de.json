@@ -495,9 +495,22 @@
     "gone": "Diese Tabelle existiert nicht mehr.",
     "stale": "Die Tabelle wurde anderswo geändert. Neu laden, um sie zu sehen – die Änderungen hier gehen dabei verloren.",
     "reload": "Neu laden",
-    "add": "Hinzufügen",
+    "add": {
+      "column": "Spalte",
+      "index": "Index",
+      "foreignKey": "Fremdschlüssel",
+      "check": "Check"
+    },
+    "addRow": {
+      "column": "Spalte hinzufügen",
+      "index": "Index hinzufügen",
+      "foreignKey": "Fremdschlüssel hinzufügen",
+      "check": "Check hinzufügen"
+    },
     "revert": "Verwerfen",
     "apply": "Anwenden",
+    "applyCount_one": "{{count}} Änderung anwenden",
+    "applyCount_other": "{{count}} Änderungen anwenden",
     "preview": "SQL-Vorschau",
     "primaryKey": "Schlüssel",
     "drop": "Löschen",
@@ -529,9 +542,6 @@
     "default": "Standardwert",
     "comment": "Kommentar",
     "generated": "Generiert:",
-    "noIndexes": "Keine Indizes",
-    "noForeignKeys": "Keine Fremdschlüssel",
-    "noChecks": "Keine Checks",
     "problemRow": "Zeile {{row}}: {{problem}}",
     "problems_one": "{{count}} Problem",
     "problems_other": "{{count}} Probleme",

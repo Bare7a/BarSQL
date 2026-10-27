@@ -77,6 +77,7 @@ fn problems(
 pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let open = tab.preview_open;
+    let least = rems(LABEL_ROW + height(cx));
     let lines = tab.problem_lines(cx);
     let count = (!lines.is_empty())
         .then(|| form::badge(t_count(cx, "structure.problems", lines.len() as i64, &[]), theme.danger));
@@ -90,7 +91,8 @@ pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl 
     v_flex()
         .debug_selector(|| "structure-preview-panel".into())
         .relative()
-        .flex_none()
+        // Open, it takes the room the rows leave, and no less than the height its edge was dragged to.
+        .map(|panel| if open { panel.flex_1().min_h(least) } else { panel.flex_none() })
         .border_t_1()
         .border_color(theme.border)
         .child(
@@ -114,7 +116,8 @@ pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl 
                     .into_any_element(),
                 false => problems(tab, lines, cx).into_any_element(),
             };
-            panel.child(div().h(rems(height(cx))).debug_selector(|| "structure-preview".into()).child(body)).child(
+            let area = div().flex_1().min_h_0().overflow_hidden().debug_selector(|| "structure-preview".into());
+            panel.child(area.child(body)).child(
                 resize_handle::<PreviewDrag, PreviewDrag>("structure-preview-splitter", Axis::Vertical).on_drag(
                     PreviewDrag,
                     |drag, _, _, cx| {

@@ -693,112 +693,162 @@ impl StructureTab {
         })
     }
 
-    fn body(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn body(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let waiting = div().flex_1().min_h_0();
         match &self.load {
-            Load::Loading => form::empty_state(None, t(cx, "tableView.loading"), cx).m_auto().into_any_element(),
-            Load::Failed(error) => v_flex()
-                .m_auto()
-                .gap(rems(0.615))
-                .items_center()
-                .child(form::error(format!("{}\n{error}", t(cx, "structure.loadFailed")), cx))
+            Load::Loading => {
+                waiting.child(form::empty_state(None, t(cx, "tableView.loading"), cx).m_auto()).into_any_element()
+            }
+            Load::Failed(error) => waiting
                 .child(
-                    Button::new("structure-retry")
-                        .small()
-                        .debug_selector(|| "structure-retry".into())
-                        .label(t(cx, "structure.retry"))
-                        .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
+                    v_flex()
+                        .m_auto()
+                        .gap(rems(0.615))
+                        .items_center()
+                        .child(form::error(format!("{}\n{error}", t(cx, "structure.loadFailed")), cx))
+                        .child(
+                            Button::new("structure-retry")
+                                .small()
+                                .debug_selector(|| "structure-retry".into())
+                                .label(t(cx, "structure.retry"))
+                                .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
+                        ),
                 )
                 .into_any_element(),
             Load::Ready => {
-                let section = self.section;
-                let empty = match section {
-                    Section::Indexes if self.draft.indexes.is_empty() => Some("structure.noIndexes"),
-                    Section::ForeignKeys if self.draft.foreign_keys.is_empty() => Some("structure.noForeignKeys"),
-                    Section::Checks if self.draft.checks.is_empty() => Some("structure.noChecks"),
-                    _ => None,
+                let grid = self.sheet(self.section).grid.clone();
+                let rows = div().min_h_0().debug_selector(|| "structure-body".into());
+                // The rows take the height they need, and the preview under them the rest.
+                let rows = match self.editable() {
+                    true => rows.flex_shrink(1.).h(grid.read(cx).fit_height(window)),
+                    false => rows.flex_1(),
                 };
-                div()
-                    .relative()
-                    .size_full()
-                    .debug_selector(|| "structure-body".into())
-                    .child(self.sheet(section).grid.clone())
-                    .children(empty.map(|key| {
-                        div().absolute().inset_0().flex().items_center().justify_center().child(form::empty_state(
-                            None,
-                            t(cx, key),
-                            cx,
-                        ))
-                    }))
-                    .into_any_element()
+                rows.child(grid).into_any_element()
             }
         }
     }
 
-    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let (_, pending) = self.pending();
-        let editable = self.editable();
+    fn grid_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = self.section_editable(self.section);
         let focused = self.focused_row(cx);
-        let (icon, tip) = match focused {
+        let (icon, drop) = match focused {
             Some((_, true)) => (Lucide::Undo2, "structure.restore"),
             _ => (Lucide::Trash, "structure.drop"),
         };
+        let add = t(cx, &format!("structure.add.{}", row_kind(self.section)));
         h_flex()
+            .debug_selector(|| "structure-toolbar".into())
+            .flex_none()
+            .gap(rems(0.462))
+            .px(rems(0.769))
+            .py(rems(0.462))
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("structure-add")
+                    .debug_selector(|| "structure-add".into())
+                    .tool(Icon::new(IconName::Plus), ICON_SM, add)
+                    .disabled(!rows)
+                    .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx))),
+            )
+            .child(
+                Button::new("structure-drop")
+                    .debug_selector(|| "structure-drop".into())
+                    .tool(Icon::new(icon), ICON_SM, t(cx, drop))
+                    .disabled(!rows || focused.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.drop_focused(window, cx))),
+            )
+    }
+
+    // A row's height under the rows that adds one, its text in line with theirs.
+    fn add_line(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let rem = f32::from(window.rem_size());
+        let label = format!("+ {}", t(cx, &format!("structure.addRow.{}", row_kind(self.section))));
+        h_flex()
+            .id("structure-add-row")
+            .debug_selector(|| "structure-add-row".into())
+            .flex_none()
+            .h(px(crate::grid::layout::row_height(rem)))
+            .pl(rems(4.769))
+            .text_size(TEXT_SM)
+            .text_color(theme.primary)
+            .border_b_1()
+            .border_color(theme.border)
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.table_hover))
+            .child(label)
+            .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx)))
+    }
+
+    // What keeps the draft from applying, or how much it changes, and the buttons that act on it.
+    fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let (_, pending) = self.pending();
+        let problems = self.plan.as_ref().err().map(Vec::as_slice).unwrap_or_default();
+        let status = match problems.first() {
+            Some(first) => {
+                let (section, row) = (first.section, first.row);
+                div()
+                    .id("structure-problems-link")
+                    .debug_selector(|| "structure-problems-link".into())
+                    .cursor_pointer()
+                    .text_color(theme.danger)
+                    .hover(|style| style.underline())
+                    .child(t_count(cx, "structure.problems", problems.len() as i64, &[]))
+                    .on_click(cx.listener(move |this, _, window, cx| this.show_problem(section, row, window, cx)))
+                    .into_any_element()
+            }
+            None if pending > 0 => div()
+                .text_color(theme.muted_foreground)
+                .child(t_count(cx, "structure.pendingChanges", pending as i64, &[]))
+                .into_any_element(),
+            None => div().into_any_element(),
+        };
+        let apply = match pending {
+            0 => t(cx, "structure.apply"),
+            n => t_count(cx, "structure.applyCount", n as i64, &[]),
+        };
+        h_flex()
+            .debug_selector(|| "structure-footer".into())
             .flex_none()
             .justify_between()
+            .gap(rems(0.923))
             .px(rems(0.923))
             .py(rems(0.615))
-            .gap(rems(0.923))
             .border_t_1()
             .border_color(theme.border)
+            .bg(theme.background)
+            .text_size(TEXT_SM)
+            .child(status)
             .child(
                 h_flex()
                     .gap(rems(0.462))
-                    .when(editable, |bar| {
-                        bar.child(
-                            Button::new("structure-revert")
-                                .debug_selector(|| "structure-revert".into())
-                                .tool_label(t(cx, "structure.revert"))
-                                .disabled(!self.has_changes())
-                                .on_click(cx.listener(|this, _, window, cx| this.revert(window, cx))),
-                        )
-                        .child(
-                            Button::new("structure-apply")
-                                .debug_selector(|| "structure-apply".into())
-                                .primary()
-                                .tool_label(t(cx, "structure.apply"))
-                                .disabled(!self.can_apply())
-                                .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
-                        )
-                    })
-                    .when(pending > 0, |bar| {
-                        let label = t_count(cx, "structure.pendingChanges", pending as i64, &[]);
-                        bar.child(form::badge(label, theme.warning))
-                    }),
+                    .child(
+                        Button::new("structure-revert")
+                            .debug_selector(|| "structure-revert".into())
+                            .tool_label(t(cx, "structure.revert"))
+                            .disabled(!self.has_changes())
+                            .on_click(cx.listener(|this, _, window, cx| this.revert(window, cx))),
+                    )
+                    .child(
+                        Button::new("structure-apply")
+                            .debug_selector(|| "structure-apply".into())
+                            .primary()
+                            .tool_label(apply)
+                            .disabled(!self.can_apply())
+                            .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
+                    ),
             )
-            .when(editable, |bar| {
-                bar.child(
-                    h_flex()
-                        .gap(rems(0.462))
-                        .child(
-                            Button::new("structure-drop")
-                                .debug_selector(|| "structure-drop".into())
-                                .tool_icon(Icon::new(icon), ICON_SM)
-                                .tooltip(t(cx, tip))
-                                .disabled(!rows || focused.is_none())
-                                .on_click(cx.listener(|this, _, window, cx| this.drop_focused(window, cx))),
-                        )
-                        .child(
-                            Button::new("structure-add")
-                                .debug_selector(|| "structure-add".into())
-                                .tool_icon(Icon::new(IconName::Plus), ICON_SM)
-                                .tooltip(t(cx, "structure.add"))
-                                .disabled(!rows)
-                                .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx))),
-                        ),
-                )
-            })
+    }
+}
+
+fn row_kind(section: Section) -> &'static str {
+    match section {
+        Section::Columns | Section::Table => "column",
+        Section::Indexes => "index",
+        Section::ForeignKeys => "foreignKey",
+        Section::Checks => "check",
     }
 }
 
@@ -872,6 +922,8 @@ fn problem_text(kind: &ProblemKind, cx: &App) -> SharedString {
 impl Render for StructureTab {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let editable = self.editable();
+        let adds = editable && self.section_editable(self.section);
         v_flex()
             .size_full()
             .key_context(CONTEXT)
@@ -889,9 +941,11 @@ impl Render for StructureTab {
                         preview::resize(event, window, cx);
                         cx.notify();
                     }))
-                    .child(div().flex_1().min_h_0().child(self.body(cx)))
-                    .when(self.editable(), |tab| tab.child(preview::panel(self, cx))),
+                    .when(editable, |tab| tab.child(self.grid_toolbar(cx)))
+                    .child(self.body(window, cx))
+                    .when(adds, |tab| tab.child(self.add_line(window, cx)))
+                    .when(editable, |tab| tab.child(preview::panel(self, cx))),
             )
-            .child(self.toolbar(cx))
+            .when(editable, |tab| tab.child(self.footer(cx)))
     }
 }

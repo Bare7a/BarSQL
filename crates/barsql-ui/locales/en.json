@@ -495,9 +495,22 @@
     "gone": "This table no longer exists.",
     "stale": "The table was changed elsewhere. Reload to see it, which drops your changes here.",
     "reload": "Reload",
-    "add": "Add",
+    "add": {
+      "column": "Column",
+      "index": "Index",
+      "foreignKey": "Foreign key",
+      "check": "Check"
+    },
+    "addRow": {
+      "column": "Add column",
+      "index": "Add index",
+      "foreignKey": "Add foreign key",
+      "check": "Add check"
+    },
     "revert": "Revert",
     "apply": "Apply",
+    "applyCount_one": "Apply {{count}} change",
+    "applyCount_other": "Apply {{count}} changes",
     "preview": "SQL preview",
     "primaryKey": "Key",
     "drop": "Drop",
@@ -529,9 +542,6 @@
     "default": "Default",
     "comment": "Comment",
     "generated": "Generated:",
-    "noIndexes": "No indexes",
-    "noForeignKeys": "No foreign keys",
-    "noChecks": "No checks",
     "problemRow": "Row {{row}}: {{problem}}",
     "problems_one": "{{count}} problem",
     "problems_other": "{{count}} problems",

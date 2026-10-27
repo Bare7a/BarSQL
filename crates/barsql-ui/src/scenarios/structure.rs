@@ -1,5 +1,5 @@
 use barsql_core::{ConnectionConfig, Value};
-use gpui_kit::{Entity, Modifiers, MouseButton, TestAppContext, point, px};
+use gpui_kit::{Entity, Modifiers, MouseButton, Pixels, TestAppContext, point, px};
 
 use super::driver::{Driver, open, open_with, selector};
 use crate::actions::{CloseTab, EditTableStructure, Quit, ReopenClosedTab};
@@ -61,6 +61,17 @@ fn pick(app: &mut Driver, row: usize, col: usize, nth: usize) {
     app.keys(&format!("up {}enter", "down ".repeat(nth)));
 }
 
+// The height the grid's header and rows take.
+fn fit(app: &mut Driver) -> Pixels {
+    let grid = grid(app);
+    app.draw();
+    app.cx.update(|window, cx| grid.read(cx).fit_height(window))
+}
+
+fn bounds_of(app: &mut Driver, selector: &'static str) -> gpui_kit::Bounds<Pixels> {
+    app.bounds(selector).unwrap_or_else(|| panic!("no {selector}"))
+}
+
 fn tick(app: &mut Driver, row: usize, col: usize) {
     let grid = grid(app);
     let at = app.grid_point(&grid, |grid| grid.check_point(row, col));
@@ -91,6 +102,15 @@ fn the_table_tab_opens_its_structure(cx: &mut TestAppContext) {
 }
 
 const TABLE: &str = "CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT)";
+
+// A table with more columns than fit, so its rows scroll and the preview sits at its least height.
+fn long_table<'a>(cx: &'a mut TestAppContext) -> Driver<'a> {
+    let columns: Vec<String> = (0..40).map(|ix| format!("c{ix} TEXT")).collect();
+    let mut app = prepared(cx, &format!("CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, {})", columns.join(", ")));
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    loaded(&mut app);
+    app
+}
 
 fn structure_of<'a>(cx: &'a mut TestAppContext) -> Driver<'a> {
     let mut app = prepared(cx, TABLE);
@@ -148,6 +168,50 @@ fn a_problem_shows_its_row(cx: &mut TestAppContext) {
     assert_eq!((names[1].as_str(), focused), ("Columns", Some((0, 0))));
 }
 
+// The rows take the height they need and the preview the rest, folded or not.
+#[gpui_kit::test]
+fn the_rows_take_their_height_and_the_preview_the_rest(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let fit = fit(&mut app);
+    let body = bounds_of(&mut app, "structure-body");
+    let add = bounds_of(&mut app, "structure-add-row");
+    let panel = bounds_of(&mut app, "structure-preview-panel");
+    let footer = bounds_of(&mut app, "structure-footer");
+    assert_eq!(body.size.height, fit);
+    assert_eq!(add.top(), body.bottom());
+    assert_eq!((panel.top(), panel.bottom()), (add.bottom(), footer.top()));
+    app.click("structure-preview-toggle");
+    let add = bounds_of(&mut app, "structure-add-row");
+    let panel = bounds_of(&mut app, "structure-preview-panel");
+    let footer = bounds_of(&mut app, "structure-footer");
+    assert_eq!(panel.top(), add.bottom());
+    assert!(panel.bottom() <= footer.top(), "{panel:?} over {footer:?}");
+}
+
+#[gpui_kit::test]
+fn the_add_row_adds_a_row_and_opens_it(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.click("structure-add-row");
+    assert_eq!(names(&mut app).len(), 3);
+    let grid = grid(&mut app);
+    let editing = app.cx.update(|_, cx| (grid.read(cx).is_editing(), grid.read(cx).focused_cell()));
+    assert_eq!(editing, (true, Some((2, NAME))));
+}
+
+// More rows than fit scroll, and the Add row and the preview stay in view.
+#[gpui_kit::test]
+fn a_long_table_scrolls_its_rows_and_keeps_the_preview(cx: &mut TestAppContext) {
+    let mut app = long_table(cx);
+    let fit = fit(&mut app);
+    let body = bounds_of(&mut app, "structure-body");
+    let preview = bounds_of(&mut app, "structure-preview");
+    let add = bounds_of(&mut app, "structure-add-row");
+    let footer = bounds_of(&mut app, "structure-footer");
+    assert!(body.size.height < fit, "{body:?} fits {fit:?}");
+    assert!(preview.size.height > px(100.), "{preview:?}");
+    assert!(add.bottom() <= footer.top(), "{add:?} under {footer:?}");
+}
+
 #[gpui_kit::test]
 fn revert_discards_the_draft(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
@@ -170,6 +234,7 @@ fn read_only_connections_show_a_viewer(cx: &mut TestAppContext) {
     app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
     loaded(&mut app);
     assert!(!app.shown("structure-apply") && !app.shown("structure-revert") && !app.shown("structure-add"));
+    assert!(!app.shown("structure-add-row") && !app.shown("structure-footer") && !app.shown("structure-toolbar"));
     open_cell(&mut app, 1, NAME);
     let grid = grid(&mut app);
     assert!(!app.cx.update(|_, cx| grid.read(cx).is_editing()), "the cells don't take input");
@@ -503,9 +568,10 @@ fn a_dropped_column_comes_back_with_undo(cx: &mut TestAppContext) {
     assert!(dropped(&mut app));
 }
 
+// The edge sets the least height the preview keeps, which shows once the rows would take more.
 #[gpui_kit::test]
 fn dragging_the_preview_edge_resizes_it(cx: &mut TestAppContext) {
-    let mut app = structure_of(cx);
+    let mut app = long_table(cx);
     let before = app.bounds("structure-preview").expect("the preview").size.height;
     let panel = app.bounds("structure-preview-panel").expect("the preview panel");
     let edge = point(panel.center().x, panel.origin.y);
@@ -520,10 +586,7 @@ fn dragging_the_preview_edge_resizes_it(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn adding_a_row_scrolls_to_it(cx: &mut TestAppContext) {
-    let columns: Vec<String> = (0..40).map(|ix| format!("c{ix} TEXT")).collect();
-    let mut app = prepared(cx, &format!("CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, {})", columns.join(", ")));
-    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
-    loaded(&mut app);
+    let mut app = long_table(cx);
     app.click("structure-add");
     let grid = grid(&mut app);
     let row = app.grid_point(&grid, |grid| grid.cell_point(41, NAME));
