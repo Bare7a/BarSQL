@@ -200,6 +200,32 @@ fn typing_a_table_name_and_enter_opens_its_table_view(cx: &mut TestAppContext) {
     assert_eq!(title, "Query 2 · Local", "numbered among the plain query tabs, not the table view");
 }
 
+// An open Structure tab doesn't stand in for its table, so the table's data stays on offer.
+#[gpui_kit::test]
+fn a_tables_open_structure_leaves_its_data_on_offer(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    session(&env);
+    let (id, connection) = (env.connection.id.clone(), env.connection.clone());
+    let (workspace, cx) = open(cx);
+    cx.update(|_, cx| schema::ensure_loaded(&id, DriverType::Sqlite, cx));
+    settle(cx, |cx| cx.update(|_, cx| schema::get(cx, &id).is_some_and(|entry| entry.tables("main").is_some())));
+    workspace.update_in(cx, |ws, window, cx| {
+        ws.open_structure(connection, "main".into(), Some("things".into()), window, cx)
+    });
+    cx.run_until_parked();
+
+    let dialog = workspace.update_in(cx, |ws, window, cx| ws.open_quick_search(window, cx)).unwrap();
+    cx.run_until_parked();
+    cx.simulate_input("thin");
+    cx.run_until_parked();
+    let items: Vec<(Kind, String)> =
+        cx.update(|_, cx| dialog.read(cx).items.iter().map(|item| (item.kind, item.label.clone())).collect());
+    assert_eq!(items, [(Kind::Tab, "things".to_string()), (Kind::Table, "things".to_string())]);
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| workspace.read(cx).table_tab().is_some()), "the data view opens");
+}
+
 #[gpui_kit::test]
 fn arrows_pick_a_connection_and_its_new_tab_takes_the_keyboard(cx: &mut TestAppContext) {
     let env = Env::new(cx);

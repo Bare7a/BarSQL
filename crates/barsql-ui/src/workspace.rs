@@ -180,11 +180,8 @@ impl TabView {
                 let tab = tab.read(cx);
                 (Some((tab.schema.clone(), tab.table.clone())), String::new())
             }
-            Self::Diagram(_) => (None, String::new()),
-            Self::Structure(tab) => {
-                let tab = tab.read(cx);
-                ((!tab.table.is_empty()).then(|| (tab.schema.clone(), tab.table.clone())), String::new())
-            }
+            // A Structure tab isn't its table's data, which quick search still offers.
+            Self::Diagram(_) | Self::Structure(_) => (None, String::new()),
         };
         TabEntry {
             id: self.id(cx),
