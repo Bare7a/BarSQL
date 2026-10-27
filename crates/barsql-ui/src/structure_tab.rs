@@ -7,7 +7,7 @@ mod sheet;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use barsql_app::{EditorTab, StructureRef};
@@ -15,7 +15,6 @@ use barsql_core::{Check, ConnectionConfig, ForeignKey, StructColumn, StructIndex
 use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Row, Section, changes, plan_changes, plan_create,
 };
-use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{EditorState, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
@@ -251,6 +250,11 @@ impl StructureTab {
     #[cfg(test)]
     pub fn script(&self) -> &str {
         &self.script
+    }
+
+    #[cfg(test)]
+    pub fn tally_counts(&self) -> (usize, usize, usize) {
+        self.tally()
     }
 
     #[cfg(test)]
@@ -568,6 +572,52 @@ impl StructureTab {
         cx.notify();
     }
 
+    // The rows the draft adds, changes and drops. A new table adds all of its rows.
+    fn tally(&self) -> (usize, usize, usize) {
+        let (draft, original) = (&self.draft, self.original.as_ref());
+        let keys = original.and_then(|original| original.primary_key.as_ref()).map_or(&[][..], |key| &key.columns[..]);
+        // Indexes and keys take a renamed column's new name, which alone changes only the column.
+        let renamed: HashMap<&str, &str> = draft
+            .columns
+            .iter()
+            .filter_map(|row| Some((original?.columns.get(row.origin?)?.name.as_str(), row.column.name.as_str())))
+            .collect();
+        let follow = |names: &[String]| -> Vec<String> {
+            names
+                .iter()
+                .map(|name| renamed.get(name.as_str()).map_or_else(|| name.clone(), |new| new.to_string()))
+                .collect()
+        };
+        let mut tally = (0, 0, 0);
+        let mut count = |origin: Option<usize>, dropped: bool, changed: bool| match (origin, dropped) {
+            (None, _) => tally.0 += 1,
+            (Some(_), true) => tally.2 += 1,
+            (Some(_), false) => tally.1 += usize::from(changed),
+        };
+        for row in &draft.columns {
+            let old = row.origin.and_then(|ix| original?.columns.get(ix));
+            let changed = old.is_some_and(|old| *old != row.column || keys.contains(&old.name) != row.primary);
+            count(row.origin, row.dropped, changed);
+        }
+        for row in &draft.indexes {
+            let old = row.origin.and_then(|ix| original?.indexes.get(ix));
+            let changed =
+                old.is_some_and(|old| StructIndex { columns: follow(&old.columns), ..old.clone() } != row.value);
+            count(row.origin, row.dropped, changed);
+        }
+        for row in &draft.foreign_keys {
+            let old = row.origin.and_then(|ix| original?.foreign_keys.get(ix));
+            let changed =
+                old.is_some_and(|old| ForeignKey { columns: follow(&old.columns), ..old.clone() } != row.value);
+            count(row.origin, row.dropped, changed);
+        }
+        for row in &draft.checks {
+            let old = row.origin.and_then(|ix| original?.checks.get(ix));
+            count(row.origin, row.dropped, old.is_some_and(|old| *old != row.value));
+        }
+        tally
+    }
+
     // The sections with rows added, changed or dropped, and how many such rows in all.
     fn pending(&self) -> (Vec<Section>, usize) {
         let Some(original) = &self.original else {
@@ -667,6 +717,7 @@ impl StructureTab {
             .h(rems(3.077))
             .border_b_1()
             .border_color(theme.border)
+            .bg(theme.sidebar)
             .child(match self.naming() {
                 Some(field) => h_flex()
                     .gap(rems(0.462))
@@ -754,98 +805,44 @@ impl StructureTab {
         }
     }
 
-    fn grid_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows = self.section_editable(self.section);
-        let focused = self.focused_row(cx);
-        let (icon, drop) = match focused {
-            Some((_, true)) => (Lucide::Undo2, "structure.restore"),
-            _ => (Lucide::Trash, "structure.drop"),
-        };
-        let add = t(cx, &format!("structure.add.{}", row_kind(self.section)));
-        h_flex()
-            .debug_selector(|| "structure-toolbar".into())
-            .flex_none()
-            .gap(rems(0.462))
-            .px(rems(0.769))
-            .py(rems(0.462))
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                Button::new("structure-add")
-                    .debug_selector(|| "structure-add".into())
-                    .tool(Icon::new(IconName::Plus), ICON_SM, add)
-                    .disabled(!rows)
-                    .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx))),
-            )
-            .child(
-                Button::new("structure-drop")
-                    .debug_selector(|| "structure-drop".into())
-                    .tool(Icon::new(icon), ICON_SM, t(cx, drop))
-                    .disabled(!rows || focused.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| this.drop_focused(window, cx))),
-            )
-    }
-
-    // A row's height under the rows that adds one, its text in line with theirs.
-    fn add_line(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let rem = f32::from(window.rem_size());
-        let label = format!("+ {}", t(cx, &format!("structure.addRow.{}", row_kind(self.section))));
-        h_flex()
-            .id("structure-add-row")
-            .debug_selector(|| "structure-add-row".into())
-            .flex_none()
-            .h(px(crate::grid::layout::row_height(rem)))
-            .pl(rems(4.769))
-            .text_size(TEXT_SM)
-            .text_color(theme.primary)
-            .border_b_1()
-            .border_color(theme.border)
-            .cursor_pointer()
-            .hover(|style| style.bg(theme.table_hover))
-            .child(label)
-            .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx)))
-    }
-
+    // As the Table View's: Revert and Apply with what they'd do, and the buttons that add and drop rows.
     fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let (_, pending) = self.pending();
+        let (added, changed, dropped) = self.tally();
         let problems = self.plan.as_ref().err().map(Vec::as_slice).unwrap_or_default();
-        let status = match problems.first() {
-            Some(first) => {
-                let first = first.clone();
-                div()
-                    .id("structure-problems-link")
-                    .debug_selector(|| "structure-problems-link".into())
-                    .cursor_pointer()
-                    .text_color(theme.danger)
-                    .hover(|style| style.underline())
-                    .child(t_count(cx, "structure.problems", problems.len() as i64, &[]))
-                    .on_click(cx.listener(move |this, _, window, cx| this.show_problem(&first, window, cx)))
-                    .into_any_element()
-            }
-            None if pending > 0 => div()
-                .text_color(theme.muted_foreground)
-                .child(t_count(cx, "structure.pendingChanges", pending as i64, &[]))
-                .into_any_element(),
-            None => div().into_any_element(),
+        let rows = self.section_editable(self.section);
+        let focused = self.focused_row(cx);
+        let pill = |key: &str, count: usize, color: Hsla, selector: &'static str| {
+            let text = t_with(cx, key, &[("count", &count.to_string())]);
+            (count > 0).then(|| form::badge(text, color).debug_selector(move || selector.into()))
         };
-        let apply = match pending {
-            0 => t(cx, "structure.apply"),
-            n => t_count(cx, "structure.applyCount", n as i64, &[]),
-        };
+        let pills = [
+            pill("structure.toAdd", added, theme.success, "structure-to-add"),
+            pill("structure.toChange", changed, theme.warning, "structure-to-change"),
+            pill("structure.toDrop", dropped, theme.danger, "structure-to-drop"),
+        ];
+        let link = problems.first().cloned().map(|first| {
+            div()
+                .id("structure-problems-link")
+                .debug_selector(|| "structure-problems-link".into())
+                .cursor_pointer()
+                .text_size(TEXT_SM)
+                .text_color(theme.danger)
+                .hover(|style| style.underline())
+                .child(t_count(cx, "structure.problems", problems.len() as i64, &[]))
+                .on_click(cx.listener(move |this, _, window, cx| this.show_problem(&first, window, cx)))
+        });
+        let drop = if focused.is_some_and(|(_, dropped)| dropped) { "structure.restore" } else { "structure.drop" };
         h_flex()
             .debug_selector(|| "structure-footer".into())
             .flex_none()
             .justify_between()
-            .gap(rems(0.923))
             .px(rems(0.923))
             .py(rems(0.615))
+            .gap(rems(0.923))
             .border_t_1()
             .border_color(theme.border)
-            .bg(theme.background)
-            .text_size(TEXT_SM)
-            .child(status)
+            .bg(theme.sidebar)
             .child(
                 h_flex()
                     .gap(rems(0.462))
@@ -860,9 +857,31 @@ impl StructureTab {
                         Button::new("structure-apply")
                             .debug_selector(|| "structure-apply".into())
                             .primary()
-                            .tool_label(apply)
+                            .tool_label(t(cx, "structure.apply"))
                             .disabled(!self.can_apply())
                             .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
+                    )
+                    .children(pills.into_iter().flatten())
+                    .children(link),
+            )
+            .child(
+                h_flex()
+                    .gap(rems(0.462))
+                    .child(
+                        Button::new("structure-add")
+                            .debug_selector(|| "structure-add".into())
+                            .tool_icon(Icon::new(IconName::Plus), ICON_SM)
+                            .tooltip(t(cx, &format!("structure.addRow.{}", row_kind(self.section))))
+                            .disabled(!rows)
+                            .on_click(cx.listener(|this, _, window, cx| this.add_row(window, cx))),
+                    )
+                    .child(
+                        Button::new("structure-drop")
+                            .debug_selector(|| "structure-drop".into())
+                            .tool_icon(Icon::new(IconName::Minus), ICON_SM)
+                            .tooltip(t(cx, drop))
+                            .disabled(!rows || focused.is_none())
+                            .on_click(cx.listener(|this, _, window, cx| this.drop_focused(window, cx))),
                     ),
             )
     }
@@ -948,7 +967,6 @@ impl Render for StructureTab {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let editable = self.editable();
-        let adds = editable && self.section_editable(self.section);
         v_flex()
             .size_full()
             .key_context(CONTEXT)
@@ -966,9 +984,7 @@ impl Render for StructureTab {
                         preview::resize(event, window, cx);
                         cx.notify();
                     }))
-                    .when(editable, |tab| tab.child(self.grid_toolbar(cx)))
                     .child(self.body(window, cx))
-                    .when(adds, |tab| tab.child(self.add_line(window, cx)))
                     .when(editable, |tab| tab.child(preview::panel(self, cx))),
             )
             .when(editable, |tab| tab.child(self.footer(cx)))

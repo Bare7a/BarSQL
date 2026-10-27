@@ -495,12 +495,6 @@
     "gone": "Diese Tabelle existiert nicht mehr.",
     "stale": "Die Tabelle wurde anderswo geändert. Neu laden, um sie zu sehen – die Änderungen hier gehen dabei verloren.",
     "reload": "Neu laden",
-    "add": {
-      "column": "Spalte",
-      "index": "Index",
-      "foreignKey": "Fremdschlüssel",
-      "check": "Check"
-    },
     "addRow": {
       "column": "Spalte hinzufügen",
       "index": "Index hinzufügen",
@@ -509,8 +503,9 @@
     },
     "revert": "Verwerfen",
     "apply": "Anwenden",
-    "applyCount_one": "{{count}} Änderung anwenden",
-    "applyCount_other": "{{count}} Änderungen anwenden",
+    "toAdd": "{{count}} hinzuzufügen",
+    "toChange": "{{count}} zu ändern",
+    "toDrop": "{{count}} zu löschen",
     "preview": "SQL-Vorschau",
     "statements_one": "{{count}} Anweisung",
     "statements_other": "{{count}} Anweisungen",
@@ -518,8 +513,6 @@
     "primaryKey": "Schlüssel",
     "drop": "Löschen",
     "restore": "Wiederherstellen",
-    "pendingChanges_one": "{{count}} Änderung",
-    "pendingChanges_other": "{{count}} Änderungen",
     "problem": {
       "emptyTableName": "Tabellennamen eingeben",
       "emptyName": "Namen eingeben",

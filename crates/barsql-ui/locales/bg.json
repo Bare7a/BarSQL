@@ -495,12 +495,6 @@
     "gone": "Тази таблица вече не съществува.",
     "stale": "Таблицата е променена другаде. Презаредете, за да я видите – промените тук ще се загубят.",
     "reload": "Презареди",
-    "add": {
-      "column": "Колона",
-      "index": "Индекс",
-      "foreignKey": "Външен ключ",
-      "check": "Проверка"
-    },
     "addRow": {
       "column": "Добави колона",
       "index": "Добави индекс",
@@ -509,8 +503,9 @@
     },
     "revert": "Отмени",
     "apply": "Приложи",
-    "applyCount_one": "Приложи {{count}} промяна",
-    "applyCount_other": "Приложи {{count}} промени",
+    "toAdd": "{{count}} за добавяне",
+    "toChange": "{{count}} за промяна",
+    "toDrop": "{{count}} за изтриване",
     "preview": "SQL преглед",
     "statements_one": "{{count}} израз",
     "statements_other": "{{count}} израза",
@@ -518,8 +513,6 @@
     "primaryKey": "Ключ",
     "drop": "Изтрий",
     "restore": "Възстанови",
-    "pendingChanges_one": "{{count}} промяна",
-    "pendingChanges_other": "{{count}} промени",
     "problem": {
       "emptyTableName": "Въведете име на таблицата",
       "emptyName": "Въведете име",

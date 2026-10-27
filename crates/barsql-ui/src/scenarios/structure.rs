@@ -186,42 +186,73 @@ fn the_rows_take_their_height_and_the_preview_the_rest(cx: &mut TestAppContext) 
     let mut app = structure_of(cx);
     let fit = fit(&mut app);
     let body = bounds_of(&mut app, "structure-body");
-    let add = bounds_of(&mut app, "structure-add-row");
     let panel = bounds_of(&mut app, "structure-preview-panel");
     let footer = bounds_of(&mut app, "structure-footer");
     assert_eq!(body.size.height, fit);
-    assert_eq!(add.top(), body.bottom());
-    assert_eq!((panel.top(), panel.bottom()), (add.bottom(), footer.top()));
+    assert_eq!((panel.top(), panel.bottom()), (body.bottom(), footer.top()));
+    assert!(!app.shown("structure-add-row") && !app.shown("structure-toolbar"), "the rows stand alone");
     app.click("structure-preview-toggle");
-    let add = bounds_of(&mut app, "structure-add-row");
+    let body = bounds_of(&mut app, "structure-body");
     let panel = bounds_of(&mut app, "structure-preview-panel");
     let footer = bounds_of(&mut app, "structure-footer");
-    assert_eq!(panel.top(), add.bottom());
+    assert_eq!(panel.top(), body.bottom());
     assert!(panel.bottom() <= footer.top(), "{panel:?} over {footer:?}");
 }
 
 #[gpui_kit::test]
-fn the_add_row_adds_a_row_and_opens_it(cx: &mut TestAppContext) {
+fn the_add_button_adds_a_row_and_opens_it(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
-    app.click("structure-add-row");
+    app.click("structure-add");
     assert_eq!(names(&mut app).len(), 3);
     let grid = grid(&mut app);
     let editing = app.cx.update(|_, cx| (grid.read(cx).is_editing(), grid.read(cx).focused_cell()));
     assert_eq!(editing, (true, Some((2, NAME))));
 }
 
-// More rows than fit scroll, and the Add row and the preview stay in view.
+// More rows than fit scroll, and the preview stays in view.
 #[gpui_kit::test]
 fn a_long_table_scrolls_its_rows_and_keeps_the_preview(cx: &mut TestAppContext) {
     let mut app = long_table(cx);
     let fit = fit(&mut app);
     let body = bounds_of(&mut app, "structure-body");
     let preview = bounds_of(&mut app, "structure-preview");
-    let add = bounds_of(&mut app, "structure-add-row");
     let footer = bounds_of(&mut app, "structure-footer");
     assert!(body.size.height < fit, "{body:?} fits {fit:?}");
     assert!(preview.size.height > px(100.), "{preview:?}");
-    assert!(add.bottom() <= footer.top(), "{add:?} under {footer:?}");
+    assert!(preview.bottom() <= footer.top(), "{preview:?} under {footer:?}");
+}
+
+// The footer counts the rows to add, change and drop, as the Table View counts its edits.
+#[gpui_kit::test]
+fn the_footer_counts_what_the_draft_adds_changes_and_drops(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT, note TEXT)");
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    loaded(&mut app);
+    edit_cell(&mut app, 1, NAME, "full_name");
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.cell_point(2, NAME));
+    app.click_at(at, Modifiers::none());
+    app.keys("delete");
+    app.click("structure-add");
+    app.type_text("email");
+    app.keys("tab");
+    app.type_text("TEXT");
+    app.keys("enter");
+    let tab = app.structure();
+    assert_eq!(app.cx.update(|_, cx| tab.read(cx).tally_counts()), (1, 1, 1));
+    assert!(app.shown("structure-to-add") && app.shown("structure-to-change") && app.shown("structure-to-drop"));
+}
+
+// An index follows its column's rename, which alone changes only the column.
+#[gpui_kit::test]
+fn a_renamed_column_counts_once_with_its_index(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, "CREATE TABLE e2e_s (id INTEGER PRIMARY KEY, name TEXT); CREATE INDEX e2e_s_name ON e2e_s(name)");
+    app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
+    loaded(&mut app);
+    edit_cell(&mut app, 1, NAME, "full_name");
+    let tab = app.structure();
+    assert_eq!(app.cx.update(|_, cx| tab.read(cx).tally_counts()), (0, 1, 0));
 }
 
 #[gpui_kit::test]
@@ -332,7 +363,7 @@ fn read_only_connections_show_a_viewer(cx: &mut TestAppContext) {
     app.context_menu("tree:t:main.e2e_s", EDIT_STRUCTURE);
     loaded(&mut app);
     assert!(!app.shown("structure-apply") && !app.shown("structure-revert") && !app.shown("structure-add"));
-    assert!(!app.shown("structure-add-row") && !app.shown("structure-footer") && !app.shown("structure-toolbar"));
+    assert!(!app.shown("structure-footer"));
     open_cell(&mut app, 1, NAME);
     let grid = grid(&mut app);
     assert!(!app.cx.update(|_, cx| grid.read(cx).is_editing()), "the cells don't take input");
