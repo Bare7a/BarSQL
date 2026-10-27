@@ -358,7 +358,7 @@ impl StructureTab {
             Some(original) => plan_changes(driver, original, &self.draft),
             None => plan_create(driver, &self.draft),
         };
-        let script = self.plan.as_ref().map(|plan| plan.script(driver)).unwrap_or_default();
+        let script = self.plan.as_ref().map(|plan| plan.preview(driver)).unwrap_or_default();
         // Setting the editor's text re-shapes it, so only a changed script goes in.
         if script != self.script {
             self.preview.update(cx, |state, cx| state.set_value(script.clone(), window, cx));

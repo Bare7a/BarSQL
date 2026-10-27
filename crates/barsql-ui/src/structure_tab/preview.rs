@@ -81,6 +81,13 @@ pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl 
     let lines = tab.problem_lines(cx);
     let count = (!lines.is_empty())
         .then(|| form::badge(t_count(cx, "structure.problems", lines.len() as i64, &[]), theme.danger));
+    let statements = tab.plan.as_ref().ok().filter(|plan| !plan.is_empty()).map(|plan| {
+        let mut text = format!("\u{b7} {}", t_count(cx, "structure.statements", plan.body().len() as i64, &[]));
+        if plan.in_transaction() {
+            text = format!("{text}, {}", t(cx, "structure.oneTransaction"));
+        }
+        div().debug_selector(|| "structure-preview-count".into()).child(text)
+    });
     let toggle = Button::new("structure-preview-toggle")
         .debug_selector(|| "structure-preview-toggle".into())
         .tool_icon(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronUp }), ICON_SM)
@@ -102,7 +109,7 @@ pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl 
                 .px(rems(0.923))
                 .text_size(TEXT_XS)
                 .text_color(theme.muted_foreground)
-                .child(h_flex().gap(rems(0.462)).child(t(cx, "structure.preview")).children(count))
+                .child(h_flex().gap(rems(0.462)).child(t(cx, "structure.preview")).children(statements).children(count))
                 .child(toggle),
         )
         .when(open, |panel| {

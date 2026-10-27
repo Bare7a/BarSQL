@@ -147,6 +147,15 @@ fn typing_a_column_change_updates_the_preview(cx: &mut TestAppContext) {
     assert_eq!(cell(&mut app, 1, NAME).as_deref(), Some("full_name"), "the grid shows the draft");
 }
 
+// The preview shows what changes the table, without the transaction around it, and says how many statements.
+#[gpui_kit::test]
+fn the_preview_shows_the_statements_alone(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    edit_cell(&mut app, 1, NAME, "full_name");
+    assert_eq!(script(&mut app), r#"ALTER TABLE "e2e_s" RENAME COLUMN "name" TO "full_name";"#);
+    assert!(app.shown("structure-preview-count"));
+}
+
 #[gpui_kit::test]
 fn an_empty_name_disables_apply_and_shows_why(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
