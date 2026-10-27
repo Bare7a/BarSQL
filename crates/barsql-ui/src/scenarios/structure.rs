@@ -277,6 +277,23 @@ fn the_footer_problem_link_shows_the_cell(cx: &mut TestAppContext) {
     assert_eq!((names[2].as_str(), focused), ("References", Some((0, 2))));
 }
 
+// A new column takes its name, then Tab to its type, as in a spreadsheet.
+#[gpui_kit::test]
+fn name_tab_type_adds_a_typed_column(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    app.click("structure-add");
+    app.type_text("email");
+    app.keys("tab");
+    app.type_text("TEXT");
+    app.keys("enter");
+    let tab = app.structure();
+    let last = app.cx.update(|_, cx| {
+        let column = &tab.read(cx).draft.columns[2].column;
+        (column.name.clone(), column.data_type.clone())
+    });
+    assert_eq!(last, ("email".to_string(), "TEXT".to_string()));
+}
+
 #[gpui_kit::test]
 fn revert_discards_the_draft(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);
