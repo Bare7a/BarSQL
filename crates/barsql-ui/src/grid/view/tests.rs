@@ -800,6 +800,16 @@ fn tab_moves_the_editor_along_the_row(cx: &mut TestAppContext) {
     assert_eq!(read(&grid, cx, |g| (g.focused_cell(), g.is_editing())), (Some((0, 0)), false));
 }
 
+// An owner can size the grid to its rows before it first paints: the header and every row, as they're painted.
+#[gpui_kit::test]
+fn the_fit_height_is_the_header_and_rows(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    let fit = cx.update(|window, cx| grid.read(cx).fit_height(window));
+    draw(cx);
+    let m = read(&grid, cx, |g| g.metrics);
+    assert_eq!(fit, m.header_height + m.row_height * 3.);
+}
+
 // A locked cell keeps its value: its checkbox doesn't flip and Enter opens no editor, where the next row's does.
 #[gpui_kit::test]
 fn a_locked_cell_does_not_edit(cx: &mut TestAppContext) {

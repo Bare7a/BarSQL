@@ -321,6 +321,10 @@ struct Metrics {
     ch: Pixels,
 }
 
+fn header_height(rem: f32) -> Pixels {
+    px((rem * (0.462 * 2. + 1.385)).round() + 1.)
+}
+
 impl Metrics {
     fn new(font: &Font, window: &Window) -> Self {
         let rem = f32::from(window.rem_size());
@@ -332,7 +336,7 @@ impl Metrics {
             font_size,
             line_height: r(1.231),
             row_height: px(row_height(rem)),
-            header_height: px((rem * (0.462 * 2. + 1.385)).round() + 1.),
+            header_height: header_height(rem),
             gutter_width: r(4.),
             cell_pad_x: r(0.769),
             cell_pad_y: r(0.308),
@@ -430,6 +434,13 @@ impl Grid {
             load_armed: true,
             scrolled_to: px(0.),
         }
+    }
+
+    // The header and every row, from the rem size so an owner can size the grid before it first paints. A horizontal
+    // bar's lane counts once a layout has one.
+    pub fn fit_height(&self, window: &Window) -> Pixels {
+        let rem = f32::from(window.rem_size());
+        header_height(rem) + px(row_height(rem)) * self.order.len() as f32 + self.scroll.lanes().height
     }
 
     pub fn focused_row(&self) -> Option<RowRef> {
