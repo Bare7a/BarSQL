@@ -134,13 +134,33 @@ pub struct ChangePlan {
 }
 
 impl ChangePlan {
-    // What the preview and the history show. SQL Server runs each step as a batch of its own.
+    // What the Apply dialog and the history show.
     pub fn script(&self, driver: &DriverType) -> String {
-        let statements: Vec<String> = match driver.dialect() {
-            Some(SqlDialect::TSql) => self.steps.iter().map(|step| format!("{};\nGO", step.sql)).collect(),
-            _ => self.steps.iter().map(|step| terminate_statement(&step.sql)).collect(),
+        formatted(driver, &self.steps).join("\n\n")
+    }
+
+    // The steps inside the transaction this module put around them, or all of them when there's none.
+    pub fn body(&self) -> &[Step] {
+        let (open, close) = self.wrapper();
+        &self.steps[open..self.steps.len() - close]
+    }
+
+    pub fn in_transaction(&self) -> bool {
+        self.wrapper() != (0, 0)
+    }
+
+    // The body as the preview shows it, without blank lines between statements.
+    pub fn preview(&self, driver: &DriverType) -> String {
+        formatted(driver, self.body()).join("\n")
+    }
+
+    // How many steps open and close that transaction.
+    fn wrapper(&self) -> (usize, usize) {
+        let sql: Vec<&str> = self.steps.iter().map(|step| step.sql.as_str()).collect();
+        let wraps = |(open, close): &&(&[&str], &str)| {
+            sql.len() > open.len() && sql.starts_with(open) && sql.last() == Some(close)
         };
-        statements.join("\n\n")
+        WRAPPERS.iter().find(wraps).map_or((0, 0), |(open, _)| (open.len(), 1))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -491,6 +511,18 @@ pub fn plan_create(driver: &DriverType, draft: &Draft) -> Result<ChangePlan, Vec
     })
 }
 
+// What `transaction`, `tsql_transaction` and SQLite's in-place alter open and close a plan with.
+const WRAPPERS: [(&[&str], &str); 2] =
+    [(&["BEGIN"], "COMMIT"), (&["SET XACT_ABORT ON", "BEGIN TRANSACTION"], "COMMIT TRANSACTION")];
+
+// SQL Server runs each step as a batch of its own.
+fn formatted(driver: &DriverType, steps: &[Step]) -> Vec<String> {
+    match driver.dialect() {
+        Some(SqlDialect::TSql) => steps.iter().map(|step| format!("{};\nGO", step.sql)).collect(),
+        _ => steps.iter().map(|step| terminate_statement(&step.sql)).collect(),
+    }
+}
+
 fn transaction(statements: Vec<String>) -> ChangePlan {
     let steps = std::iter::once("BEGIN".to_string()).chain(statements).chain(std::iter::once("COMMIT".to_string()));
     ChangePlan { steps: steps.map(Step::sql).collect(), warnings: Vec::new() }
@@ -816,6 +848,20 @@ mod tests {
         let plan = ChangePlan { steps: vec![Step::sql("A"), Step::sql("B")], warnings: Vec::new() };
         assert_eq!(plan.script(&PG), "A;\n\nB;");
         assert_eq!(plan.script(&MS), "A;\nGO\n\nB;\nGO");
+    }
+
+    #[test]
+    fn the_preview_leaves_out_the_transaction_around_the_changes() {
+        let wrapped = transaction(vec!["A".into(), "B".into()]);
+        assert_eq!((wrapped.body().len(), wrapped.in_transaction()), (2, true));
+        assert_eq!(wrapped.preview(&PG), "A;\nB;");
+        let batches = tsql_transaction(vec!["A".into()]);
+        assert_eq!((batches.preview(&MS), batches.in_transaction()), ("A;\nGO".to_string(), true));
+        let steps = ["PRAGMA foreign_keys = OFF", "BEGIN", "A", "COMMIT", "PRAGMA foreign_keys = ON"];
+        let rebuild = ChangePlan { steps: steps.map(Step::sql).to_vec(), warnings: Vec::new() };
+        assert_eq!((rebuild.body().len(), rebuild.in_transaction()), (5, false), "a rebuild shows whole");
+        let single = ChangePlan { steps: vec![Step::sql("A")], warnings: Vec::new() };
+        assert_eq!((single.preview(&PG), single.in_transaction()), ("A;".to_string(), false));
     }
 
     #[test]
