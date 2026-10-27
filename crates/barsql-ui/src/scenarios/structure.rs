@@ -669,6 +669,16 @@ fn picking_a_type_from_the_list_sets_it(cx: &mut TestAppContext) {
     assert_eq!(app.cx.update(|_, cx| tab.read(cx).draft.columns[1].column.data_type.clone()), first);
 }
 
+// The title is the tab's icon, then the table's name, then its schema.
+#[gpui_kit::test]
+fn the_title_shows_the_table_then_its_schema(cx: &mut TestAppContext) {
+    let mut app = structure_of(cx);
+    let icon = bounds_of(&mut app, "structure-title-icon");
+    let name = bounds_of(&mut app, "structure-title");
+    let schema = bounds_of(&mut app, "structure-title-schema");
+    assert!(icon.right() <= name.left() && name.right() <= schema.left(), "{icon:?} {name:?} {schema:?}");
+}
+
 #[gpui_kit::test]
 fn the_header_lines_up_with_the_sidebar_tabs(cx: &mut TestAppContext) {
     let mut app = structure_of(cx);

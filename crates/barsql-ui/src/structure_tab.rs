@@ -15,6 +15,7 @@ use barsql_core::{Check, ConnectionConfig, ForeignKey, StructColumn, StructIndex
 use barsql_sql::structure::{
     ChangePlan, ColumnRow, Draft, Problem, ProblemKind, Row, Section, changes, plan_changes, plan_create,
 };
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{EditorState, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
@@ -24,6 +25,7 @@ use gpui_kit::*;
 use self::preview::PreviewDrag;
 use self::sheet::Sheet;
 use crate::cell_viewer;
+use crate::connections_panel::parse_color;
 use crate::form::{self, ToolButton as _};
 use crate::grid::{Grid, GridEvent};
 use crate::i18n::{I18n, t, t_count, t_with};
@@ -32,7 +34,7 @@ use crate::schema_actions;
 use crate::schema_tree::TableChange;
 use crate::state;
 use crate::toast;
-use crate::tokens::{ICON_SM, TEXT_SM};
+use crate::tokens::{ICON_MD, ICON_SM, TEXT_MD, TEXT_SM};
 
 const CONTEXT: &str = "StructureTab";
 
@@ -708,6 +710,12 @@ impl StructureTab {
                     })),
             )
         });
+        // The tab's own icon, in its connection's color as the tab strip shows it.
+        let color = parse_color(&self.connection.color).unwrap_or(theme.muted_foreground);
+        let icon = div()
+            .flex_none()
+            .debug_selector(|| "structure-title-icon".into())
+            .child(Icon::new(Lucide::Columns3).size(ICON_MD).text_color(color));
         h_flex()
             .debug_selector(|| "structure-header".into())
             .flex_none()
@@ -722,6 +730,7 @@ impl StructureTab {
                 Some(field) => h_flex()
                     .gap(rems(0.462))
                     .text_size(TEXT_SM)
+                    .child(icon)
                     .child(div().text_color(theme.muted_foreground).child(t(cx, "structure.tableName")))
                     .child(format!("{}.", self.schema))
                     .child(
@@ -731,11 +740,27 @@ impl StructureTab {
                             .child(form::input(field, window, cx).disabled(!self.editable())),
                     )
                     .into_any_element(),
-                None => div()
-                    .text_size(TEXT_SM)
-                    .font_semibold()
-                    .debug_selector(|| "structure-title".into())
-                    .child(format!("{}.{}", self.schema, self.table))
+                None => h_flex()
+                    .min_w_0()
+                    .gap(rems(0.615))
+                    .child(icon)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(TEXT_MD)
+                            .font_semibold()
+                            .debug_selector(|| "structure-title".into())
+                            .child(self.table.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(TEXT_SM)
+                            .text_color(theme.muted_foreground)
+                            .debug_selector(|| "structure-title-schema".into())
+                            .child(self.schema.clone()),
+                    )
                     .into_any_element(),
             })
             .child(div().w(rems(30.769)).child(switch))
