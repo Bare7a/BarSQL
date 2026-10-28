@@ -62,6 +62,7 @@ mod connections;
 mod explain;
 mod grid;
 mod query;
+mod result_edits;
 mod roundtrip;
 mod schema;
 mod ssh;

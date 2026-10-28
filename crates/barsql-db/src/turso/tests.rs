@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use barsql_core::{ColumnInfo, Row, RowDelete, Value};
+
 use super::{Endpoint, TursoEngine, TursoOptions};
 use crate::event::ScriptEvent;
 use crate::http::fake::{Reply, fake, response};
@@ -111,6 +113,53 @@ async fn a_dropped_stream_runs_the_statement_once_more_on_a_new_one() {
     );
     let requests = server.requests();
     assert!(requests[3].contains(r#""baton":"b1""#) && requests[4].contains(r#""baton":null"#), "{requests:?}");
+}
+
+fn executed(baton: &str, affected: u64) -> Reply {
+    ok(&format!(
+        r#"{{"baton":"{baton}","base_url":null,"results":[{{"type":"ok","response":{{"type":"execute","result":{{"cols":[],"rows":[],"affected_row_count":{affected}}}}}}}]}}"#
+    ))
+}
+
+// Edits are saved a while after their run, when the server has usually dropped the tab's stream. Their transaction
+// starts on a new one, where the rest of it follows.
+#[tokio::test]
+async fn saved_edits_start_their_transaction_on_a_new_stream() {
+    let invalid = Reply::Send(response("400 Bad Request", "Received an invalid baton"));
+    let mut replies = vec![ok(""), ok(SELECT_ONE), cursor("b1", None, 7), ok(AUTOCOMMIT), invalid];
+    replies.extend([executed("b2", 0), executed("b2", 1), executed("b2", 0)]);
+    let server = fake(replies).await;
+    let engine = TursoEngine::connect(options(server.addr.port())).await.unwrap();
+    let mut session = Engine::Turso(engine.clone()).session().await.unwrap();
+    run_on(&mut session, &["SELECT 7"]).await;
+    let columns = [ColumnInfo { name: "id".into(), is_primary: true, ..Default::default() }];
+    let key: Row = [("id".to_string(), Value::Int(1))].into_iter().collect();
+    let delete = RowDelete { schema: "main".into(), table: "t".into(), primary_keys: vec![key] };
+    assert_eq!(session.apply_row_edits(&delete, &[], &columns).await.unwrap(), 0);
+    std::mem::forget(session);
+    let requests = server.requests();
+    let sent = |ix: usize, sql: &str, baton: &str| requests[ix].contains(sql) && requests[ix].contains(baton);
+    assert!(sent(4, "BEGIN", r#""baton":"b9""#) && sent(5, "BEGIN", r#""baton":null"#), "{requests:?}");
+    assert!(sent(6, "DELETE", r#""baton":"b2""#) && sent(7, "COMMIT", r#""baton":"b2""#), "{requests:?}");
+}
+
+// A deferred foreign key refuses the COMMIT itself, which leaves the transaction open on the stream until rolled back.
+#[tokio::test]
+async fn edits_refused_at_commit_roll_back() {
+    let refused = r#"{"baton":"b2","base_url":null,"results":[{"type":"error","error":{"message":"FOREIGN KEY constraint failed"}}]}"#;
+    let replies = vec![ok(""), ok(SELECT_ONE), executed("b2", 0), executed("b2", 1), ok(refused), executed("b2", 0)];
+    let server = fake(replies).await;
+    let engine = TursoEngine::connect(options(server.addr.port())).await.unwrap();
+    let mut session = Engine::Turso(engine.clone()).session().await.unwrap();
+    let columns = [ColumnInfo { name: "id".into(), is_primary: true, ..Default::default() }];
+    let key: Row = [("id".to_string(), Value::Int(1))].into_iter().collect();
+    let delete = RowDelete { schema: "main".into(), table: "t".into(), primary_keys: vec![key] };
+    let error = session.apply_row_edits(&delete, &[], &columns).await.unwrap_err();
+    assert!(error.message.contains("FOREIGN KEY"), "{error:?}");
+    std::mem::forget(session);
+    let requests = server.requests();
+    assert!(requests[4].contains("COMMIT") && requests[5].contains("ROLLBACK"), "{requests:?}");
+    assert!(requests[5].contains(r#""baton":"b2""#), "on the same stream: {requests:?}");
 }
 
 // Streams expire after a few idle seconds, so losing one that held nothing goes unsaid.

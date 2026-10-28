@@ -605,8 +605,8 @@ mod tests {
     fn the_picks_follow_streamed_rows_until_the_panel_is_used(cx: &mut TestAppContext) {
         let _env = Env::new(cx);
         let columns: Arc<[ColumnMeta]> = vec![
-            ColumnMeta { name: "region".into(), type_name: "TEXT".into() },
-            ColumnMeta { name: "sales".into(), type_name: "INTEGER".into() },
+            ColumnMeta { name: "region".into(), type_name: "TEXT".into(), ..Default::default() },
+            ColumnMeta { name: "sales".into(), type_name: "INTEGER".into(), ..Default::default() },
         ]
         .into();
         let slot = Rc::new(RefCell::new(None));

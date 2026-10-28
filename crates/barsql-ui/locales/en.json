@@ -140,7 +140,12 @@
     "copyAs": "Copy as {{format}}",
     "planShowQuiet_one": "Show 1 more (0 or false)",
     "planShowQuiet_other": "Show {{count}} more (0 or false)",
-    "planHideQuiet": "Hide 0 and false"
+    "planHideQuiet": "Hide 0 and false",
+    "editsTo": "Changes to {{table}}",
+    "discardTitle": "Discard unsaved changes?",
+    "discardDescription_one": "One row in the results has changes that weren't saved. Running again drops them.",
+    "discardDescription_other": "{{count}} rows in the results have changes that weren't saved. Running again drops them.",
+    "discardConfirm": "Discard and run"
   },
   "sidebar": {
     "newTable": "New table…",
@@ -272,7 +277,11 @@
     "quitDescription_other": "{{count}} tabs have open transactions. Quitting rolls them back, and the changes made in them are lost.",
     "quitConfirm": "Roll back and quit",
     "rolledBack_one": "The connection closed, so the open transaction in {{tabs}} was rolled back.",
-    "rolledBack_other": "The connection closed, so the open transactions in {{count}} tabs were rolled back: {{tabs}}."
+    "rolledBack_other": "The connection closed, so the open transactions in {{count}} tabs were rolled back: {{tabs}}.",
+    "discardTitle": "Discard unapplied changes?",
+    "discardDescription_one": "One tab has changes that weren't applied. They're lost when it closes.",
+    "discardDescription_other": "{{count}} tabs have changes that weren't applied. They're lost when they close.",
+    "discardConfirm": "Discard changes"
   },
   "common": {
     "undo": "Undo"
@@ -480,10 +489,6 @@
       "definition": "Definition",
       "constraint": "Constraint"
     },
-    "discardTitle": "Discard structure changes?",
-    "discardDescription_one": "One tab has structure changes that weren't applied. They're lost when it closes.",
-    "discardDescription_other": "{{count}} tabs have structure changes that weren't applied. They're lost when they close.",
-    "discardConfirm": "Discard changes",
     "newTableTitle": "New table",
     "tableName": "Table name",
     "tableNamePlaceholder": "e.g. customers",

@@ -13,7 +13,7 @@ use crate::event::{ScriptEvent, Sink, StatementResult, emit};
 use crate::script::{
     self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows, touches_transaction,
 };
-use crate::{Cancel, ChunkBuilder, ColumnMeta};
+use crate::{Cancel, ChunkBuilder, ColumnMeta, ColumnOrigin};
 
 use super::values::Decoder;
 
@@ -179,14 +179,14 @@ impl StatementRunner for PgSession {
             StatementRun { sets: 1, error: Some(error) }
         };
 
-        // The simple protocol reports no column types, so prepare the statement to get them.
-        let oids: Vec<u32> = match self.lease.client().prepare(stmt).await {
-            Ok(prepared) => prepared.columns().iter().map(|c| c.type_().oid()).collect(),
+        // The simple protocol reports no column types or origins, so prepare the statement to get them.
+        let (oids, origins): (Vec<u32>, Vec<Option<ColumnOrigin>>) = match self.lease.client().prepare(stmt).await {
+            Ok(prepared) => prepared.columns().iter().map(|c| (c.type_().oid(), origin(c))).unzip(),
             Err(err) if err.as_db_error().is_some() || self.lease.client().is_closed() => {
                 self.send_notices(first_index, sink).await;
                 return fail(mark_cancelled(pg_error(&err), cancel), None).await;
             }
-            Err(_) => Vec::new(),
+            Err(_) => (Vec::new(), Vec::new()),
         };
         let stream = match self.lease.client().simple_query_raw(stmt).await {
             Ok(stream) => stream,
@@ -234,6 +234,7 @@ impl StatementRunner for PgSession {
                         .map(|(i, c)| ColumnMeta {
                             name: c.name().to_string(),
                             type_name: oids.get(i).map(|&oid| type_name(oid)).unwrap_or_default(),
+                            origin: origins.get(i).cloned().flatten(),
                         })
                         .collect();
                     let decoders = (0..columns.len())
@@ -287,6 +288,14 @@ impl StatementRunner for PgSession {
 }
 
 type SetState = (Arc<[ColumnMeta]>, Vec<Decoder>, ChunkBuilder, usize);
+
+// Zero for an expression's column, or none at all.
+fn origin(column: &tokio_postgres::Column) -> Option<ColumnOrigin> {
+    match (column.table_oid(), column.column_id()) {
+        (Some(table), Some(column)) if table != 0 && column > 0 => Some(ColumnOrigin::Oid { table, column }),
+        _ => None,
+    }
+}
 
 // Rows that came before an error or a cancel still show, so the count matches the grid.
 async fn close_set(set: Option<SetState>, result_index: usize, sink: &Sink, started: Instant) -> Option<ResultSummary> {

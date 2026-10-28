@@ -7,6 +7,7 @@ mod editor;
 mod engines;
 mod import;
 mod plans;
+mod result_edits;
 mod results;
 mod schema;
 mod shell;

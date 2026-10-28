@@ -128,3 +128,11 @@ pub fn rows(events: &[RunEvent], index: usize) -> Vec<Vec<Option<String>>> {
 pub fn file_exists(path: &str) -> bool {
     Path::new(path).exists()
 }
+
+pub fn meta(events: &[RunEvent], index: usize) -> Vec<barsql_db::ColumnMeta> {
+    let columns = events.iter().find_map(|event| match event {
+        RunEvent::Meta { result_index, columns, .. } if *result_index == index => Some(columns.to_vec()),
+        _ => None,
+    });
+    columns.unwrap_or_default()
+}

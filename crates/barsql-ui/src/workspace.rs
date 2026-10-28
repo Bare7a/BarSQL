@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use barsql_app::{
@@ -134,9 +135,13 @@ impl TabView {
         self.query().is_some_and(|tab| tab.read(cx).is_dirty(cx))
     }
 
-    // Structure changes live only in the tab, so closing it loses them.
+    // Structure changes and a query's unsaved result edits live only in the tab, so closing it loses them.
     fn holds_draft(&self, cx: &App) -> bool {
-        matches!(self, Self::Structure(tab) if tab.read(cx).has_changes())
+        match self {
+            Self::Structure(tab) => tab.read(cx).has_changes(),
+            Self::Query(tab) => tab.read(cx).has_result_edits(cx),
+            _ => false,
+        }
     }
 
     fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -262,6 +267,8 @@ pub struct Workspace {
     save_task: Task<()>,
     // Focused while the quit confirmation shows.
     quit_dialog: Option<WeakFocusHandle>,
+    // Tabs holding changes that closing them would lose.
+    drafts: HashSet<EntityId>,
     _subscriptions: Vec<Subscription>,
     _app_events: Task<()>,
 }
@@ -621,6 +628,7 @@ impl Workspace {
             saved: None,
             save_task: Task::ready(()),
             quit_dialog: None,
+            drafts: HashSet::new(),
             _subscriptions: subscriptions,
             _app_events: app_events,
         };
@@ -828,6 +836,25 @@ impl Workspace {
         self.active_tab().and_then(TabView::query)
     }
 
+    // Observes the tabs that can hold a draft. Only the one that changed is asked again.
+    fn tab_changed<T: 'static>(&mut self, view: Entity<T>, cx: &mut Context<Self>) {
+        let id = view.entity_id();
+        let held = self.tabs.iter().find(|tab| tab.view.entity_id() == id).is_some_and(|tab| tab.view.holds_draft(cx));
+        self.note_draft(id, held);
+        cx.notify();
+    }
+
+    // The Dock's Quit asks from outside GPUI, where the tabs can't be read.
+    fn note_draft(&mut self, tab: EntityId, held: bool) {
+        if held {
+            self.drafts.insert(tab);
+        } else {
+            self.drafts.remove(&tab);
+        }
+        #[cfg(target_os = "macos")]
+        crate::system_quit::set_drafts(!self.drafts.is_empty());
+    }
+
     fn query_tabs(&self) -> Vec<Entity<QueryTab>> {
         self.tabs.iter().filter_map(|tab| tab.view.query().cloned()).collect()
     }
@@ -859,7 +886,7 @@ impl Workspace {
                 view
             });
             let subscriptions = vec![
-                cx.observe(&view, |_, _, cx| cx.notify()),
+                cx.observe(&view, Self::tab_changed),
                 cx.subscribe_in(&view, window, |this, view, event: &StructureTabEvent, window, cx| match event {
                     StructureTabEvent::Edited => this.schedule_save(cx),
                     StructureTabEvent::Applied { created } => {
@@ -905,7 +932,7 @@ impl Workspace {
         }
         let view = cx.new(|cx| QueryTab::new(tab, connection, window, cx));
         let subscriptions = vec![
-            cx.observe(&view, |_, _, cx| cx.notify()),
+            cx.observe(&view, Self::tab_changed),
             cx.subscribe_in(&view, window, |this, view, event: &QueryTabEvent, window, cx| match event {
                 QueryTabEvent::Edited => this.schedule_save(cx),
                 QueryTabEvent::RunFinished => this.sidebar.update(cx, |sidebar, cx| sidebar.refresh_history(cx)),
@@ -1392,6 +1419,7 @@ impl Workspace {
         }
         let open = self.tabs.remove(ix);
         let (closing, persisted) = (open.view.stored(cx), open.view.persisted(cx));
+        self.note_draft(open.view.entity_id(), false);
         drop(open);
         let id = closing.id.clone();
         if persisted {
@@ -1522,13 +1550,12 @@ impl Workspace {
         true
     }
 
-    // Clean tabs close at once. Structure drafts can't be saved, so they ask first, Discard only; then query tabs.
+    // Clean tabs close at once. Drafts can't be saved, so they ask first, Discard only; then query tabs.
     fn close_tabs_saving(&mut self, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         let drafts = self.drafts(&ids, cx);
         let dirty = |this: &Self, id: &String| this.index_of(id, cx).is_some_and(|ix| this.tabs[ix].view.is_dirty(cx));
-        let (dirty, clean): (Vec<String>, Vec<String>) =
-            ids.into_iter().filter(|id| !drafts.contains(id)).partition(|id| dirty(self, id));
-        for id in &clean {
+        let (dirty, clean): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|id| dirty(self, id));
+        for id in clean.iter().filter(|id| !drafts.contains(id)) {
             self.close_tab_by_id(id, window, cx);
         }
         let Some(confirm) = self.confirm_discard(&drafts, cx) else {
@@ -1537,7 +1564,7 @@ impl Workspace {
         let this = cx.entity().downgrade();
         dialogs::confirm(confirm, window, cx, move |window, cx| {
             let _ = this.update(cx, |this, cx| {
-                for id in &drafts {
+                for id in drafts.iter().filter(|id| !dirty.contains(id)) {
                     this.close_tab_by_id(id, window, cx);
                 }
                 this.close_unsaved(dirty.clone(), window, cx);
@@ -1556,10 +1583,10 @@ impl Workspace {
             .filter_map(|id| self.index_of(id, cx).map(|ix| self.tabs[ix].view.title(cx).to_string()))
             .collect();
         (!titles.is_empty()).then(|| Confirm {
-            title: t(cx, "structure.discardTitle"),
-            description: t_count(cx, "structure.discardDescription", titles.len() as i64, &[]),
+            title: t(cx, "tabs.discardTitle"),
+            description: t_count(cx, "tabs.discardDescription", titles.len() as i64, &[]),
             detail: Some(titles.join("\n").into()),
-            confirm: t(cx, "structure.discardConfirm"),
+            confirm: t(cx, "tabs.discardConfirm"),
             danger: true,
         })
     }

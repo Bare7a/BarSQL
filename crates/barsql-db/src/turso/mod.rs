@@ -348,6 +348,7 @@ impl Streaming<'_> {
             .map(|c| ColumnMeta {
                 name: c.name.unwrap_or_default(),
                 type_name: c.decltype.unwrap_or_default().to_uppercase(),
+                ..Default::default()
             })
             .collect();
         self.time_columns = columns.iter().map(|c| values::is_time_type(&c.type_name)).collect();
@@ -493,6 +494,47 @@ impl TursoSession {
         Err(QueryError::message(NO_TRANSACTIONS))
     }
 
+    // An apply's own transaction, on a new stream when the server had dropped this one. Nothing ran on the old one, and
+    // the apply's statements follow at once, before the new one can idle out.
+    pub(crate) async fn begin_edits(&mut self) -> Result<(), QueryError> {
+        let begun = match self.transaction_word("BEGIN").await {
+            Err(error) if error.lost_stream() && self.baton.is_some() => {
+                self.drop_stream("The server had closed this tab's stream, so the changes were saved on a new one.");
+                self.transaction_word("BEGIN").await
+            }
+            begun => begun,
+        };
+        begun.map_err(hrana_error)?
+    }
+
+    // A ROLLBACK that got no answer may leave the stream in the transaction, so the stream goes: the server rolls it
+    // back as it expires, and the next run starts on a new one.
+    pub(crate) async fn end_edits(&mut self, commit: bool) -> Result<(), QueryError> {
+        match self.transaction_word(if commit { "COMMIT" } else { "ROLLBACK" }).await {
+            Ok(ended) => ended,
+            Err(error) => {
+                if !commit {
+                    self.drop_stream(
+                        "Saving the changes failed with this tab's stream, so the next run starts a new one.",
+                    );
+                }
+                Err(hrana_error(error))
+            }
+        }
+    }
+
+    // The outer error is a request that got no answer.
+    async fn transaction_word(&mut self, word: &str) -> Result<Result<(), QueryError>, HError> {
+        let requests = vec![PipelineRequest::Execute { stmt: Stmt::new(word, &[]) }];
+        let res = self.engine.pipeline(&self.client, &self.path, self.baton.clone(), requests).await?;
+        self.follow(res.baton, res.base_url);
+        Ok(match res.results.into_iter().next() {
+            Some(PipelineResult::Ok { .. }) => Ok(()),
+            Some(PipelineResult::Error { error }) => Err(hrana_error(error)),
+            None => Err(QueryError::message("the server's answer is missing the statement's result")),
+        })
+    }
+
     async fn execute_args(&mut self, sql: &str, params: &[Value]) -> Result<StmtResult, QueryError> {
         let args: Vec<LiteValue> = params.iter().map(LiteValue::from_value).collect();
         let requests = vec![PipelineRequest::Execute { stmt: Stmt::new(sql, &args) }];
@@ -519,6 +561,7 @@ impl TursoSession {
             .map(|c| ColumnMeta {
                 name: c.name.clone().unwrap_or_default(),
                 type_name: c.decltype.clone().unwrap_or_default().to_uppercase(),
+                ..Default::default()
             })
             .collect();
         let times: Vec<bool> = columns.iter().map(|c| values::is_time_type(&c.type_name)).collect();

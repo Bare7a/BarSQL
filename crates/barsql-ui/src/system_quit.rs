@@ -1,6 +1,6 @@
 // The Dock's Quit, logging out and shutting down send terminate: past the Quit action, and GPUI Kit's delegate has no
-// applicationShouldTerminate:, so this adds one that cancels the quit and asks while a tab holds a transaction.
-// A cancelled logout or shutdown stays cancelled, and OK quits BarSQL alone.
+// applicationShouldTerminate:, so this adds one that cancels the quit and asks while a tab holds a transaction or
+// unapplied changes. A cancelled logout or shutdown stays cancelled, and OK quits BarSQL alone.
 use std::cell::{Cell, OnceCell};
 
 use barsql_app::BarApp;
@@ -22,6 +22,8 @@ thread_local! {
     static HOOK: OnceCell<(BarApp, AsyncApp)> = const { OnceCell::new() };
     // Set once Quit has asked, or had nothing to ask about.
     static ALLOWED: Cell<bool> = const { Cell::new(false) };
+    // Kept by the workspace, as the tabs can't be read from here.
+    static DRAFTS: Cell<bool> = const { Cell::new(false) };
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -55,10 +57,14 @@ pub fn allow_terminate() {
     ALLOWED.set(true);
 }
 
+pub fn set_drafts(held: bool) {
+    DRAFTS.set(held);
+}
+
 // AppKit asks from its event loop, which can run nested inside a GPUI callback that holds the App. So this reads
 // BarApp alone and asks from a task.
 pub fn should_terminate(bar: &BarApp, cx: &AsyncApp) -> Reply {
-    if ALLOWED.get() || !bar.any_transaction_open() {
+    if ALLOWED.get() || !(DRAFTS.get() || bar.any_transaction_open()) {
         return Reply::Now;
     }
     cx.spawn(async |cx| cx.update(ask)).detach();

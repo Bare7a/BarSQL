@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use barsql_db::{ChunkBuilder, ColumnMeta};
+use barsql_db::{ChunkBuilder, ColumnMeta, ResultSet};
 use barsql_io::ExportFormat;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Root;
@@ -51,8 +51,13 @@ fn open(cx: &mut TestAppContext, rows: usize) -> (Env, Entity<Grid>, &mut Visual
 
 // `rows` rows of (id, name, note) where every third note is NULL.
 fn sample(rows: usize) -> ChunkBuilder {
+    sample_of(rows, 0..rows)
+}
+
+// The rows of `sample(rows)` that `keep` names.
+fn sample_of(rows: usize, keep: impl Iterator<Item = usize>) -> ChunkBuilder {
     let mut builder = ChunkBuilder::new(3, rows);
-    for row in 0..rows {
+    for row in keep {
         builder.push_number(|s| s.push_str(&(rows - row).to_string()));
         builder.push_text(|s| s.push_str(&format!("name {row}")));
         if row % 3 == 2 {
@@ -66,7 +71,10 @@ fn sample(rows: usize) -> ChunkBuilder {
 }
 
 fn columns() -> Arc<[ColumnMeta]> {
-    ["id", "name", "note"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into()
+    ["id", "name", "note"]
+        .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into(), ..Default::default() })
+        .to_vec()
+        .into()
 }
 
 // A focused grid of (id, name, note) in its own window.
@@ -195,6 +203,43 @@ fn large_results_sort_in_the_background(cx: &mut TestAppContext) {
     assert_eq!(read(&grid, cx, |g| g.order.global_at(0)), Some(29_999));
 }
 
+// Applied deletes drop out of the old order, which a large result shows until it has sorted again.
+#[gpui_kit::test]
+fn a_replaced_large_result_keeps_its_sorted_rows_in_step(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 30_000);
+    grid.update(cx, |grid, cx| grid.toggle_sort(0, cx));
+    cx.run_until_parked();
+    let mut set = ResultSet::new(columns());
+    set.push(Arc::new(sample_of(30_000, 1..29_999).finish()));
+    grid.update(cx, |grid, cx| grid.replace_set(set, &[0, 29_999], cx));
+    let ids = |g: &Grid| {
+        [0, 1, 29_997, 29_998]
+            .map(|display| g.order.global_at(display).and_then(|row| g.set.display(row, 0)).map(str::to_owned))
+    };
+    let shown = read(&grid, cx, ids);
+    assert_eq!(shown, [Some("2".into()), Some("3".into()), Some("29999".into()), None], "ids 1 and 30000 are gone");
+    assert!(read(&grid, cx, |g| g.sorting.is_some()), "still sorting");
+    cx.run_until_parked();
+    assert_eq!(read(&grid, cx, ids), shown);
+}
+
+// The status bar's totals read staged values, so they follow an overlay that's set or patched.
+#[gpui_kit::test]
+fn the_totals_follow_staged_values(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    let title = header_title(&grid, 0, cx);
+    cx.simulate_click(title, Modifiers::default());
+    let sum = |cx: &mut VisualTestContext| read(&grid, cx, |g| g.aggregate().map(|a| a.columns[0].sum));
+    assert_eq!(sum(cx), Some(6.0), "ids 3, 2 and 1");
+    let staged = Arc::new(HashMap::from([((0, 0), Some("10".to_string()))]));
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { staged, editable: true, ..Default::default() }, cx));
+    assert_eq!(sum(cx), Some(13.0));
+    grid.update(cx, |grid, cx| {
+        grid.patch_overlay(|overlay| drop(Arc::make_mut(&mut overlay.staged).insert((1, 0), Some("20".into()))), cx)
+    });
+    assert_eq!(sum(cx), Some(31.0));
+}
+
 fn focus_changes(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> Rc<RefCell<usize>> {
     let heard = Rc::new(RefCell::new(0));
     let count = heard.clone();
@@ -306,7 +351,7 @@ fn a_sql_copy_quotes_for_the_connections_dialect(cx: &mut TestAppContext) {
 // (id, active, flag): SQLite's 1 and 0 in a column declared BOOLEAN, then the engine's own true and false.
 fn booleans(cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
     let columns: Arc<[ColumnMeta]> = [("id", "INTEGER"), ("active", "BOOLEAN"), ("flag", "bool")]
-        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into(), ..Default::default() })
         .to_vec()
         .into();
     let mut builder = ChunkBuilder::new(3, 2);
@@ -371,7 +416,7 @@ fn reactions(nullable: bool, cx: &mut TestAppContext) -> (Entity<Grid>, &mut Vis
 // As reactions, with `rows` rows alternating like and love.
 fn reactions_rows(nullable: bool, rows: usize, cx: &mut TestAppContext) -> (Entity<Grid>, &mut VisualTestContext) {
     let columns: Arc<[ColumnMeta]> = [("id", "INTEGER"), ("kind", "TEXT")]
-        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into(), ..Default::default() })
         .to_vec()
         .into();
     let mut builder = ChunkBuilder::new(2, rows);
@@ -778,7 +823,7 @@ fn invalid_cells_and_marks_come_from_the_overlay(cx: &mut TestAppContext) {
 fn tab_moves_the_editor_along_the_row(cx: &mut TestAppContext) {
     let _env = Env::new(cx);
     let columns: Arc<[ColumnMeta]> = [("name", "TEXT"), ("active", "BOOLEAN"), ("note", "TEXT"), ("extra", "TEXT")]
-        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+        .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into(), ..Default::default() })
         .to_vec()
         .into();
     let mut builder = ChunkBuilder::new(4, 1);

@@ -82,6 +82,21 @@ async fn read_only_sets_query_only_and_paths_drop_their_query() {
 }
 
 #[tokio::test]
+async fn result_columns_name_the_table_columns_they_come_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("origins.db"), false).await;
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)").await;
+    let mut session = engine.session().await.unwrap();
+    let sql = "SELECT id, name AS n, upper(name) FROM t";
+    let res = session.buffered(sql, &Cancel::new()).await.unwrap();
+    let sources = session.column_sources(sql, &res.columns, &Cancel::new()).await.unwrap();
+    let named: Vec<Option<(String, String, String)>> =
+        sources.columns.into_iter().map(|s| s.map(|s| (s.schema, s.table, s.column))).collect();
+    let column = |name: &str| Some(("main".to_string(), "t".to_string(), name.to_string()));
+    assert_eq!(named, [column("id"), column("name"), None]);
+}
+
+#[tokio::test]
 async fn connecting_needs_a_file_path() {
     let err = Engine::connect(&ConnectionConfig { driver: DriverType::Sqlite, ..Default::default() }).await.err();
     assert!(err.is_some_and(|e| e.message.contains("file path")));

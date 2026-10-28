@@ -358,7 +358,8 @@ mod tests {
     }
 
     fn set(values: &[Option<(&str, bool)>]) -> ResultSet {
-        let columns: Arc<[ColumnMeta]> = vec![ColumnMeta { name: "v".into(), type_name: "X".into() }].into();
+        let columns: Arc<[ColumnMeta]> =
+            vec![ColumnMeta { name: "v".into(), type_name: "X".into(), ..Default::default() }].into();
         let mut builder = ChunkBuilder::new(1, values.len());
         for value in values {
             match value {

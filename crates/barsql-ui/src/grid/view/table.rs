@@ -17,7 +17,13 @@ impl Grid {
     // Turns on table-view mode. Also called to refresh the staged edits.
     pub fn set_overlay(&mut self, overlay: TableOverlay, cx: &mut Context<Self>) {
         self.overlay = Some(overlay);
+        self.forget_aggregate();
         cx.notify();
+    }
+
+    // The status bar's totals read staged values, which its cache doesn't see change.
+    fn forget_aggregate(&mut self) {
+        *self.aggregate.borrow_mut() = None;
     }
 
     pub fn set_table_name(&mut self, table: Option<String>) {
@@ -89,7 +95,13 @@ impl Grid {
     }
 
     pub(super) fn locked(&self, row: usize, column: usize) -> bool {
-        self.overlay.as_ref().is_some_and(|overlay| overlay.locked.contains(&(row, column)))
+        self.overlay
+            .as_ref()
+            .is_some_and(|overlay| overlay.locked.contains(&(row, column)) || overlay.locked_columns.contains(&column))
+    }
+
+    pub(super) fn server_sorted(&self) -> bool {
+        self.overlay.as_ref().is_some_and(|overlay| !overlay.local)
     }
 
     // Focuses a cell and scrolls to it, as a click does.
@@ -133,6 +145,48 @@ impl Grid {
         cx.notify();
     }
 
+    // `removed` holds the dropped rows' old places, ascending. Widths, hidden columns, the sort and the focus stay.
+    pub fn replace_set(&mut self, set: ResultSet, removed: &[usize], cx: &mut Context<Self>) {
+        let moved =
+            |row: usize| removed.binary_search(&row).is_err().then(|| row - removed.partition_point(|&r| r < row));
+        // A large result sorts again in the background, so until then the old order goes on, minus the dropped rows.
+        if self.sort.column.is_some() {
+            let order = (0..self.order.len()).filter_map(|display| self.order.global_at(display).and_then(moved));
+            self.order = RowOrder::sorted(order.collect());
+        }
+        let (focus, col) = (self.selection.focus_row.and_then(moved), self.selection.focus_col);
+        self.set = set;
+        // No row count matches it, so the order is worked out again for the new values.
+        self.ordered_for = (SortState::default(), usize::MAX);
+        self.sorting = None;
+        self.editing = None;
+        *self.aggregate.borrow_mut() = None;
+        self.sync_order(cx);
+        self.selection.clear();
+        if let Some(row) = focus.filter(|&row| row < self.set.rows()).or_else(|| self.order.global_at(0)) {
+            self.selection.focus(row, col);
+        }
+        self.publish(cx);
+        cx.notify();
+    }
+
+    // Changes the overlay in place, for a change to a few of a large result's rows.
+    pub fn patch_overlay(&mut self, patch: impl FnOnce(&mut TableOverlay), cx: &mut Context<Self>) {
+        if let Some(overlay) = self.overlay.as_mut() {
+            patch(overlay);
+            self.forget_aggregate();
+            cx.notify();
+        }
+    }
+
+    // Back to a plain result, as when its connection now points elsewhere.
+    pub fn clear_overlay(&mut self, cx: &mut Context<Self>) {
+        self.overlay = None;
+        self.editing = None;
+        self.forget_aggregate();
+        cx.notify();
+    }
+
     // Once loading ends, scrolling near the bottom can ask for more again.
     pub fn set_loading(&mut self, loading: bool) {
         if !loading {
@@ -152,7 +206,7 @@ impl Grid {
 
     // Asks for the next page when the last rows scroll into view. The pane decides whether there is one.
     pub(super) fn check_load_more(&mut self, cx: &mut Context<Self>) {
-        if self.overlay.is_none() {
+        if !self.server_sorted() {
             return;
         }
         let position = self.scroll.position().y;

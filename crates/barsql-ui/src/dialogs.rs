@@ -7,7 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::form;
-use crate::i18n::t;
+use crate::i18n::{t, t_count, t_with};
 use crate::modal::{self, Modal};
 use crate::tokens::TEXT_SM;
 
@@ -124,6 +124,19 @@ pub struct Confirm {
     pub detail: Option<SharedString>,
     pub confirm: SharedString,
     pub danger: bool,
+}
+
+impl Confirm {
+    pub fn save_rows(connection: &barsql_core::ConnectionConfig, rows: usize, cx: &App) -> Self {
+        let name = [("name", connection.name.as_str())];
+        Self {
+            title: t_with(cx, "safety.changesTitle", &name),
+            description: t_count(cx, "safety.saveRows", rows as i64, &name),
+            detail: None,
+            confirm: t(cx, "common.save"),
+            danger: true,
+        }
+    }
 }
 
 // The latest confirmation's title and detail.

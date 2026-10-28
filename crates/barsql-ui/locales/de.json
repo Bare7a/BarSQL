@@ -140,7 +140,12 @@
     "copyAs": "Kopieren als {{format}}",
     "planShowQuiet_one": "1 weiteres anzeigen (0 oder false)",
     "planShowQuiet_other": "{{count}} weitere anzeigen (0 oder false)",
-    "planHideQuiet": "0 und false ausblenden"
+    "planHideQuiet": "0 und false ausblenden",
+    "editsTo": "Änderungen an {{table}}",
+    "discardTitle": "Ungespeicherte Änderungen verwerfen?",
+    "discardDescription_one": "Eine Zeile im Ergebnis hat Änderungen, die nicht gespeichert wurden. Erneutes Ausführen verwirft sie.",
+    "discardDescription_other": "{{count}} Zeilen im Ergebnis haben Änderungen, die nicht gespeichert wurden. Erneutes Ausführen verwirft sie.",
+    "discardConfirm": "Verwerfen und ausführen"
   },
   "sidebar": {
     "newTable": "Neue Tabelle…",
@@ -272,7 +277,11 @@
     "quitDescription_other": "{{count}} Tabs haben offene Transaktionen. Beim Beenden werden sie zurückgerollt, und die Änderungen darin gehen verloren.",
     "quitConfirm": "Zurückrollen und beenden",
     "rolledBack_one": "Die Verbindung wurde geschlossen, daher wurde die offene Transaktion in {{tabs}} zurückgerollt.",
-    "rolledBack_other": "Die Verbindung wurde geschlossen, daher wurden die offenen Transaktionen in {{count}} Tabs zurückgerollt: {{tabs}}."
+    "rolledBack_other": "Die Verbindung wurde geschlossen, daher wurden die offenen Transaktionen in {{count}} Tabs zurückgerollt: {{tabs}}.",
+    "discardTitle": "Nicht angewendete Änderungen verwerfen?",
+    "discardDescription_one": "Ein Tab hat Änderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
+    "discardDescription_other": "{{count}} Tabs haben Änderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
+    "discardConfirm": "Änderungen verwerfen"
   },
   "common": {
     "undo": "Rückgängig"
@@ -480,10 +489,6 @@
       "definition": "Definition",
       "constraint": "Constraint"
     },
-    "discardTitle": "Strukturänderungen verwerfen?",
-    "discardDescription_one": "Ein Tab hat Strukturänderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
-    "discardDescription_other": "{{count}} Tabs haben Strukturänderungen, die nicht angewendet wurden. Beim Schließen gehen sie verloren.",
-    "discardConfirm": "Änderungen verwerfen",
     "newTableTitle": "Neue Tabelle",
     "tableName": "Tabellenname",
     "tableNamePlaceholder": "z. B. customers",

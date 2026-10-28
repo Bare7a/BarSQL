@@ -1,5 +1,8 @@
-use barsql_app::RunEvent;
-use barsql_core::{DriverType, QueryError, ResultSummary, SqlDialect};
+use std::rc::Rc;
+
+use barsql_app::{ApplyError, ResultTable, RunEvent};
+use barsql_core::{ConnectionConfig, DriverType, QueryError, ResultSummary, SqlDialect};
+use barsql_db::{Cancel, ResultSet};
 use barsql_io::EXPORT_FORMATS;
 use barsql_sql::QueryPlan;
 use barsql_sql::lang::{self, UnknownKind, closest, find_name, unknown_name};
@@ -8,20 +11,25 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::cell_viewer;
 use crate::chart_view::ChartView;
+use crate::dialogs;
 use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef};
 use crate::i18n::{I18n, format_number, t, t_count, t_with};
 use crate::list_nav::LIST_INSET;
 use crate::message_log::{self, Heading, Line, MessageLog};
 use crate::plan_view::PlanView;
+use crate::result_edits::ResultEditor;
 use crate::schema::{self, ColumnsLoad};
 use crate::scrollbars::{HoverScrollbar as _, system_bar};
 use crate::shortcuts;
+use crate::state;
+use crate::table_edits::Outcome;
 use crate::toast;
 use crate::tokens::{ICON_SM, ICON_XS, TEXT_MD, TEXT_SM, TEXT_XS};
 
@@ -180,6 +188,23 @@ struct ResultSetView {
     plan: Option<Entity<PlanView>>,
     error: Option<ShownError>,
     statement: Option<String>,
+    // Set once the rows turn out to be one table's, primary key included.
+    editor: Option<ResultEditor>,
+    // Rows that may be one table's, looked up once the result shows: most of a long script's never do.
+    lookup_due: bool,
+    _resolving: Option<Lookup>,
+}
+
+// Cancelled when its result goes, so the lookup leaves the tab's queue instead of holding up the next run.
+struct Lookup {
+    _task: Task<()>,
+    cancel: Cancel,
+}
+
+impl Drop for Lookup {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 impl ResultSetView {
@@ -233,6 +258,8 @@ pub enum ResultsEvent {
     Fix(Fix),
     // Also sent when there is no focused row anymore.
     FocusedRowChanged,
+    // Edits to a result's rows ran on the tab's session, which may hold a transaction.
+    EditsApplied { failed: bool },
 }
 
 #[cfg(test)]
@@ -250,8 +277,9 @@ pub struct ResultsPanel {
     active: usize,
     // The tab's connection's, for the grids' SQL copies and exports.
     dialect: Option<SqlDialect>,
-    // The tab's connection, where a name an error calls unknown may have a near one.
-    connection: Option<(String, DriverType)>,
+    // The tab's connection, where a name an error calls unknown may have a near one, and where edits go.
+    connection: Option<ConnectionConfig>,
+    tab_id: String,
     // The Messages tab is showing, in place of the active result.
     messages_open: bool,
     messages: MessageLog,
@@ -263,15 +291,38 @@ impl ResultsPanel {
         self.dialect = dialect;
     }
 
-    pub fn set_connection(&mut self, id: String, driver: DriverType) {
-        self.connection = Some((id, driver));
+    // Editors and lookups were for the old target, so a change to how it connects, read-only included, drops them.
+    // Anything else leaves the overlays as they are.
+    pub fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
+        if self.connection.as_ref().is_some_and(|old| old.fingerprint() != connection.fingerprint()) {
+            for set in &mut self.sets {
+                (set.lookup_due, set._resolving) = (false, None);
+                if let (Some(_), Some(grid)) = (set.editor.take(), &set.grid) {
+                    grid.update(cx, |grid, cx| grid.clear_overlay(cx));
+                }
+            }
+        }
+        self.connection = Some(connection);
+    }
+
+    pub fn set_tab(&mut self, tab_id: String) {
+        self.tab_id = tab_id;
+    }
+
+    pub fn pending_edits(&self) -> usize {
+        self.sets.iter().filter_map(|set| set.editor.as_ref()).map(|editor| editor.counts()).map(|(e, d)| e + d).sum()
+    }
+
+    // Without counting them, as it's asked whenever the tab changes.
+    pub fn has_pending_edits(&self) -> bool {
+        self.sets.iter().filter_map(|set| set.editor.as_ref()).any(ResultEditor::has_pending)
     }
 
     // A name the error calls unknown may be a typo of one the schema has: a column of the statement's tables, or a
     // table. Their columns may still be loading, so the hint follows the error by a moment.
     fn suggest(&self, index: usize, statement: String, error: &QueryError, cx: &mut Context<Self>) {
         let Some((kind, name)) = unknown_name(&error.message) else { return };
-        let Some((id, _)) = &self.connection else { return };
+        let Some(id) = self.connection.as_ref().map(|connection| connection.id.as_str()) else { return };
         let Some(catalog) = schema::catalog(cx, id) else { return };
         let (tables, loads): (Vec<String>, Vec<ColumnsLoad>) = match kind {
             UnknownKind::Table => (catalog.tables.iter().map(|table| table.name.clone()).collect(), Vec::new()),
@@ -342,6 +393,7 @@ impl ResultsPanel {
 
     pub(crate) fn select_result(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.active = ix;
+        self.resolve_editor(ix, cx);
         self.messages_open = false;
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
@@ -420,7 +472,7 @@ impl ResultsPanel {
             }
             RunEvent::Result(result) => {
                 let result = *result;
-                let driver = self.connection.as_ref().map(|(_, driver)| driver.clone());
+                let driver = self.connection.as_ref().map(|connection| connection.driver.clone());
                 let error = result.error.map(|mut error| {
                     failed = (!error.cancelled).then_some(true);
                     locate_unknown(&mut error, &result.statement, driver.as_ref());
@@ -435,9 +487,14 @@ impl ResultsPanel {
                 }
                 let shown = error.map(|error| ShownError::new(error, cx));
                 let plan = result.plan.map(|plan| cx.new(|cx| PlanView::new(plan, cx)));
+                // A batch's later results carry its whole text too, and only its first can be traced.
+                let before = result.result_index.checked_sub(1).and_then(|prev| self.sets.get(prev));
+                let first = before.and_then(|set| set.statement.as_deref()) != Some(result.statement.as_str());
+                let (index, rows) = (result.result_index, first && shown.is_none() && plan.is_none());
                 let set = self.slot(result.result_index);
                 set.streaming = false;
                 set.statement = Some(result.statement);
+                set.lookup_due = rows;
                 if let Some(error) = shown {
                     set.grid = None;
                     set._subscriptions.clear();
@@ -454,6 +511,9 @@ impl ResultsPanel {
                 }
                 if self.active >= self.sets.len() {
                     self.active = 0;
+                }
+                if index == self.active {
+                    self.resolve_editor(index, cx);
                 }
             }
             // A batch-level failure, like no session, replaces every result.
@@ -945,12 +1005,226 @@ impl ResultsPanel {
                 let meta = &grid.set().columns[*column];
                 let (name, type_name) = (meta.name.clone(), meta.type_name.clone());
                 let value = grid.set().display(*row, *column).map(str::to_string);
-                crate::cell_viewer::open(name, type_name, value, window, cx);
+                cell_viewer::open(name, type_name, value, window, cx);
             }
             GridEvent::Export => crate::export_dialog::open(grid.read(cx).export_source(), window, cx),
             GridEvent::FocusedRowChanged if self.is_active(grid) => cx.emit(ResultsEvent::FocusedRowChanged),
+            GridEvent::EditCell { row, column, value } => {
+                let cell = [(*row, *column, value.clone())];
+                self.stage(grid, |editor, set| editor.stage(set, &cell), cx);
+            }
+            GridEvent::PasteCells(cells) => self.stage(grid, |editor, set| editor.stage(set, cells), cx),
+            GridEvent::ToggleDelete(row) => self.stage(grid, |editor, set| editor.toggle_deletes(set, &[*row]), cx),
+            GridEvent::DeleteRows(rows) => self.stage(grid, |editor, set| editor.toggle_deletes(set, rows), cx),
+            GridEvent::Undo => self.stage(grid, |editor, _| changed(editor.undo()), cx),
+            GridEvent::Redo => self.stage(grid, |editor, _| changed(editor.redo()), cx),
+            GridEvent::Apply => {
+                if let Some(index) = self.index_of(grid) {
+                    self.apply_edits(index, window, cx);
+                }
+            }
+            GridEvent::EditInViewer { row, column } => {
+                let state = grid.read(cx);
+                let meta = &state.set().columns[*column];
+                let (name, type_name) = (meta.name.clone(), meta.type_name.clone());
+                let value = state.shown(*row, *column).display().map(str::to_string);
+                let (grid, row, column) = (grid.downgrade(), *row, *column);
+                let on_save: cell_viewer::OnSave = Rc::new(move |value, _, cx| {
+                    grid.update(cx, |_, cx| cx.emit(GridEvent::EditCell { row, column, value })).ok();
+                });
+                cell_viewer::open_editor(name, type_name, value, on_save, window, cx);
+            }
             _ => {}
         }
+    }
+
+    fn index_of(&self, grid: &Entity<Grid>) -> Option<usize> {
+        self.sets.iter().position(|set| set.grid.as_ref() == Some(grid))
+    }
+
+    fn editable(&self) -> bool {
+        self.connection.as_ref().is_some_and(|connection| !connection.read_only)
+    }
+
+    fn resolve_editor(&mut self, index: usize, cx: &mut Context<Self>) {
+        let editing = |c: &ConnectionConfig| c.driver.capabilities().row_editing && !c.read_only;
+        let Some(connection) = self.connection.clone().filter(editing) else { return };
+        let tab = self.tab_id.clone();
+        let Some(set) = self.sets.get_mut(index).filter(|set| set.lookup_due) else { return };
+        let (Some(grid), Some(statement)) = (set.grid.clone(), set.statement.clone()) else { return };
+        set.lookup_due = false;
+        let columns = grid.read(cx).set().columns.clone();
+        let (bar, id, cancel) = (state::bar(cx), connection.id.clone(), Cancel::new());
+        let lookup = state::spawn(cx, {
+            let cancel = cancel.clone();
+            async move { bar.result_table(&id, &tab, &statement, &columns, &cancel).await }
+        });
+        let task = cx.spawn(async move |this, cx| {
+            let Some(Ok(Some(table))) = lookup.await else { return };
+            let _ = this.update(cx, |this, cx| this.install_editor(index, &grid, table, cx));
+        });
+        set._resolving = Some(Lookup { _task: task, cancel });
+    }
+
+    fn install_editor(&mut self, index: usize, grid: &Entity<Grid>, table: ResultTable, cx: &mut Context<Self>) {
+        let Some(set) = self.sets.get_mut(index).filter(|set| set.grid.as_ref() == Some(grid)) else { return };
+        set.editor = ResultEditor::new(table, grid.read(cx).set());
+        self.sync_overlay(index, cx);
+    }
+
+    fn sync_overlay(&mut self, index: usize, cx: &mut Context<Self>) {
+        let editable = self.editable();
+        let Some(set) = self.sets.get(index) else { return };
+        let (Some(grid), Some(editor)) = (&set.grid, &set.editor) else { return };
+        let overlay = editor.overlay(grid.read(cx).set(), editable && !editor.applying);
+        grid.update(cx, |grid, cx| grid.set_overlay(overlay, cx));
+        cx.notify();
+    }
+
+    fn stage(
+        &mut self,
+        grid: &Entity<Grid>,
+        edit: impl FnOnce(&mut ResultEditor, &ResultSet) -> Outcome,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.index_of(grid).filter(|_| self.editable()) else { return };
+        let rows = grid.read(cx).set().clone();
+        let Some(editor) = self.sets[index].editor.as_mut().filter(|editor| !editor.applying) else { return };
+        if edit(editor, &rows) == Outcome::Ambiguous {
+            toast::error(t(cx, "tableView.ambiguousRow"), cx);
+        }
+        let editor = &*editor;
+        grid.update(cx, |grid, cx| grid.patch_overlay(|overlay| editor.patch(overlay), cx));
+        cx.notify();
+    }
+
+    fn revert_edits(&mut self, cx: &mut Context<Self>) {
+        let index = self.active;
+        if let Some(editor) = self.sets.get_mut(index).and_then(|set| set.editor.as_mut()).filter(|e| !e.applying) {
+            editor.revert();
+        }
+        self.sync_overlay(index, cx);
+    }
+
+    // A connection that asks before changes gets a confirmation first.
+    fn apply_edits(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.connection.clone().filter(|connection| !connection.read_only) else { return };
+        let Some(editor) = self.sets.get(index).and_then(|set| set.editor.as_ref()) else { return };
+        if !editor.has_pending() || editor.applying {
+            return;
+        }
+        if !connection.confirm_changes {
+            return self.apply_now(index, window, cx);
+        }
+        let (edits, deletes) = editor.counts();
+        let confirm = dialogs::Confirm::save_rows(&connection, edits + deletes, cx);
+        let panel = cx.entity().downgrade();
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            let _ = panel.update(cx, |panel, cx| panel.apply_now(index, window, cx));
+        });
+    }
+
+    fn apply_now(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.connection.clone().filter(|connection| !connection.read_only) else { return };
+        let tab = self.tab_id.clone();
+        let Some(set) = self.sets.get_mut(index) else { return };
+        let (Some(grid), Some(editor)) = (set.grid.clone(), set.editor.as_mut()) else { return };
+        if !editor.has_pending() || editor.applying {
+            return;
+        }
+        editor.applying = true;
+        let edits = editor.edits();
+        let bar = state::bar(cx);
+        let work = state::spawn(cx, async move { bar.apply_result_edits(&connection.id, &tab, &edits).await });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = work.await;
+            let _ = this.update_in(cx, |this, window, cx| this.finish_apply(index, &grid, result, window, cx));
+        })
+        .detach();
+        self.sync_overlay(index, cx);
+    }
+
+    // A failure keeps the edits staged: outside the tab's transaction, none landed.
+    fn finish_apply(
+        &mut self,
+        index: usize,
+        grid: &Entity<Grid>,
+        result: Option<Result<i64, ApplyError>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dialect = self.dialect;
+        if let Some(set) = self.sets.get_mut(index).filter(|set| set.grid.as_ref() == Some(grid))
+            && let Some(editor) = set.editor.as_mut()
+        {
+            editor.applying = false;
+            if let Some(Ok(_)) = &result {
+                let (applied, removed) = editor.apply_to(grid.read(cx).set(), dialect);
+                if let Some(summary) = set.summary.as_mut() {
+                    summary.row_count = applied.rows() as i64;
+                }
+                grid.update(cx, |grid, cx| grid.replace_set(applied, &removed, cx));
+            }
+        }
+        // A refusal ran nothing, so the tab's transaction is as it was.
+        let failed = match &result {
+            Some(Ok(_)) => Some(false),
+            Some(Err(error)) => error.ran.then_some(true),
+            None => None,
+        };
+        match result {
+            Some(Ok(missing)) if missing > 0 => toast::info(t_count(cx, "tableView.deletesNotFound", missing, &[]), cx),
+            Some(Err(ApplyError { error, .. })) => {
+                dialogs::alert(t(cx, "errors.generic"), error.message.into(), window, cx)
+            }
+            _ => {}
+        }
+        self.sync_overlay(index, cx);
+        if let Some(failed) = failed {
+            cx.emit(ResultsEvent::EditsApplied { failed });
+        }
+    }
+
+    fn edit_bar(&self, editor: &ResultEditor, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (edits, deletes) = editor.counts();
+        let busy = editor.applying;
+        h_flex()
+            .flex_none()
+            .px(rems(0.923))
+            .py(rems(0.615))
+            .gap(rems(0.462))
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                Button::new("result-revert")
+                    .debug_selector(|| "result-revert".into())
+                    .tool_label(t(cx, "tableView.reset"))
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.revert_edits(cx))),
+            )
+            .child(
+                Button::new("result-apply")
+                    .debug_selector(|| "result-apply".into())
+                    .primary()
+                    .tool_label(t(cx, "tableView.apply"))
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, window, cx| this.apply_edits(this.active, window, cx))),
+            )
+            .when(edits > 0, |el| {
+                let text = t_with(cx, "tableView.pendingUpdates", &[("count", &edits.to_string())]);
+                el.child(form::badge(text, theme.warning))
+            })
+            .when(deletes > 0, |el| {
+                let text = t_with(cx, "tableView.pendingDeletes", &[("count", &deletes.to_string())]);
+                el.child(form::badge(text, theme.danger))
+            })
+            .child(div().flex_1())
+            .child(div().min_w_0().truncate().text_size(TEXT_SM).text_color(theme.muted_foreground).child(t_with(
+                cx,
+                "results.editsTo",
+                &[("table", editor.table())],
+            )))
     }
 
     fn grid(&self, set: &ResultSetView, grid: &Entity<Grid>, cx: &mut Context<Self>) -> AnyElement {
@@ -969,10 +1243,12 @@ impl ResultsPanel {
             Some(chart) if set.charting => chart.clone().into_any_element(),
             _ => grid.clone().into_any_element(),
         };
+        let edit_bar = set.editor.as_ref().filter(|editor| editor.has_pending() || editor.applying);
         v_flex()
             .size_full()
             .child(grid::toolbar(grid, meta, None, Some(toggle), !set.charting, cx))
             .child(div().flex_1().min_h_0().child(body))
+            .children(edit_bar.map(|editor| self.edit_bar(editor, cx)))
             .into_any_element()
     }
 
@@ -985,6 +1261,11 @@ impl ResultsPanel {
             set.chart = Some(cx.new(|cx| ChartView::new(grid, window, cx)));
         }
         cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn editing_table(&self) -> Option<String> {
+        Some(self.sets.get(self.active)?.editor.as_ref()?.table().to_string())
     }
 
     #[cfg(test)]
@@ -1054,7 +1335,7 @@ mod messages_tests {
     use super::ResultsPanel;
     use crate::test_support::Env;
 
-    fn panel(cx: &mut TestAppContext) -> (Entity<ResultsPanel>, &mut VisualTestContext) {
+    pub(super) fn panel(cx: &mut TestAppContext) -> (Entity<ResultsPanel>, &mut VisualTestContext) {
         let mut panel = None;
         let window = cx.add_window(|window, cx| {
             let view = cx.new(|_| ResultsPanel::default());
@@ -1065,7 +1346,7 @@ mod messages_tests {
         (panel.unwrap(), cx)
     }
 
-    fn apply(panel: &Entity<ResultsPanel>, events: Vec<RunEvent>, cx: &mut VisualTestContext) {
+    pub(super) fn apply(panel: &Entity<ResultsPanel>, events: Vec<RunEvent>, cx: &mut VisualTestContext) {
         for event in events {
             panel.update_in(cx, |panel, window, cx| panel.apply(event, window, cx));
         }
@@ -1077,7 +1358,7 @@ mod messages_tests {
         RunEvent::Messages { result_index: index, messages, dropped: 0 }
     }
 
-    fn done(index: usize, statement: &str, rows: i64) -> RunEvent {
+    pub(super) fn done(index: usize, statement: &str, rows: i64) -> RunEvent {
         let summary = ResultSummary { row_count: rows, ..Default::default() };
         let result = RunResult {
             result_index: index,
@@ -1134,7 +1415,8 @@ mod messages_tests {
     fn messages_wait_behind_rows_until_their_tab_is_picked(cx: &mut TestAppContext) {
         let _env = Env::new(cx);
         let (panel, cx) = panel(cx);
-        let columns: Arc<[ColumnMeta]> = vec![ColumnMeta { name: "n".into(), type_name: "int4".into() }].into();
+        let columns: Arc<[ColumnMeta]> =
+            vec![ColumnMeta { name: "n".into(), type_name: "int4".into(), ..Default::default() }].into();
         let mut rows = ChunkBuilder::new(1, 1);
         rows.push_number(|s| s.push('1'));
         rows.end_row();
@@ -1172,6 +1454,105 @@ mod messages_tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("result-tab-messages").is_none(), "a new run starts without them");
     }
+}
+
+#[cfg(test)]
+mod editor_tests {
+    use std::sync::Arc;
+
+    use barsql_app::{ResultTable, RunEvent};
+    use barsql_core::{ColumnInfo, ConnectionConfig, DriverType};
+    use barsql_db::{ChunkBuilder, ColumnMeta};
+    use gpui_kit::TestAppContext;
+
+    use super::ResultsPanel;
+    use super::messages_tests::{apply, done, panel};
+    use crate::test_support::Env;
+
+    // Result `index`: one row of (id, name).
+    fn people(index: usize, statement: &str) -> Vec<RunEvent> {
+        let columns: Arc<[ColumnMeta]> = [("id", "int4"), ("name", "text")]
+            .map(|(name, type_name)| ColumnMeta {
+                name: name.into(),
+                type_name: type_name.into(),
+                ..Default::default()
+            })
+            .to_vec()
+            .into();
+        let mut rows = ChunkBuilder::new(2, 1);
+        rows.push_number(|s| s.push('1'));
+        rows.push_text(|s| s.push_str("ann"));
+        rows.end_row();
+        vec![
+            RunEvent::Meta { result_index: index, columns, schema_name: String::new(), table_name: String::new() },
+            RunEvent::Rows { result_index: index, chunk: Arc::new(rows.finish()) },
+            done(index, statement, 1),
+        ]
+    }
+
+    fn looked_up(panel: &ResultsPanel) -> Vec<bool> {
+        panel.sets.iter().map(|set| set._resolving.is_some()).collect()
+    }
+
+    // A SQL Server batch's results all carry its text, and only the first can be traced from it. A result that isn't
+    // shown waits until it is.
+    #[gpui_kit::test]
+    fn only_a_statements_first_result_on_a_writable_connection_looks_up_its_table(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let connection = ConnectionConfig { driver: DriverType::SqlServer, ..Default::default() };
+        panel.update(cx, |panel, cx| panel.set_connection(connection.clone(), cx));
+        let batch = "SELECT id, name FROM a WHERE id = 1\nUPDATE b SET name = name OUTPUT inserted.id, inserted.name";
+        let runs = [people(0, batch), people(1, batch), people(2, "SELECT id, name FROM c")];
+        apply(&panel, runs.into_iter().flatten().collect(), cx);
+        assert_eq!(panel.read_with(cx, |panel, _| looked_up(panel)), [true, false, false]);
+        panel.update(cx, |panel, cx| {
+            panel.select_result(1, cx);
+            panel.select_result(2, cx);
+        });
+        assert_eq!(panel.read_with(cx, |panel, _| looked_up(panel)), [true, false, true]);
+
+        panel.update(cx, |panel, cx| {
+            panel.clear(cx);
+            panel.set_connection(ConnectionConfig { read_only: true, ..connection }, cx);
+        });
+        apply(&panel, people(0, "SELECT id, name FROM c"), cx);
+        assert_eq!(panel.read_with(cx, |panel, _| looked_up(panel)), [false], "its edits could never apply");
+    }
+
+    // Edits staged against one server don't follow the tab to another, though a rename keeps them.
+    #[gpui_kit::test]
+    fn a_connection_pointed_elsewhere_drops_staged_edits(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let staging = ConnectionConfig { driver: DriverType::Postgres, host: "staging".into(), ..Default::default() };
+        panel.update(cx, |panel, cx| panel.set_connection(staging.clone(), cx));
+        apply(&panel, people(0, "SELECT id, name FROM people"), cx);
+        panel.update(cx, |panel, cx| {
+            let grid = panel.sets[0].grid.clone().expect("a grid");
+            let catalog = ["id", "name"]
+                .map(|name| ColumnInfo { name: name.into(), is_primary: name == "id", ..Default::default() })
+                .to_vec();
+            let columns = vec![Some("id".into()), Some("name".into())];
+            panel.install_editor(
+                0,
+                &grid,
+                ResultTable { table: "people".into(), columns, catalog, ..Default::default() },
+                cx,
+            );
+            panel.stage(&grid, |editor, set| editor.stage(set, &[(0, 1, Some("anna".into()))]), cx);
+        });
+        let renamed = ConnectionConfig { name: "Staging".into(), ..staging.clone() };
+        panel.update(cx, |panel, cx| panel.set_connection(renamed, cx));
+        assert_eq!(panel.read_with(cx, |panel, _| panel.pending_edits()), 1, "a rename keeps them");
+        let prod = ConnectionConfig { host: "prod".into(), ..staging };
+        panel.update(cx, |panel, cx| panel.set_connection(prod, cx));
+        assert!(panel.read_with(cx, |panel, _| panel.sets[0].editor.is_none() && panel.pending_edits() == 0));
+    }
+}
+
+fn changed(changed: bool) -> Outcome {
+    if changed { Outcome::Changed } else { Outcome::Unchanged }
 }
 
 fn copy_text(text: String, cx: &mut App) {

@@ -13,6 +13,7 @@ mod plan_showplan;
 pub mod quote;
 pub mod readonly;
 pub mod schema_diff;
+pub mod select_source;
 pub mod split;
 pub mod sql_text;
 pub mod structure;

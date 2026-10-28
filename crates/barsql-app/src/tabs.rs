@@ -36,6 +36,14 @@ pub(crate) struct TabSlot {
 
 pub(crate) type TabGuard = OwnedMutexGuard<TabSlot>;
 
+impl TabSlot {
+    // The session as the tab's last run left it, if it's still open on `connection_id`.
+    pub(crate) fn live_session(&mut self, connection_id: &str) -> Option<&mut Session> {
+        let same = !self.closed && self.connection_id == connection_id;
+        self.session.as_mut().filter(|session| same && !session.is_broken())
+    }
+}
+
 impl Tabs {
     // Work takes its slot before its first await, so a tab closed while the work connects doesn't get a new one.
     pub(crate) fn slot(&self, tab_id: &str) -> Slot {
@@ -208,7 +216,7 @@ impl BarApp {
     }
 }
 
-async fn unless_cancelled<T>(
+pub(crate) async fn unless_cancelled<T>(
     work: impl Future<Output = Result<T, QueryError>>,
     cancel: &Cancel,
 ) -> Result<T, QueryError> {

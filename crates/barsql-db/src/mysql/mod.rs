@@ -18,7 +18,7 @@ use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_e
 use crate::ssh::{Forward, SshOptions, TunnelSlot};
 use crate::temporal::parse_offset;
 use crate::tls::TlsMode;
-use crate::{Cancel, ChunkBuilder, ColumnMeta};
+use crate::{Cancel, ChunkBuilder, ColumnMeta, ColumnOrigin};
 
 pub(crate) use values::push_binary as push_binary_value;
 pub use values::{Decoder, type_name};
@@ -399,7 +399,7 @@ async fn stream_query(
         } else {
             let meta: Arc<[ColumnMeta]> = columns
                 .iter()
-                .map(|c| ColumnMeta { name: c.name_str().into_owned(), type_name: type_name(c) })
+                .map(|c| ColumnMeta { name: c.name_str().into_owned(), type_name: type_name(c), origin: origin(c) })
                 .collect();
             let decoders: Vec<Decoder> = columns.iter().map(Decoder::for_column).collect();
             emit(sink, ScriptEvent::Meta { result_index: index, columns: meta.clone() }).await;
@@ -507,6 +507,16 @@ pub(crate) fn my_error(err: mysql_async::Error) -> QueryError {
         },
         other => QueryError::message(other.to_string()),
     }
+}
+
+// Empty for an expression.
+fn origin(column: &Column) -> Option<ColumnOrigin> {
+    let (table, name) = (column.org_table_str(), column.org_name_str());
+    (!table.is_empty() && !name.is_empty()).then(|| ColumnOrigin::Named {
+        schema: column.schema_str().into_owned(),
+        table: table.into_owned(),
+        column: name.into_owned(),
+    })
 }
 
 #[cfg(test)]

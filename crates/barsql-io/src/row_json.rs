@@ -188,7 +188,11 @@ mod tests {
     fn typed_set(columns: &[(&str, &str)], cells: &[Option<&str>]) -> ResultSet {
         let meta: Arc<[ColumnMeta]> = columns
             .iter()
-            .map(|(name, type_name)| ColumnMeta { name: name.to_string(), type_name: type_name.to_string() })
+            .map(|(name, type_name)| ColumnMeta {
+                name: name.to_string(),
+                type_name: type_name.to_string(),
+                ..Default::default()
+            })
             .collect();
         let mut builder = ChunkBuilder::new(columns.len(), 1);
         for cell in cells {

@@ -33,6 +33,7 @@ mod plan_view;
 mod query_tab;
 mod quick_search;
 mod relative_time;
+mod result_edits;
 mod results;
 mod saved_panel;
 mod saved_queries;

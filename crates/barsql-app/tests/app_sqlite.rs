@@ -3,12 +3,14 @@ mod support;
 use std::time::{Duration, Instant};
 
 use barsql_app::{
-    AppEvent, BackupOutcome, BackupRequest, CsvImportRequest, CsvOptions, RunEvent, SqlImportRequest, Unsaved,
+    AppEvent, BackupOutcome, BackupRequest, CsvImportRequest, CsvOptions, ResultEdits, ResultTable, RunEvent,
+    SqlImportRequest, Unsaved,
 };
+use barsql_core::schema::primary_keys;
 use barsql_core::{DriverType, ObjectKind, Row, RowDelete, RowUpdate, SavedQuery, TableDataRequest, Value};
 use barsql_sql::alter;
 use barsql_sql::structure::{ChangePlan, Draft, Step, plan_changes};
-use support::{Fixture, collect, import_outcome, results, rows};
+use support::{Fixture, collect, import_outcome, meta, results, rows};
 
 fn row(pairs: &[(&str, Value)]) -> Row {
     pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
@@ -20,6 +22,11 @@ fn header(has_header: bool) -> CsvOptions {
 
 fn names(values: &[&str]) -> Vec<String> {
     values.iter().map(|s| s.to_string()).collect()
+}
+
+async fn result_table(f: &Fixture, id: &str, tab: &str, sql: &str) -> Option<ResultTable> {
+    let events = collect(f.app.execute_query_stream(id, tab, sql).await.unwrap()).await;
+    f.app.result_table(id, tab, sql, &meta(&events, 0), &barsql_db::Cancel::new()).await.unwrap()
 }
 
 #[tokio::test]
@@ -68,6 +75,8 @@ async fn read_only_blocks_writes_but_not_reads() {
     assert!(f.app.execute_query_stream(&id, "tab", "DELETE FROM t").await.is_err());
     let err = f.app.update_row(&id, &RowUpdate { table: "t".into(), ..Default::default() }).await.unwrap_err();
     assert!(err.message.contains("read-only"));
+    let err = f.app.apply_result_edits(&id, "tab", &ResultEdits::default()).await.unwrap_err();
+    assert!(err.error.message.contains("read-only") && !err.ran);
 }
 
 #[tokio::test]
@@ -259,6 +268,99 @@ async fn a_tab_keeps_its_session_state_between_runs() {
     .await;
     let events = collect(f.app.execute_query_stream(&id, "tab-a", "SELECT v FROM scratch").await.unwrap()).await;
     assert_eq!(rows(&events, 0), [[Some("7".to_string())]]);
+}
+
+#[tokio::test]
+async fn a_single_table_result_names_its_table_and_key() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").await;
+    f.exec(&id, "CREATE TABLE pets (id INTEGER PRIMARY KEY, owner INTEGER)").await;
+    f.exec(&id, "CREATE VIEW grown AS SELECT * FROM people").await;
+    let found = result_table(&f, &id, "tab", "SELECT id, name AS n, upper(name) FROM people").await.expect("one table");
+    assert_eq!((found.schema.as_str(), found.table.as_str()), ("main", "people"));
+    assert_eq!(found.columns, [Some("id".into()), Some("name".into()), None]);
+    assert_eq!(primary_keys(&found.catalog), ["id"]);
+    for sql in [
+        "SELECT p.id, pets.id FROM people p JOIN pets ON pets.owner = p.id",
+        "SELECT name, count(*) FROM people GROUP BY name",
+        "SELECT count(*) FROM people",
+        "WITH p AS (SELECT * FROM people) SELECT * FROM p",
+        "SELECT * FROM grown",
+    ] {
+        assert_eq!(result_table(&f, &id, "tab", sql).await, None, "{sql}");
+    }
+}
+
+#[tokio::test]
+async fn result_edits_land_together_or_not_at_all() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)").await;
+    f.exec(&id, "INSERT INTO people VALUES (1, 'ann'), (2, 'bob'), (3, 'cy')").await;
+    let table = result_table(&f, &id, "tab", "SELECT * FROM people").await.expect("one table");
+    let key = |id: i64| row(&[("id", Value::Int(id))]);
+    let rename = |id: i64, name: &str| RowUpdate {
+        schema: table.schema.clone(),
+        table: table.table.clone(),
+        primary_key: key(id),
+        changes: row(&[("name", Value::from(name))]),
+    };
+    let edits = |deletes: &[i64], updates: Vec<RowUpdate>| ResultEdits {
+        delete: RowDelete {
+            schema: table.schema.clone(),
+            table: table.table.clone(),
+            primary_keys: deletes.iter().map(|id| key(*id)).collect(),
+        },
+        updates,
+        columns: table.catalog.clone(),
+        database: table.database.clone(),
+        fingerprint: table.fingerprint.clone(),
+    };
+    let names = "SELECT name FROM people ORDER BY id";
+
+    // The second rename breaks UNIQUE, so the delete and the first rename go too.
+    let clash = edits(&[3], vec![rename(1, "anna"), rename(2, "anna")]);
+    assert!(f.app.apply_result_edits(&id, "tab", &clash).await.unwrap_err().ran);
+    assert_eq!(f.query(&id, names).await, [["ann"], ["bob"], ["cy"]]);
+    let moved = ResultEdits { fingerprint: "elsewhere".into(), ..edits(&[3], Vec::new()) };
+    let refused = f.app.apply_result_edits(&id, "tab", &moved).await.unwrap_err();
+    assert!(!refused.ran && refused.error.message.contains("connection changed"), "{refused:?}");
+    assert_eq!(f.query(&id, names).await, [["ann"], ["bob"], ["cy"]]);
+    let missing = f.app.apply_result_edits(&id, "tab", &edits(&[3, 9], vec![rename(1, "anna")])).await.unwrap();
+    assert_eq!(missing, 1, "9 was never there");
+    assert_eq!(f.query(&id, names).await, [["anna"], ["bob"]]);
+    assert!(!f.app.transaction_status("tab"), "the edits' own transaction ended");
+
+    // In the tab's transaction, they end with it.
+    f.app.begin_transaction(&id, "tab").await.unwrap();
+    f.app.apply_result_edits(&id, "tab", &edits(&[], vec![rename(2, "bobby")])).await.unwrap();
+    assert!(f.app.transaction_status("tab"));
+    f.app.rollback_transaction("tab").await.unwrap();
+    assert_eq!(f.query(&id, names).await, [["anna"], ["bob"]]);
+}
+
+// A deferred foreign key refuses the COMMIT itself, which SQLite leaves open, so the edits' own transaction goes too.
+#[tokio::test]
+async fn result_edits_refused_at_commit_leave_no_transaction() {
+    let f = Fixture::new();
+    let id = f.sqlite().await;
+    f.exec(&id, "CREATE TABLE parents (id INTEGER PRIMARY KEY)").await;
+    f.exec(&id, "CREATE TABLE children (parent INTEGER REFERENCES parents (id) DEFERRABLE INITIALLY DEFERRED)").await;
+    f.exec(&id, "INSERT INTO parents VALUES (1), (2)").await;
+    f.exec(&id, "INSERT INTO children VALUES (1)").await;
+    let table = result_table(&f, &id, "tab", "SELECT * FROM parents").await.expect("one table");
+    let keys = [1, 2].map(|id| row(&[("id", Value::Int(id))])).to_vec();
+    let edits = ResultEdits {
+        delete: RowDelete { schema: table.schema.clone(), table: table.table.clone(), primary_keys: keys },
+        columns: table.catalog.clone(),
+        fingerprint: table.fingerprint.clone(),
+        ..Default::default()
+    };
+    let refused = f.app.apply_result_edits(&id, "tab", &edits).await.unwrap_err();
+    assert!(refused.ran && refused.error.message.contains("FOREIGN KEY"), "{refused:?}");
+    assert!(!f.app.transaction_status("tab"), "none left open on the tab");
+    assert_eq!(f.query(&id, "SELECT id FROM parents ORDER BY id").await, [["1"], ["2"]]);
 }
 
 #[tokio::test]

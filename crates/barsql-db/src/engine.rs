@@ -7,7 +7,7 @@ use barsql_core::{
     ObjectRef, QueryError, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest, TableInfo,
     TriggerInfo, Value,
 };
-use barsql_sql::dml::{build_delete, build_insert, build_insert_with, build_table_select, build_update};
+use barsql_sql::dml::{build_insert, build_insert_with, build_table_select};
 use barsql_sql::{
     ExplainStrategy, PlanRows, READ_ONLY_ERROR, assert_read_only, quote_ident, table_ref, validate_table_filter,
 };
@@ -310,8 +310,7 @@ impl Engine {
         self.update_rows(std::slice::from_ref(update)).await
     }
 
-    // A key that matches no row is an error, else the edit would vanish silently. A failure keeps the rows already
-    // updated.
+    // A failure keeps the rows already updated.
     pub async fn update_rows(&self, updates: &[RowUpdate]) -> Result<(), QueryError> {
         self.require_writable()?;
         if updates.is_empty() {
@@ -326,28 +325,12 @@ impl Engine {
                     Some((schema.clone(), update.table.clone(), self.list_columns(&schema, &update.table).await?));
             }
             let Some((_, _, columns)) = &catalog else { unreachable!("read above") };
-            let pks = primary_keys(columns);
-            if pks.is_empty() {
-                return Err(QueryError::message("table has no primary key"));
-            }
-            let (sql, args) = build_update(
-                &self.driver(),
-                &schema,
-                &update.table,
-                &update.changes,
-                &update.primary_key,
-                &pks,
-                columns,
-            )
-            .map_err(QueryError::message)?;
-            if session.execute_params(&sql, &args).await? == 0 {
-                return Err(row_not_found(&update.primary_key));
-            }
+            session.update_row(&schema, update, columns).await?;
         }
         Ok(())
     }
 
-    // One statement per key. A failure keeps the rows already deleted.
+    // A statement per batch of keys. A failure keeps the batches already deleted.
     pub async fn delete_rows(&self, delete: &RowDelete) -> (i64, Option<QueryError>) {
         if let Err(err) = self.require_writable() {
             return (0, Some(err));
@@ -366,12 +349,9 @@ impl Engine {
             Err(err) => return (0, Some(err)),
         };
         let mut total = 0;
-        for key in &delete.primary_keys {
-            let (sql, args) = match build_delete(&self.driver(), &schema, &delete.table, &pks, key, &columns) {
-                Ok(built) => built,
-                Err(err) => return (total, Some(QueryError::message(err))),
-            };
-            match session.execute_params(&sql, &args).await {
+        let keys: Vec<&Row> = delete.primary_keys.iter().collect();
+        for keys in keys.chunks(crate::sources::key_batch(0, &columns)) {
+            match session.delete_keys(&schema, &delete.table, keys, &columns).await {
                 Ok(n) => total += n as i64,
                 Err(err) => return (total, Some(err)),
             }
@@ -576,7 +556,7 @@ impl Session {
     }
 }
 
-fn row_not_found(key: &Row) -> QueryError {
+pub(crate) fn row_not_found(key: &Row) -> QueryError {
     let key: Vec<String> =
         key.iter().map(|(column, value)| format!("{column} = {}", crate::lite::literal(value))).collect();
     QueryError::message(format!(

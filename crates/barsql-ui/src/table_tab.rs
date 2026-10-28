@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use barsql_app::{EditorTab, RunEvent, TableViewRef};
-use barsql_core::{ConnectionConfig, Row, RowDelete, RowUpdate, TableDataRequest, Value};
+use barsql_core::{ConnectionConfig, Row, RowDelete, RowUpdate, TableDataRequest};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputMode, InputState};
@@ -11,7 +11,6 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use serde_json::Value as Json;
 
 use crate::cell_viewer;
 use crate::completion::{self, Completion};
@@ -23,7 +22,7 @@ use crate::results::ShownError;
 use crate::schema;
 use crate::sql_language::FilterCompletion;
 use crate::state;
-use crate::table_edits::{Keys, Outcome, OwnedCell, Staging, changes_row, foreign_key_filter};
+use crate::table_edits::{Keys, Outcome, OwnedCell, Staging, changes_row, foreign_key_filter, key_row};
 use crate::toast;
 use crate::tokens::{ICON_SM, TEXT_SM};
 
@@ -438,20 +437,15 @@ impl TableTab {
         let set = grid.set();
         let column_ix = |name: &str| set.columns.iter().position(|c| c.name == name);
         let mut staged = HashMap::new();
-        let mut deleted = std::collections::HashSet::new();
-        for row in 0..set.rows() {
-            let Some(key) = self.keys.key(row) else { continue };
-            if let Some(edits) = self.staging.pending.edits.get(key) {
-                for (column, value) in edits {
-                    if let Some(ix) = column_ix(column) {
-                        staged.insert((row, ix), value.clone());
-                    }
+        for (key, edits) in &self.staging.pending.edits {
+            let Some(row) = self.keys.row_of(key) else { continue };
+            for (column, value) in edits {
+                if let Some(ix) = column_ix(column) {
+                    staged.insert((row, ix), value.clone());
                 }
             }
-            if self.staging.pending.deletes.contains(key) {
-                deleted.insert(row);
-            }
         }
+        let deleted = self.staging.pending.deletes.iter().filter_map(|key| self.keys.row_of(key)).collect();
         let sorted = self.order_by.clone().or_else(|| self.primary_keys.first().cloned());
         let sort = sorted.and_then(|name| column_ix(&name)).or((!set.columns.is_empty()).then_some(0));
         let foreign =
@@ -647,16 +641,8 @@ impl TableTab {
         if !self.connection.confirm_changes {
             return self.apply_now(window, cx);
         }
-        let pending = &self.staging.pending;
-        let rows = pending.deletes.len() + pending.edits.keys().filter(|key| !pending.deletes.contains(*key)).count();
-        let name = [("name", self.connection.name.as_str())];
-        let confirm = dialogs::Confirm {
-            title: t_with(cx, "safety.changesTitle", &name),
-            description: t_count(cx, "safety.saveRows", rows as i64, &name),
-            detail: None,
-            confirm: t(cx, "common.save"),
-            danger: true,
-        };
+        let rows = self.staging.edit_count() + self.staging.delete_count();
+        let confirm = dialogs::Confirm::save_rows(&self.connection, rows, cx);
         let tab = cx.entity().downgrade();
         dialogs::confirm(confirm, window, cx, move |window, cx| {
             let _ = tab.update(cx, |tab, cx| tab.apply_now(window, cx));
@@ -676,7 +662,7 @@ impl TableTab {
         let updates: Vec<RowUpdate> = pending
             .edits
             .iter()
-            .filter(|(key, _)| !pending.deletes.contains(key))
+            .filter(|(key, _)| !pending.deletes.contains(*key))
             .map(|(key, changes)| RowUpdate {
                 schema: schema.clone(),
                 table: table.clone(),
@@ -906,25 +892,6 @@ impl TableTab {
             .child(div().flex_1().min_h_0().child(self.grid.clone()))
             .into_any_element()
     }
-}
-
-// Decodes a PkKey for update_row and delete_rows.
-fn key_row(key: &str) -> Row {
-    let map: serde_json::Map<String, Json> = serde_json::from_str(key).unwrap_or_default();
-    map.into_iter()
-        .map(|(column, value)| {
-            let value = match value {
-                Json::Null => Value::Null,
-                Json::Bool(b) => Value::Bool(b),
-                Json::Number(n) => {
-                    n.as_i64().map(Value::Int).unwrap_or_else(|| Value::Float(n.as_f64().unwrap_or(f64::NAN)))
-                }
-                Json::String(s) => Value::Text(s),
-                other => Value::Text(other.to_string()),
-            };
-            (column, value)
-        })
-        .collect()
 }
 
 impl Render for TableTab {

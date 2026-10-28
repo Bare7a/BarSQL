@@ -501,7 +501,7 @@ fn closing_a_dirty_structure_tab_asks_to_discard(cx: &mut TestAppContext) {
     edit_cell(&mut app, 1, NAME, "full_name");
     app.dispatch(CloseTab);
     assert!(app.dialog_open());
-    assert_eq!(app.asked(), ("Discard structure changes?".into(), Some("e2e_s".into())));
+    assert_eq!(app.asked(), ("Discard unapplied changes?".into(), Some("e2e_s".into())));
     app.confirm_dialog();
     assert_eq!(app.titles().len(), tabs - 1);
     app.query("SELECT name FROM e2e_s");

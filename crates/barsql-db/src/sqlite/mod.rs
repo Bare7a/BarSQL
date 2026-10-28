@@ -13,7 +13,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 use crate::event::{ScriptEvent, Sink, StatementResult, emit};
 use crate::lite::{LiteRef, LiteRows, LiteSource, LiteValue, values};
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
-use crate::{Cancel, ChunkBuilder, ColumnMeta};
+use crate::{Cancel, ChunkBuilder, ColumnMeta, ColumnOrigin};
 
 pub use crate::lite::values::parse_time;
 
@@ -177,6 +177,14 @@ impl SqliteSession {
         result
     }
 
+    // A transaction keeps the connection from the engine's own catalog reads.
+    pub async fn list_columns(&mut self, table: &str) -> Result<Vec<barsql_core::ColumnInfo>, QueryError> {
+        let table = table.to_string();
+        let result = self.blocking(move |conn| crate::lite::catalog::columns(&mut Rusqlite(conn), &table)).await;
+        self.release();
+        result?
+    }
+
     pub async fn execute_params(&mut self, sql: &str, params: &[Value]) -> Result<u64, QueryError> {
         let sql = sql.to_string();
         let params: Vec<rusqlite::types::Value> = params.iter().map(lite_value).collect();
@@ -294,7 +302,12 @@ fn stream_statement(
     }
     let columns: Arc<[ColumnMeta]> = prepared
         .columns()
-        .map(|c| ColumnMeta { name: c.name().to_string(), type_name: c.decl_type().unwrap_or("").to_uppercase() })
+        .enumerate()
+        .map(|(i, c)| ColumnMeta {
+            name: c.name().to_string(),
+            type_name: c.decl_type().unwrap_or("").to_uppercase(),
+            origin: origin(&prepared, i),
+        })
         .collect();
     emit(ScriptEvent::Meta { result_index: index, columns: columns.clone() });
     let time_columns: Vec<bool> = columns.iter().map(|c| values::is_time_type(&c.type_name)).collect();
@@ -472,4 +485,14 @@ fn error_string(primary: i32) -> &'static str {
         26 => "file is not a database",
         _ => "unknown error",
     }
+}
+
+// Not columns_with_metadata, which panics on a name that isn't UTF-8.
+fn origin(prepared: &rusqlite::Statement<'_>, column: usize) -> Option<ColumnOrigin> {
+    let (schema, table, name, ..) = prepared.column_metadata(column).ok().flatten()?;
+    Some(ColumnOrigin::Named {
+        schema: schema.to_str().ok()?.to_string(),
+        table: table.to_str().ok()?.to_string(),
+        column: name.to_str().ok()?.to_string(),
+    })
 }

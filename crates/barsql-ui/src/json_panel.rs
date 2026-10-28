@@ -291,8 +291,10 @@ mod tests {
 
     // (id 7, name), with a NULL name for None.
     fn row_with(name: Option<&str>) -> RowRef {
-        let columns: Arc<[ColumnMeta]> =
-            ["id", "name"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into();
+        let columns: Arc<[ColumnMeta]> = ["id", "name"]
+            .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into(), ..Default::default() })
+            .to_vec()
+            .into();
         let mut builder = ChunkBuilder::new(2, 1);
         builder.push_number(|s| s.push('7'));
         match name {
@@ -307,7 +309,8 @@ mod tests {
 
     // Row `number` of ids 1 to 3.
     fn numbered(number: usize) -> RowRef {
-        let columns: Arc<[ColumnMeta]> = [ColumnMeta { name: "id".into(), type_name: "INT".into() }].into();
+        let columns: Arc<[ColumnMeta]> =
+            [ColumnMeta { name: "id".into(), type_name: "INT".into(), ..Default::default() }].into();
         let mut builder = ChunkBuilder::new(1, 3);
         for id in 1..=3 {
             builder.push_number(|s| s.push_str(&id.to_string()));

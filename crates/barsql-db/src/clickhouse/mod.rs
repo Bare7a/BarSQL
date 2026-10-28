@@ -514,7 +514,7 @@ impl ChSession {
         let written = written_rows(&res);
         let failed = |error: crate::http::HttpError| Some(QueryError::from(error));
         if let Some(format) = output_format(out.stmt) {
-            out.begin(vec![ColumnMeta { name: format, type_name: "String".into() }]).await;
+            out.begin(vec![ColumnMeta { name: format, type_name: "String".into(), ..Default::default() }]).await;
             loop {
                 match res.next_line(MAX_LINE).await {
                     Ok(Some(line)) if tsv::opens_exception(&line) => {
@@ -543,6 +543,7 @@ impl ChSession {
             .map(|(name, type_name)| ColumnMeta {
                 name: name.unwrap_or_default(),
                 type_name: type_name.unwrap_or_default(),
+                ..Default::default()
             })
             .collect();
         let width = columns.len();

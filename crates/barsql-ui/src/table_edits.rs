@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 use barsql_core::{DriverType, Row, Value};
 use barsql_db::{Cell, ResultSet};
@@ -6,7 +9,8 @@ use barsql_io::sql_literal;
 use barsql_sql::lang::quoting::format_sql_identifier;
 use serde_json::Value as Json;
 
-// Staged edits and deletes are keyed by primary key. Undo and redo swap whole snapshots.
+// Staged edits and deletes are keyed by primary key. Undo and redo replay what each step changed, so a large result's
+// staging isn't copied per step.
 
 // Undo and redo keep this many steps each.
 const HISTORY_LIMIT: usize = 100;
@@ -16,8 +20,18 @@ pub type PkKey = String;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pending {
-    pub edits: BTreeMap<PkKey, BTreeMap<String, Option<String>>>,
-    pub deletes: Vec<PkKey>,
+    pub edits: BTreeMap<PkKey, RowEdits>,
+    pub deletes: BTreeSet<PkKey>,
+}
+
+// A row's staged values by column, where None is a staged NULL.
+type RowEdits = BTreeMap<String, Option<String>>;
+
+// Each row a step touched, with its edits before and after the step, and the rows whose delete mark it flipped.
+#[derive(Debug, Clone, Default)]
+struct Step {
+    edits: Vec<(PkKey, Option<RowEdits>, Option<RowEdits>)>,
+    deletes: Vec<PkKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +81,21 @@ fn cell_json(cell: Cell<'_>) -> Json {
     }
 }
 
+// Primary keys of a result's rows. Keying a large result is a pass of hashes, which also finds keys rows share, and a
+// row's key text is made only once it stages or is asked for.
 pub struct Keys {
-    by_row: Vec<PkKey>,
-    ambiguous: HashSet<PkKey>,
+    set: ResultSet,
+    columns: Vec<(usize, String)>,
+    // Each row's key cells, hashed.
+    hashes: Vec<u64>,
+    ambiguous: HashSet<u64>,
+    made: RefCell<Made>,
+}
+
+#[derive(Default)]
+struct Made {
+    by_row: HashMap<usize, Rc<str>>,
+    rows: HashMap<Rc<str>, usize>,
 }
 
 impl Keys {
@@ -78,28 +104,72 @@ impl Keys {
             .iter()
             .filter_map(|name| set.columns.iter().position(|c| &c.name == name).map(|ix| (ix, name.clone())))
             .collect();
-        let by_row: Vec<PkKey> = (0..set.rows())
-            .map(|row| {
-                let key: BTreeMap<&str, Json> =
-                    columns.iter().map(|(ix, name)| (name.as_str(), cell_json(set.cell(row, *ix)))).collect();
-                serde_json::to_string(&key).unwrap_or_default()
-            })
-            .collect();
-        let mut counts: HashMap<&str, usize> = HashMap::new();
-        for key in &by_row {
-            *counts.entry(key).or_default() += 1;
+        Self::for_columns(set, &columns)
+    }
+
+    // Each key column's place in the result and its name in the table, which a query may have aliased.
+    pub fn for_columns(set: &ResultSet, columns: &[(usize, String)]) -> Self {
+        let mut hashes = Vec::with_capacity(set.rows());
+        for (_, chunk) in set.chunks() {
+            for row in 0..chunk.rows() {
+                let mut hasher = DefaultHasher::new();
+                for (column, _) in columns {
+                    hash_cell(chunk.cell(row, *column), &mut hasher);
+                }
+                hashes.push(hasher.finish());
+            }
         }
-        let ambiguous = counts.into_iter().filter(|(_, n)| *n > 1).map(|(key, _)| key.to_string()).collect();
-        Self { by_row, ambiguous }
+        let mut sorted = hashes.clone();
+        sorted.sort_unstable();
+        let ambiguous = sorted.windows(2).filter(|pair| pair[0] == pair[1]).map(|pair| pair[0]).collect();
+        Self { set: set.clone(), columns: columns.to_vec(), hashes, ambiguous, made: RefCell::default() }
     }
 
-    pub fn key(&self, row: usize) -> Option<&PkKey> {
-        self.by_row.get(row)
+    pub fn key(&self, row: usize) -> Option<Rc<str>> {
+        if row >= self.hashes.len() {
+            return None;
+        }
+        if let Some(key) = self.made.borrow().by_row.get(&row) {
+            return Some(key.clone());
+        }
+        let key: BTreeMap<&str, Json> =
+            self.columns.iter().map(|(ix, name)| (name.as_str(), cell_json(self.set.cell(row, *ix)))).collect();
+        let key: Rc<str> = serde_json::to_string(&key).unwrap_or_default().into();
+        let mut made = self.made.borrow_mut();
+        made.by_row.insert(row, key.clone());
+        made.rows.insert(key.clone(), row);
+        Some(key)
     }
 
-    fn usable(&self, row: usize) -> Result<&PkKey, Outcome> {
-        let key = self.by_row.get(row).ok_or(Outcome::Invalid)?;
-        if self.ambiguous.contains(key) { Err(Outcome::Ambiguous) } else { Ok(key) }
+    // A staged key's row. Rows make their keys as they stage, so only a key made elsewhere needs a scan.
+    pub fn row_of(&self, key: &str) -> Option<usize> {
+        {
+            let made = self.made.borrow();
+            if let Some(&row) = made.rows.get(key) {
+                return Some(row);
+            }
+            if made.by_row.len() == self.hashes.len() {
+                return None;
+            }
+        }
+        (0..self.hashes.len()).find(|&row| self.key(row).as_deref() == Some(key))
+    }
+
+    fn usable(&self, row: usize) -> Result<Rc<str>, Outcome> {
+        let hash = self.hashes.get(row).ok_or(Outcome::Invalid)?;
+        if self.ambiguous.contains(hash) {
+            return Err(Outcome::Ambiguous);
+        }
+        self.key(row).ok_or(Outcome::Invalid)
+    }
+}
+
+fn hash_cell(cell: Cell<'_>, hasher: &mut impl Hasher) {
+    match cell {
+        Cell::Null => 0u8.hash(hasher),
+        Cell::Bool(value) => (1u8, value).hash(hasher),
+        Cell::Number(text) => (2u8, text).hash(hasher),
+        Cell::Text(text) => (3u8, text).hash(hasher),
     }
 }
 
@@ -107,18 +177,23 @@ impl Keys {
 #[derive(Debug, Clone, Default)]
 pub struct Staging {
     pub pending: Pending,
-    undo: Vec<Pending>,
-    redo: Vec<Pending>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
+    // Kept as steps change `pending`, since it's read on every redraw.
+    counted_edits: usize,
+    // The rows the last change touched, for a view that updates only those.
+    touched: Vec<PkKey>,
 }
 
 impl Staging {
-    // Applying, resetting or reloading makes old snapshots point at rows that may be gone.
+    // Applying, resetting or reloading makes old steps point at rows that may be gone.
     pub fn clear(&mut self) {
         *self = Self::default();
     }
 
-    fn commit(&mut self, next: Pending) {
-        self.undo.push(std::mem::replace(&mut self.pending, next));
+    // The step is already in `pending`.
+    fn commit(&mut self, step: Step) {
+        self.undo.push(step);
         if self.undo.len() > HISTORY_LIMIT {
             self.undo.remove(0);
         }
@@ -126,28 +201,65 @@ impl Staging {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(prev) = self.undo.pop() else { return false };
-        self.redo.push(std::mem::replace(&mut self.pending, prev));
+        self.touched.clear();
+        let Some(step) = self.undo.pop() else { return false };
+        self.replay(&step, false);
+        self.redo.push(step);
         true
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(next) = self.redo.pop() else { return false };
-        self.undo.push(std::mem::replace(&mut self.pending, next));
+        self.touched.clear();
+        let Some(step) = self.redo.pop() else { return false };
+        self.replay(&step, true);
+        self.undo.push(step);
         true
+    }
+
+    // Puts the rows the step touched as it left them, or as it found them. A flipped delete mark flips back either way.
+    fn replay(&mut self, step: &Step, forward: bool) {
+        let touched: Vec<PkKey> = step.edits.iter().map(|(key, ..)| key).chain(&step.deletes).cloned().collect();
+        let counted = |pending: &Pending| {
+            touched.iter().filter(|key| pending.edits.contains_key(*key) && !pending.deletes.contains(*key)).count()
+        };
+        let before = counted(&self.pending);
+        for (key, before, after) in &step.edits {
+            match if forward { after } else { before } {
+                Some(edits) => self.pending.edits.insert(key.clone(), edits.clone()),
+                None => self.pending.edits.remove(key),
+            };
+        }
+        for key in &step.deletes {
+            if !self.pending.deletes.remove(key) {
+                self.pending.deletes.insert(key.clone());
+            }
+        }
+        self.counted_edits = self.counted_edits - before + counted(&self.pending);
+        self.touched = touched;
+    }
+
+    pub fn touched(&self) -> &[PkKey] {
+        &self.touched
+    }
+
+    fn flip_deletes(&mut self, keys: Vec<PkKey>) {
+        let step = Step { deletes: keys, ..Default::default() };
+        self.replay(&step, true);
+        self.commit(step);
     }
 
     // Edits of rows staged for deletion are dropped on apply, so they don't count.
     pub fn edit_count(&self) -> usize {
-        self.pending.edits.keys().filter(|key| !self.pending.deletes.contains(key)).count()
+        self.counted_edits
     }
 
     pub fn delete_count(&self) -> usize {
         self.pending.deletes.len()
     }
 
+    // With no deletes, every edit counts.
     pub fn has_pending(&self) -> bool {
-        self.edit_count() > 0 || self.delete_count() > 0
+        !self.pending.deletes.is_empty() || !self.pending.edits.is_empty()
     }
 
     pub fn edit_cell(
@@ -163,8 +275,23 @@ impl Staging {
 
     // One undo step for the whole batch. Ambiguous rows are skipped and reported.
     pub fn paste(&mut self, set: &ResultSet, keys: &Keys, cells: &[(usize, usize, Option<String>)]) -> Outcome {
-        let mut edits = self.pending.edits.clone();
-        let (mut changed, mut ambiguous) = (false, false);
+        let names: Vec<Option<String>> = set.columns.iter().map(|c| Some(c.name.clone())).collect();
+        self.paste_as(set, keys, cells, &names)
+    }
+
+    // A column `names` leaves unnamed isn't the table's, so it's skipped.
+    pub fn paste_as(
+        &mut self,
+        set: &ResultSet,
+        keys: &Keys,
+        cells: &[(usize, usize, Option<String>)],
+        names: &[Option<String>],
+    ) -> Outcome {
+        self.touched.clear();
+        // The rows the paste touches, changed apart from `pending` until the step is whole.
+        let mut rows: BTreeMap<PkKey, RowEdits> = BTreeMap::new();
+        let mut seen: BTreeSet<Rc<str>> = BTreeSet::new();
+        let mut ambiguous = false;
         for (row, column, value) in cells {
             let key = match keys.usable(*row) {
                 Ok(key) => key,
@@ -174,12 +301,24 @@ impl Staging {
                 }
                 Err(_) => continue,
             };
-            let Some(meta) = set.columns.get(*column) else { continue };
-            let original = set.display(*row, *column);
-            changed |= reconcile_cell_edit(&mut edits, key, &meta.name, original, value.as_deref()) == Outcome::Changed;
+            let Some(name) = names.get(*column).and_then(Option::as_deref) else { continue };
+            if seen.insert(key.clone())
+                && let Some(edits) = self.pending.edits.get(&*key)
+            {
+                rows.insert(key.to_string(), edits.clone());
+            }
+            reconcile_cell_edit(&mut rows, &key, name, set.display(*row, *column), value.as_deref());
         }
+        let edits: Vec<_> = seen
+            .into_iter()
+            .map(|key| (key.to_string(), self.pending.edits.get(&*key).cloned(), rows.remove(&*key)))
+            .filter(|(_, before, after)| before != after)
+            .collect();
+        let changed = !edits.is_empty();
         if changed {
-            self.commit(Pending { edits, deletes: self.pending.deletes.clone() });
+            let step = Step { edits, ..Default::default() };
+            self.replay(&step, true);
+            self.commit(step);
         }
         match (ambiguous, changed) {
             (true, _) => Outcome::Ambiguous,
@@ -189,56 +328,48 @@ impl Staging {
     }
 
     pub fn toggle_delete(&mut self, keys: &Keys, row: usize) -> Outcome {
+        self.touched.clear();
         let key = match keys.usable(row) {
-            Ok(key) => key.clone(),
+            Ok(key) => key.to_string(),
             Err(outcome) => return outcome,
         };
-        let mut deletes = self.pending.deletes.clone();
-        match deletes.iter().position(|k| *k == key) {
-            Some(ix) => {
-                deletes.remove(ix);
-            }
-            None => deletes.push(key),
-        }
-        self.commit(Pending { edits: self.pending.edits.clone(), deletes });
+        self.flip_deletes(vec![key]);
         Outcome::Changed
     }
 
     // Marks every row, or unmarks them all when each is marked already. One undo step, and ambiguous rows are
     // skipped and reported.
     pub fn toggle_deletes(&mut self, keys: &Keys, rows: &[usize]) -> Outcome {
+        self.touched.clear();
         let mut ambiguous = false;
-        let mut picked: Vec<PkKey> = Vec::new();
+        let mut picked: BTreeSet<Rc<str>> = BTreeSet::new();
         for &row in rows {
             match keys.usable(row) {
-                Ok(key) if !picked.contains(key) => picked.push(key.clone()),
-                Ok(_) => {}
+                Ok(key) => {
+                    picked.insert(key);
+                }
                 Err(outcome) => ambiguous |= outcome == Outcome::Ambiguous,
             }
         }
         if picked.is_empty() {
             return if ambiguous { Outcome::Ambiguous } else { Outcome::Unchanged };
         }
-        let mut deletes = self.pending.deletes.clone();
-        if picked.iter().all(|key| deletes.contains(key)) {
-            deletes.retain(|key| !picked.contains(key));
-        } else {
-            deletes.extend(picked.into_iter().filter(|key| !self.pending.deletes.contains(key)));
-        }
-        self.commit(Pending { edits: self.pending.edits.clone(), deletes });
+        let all = picked.iter().all(|key| self.pending.deletes.contains(&**key));
+        let flipped = picked.into_iter().filter(|key| all || !self.pending.deletes.contains(&**key));
+        self.flip_deletes(flipped.map(|key| key.to_string()).collect());
         if ambiguous { Outcome::Ambiguous } else { Outcome::Changed }
     }
 
     #[cfg(test)]
     fn is_deleted(&self, keys: &Keys, row: usize) -> bool {
-        keys.key(row).is_some_and(|key| self.pending.deletes.contains(key))
+        keys.key(row).is_some_and(|key| self.pending.deletes.contains(&*key))
     }
 
     // Some(None) is a staged NULL.
     #[cfg(test)]
     fn staged(&self, keys: &Keys, row: usize, column: &str) -> Option<Option<&str>> {
         let key = keys.key(row)?;
-        self.pending.edits.get(key)?.get(column).map(Option::as_deref)
+        self.pending.edits.get(&*key)?.get(column).map(Option::as_deref)
     }
 }
 
@@ -350,6 +481,25 @@ impl OwnedCell {
     }
 }
 
+// Decodes a PkKey for update_row and delete_rows.
+pub fn key_row(key: &str) -> Row {
+    let map: serde_json::Map<String, Json> = serde_json::from_str(key).unwrap_or_default();
+    map.into_iter()
+        .map(|(column, value)| {
+            let value = match value {
+                Json::Null => Value::Null,
+                Json::Bool(b) => Value::Bool(b),
+                Json::Number(n) => {
+                    n.as_i64().map(Value::Int).unwrap_or_else(|| Value::Float(n.as_f64().unwrap_or(f64::NAN)))
+                }
+                Json::String(s) => Value::Text(s),
+                other => Value::Text(other.to_string()),
+            };
+            (column, value)
+        })
+        .collect()
+}
+
 // In the shape update_row expects, with None as NULL.
 pub fn changes_row(changes: &BTreeMap<String, Option<String>>) -> Row {
     changes.iter().map(|(column, value)| (column.clone(), value.clone().map_or(Value::Null, Value::Text))).collect()
@@ -407,8 +557,10 @@ mod tests {
     }
 
     fn set(rows: &[(&str, &str)]) -> ResultSet {
-        let columns: Arc<[ColumnMeta]> =
-            ["id", "name"].map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() }).to_vec().into();
+        let columns: Arc<[ColumnMeta]> = ["id", "name"]
+            .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into(), ..Default::default() })
+            .to_vec()
+            .into();
         let mut builder = ChunkBuilder::new(2, rows.len());
         for (id, name) in rows {
             builder.push_number(|s| s.push_str(id));
@@ -420,11 +572,90 @@ mod tests {
         set
     }
 
+    fn names(staging: &Staging, keys: &Keys) -> Vec<Option<String>> {
+        (0..3).map(|row| staging.staged(keys, row, "name").flatten().map(str::to_string)).collect()
+    }
+
+    // Keying hashes every row, which finds keys rows share, and makes a key's text only for the rows that ask.
+    #[test]
+    fn keys_make_their_text_only_for_rows_that_ask() {
+        let set = set(&[("1", "ann"), ("2", "bob"), ("1", "ann again")]);
+        let keys = Keys::new(&set, &["id".into()]);
+        assert!(keys.made.borrow().by_row.is_empty());
+        assert_eq!(keys.usable(1).as_deref(), Ok("{\"id\":2}"));
+        assert_eq!(keys.usable(0), Err(Outcome::Ambiguous));
+        assert_eq!(keys.row_of("{\"id\":2}"), Some(1));
+        assert_eq!(keys.made.borrow().by_row.len(), 1, "only the row that asked");
+        assert_eq!(keys.row_of("{\"id\":9}"), None, "after one scan of every row");
+        assert_eq!(keys.row_of("{\"id\":9}"), None);
+    }
+
+    // The count kept per step matches one taken over everything staged, and each change says which rows it touched.
+    #[test]
+    fn counts_and_touched_rows_follow_each_step() {
+        let set = set(&[("1", "ann"), ("2", "bob"), ("3", "cy")]);
+        let keys = Keys::new(&set, &["id".into()]);
+        let key = |row: usize| keys.key(row).expect("a key").to_string();
+        let walked = |staging: &Staging| {
+            staging.pending.edits.keys().filter(|key| !staging.pending.deletes.contains(*key)).count()
+        };
+        let mut staging = Staging::default();
+        staging.paste(&set, &keys, &[(0, 1, Some("a".into())), (1, 1, Some("b".into()))]);
+        assert_eq!((staging.edit_count(), staging.touched()), (2, &[key(0), key(1)][..]));
+        staging.toggle_deletes(&keys, &[1, 2]);
+        assert_eq!((staging.edit_count(), staging.touched()), (1, &[key(1), key(2)][..]));
+        staging.edit_cell(&set, &keys, 2, 1, Some("c".into()));
+        assert_eq!(staging.edit_count(), walked(&staging));
+        assert!(staging.undo() && staging.undo());
+        assert_eq!((staging.edit_count(), staging.touched()), (2, &[key(1), key(2)][..]));
+        assert!(staging.redo());
+        assert_eq!(staging.edit_count(), walked(&staging));
+        assert_eq!(staging.paste(&set, &keys, &[(0, 1, Some("a".into()))]), Outcome::Unchanged);
+        assert!(staging.touched().is_empty(), "nothing to show again");
+    }
+
+    // Each step keeps only what it changed, so taking one back leaves the rows other steps changed as they are.
+    #[test]
+    fn undo_and_redo_replay_one_step_of_many() {
+        let set = set(&[("1", "ann"), ("2", "bob"), ("3", "cy")]);
+        let keys = Keys::new(&set, &["id".into()]);
+        let mut staging = Staging::default();
+        assert_eq!(staging.paste(&set, &keys, &[(0, 1, Some("a".into())), (1, 1, Some("b".into()))]), Outcome::Changed);
+        assert_eq!(staging.edit_cell(&set, &keys, 1, 1, Some("bee".into())), Outcome::Changed);
+        assert_eq!(staging.toggle_deletes(&keys, &[0, 2]), Outcome::Changed);
+        assert_eq!(staging.edit_cell(&set, &keys, 1, 1, Some("bob".into())), Outcome::Changed, "back to the original");
+        let deleted = |staging: &Staging| [0, 1, 2].map(|row| staging.is_deleted(&keys, row));
+        assert_eq!(
+            (names(&staging, &keys), deleted(&staging)),
+            (vec![Some("a".into()), None, None], [true, false, true])
+        );
+
+        assert!(staging.undo() && staging.undo());
+        assert_eq!(names(&staging, &keys), [Some("a".into()), Some("bee".into()), None]);
+        assert_eq!(deleted(&staging), [false; 3]);
+        assert!(staging.undo());
+        assert_eq!(names(&staging, &keys), [Some("a".into()), Some("b".into()), None]);
+        assert!(staging.redo() && staging.redo());
+        assert_eq!(
+            (names(&staging, &keys), deleted(&staging)),
+            (vec![Some("a".into()), Some("bee".into()), None], [true, false, true])
+        );
+        assert_eq!(staging.edit_cell(&set, &keys, 2, 1, Some("c".into())), Outcome::Changed);
+        assert!(!staging.redo(), "a new step drops what was undone");
+        assert_eq!(
+            staging.paste(&set, &keys, &[(0, 1, Some("a".into()))]),
+            Outcome::Unchanged,
+            "no step for no change"
+        );
+        assert!(staging.undo());
+        assert_eq!(names(&staging, &keys), [Some("a".into()), Some("bee".into()), None]);
+    }
+
     #[test]
     fn staging_edits_deletes_undo_and_redo() {
         let set = set(&[("1", "ann"), ("2", "bob")]);
         let keys = Keys::new(&set, &["id".into()]);
-        assert_eq!(keys.key(0).map(String::as_str), Some("{\"id\":1}"));
+        assert_eq!(keys.key(0).as_deref(), Some("{\"id\":1}"));
         let mut staging = Staging::default();
         assert_eq!(staging.edit_cell(&set, &keys, 0, 1, Some("anna".into())), Outcome::Changed);
         assert_eq!(staging.staged(&keys, 0, "name"), Some(Some("anna")));
@@ -467,7 +698,7 @@ mod tests {
         let cells = [(0, 1, Some("x".into())), (2, 1, Some("y".into()))];
         assert_eq!(staging.paste(&set, &keys, &cells), Outcome::Ambiguous, "the rest of a paste still lands");
         assert_eq!(staging.staged(&keys, 2, "name"), Some(Some("y")));
-        assert_eq!(Keys::new(&set, &[]).key(0).map(String::as_str), Some("{}"), "no key, no staging by key");
+        assert_eq!(Keys::new(&set, &[]).key(0).as_deref(), Some("{}"), "no key, no staging by key");
     }
 
     #[test]

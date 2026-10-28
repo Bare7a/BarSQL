@@ -93,6 +93,7 @@ impl Sheet {
                 .map(|(name, flag)| ColumnMeta {
                     name: name.to_string(),
                     type_name: if *flag { "boolean" } else { "" }.into(),
+                    ..Default::default()
                 })
                 .collect();
             let mut builder = ChunkBuilder::new(columns.len(), rows.len());

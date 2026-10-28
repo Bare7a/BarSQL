@@ -242,6 +242,10 @@ pub struct TableOverlay {
     pub fixed: bool,
     // (row, column) cells the owner keeps as they are, like a generated column's.
     pub locked: HashSet<(usize, usize)>,
+    // Whole columns kept as they are, like a query's computed ones.
+    pub locked_columns: HashSet<usize>,
+    // A query's rows, all loaded: they sort in place, with no pages and no filtering by value.
+    pub local: bool,
     // (row, column) cells outlined as invalid.
     pub invalid: HashSet<(usize, usize)>,
     // (row, column) -> icons at the cell's right edge.
@@ -694,10 +698,18 @@ impl Grid {
             columns.iter().map(|&column| ColumnStats { name: name(column), ..Default::default() }).collect();
         for &row in &rows {
             for (stats, &column) in stats.iter_mut().zip(&columns) {
-                stats.add(self.shown(row, column));
+                stats.add(self.counted(row, column));
             }
         }
         Some(Aggregate { cells, columns: stats })
+    }
+
+    // A staged value shows as text, though where it replaces a number it counts as one.
+    fn counted(&self, row: usize, column: usize) -> barsql_db::Cell<'_> {
+        match (self.shown(row, column), self.set.cell(row, column)) {
+            (barsql_db::Cell::Text(text), barsql_db::Cell::Number(_)) => barsql_db::Cell::Number(text),
+            (shown, _) => shown,
+        }
     }
 
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -1035,7 +1047,7 @@ impl Grid {
             }
             Target::Header { col, zone: Zone::Sort } => {
                 let column = self.columns[col];
-                if self.overlay.is_some() {
+                if self.server_sorted() {
                     self.selection.clear();
                     cx.emit(GridEvent::SortRequested(column));
                 } else {
@@ -1739,7 +1751,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
             header.texts.push((type_name, point(title_left + line.width + m.gap, title_top)));
         }
         header.texts.push((line, point(title_left, title_top)));
-        let (sort_column, desc) = match overlay {
+        let (sort_column, desc) = match overlay.filter(|overlay| !overlay.local) {
             Some(overlay) => (overlay.sort.map(|(c, _)| c), overlay.sort.is_some_and(|(_, desc)| desc)),
             None => (grid.sort.column, grid.sort.desc),
         };

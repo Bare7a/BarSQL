@@ -111,11 +111,10 @@ impl Grid {
         let null = this.shown(row, column).is_null();
         let deleted = this.is_deleted(row);
         let locked = deleted || this.locked(row, column);
-        let menu = if overlay.editable {
+        let menu = if overlay.editable && !locked {
             menu.item(
                 item(t(cx, "tableView.contextEdit"), emit(grid, move || GridEvent::EditInViewer { row, column }))
-                    .action(Box::new(ViewCellValue))
-                    .disabled(locked),
+                    .action(Box::new(ViewCellValue)),
             )
         } else {
             let view = item(t(cx, "results.contextViewCell"), emit(grid, move || GridEvent::ViewCell { row, column }));
@@ -131,7 +130,7 @@ impl Grid {
             ),
             None => menu,
         };
-        let menu = match overlay.fixed {
+        let menu = match overlay.fixed || overlay.local {
             true => menu,
             false => {
                 menu.item(item(t(cx, "grid.filterByValue"), emit(grid, move || GridEvent::FilterBy { row, column })))
@@ -195,13 +194,13 @@ impl Grid {
         let this = grid.read(cx);
         let Some(&column) = this.columns.get(col) else { return menu };
         let name = this.set.columns[column].name.clone();
-        let sorted = match &this.overlay {
+        let sorted = match this.overlay.as_ref().filter(|overlay| !overlay.local) {
             Some(overlay) => overlay.sort,
             None => this.sort.column.map(|c| (c, this.sort.desc)),
         };
         let any_hidden = this.hidden_count() > 0;
         let sort = |grid: &Entity<Self>, to: Option<(usize, bool)>| {
-            on(grid, move |grid, _, cx| match grid.overlay.is_some() {
+            on(grid, move |grid, _, cx| match grid.server_sorted() {
                 true => cx.emit(GridEvent::SortTo(to)),
                 false => grid.sort_to(to, cx),
             })

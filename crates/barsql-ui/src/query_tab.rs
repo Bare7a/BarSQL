@@ -199,11 +199,12 @@ impl QueryTab {
         let occurrences = cx.new(|cx| OccurrenceMarks::new(&editor, cx));
         let flash = editor.update(cx, |state, cx| state.create_range_decorations_collection(Vec::new(), cx));
         let dialect = connection.driver.dialect();
-        let (connection_id, driver) = (connection.id.clone(), connection.driver.clone());
-        let results = cx.new(|_| {
+        let (panel_connection, tab_id) = (connection.clone(), tab.id.clone());
+        let results = cx.new(|cx| {
             let mut results = ResultsPanel::default();
             results.set_dialect(dialect);
-            results.set_connection(connection_id, driver);
+            results.set_connection(panel_connection, cx);
+            results.set_tab(tab_id);
             results
         });
         let subscriptions = vec![
@@ -223,6 +224,11 @@ impl QueryTab {
                 }
                 ResultsEvent::Fix(fix) => this.apply_fix(fix, window, cx),
                 ResultsEvent::FocusedRowChanged => cx.emit(QueryTabEvent::FocusedRowChanged),
+                ResultsEvent::EditsApplied { failed } => {
+                    this.track_statement(*failed);
+                    this.sync_transaction(*failed, cx);
+                    cx.notify();
+                }
             }),
             cx.observe_global_in::<Schemas>(window, |this, window, cx| this.schedule_diagnostics(window, cx)),
             cx.observe_global_in::<I18n>(window, |this, window, cx| this.schedule_diagnostics(window, cx)),
@@ -325,12 +331,17 @@ impl QueryTab {
         !self.saved_query_id.is_empty() && *self.sql(cx) != *self.saved_sql_baseline
     }
 
-    // Takes edits like name, colour or read-only. A changed driver is ignored.
+    // Takes edits like name, colour or read-only. A changed driver is ignored, though the results drop their edits.
     pub fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
+        self.results.update(cx, |results, cx| results.set_connection(connection.clone(), cx));
         if connection.driver == self.connection.driver {
             self.connection = connection;
-            cx.notify();
         }
+        cx.notify();
+    }
+
+    pub fn has_result_edits(&self, cx: &App) -> bool {
+        self.results.read(cx).has_pending_edits()
     }
 
     pub fn set_title(&mut self, title: SharedString, cx: &mut Context<Self>) {
@@ -697,8 +708,37 @@ impl QueryTab {
         if self.running.is_some() {
             return;
         }
-        self.with_params(sql, window, cx, move |tab, sql, window, cx| {
-            tab.after_check(sql, window, cx, move |tab, sql, window, cx| tab.execute(sql, base, window, cx))
+        self.after_discard(window, cx, move |tab, window, cx| {
+            tab.with_params(sql.clone(), window, cx, move |tab, sql, window, cx| {
+                tab.after_check(sql, window, cx, move |tab, sql, window, cx| tab.execute(sql, base, window, cx))
+            })
+        });
+    }
+
+    // A run replaces the results, so changed rows not yet saved ask first.
+    fn after_discard(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let pending = self.results.read(cx).pending_edits();
+        if pending == 0 {
+            return then(self, window, cx);
+        }
+        let confirm = Confirm {
+            title: t(cx, "results.discardTitle"),
+            description: t_count(cx, "results.discardDescription", pending as i64, &[]),
+            detail: None,
+            confirm: t(cx, "results.discardConfirm"),
+            danger: true,
+        };
+        let tab = cx.entity().downgrade();
+        dialogs::confirm(confirm, window, cx, move |window, cx| {
+            let _ = tab.update(cx, |tab, cx| {
+                tab.results.update(cx, |results, cx| results.clear(cx));
+                then(tab, window, cx);
+            });
         });
     }
 
@@ -873,18 +913,24 @@ impl QueryTab {
         });
         cx.spawn_in(window, async move |this, cx| {
             let Some(result) = work.await else { return };
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.sync_transaction(false, cx);
                 let message = match control {
                     TxnControl::Begin => "results.txnBegin",
                     TxnControl::Commit => "results.txnCommit",
                     TxnControl::Rollback => "results.txnRollback",
                 };
-                this.results.update(cx, |results, cx| match result {
-                    Ok(()) if confirm => results.show_message(t(cx, message), cx),
+                match result {
+                    Ok(()) if confirm => {
+                        this.results.update(cx, |results, cx| results.show_message(t(cx, message), cx))
+                    }
                     Ok(()) => {}
-                    Err(error) => results.show_error(error, cx),
-                });
+                    // With edits staged in the results, a toolbar button's failure shows in a dialog, not in their place.
+                    Err(error) if !confirm && this.has_result_edits(cx) => {
+                        dialogs::alert(t(cx, "errors.generic"), error.message.into(), window, cx)
+                    }
+                    Err(error) => this.results.update(cx, |results, cx| results.show_error(error, cx)),
+                }
                 cx.notify();
             });
         })
@@ -918,9 +964,11 @@ impl QueryTab {
             return;
         }
         // An analyze runs the statement.
-        self.with_params(sql, window, cx, move |tab, sql, window, cx| match analyze {
-            true => tab.after_check(sql, window, cx, |tab, sql, window, cx| tab.explain_sql(sql, true, window, cx)),
-            false => tab.explain_sql(sql, false, window, cx),
+        self.after_discard(window, cx, move |tab, window, cx| {
+            tab.with_params(sql.clone(), window, cx, move |tab, sql, window, cx| match analyze {
+                true => tab.after_check(sql, window, cx, |tab, sql, window, cx| tab.explain_sql(sql, true, window, cx)),
+                false => tab.explain_sql(sql, false, window, cx),
+            })
         });
     }
 

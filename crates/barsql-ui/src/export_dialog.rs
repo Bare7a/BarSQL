@@ -406,7 +406,7 @@ mod tests {
 
     fn source() -> ExportSource {
         let columns: Arc<[ColumnMeta]> = ["id", "name", "note"]
-            .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() })
+            .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into(), ..Default::default() })
             .to_vec()
             .into();
         let mut builder = ChunkBuilder::new(3, 3);

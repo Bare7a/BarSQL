@@ -215,7 +215,7 @@ mod tests {
 
     fn set() -> ResultSet {
         let columns: Arc<[ColumnMeta]> = ["id", "name", "note"]
-            .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into() })
+            .map(|name| ColumnMeta { name: name.into(), type_name: "TEXT".into(), ..Default::default() })
             .to_vec()
             .into();
         let mut builder = ChunkBuilder::new(3, 3);
@@ -282,7 +282,11 @@ mod tests {
     #[test]
     fn booleans_copy_as_true_and_false() {
         let columns: Arc<[ColumnMeta]> = [("active", "BOOLEAN"), ("flag", "bool")]
-            .map(|(name, type_name)| ColumnMeta { name: name.into(), type_name: type_name.into() })
+            .map(|(name, type_name)| ColumnMeta {
+                name: name.into(),
+                type_name: type_name.into(),
+                ..Default::default()
+            })
             .to_vec()
             .into();
         let mut builder = ChunkBuilder::new(2, 2);

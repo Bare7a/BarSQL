@@ -422,7 +422,11 @@ mod tests {
     fn set(columns: &[(&str, &str)], rows: Vec<Vec<V>>) -> ResultSet {
         let meta: Arc<[ColumnMeta]> = columns
             .iter()
-            .map(|(name, type_name)| ColumnMeta { name: name.to_string(), type_name: type_name.to_string() })
+            .map(|(name, type_name)| ColumnMeta {
+                name: name.to_string(),
+                type_name: type_name.to_string(),
+                ..Default::default()
+            })
             .collect::<Vec<_>>()
             .into();
         let mut set = ResultSet::new(meta);

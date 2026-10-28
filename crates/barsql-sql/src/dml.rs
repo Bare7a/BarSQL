@@ -20,25 +20,31 @@ pub fn build_update(
     pk_cols: &[String],
     columns: &[ColumnInfo],
 ) -> Result<Statement, String> {
+    build_update_many(driver, schema, table, changes, &[pk_values], pk_cols, columns)
+}
+
+// The same changes to several rows in one statement.
+pub fn build_update_many(
+    driver: &DriverType,
+    schema: &str,
+    table: &str,
+    changes: &Row,
+    pk_rows: &[&Row],
+    pk_cols: &[String],
+    columns: &[ColumnInfo],
+) -> Result<Statement, String> {
     if changes.is_empty() {
         return Err("no changes to apply".into());
     }
     require_row_edits(driver)?;
-    require_pk_values(pk_cols, pk_values)?;
-    let mut args = Vec::with_capacity(changes.len() + pk_cols.len());
+    let mut args = Vec::with_capacity(changes.len() + pk_cols.len() * pk_rows.len());
     let mut sets = Vec::with_capacity(changes.len());
     for (col, value) in changes {
         let mark = bind(driver, columns, col, value, &mut args)?;
         sets.push(format!("{} = {mark}", quote_ident(driver, col)));
     }
-    let mut filters = Vec::with_capacity(pk_cols.len());
-    for pk in pk_cols {
-        let mark = bind(driver, columns, pk, &pk_values[pk], &mut args)?;
-        filters.push(format!("{} = {mark}", quote_ident(driver, pk)));
-    }
-    let sql =
-        format!("UPDATE {} SET {} WHERE {}", table_ref(driver, schema, table), sets.join(", "), filters.join(" AND "));
-    Ok((sql, args))
+    let filter = key_filter(driver, pk_cols, pk_rows, columns, &mut args)?;
+    Ok((format!("UPDATE {} SET {} WHERE {filter}", table_ref(driver, schema, table), sets.join(", ")), args))
 }
 
 pub fn build_delete(
@@ -49,15 +55,55 @@ pub fn build_delete(
     pk_row: &Row,
     columns: &[ColumnInfo],
 ) -> Result<Statement, String> {
+    build_delete_many(driver, schema, table, pk_cols, &[pk_row], columns)
+}
+
+pub fn build_delete_many(
+    driver: &DriverType,
+    schema: &str,
+    table: &str,
+    pk_cols: &[String],
+    pk_rows: &[&Row],
+    columns: &[ColumnInfo],
+) -> Result<Statement, String> {
     require_row_edits(driver)?;
-    require_pk_values(pk_cols, pk_row)?;
-    let mut args = Vec::with_capacity(pk_cols.len());
-    let mut filters = Vec::with_capacity(pk_cols.len());
-    for pk in pk_cols {
-        let mark = bind(driver, columns, pk, &pk_row[pk], &mut args)?;
-        filters.push(format!("{} = {mark}", quote_ident(driver, pk)));
+    let mut args = Vec::with_capacity(pk_cols.len() * pk_rows.len());
+    let filter = key_filter(driver, pk_cols, pk_rows, columns, &mut args)?;
+    Ok((format!("DELETE FROM {} WHERE {filter}", table_ref(driver, schema, table)), args))
+}
+
+// The rows' keys: `key = …` for one row, `key IN (…)` for several with a one-column key, else each row's key columns
+// ANDed and ORed together.
+fn key_filter(
+    driver: &DriverType,
+    pk_cols: &[String],
+    pk_rows: &[&Row],
+    columns: &[ColumnInfo],
+    args: &mut Vec<Value>,
+) -> Result<String, String> {
+    if pk_rows.is_empty() {
+        return Err("no rows to change".into());
     }
-    Ok((format!("DELETE FROM {} WHERE {}", table_ref(driver, schema, table), filters.join(" AND ")), args))
+    let mut keys = Vec::with_capacity(pk_rows.len());
+    for pk_row in pk_rows {
+        require_pk_values(pk_cols, pk_row)?;
+        let marks: Result<Vec<String>, String> =
+            pk_cols.iter().map(|pk| bind(driver, columns, pk, &pk_row[pk], args)).collect();
+        keys.push(marks?);
+    }
+    let equal = |marks: &[String]| {
+        let filters: Vec<String> =
+            pk_cols.iter().zip(marks).map(|(pk, mark)| format!("{} = {mark}", quote_ident(driver, pk))).collect();
+        filters.join(" AND ")
+    };
+    Ok(match (pk_cols, keys.as_slice()) {
+        (_, [marks]) => equal(marks),
+        ([pk], _) => {
+            let marks: Vec<&str> = keys.iter().map(|marks| marks[0].as_str()).collect();
+            format!("{} IN ({})", quote_ident(driver, pk), marks.join(", "))
+        }
+        _ => keys.iter().map(|marks| format!("({})", equal(marks))).collect::<Vec<_>>().join(" OR "),
+    })
 }
 
 // Callers append any driver-specific suffix such as RETURNING *.
@@ -437,6 +483,26 @@ mod tests {
         assert!(build_delete(&pg, "public", "t", &id, &row(&[("id", 1.into())]), &[]).is_ok());
         assert!(build_insert(&pg, "public", "t", &Row::new(), &[]).is_err());
         assert!(build_insert(&pg, "public", "t", &row(&[("name", "x".into())]), &[]).is_ok());
+    }
+
+    #[test]
+    fn many_rows_go_in_one_statement() {
+        let (pg, ms) = (DriverType::Postgres, DriverType::SqlServer);
+        let ids = [1, 2, 3].map(|id| row(&[("id", id.into())]));
+        let ids: Vec<&Row> = ids.iter().collect();
+        let (sql, args) = build_delete_many(&pg, "public", "t", &cols(&["id"]), &ids, &[]).unwrap();
+        assert_eq!(sql, r#"DELETE FROM "public"."t" WHERE "id" IN ($1, $2, $3)"#);
+        assert_eq!(args, vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let changes = row(&[("status", "done".into())]);
+        let (sql, args) = build_update_many(&pg, "public", "t", &changes, &ids[..2], &cols(&["id"]), &[]).unwrap();
+        assert_eq!(sql, r#"UPDATE "public"."t" SET "status" = $1 WHERE "id" IN ($2, $3)"#);
+        assert_eq!(args, vec![Value::from("done"), Value::Int(1), Value::Int(2)]);
+        let keys = [row(&[("a", 1.into()), ("b", "x".into())]), row(&[("a", 2.into()), ("b", "y".into())])];
+        let keys: Vec<&Row> = keys.iter().collect();
+        let (sql, args) = build_delete_many(&ms, "dbo", "t", &cols(&["a", "b"]), &keys, &[]).unwrap();
+        assert_eq!(sql, "DELETE FROM [dbo].[t] WHERE ([a] = @P1 AND [b] = @P2) OR ([a] = @P3 AND [b] = @P4)");
+        assert_eq!(args.len(), 4);
+        assert!(build_delete_many(&pg, "public", "t", &cols(&["id"]), &[], &[]).is_err());
     }
 
     #[test]

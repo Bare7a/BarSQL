@@ -531,6 +531,7 @@ fn meta(columns: &[(String, ColumnType)], first: &[&ColumnData<'_>]) -> Arc<[Col
         .map(|(i, (name, column))| ColumnMeta {
             name: name.clone(),
             type_name: values::type_name(*column, first.get(i).copied()).to_string(),
+            ..Default::default()
         })
         .collect()
 }

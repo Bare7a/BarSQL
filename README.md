@@ -326,6 +326,12 @@ View and modify table data directly in the grid - no hand-written `UPDATE` / `DE
 
 - **Browse** any table's rows from the Schema Explorer
 - **Inline edit** cells in place - changes are staged, then applied on demand (`Ctrl+S`)
+- **Edit query results** too - a `SELECT` from one table that includes its primary key edits like a table view:
+  - Aliased columns save to the columns they show, while expressions and generated columns stay as they are
+  - The engine says where each column comes from (on Turso, the select list does), so a `search_path` or `USE` can't point an edit at another table
+  - Edits run on the tab's own session: inside its transaction when one is open, otherwise all together or not at all
+  - Joins, `GROUP BY`, set operations and views stay read-only
+  - Running again, closing the tab or quitting asks before dropping changes that weren't applied
 - **Undo / redo** staged changes, **paste** blocks of cells, **set NULL** (`Ctrl+Backspace`)
 - **Insert** new rows and **bulk-delete** selected ones
 - **Jump through foreign keys** - a referencing cell opens the row it points at

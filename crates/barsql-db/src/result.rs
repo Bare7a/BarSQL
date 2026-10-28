@@ -2,10 +2,19 @@ use std::sync::Arc;
 
 use barsql_core::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ColumnMeta {
     pub name: String,
     pub type_name: String,
+    // None for an expression, or when the driver doesn't say.
+    pub origin: Option<ColumnOrigin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnOrigin {
+    // Postgres reports the table's OID and the column's number, which the catalog names.
+    Oid { table: u32, column: i16 },
+    Named { schema: String, table: String, column: String },
 }
 
 // Used as the value's JSON type. The text is always the grid's display string.
@@ -210,6 +219,11 @@ impl ResultSet {
     pub fn display(&self, row: usize, col: usize) -> Option<&str> {
         self.cell(row, col).display()
     }
+
+    // Each chunk with the row it starts at.
+    pub fn chunks(&self) -> impl Iterator<Item = (usize, &Arc<ResultChunk>)> {
+        self.starts.iter().copied().zip(&self.chunks)
+    }
 }
 
 #[cfg(test)]
@@ -219,8 +233,8 @@ mod tests {
     #[test]
     fn cells_round_trip_across_chunks_with_their_kinds() {
         let columns: Arc<[ColumnMeta]> = vec![
-            ColumnMeta { name: "a".into(), type_name: "INTEGER".into() },
-            ColumnMeta { name: "b".into(), type_name: "TEXT".into() },
+            ColumnMeta { name: "a".into(), type_name: "INTEGER".into(), ..Default::default() },
+            ColumnMeta { name: "b".into(), type_name: "TEXT".into(), ..Default::default() },
         ]
         .into();
         assert_eq!(ResultSet::new(columns.clone()).cell(0, 0), Cell::Null);
