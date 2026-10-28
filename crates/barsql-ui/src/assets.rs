@@ -52,6 +52,7 @@ icon_assets!(
         Pin,
         PinOff,
         Plug,
+        Puzzle,
         RefreshCw,
         Route,
         Save,

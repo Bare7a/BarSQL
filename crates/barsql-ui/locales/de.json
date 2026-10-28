@@ -98,6 +98,11 @@
     "sslStrict": "Strikt (TDS 8.0)",
     "confirmChanges": "Vor Änderungen nachfragen",
     "confirmChangesHint": "Für Produktivdatenbanken: bestätigt INSERT, UPDATE, DELETE, DDL und Tabellenänderungen, bevor sie laufen.",
+    "extensions": "Erweiterungen laden",
+    "extensionsHint": "Lädt SQLite-Erweiterungen wie cr-sqlite bei jedem Öffnen dieser Datei. Sie laufen in BarSQL, fügen Sie also nur vertrauenswürdige hinzu.",
+    "extensionsEmpty": "Noch keine Erweiterungen. Fügen Sie mit + eine Bibliotheksdatei hinzu.",
+    "extensionsAdd": "Erweiterung hinzufügen",
+    "extensionsRemove": "Erweiterung entfernen",
     "hostRequired": "Host ist erforderlich.",
     "usernameRequired": "Benutzername ist erforderlich.",
     "urlScheme": "Die Datenbank-URL muss mit libsql://, https://, http://, wss:// oder ws:// beginnen.",
@@ -315,6 +320,7 @@
     "commandPalette": "Befehlspalette…"
   },
   "errors": {
+    "pathNotText": "{{path}} kann nicht verwendet werden: Der Pfad ist kein gültiges UTF-8. Benennen Sie ihn um und versuchen Sie es erneut.",
     "deleteQueryFailed": "Abfrage konnte nicht gelöscht werden",
     "deleteQueryFailedDetail": "Die gespeicherte Abfrage ist nicht mehr in der Bibliothek.",
     "deleteConnectionFailed": "Verbindung konnte nicht gelöscht werden",
@@ -342,7 +348,9 @@
     "switchConnection": "Verbindung wechseln",
     "connectionSettings": "Verbindungseinstellungen",
     "readOnly": "Schreibgeschützt",
-    "protected": "Fragt vor Änderungen"
+    "protected": "Fragt vor Änderungen",
+    "extensions": "{{count}} Erweiterung",
+    "extensions_other": "{{count}} Erweiterungen"
   },
   "theme": {
     "dark": "Dunkel",

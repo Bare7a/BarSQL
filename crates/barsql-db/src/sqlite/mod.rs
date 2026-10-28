@@ -1,5 +1,7 @@
+mod extensions;
 mod schema;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -21,13 +23,15 @@ pub use crate::lite::values::parse_time;
 pub struct SqliteConnectOptions {
     pub path: PathBuf,
     pub read_only: bool,
+    pub extensions: Vec<PathBuf>,
 }
 
 impl SqliteConnectOptions {
     // Any `?` query is dropped, so a stored path cannot smuggle in open flags or pragmas.
     pub fn from_config(cfg: &ConnectionConfig) -> Self {
         let path = cfg.file_path.split('?').next().unwrap_or_default();
-        Self { path: PathBuf::from(path), read_only: cfg.read_only }
+        let extensions = cfg.active_extensions().map(PathBuf::from).collect();
+        Self { path: PathBuf::from(path), read_only: cfg.read_only, extensions }
     }
 }
 
@@ -38,12 +42,14 @@ pub struct SqliteEngine {
     pub(crate) options: SqliteConnectOptions,
     conn: Arc<Mutex<Connection>>,
     interrupt: Arc<InterruptHandle>,
+    // Lowercase function name, and the extension that added it.
+    extension_functions: HashMap<String, String>,
 }
 
 impl SqliteEngine {
     pub async fn connect(options: SqliteConnectOptions) -> Result<Arc<Self>, QueryError> {
         let opened = options.clone();
-        let conn = tokio::task::spawn_blocking(move || -> Result<Connection, QueryError> {
+        let (conn, added) = tokio::task::spawn_blocking(move || -> Result<_, QueryError> {
             let conn = Connection::open_with_flags(
                 &opened.path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -53,13 +59,17 @@ impl SqliteEngine {
             if opened.read_only {
                 conn.execute_batch("PRAGMA query_only = true").map_err(|err| lite_error(&err))?;
             }
+            // After query_only, so an extension setting itself up can't write to a read-only file.
+            // A later failure must still tear down the ones that loaded.
+            let added = extensions::load(&conn, &opened.extensions).inspect_err(|_| extensions::finalize(&conn))?;
             conn.query_row("SELECT 1", [], |_| Ok(())).map_err(|err| lite_error(&err))?;
-            Ok(conn)
+            Ok((conn, added))
         })
         .await
         .map_err(|err| QueryError::message(err.to_string()))??;
         let interrupt = Arc::new(conn.get_interrupt_handle());
-        Ok(Arc::new(Self { options, conn: Arc::new(Mutex::new(conn)), interrupt }))
+        let extension_functions = added.into_iter().collect();
+        Ok(Arc::new(Self { options, conn: Arc::new(Mutex::new(conn)), interrupt, extension_functions }))
     }
 
     pub fn read_only(&self) -> bool {
@@ -85,6 +95,17 @@ impl SqliteEngine {
     fn server_cancel(&self) -> impl Fn() + Send + Sync + 'static {
         let interrupt = self.interrupt.clone();
         move || interrupt.interrupt()
+    }
+}
+
+impl Drop for SqliteEngine {
+    fn drop(&mut self) {
+        // Sessions hold the engine, so with it gone nothing else holds the connection.
+        if !self.options.extensions.is_empty()
+            && let Some(conn) = Arc::get_mut(&mut self.conn)
+        {
+            extensions::finalize(conn.get_mut());
+        }
     }
 }
 

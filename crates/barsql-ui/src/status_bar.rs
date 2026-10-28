@@ -38,6 +38,8 @@ pub struct StatusBarState {
     pub read_only: bool,
     // The connection asks before changes.
     pub protected: bool,
+    // The extensions the connection loads, by file name.
+    pub extensions: Vec<String>,
     // An open transaction, and whether a statement in it failed.
     pub transaction: Option<bool>,
     // The editor's caret while the grid doesn't have the focus, and the grid's stats while it does. Never both.
@@ -260,6 +262,13 @@ pub fn render(state: StatusBarState, cx: &App) -> impl IntoElement {
                         .child(t(cx, "status.protected"));
                     el.child(clickable(chip, actions.edit_connection.clone(), settings.clone(), cx))
                 })
+                // Not a guard, so not in the guards' colour.
+                .when(!state.extensions.is_empty(), |el| {
+                    let count = t_count(cx, "status.extensions", state.extensions.len() as i64, &[]);
+                    let chip = chip("status-extensions", theme.primary).child(icon(Lucide::Puzzle)).child(count);
+                    let tip = format!("{} · {settings}", state.extensions.join(", "));
+                    el.child(clickable(chip, actions.edit_connection.clone(), tip.into(), cx))
+                })
                 .when_some(state.transaction, |el, failed| {
                     let (key, color) =
                         if failed { ("editor.txnError", theme.danger) } else { ("editor.txnActive", theme.warning) };
@@ -382,5 +391,29 @@ mod tests {
         assert_eq!(guard_tint(&state(false, true, Some(red))), Some(red));
         assert_eq!(guard_tint(&state(false, false, Some(red))), None);
         assert_eq!(guard_tint(&state(true, true, None)), None);
+        let extended = StatusBarState { extensions: vec!["crsqlite.dylib".into()], ..state(false, false, Some(red)) };
+        assert_eq!(guard_tint(&extended), None, "extensions aren't a guard");
+    }
+
+    struct Bar(Vec<String>);
+
+    impl gpui_kit::Render for Bar {
+        fn render(&mut self, _: &mut gpui_kit::Window, cx: &mut gpui_kit::Context<Self>) -> impl gpui_kit::IntoElement {
+            let connection = super::StatusConnection { name: "Notes".into(), engine: "SQLite".into(), connected: true };
+            super::render(
+                StatusBarState { connection: Some(connection), extensions: self.0.clone(), ..Default::default() },
+                cx,
+            )
+        }
+    }
+
+    #[gpui_kit::test]
+    fn only_a_connection_with_extensions_shows_their_chip(cx: &mut gpui_kit::TestAppContext) {
+        let _env = crate::test_support::Env::new(cx);
+        for (extensions, shown) in [(vec![], false), (vec!["crsqlite.dylib".to_string()], true)] {
+            let (_, cx) = cx.add_window_view(|_, _| Bar(extensions));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(cx.debug_bounds("status-extensions").is_some(), shown);
+        }
     }
 }

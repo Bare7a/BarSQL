@@ -145,6 +145,8 @@ pub struct ConnectionConfig {
     pub confirm_changes: bool,
     #[serde(default)]
     pub ssh: SshConfig,
+    #[serde(default, skip_serializing_if = "ExtensionsConfig::is_empty")]
+    pub extensions: ExtensionsConfig,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -176,6 +178,27 @@ pub struct SshConfig {
     pub extra: Map<String, Value>,
 }
 
+// Loaded in order when the connection opens. Switching it off keeps the list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionsConfig {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<ExtensionFile>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionFile {
+    #[serde(default)]
+    pub path: String,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
 impl ConnectionConfig {
     pub fn normalize(&mut self) {
         trim_in_place(&mut self.name);
@@ -190,6 +213,7 @@ impl ConnectionConfig {
         trim_in_place(&mut self.instance);
         self.take_url_token();
         self.ssh.normalize();
+        self.extensions.normalize();
     }
 
     // Turso's dashboard hands out URLs with `?authToken=…`. The token goes in its own field, so the URL can be
@@ -271,6 +295,20 @@ impl ConnectionConfig {
         }
     }
 
+    pub fn active_extensions(&self) -> impl Iterator<Item = &str> {
+        let on = self.extensions.enabled && self.driver.capabilities().extensions;
+        let files: &[ExtensionFile] = if on { &self.extensions.files } else { &[] };
+        files.iter().map(|file| file.path.as_str())
+    }
+
+    // A save between two configs that connect alike keeps an open connection.
+    pub fn connects_like(&self, other: &ConnectionConfig) -> bool {
+        let (mut this, mut other) = (self.clone(), other.clone());
+        this.normalize();
+        other.normalize();
+        this.fingerprint() == other.fingerprint()
+    }
+
     // Hashed so passwords never show up in plain text wherever the fingerprint is kept.
     pub fn fingerprint(&self) -> String {
         let ssh = &self.ssh;
@@ -303,6 +341,9 @@ impl ConnectionConfig {
             if !value.is_empty() {
                 raw.push_str(&format!("|{label}={value}"));
             }
+        }
+        for path in self.active_extensions() {
+            raw.push_str(&format!("|extension={path}"));
         }
         hex::encode(Sha256::digest(raw.as_bytes()))
     }
@@ -341,6 +382,24 @@ impl SshConfig {
             other => Err(ConfigError::SshAuthMethod(other.to_string())),
         }
     }
+}
+
+impl ExtensionsConfig {
+    fn is_empty(&self) -> bool {
+        !self.enabled && self.files.is_empty() && self.extra.is_empty()
+    }
+
+    fn normalize(&mut self) {
+        for file in &mut self.files {
+            trim_in_place(&mut file.path);
+        }
+        self.files.retain(|file| !file.path.is_empty());
+    }
+}
+
+// Folder and file name, split on either separator, since a data folder can move between operating systems.
+pub fn path_parts(path: &str) -> (&str, &str) {
+    path.rsplit_once(['/', '\\']).unwrap_or(("", path))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -565,6 +624,13 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_and_cosmetic_fields_dont_change_how_it_connects() {
+        let renamed = ConnectionConfig { name: "renamed".into(), host: " db.internal ".into(), ..pg() };
+        assert!(pg().connects_like(&renamed));
+        assert!(!pg().connects_like(&ConnectionConfig { host: "other".into(), ..pg() }));
+    }
+
+    #[test]
     fn normalize_ssh_trims_and_defaults() {
         let mut cfg = pg();
         cfg.ssh = SshConfig {
@@ -676,6 +742,49 @@ mod tests {
             mutate(&mut cfg.ssh);
             assert_ne!(cfg.fingerprint(), base_fp, "SSH {name}");
         }
+    }
+
+    fn sqlite_with(enabled: bool, paths: &[&str]) -> ConnectionConfig {
+        let files = paths.iter().map(|path| ExtensionFile { path: path.to_string(), ..Default::default() }).collect();
+        ConnectionConfig {
+            driver: DriverType::Sqlite,
+            file_path: "app.db".into(),
+            extensions: ExtensionsConfig { enabled, files, ..Default::default() },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn extensions_stay_out_of_the_file_until_set() {
+        let plain = sqlite_with(false, &[]);
+        assert!(serde_json::to_value(&plain).unwrap().get("extensions").is_none());
+        let json = r#"{"driver":"sqlite","extensions":{"enabled":true,"files":[{"path":"/x/crsqlite.dylib"}]}}"#;
+        let cfg: ConnectionConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.active_extensions().collect::<Vec<_>>(), ["/x/crsqlite.dylib"]);
+        assert_eq!(
+            serde_json::to_value(&cfg).unwrap()["extensions"],
+            serde_json::json!({ "enabled": true, "files": [{ "path": "/x/crsqlite.dylib" }] })
+        );
+    }
+
+    #[test]
+    fn only_a_switched_on_list_loads_and_only_on_sqlite() {
+        let mut cfg = sqlite_with(true, &[" /x/crsqlite.dylib ", "  "]);
+        cfg.normalize();
+        assert_eq!(cfg.active_extensions().collect::<Vec<_>>(), ["/x/crsqlite.dylib"], "trimmed, blanks dropped");
+        let off = sqlite_with(false, &["/x/crsqlite.dylib"]);
+        assert_eq!((off.active_extensions().count(), off.extensions.files.len()), (0, 1), "off keeps the list");
+        let postgres = ConnectionConfig { driver: DriverType::Postgres, ..cfg };
+        assert_eq!(postgres.active_extensions().count(), 0);
+    }
+
+    #[test]
+    fn fingerprint_covers_the_extensions_that_load() {
+        let base_fp = sqlite_with(false, &[]).fingerprint();
+        assert_eq!(sqlite_with(false, &["/x/crsqlite.dylib"]).fingerprint(), base_fp, "a list that's off");
+        let on = sqlite_with(true, &["/x/crsqlite.dylib"]).fingerprint();
+        assert_ne!(on, base_fp);
+        assert_ne!(sqlite_with(true, &["/x/crsqlite.dylib", "/x/vec0.dylib"]).fingerprint(), on);
     }
 
     #[test]

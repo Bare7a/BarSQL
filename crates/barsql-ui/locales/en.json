@@ -98,6 +98,11 @@
     "sslStrict": "Strict (TDS 8.0)",
     "confirmChanges": "Ask before running changes",
     "confirmChangesHint": "For production databases: confirms INSERT, UPDATE, DELETE, DDL and grid saves before they run.",
+    "extensions": "Load extensions",
+    "extensionsHint": "Loads SQLite extensions such as cr-sqlite each time this file opens. They run inside BarSQL, so add only ones you trust.",
+    "extensionsEmpty": "No extensions yet. Add a library file with +.",
+    "extensionsAdd": "Add extension",
+    "extensionsRemove": "Remove extension",
     "hostRequired": "Host is required.",
     "usernameRequired": "Username is required.",
     "urlScheme": "The database URL must start with libsql://, https://, http://, wss:// or ws://.",
@@ -315,6 +320,7 @@
     "commandPalette": "Command Palette…"
   },
   "errors": {
+    "pathNotText": "Can't use {{path}}: its path isn't valid UTF-8. Rename it and try again.",
     "deleteQueryFailed": "Could not delete query",
     "deleteQueryFailedDetail": "The saved query is no longer in the library.",
     "deleteConnectionFailed": "Could not delete connection",
@@ -342,7 +348,9 @@
     "switchConnection": "Switch connection",
     "connectionSettings": "Connection settings",
     "readOnly": "Read-only",
-    "protected": "Asks before changes"
+    "protected": "Asks before changes",
+    "extensions": "{{count}} extension",
+    "extensions_other": "{{count}} extensions"
   },
   "theme": {
     "dark": "Dark",

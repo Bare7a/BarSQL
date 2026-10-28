@@ -360,8 +360,9 @@ pub(crate) fn triggers(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Trig
 
 // One row per calling form, folded by name. Window-capable aggregates and pure window functions share the
 // type 'w', so both count as aggregates. Table-valued functions like json_each are modules and aren't listed.
-// SQL can't define functions here, so everything listed ships with the build. FTS5's bm25 and snippet are
-// listed as not built in only because FTS5 registers them late. The JSON operators -> and ->> are listed too.
+// SQL can't define functions here, so everything listed ships with the build or a loaded extension, whose
+// functions the SQLite engine marks as its own. FTS5's bm25 and snippet are listed as not built in only because
+// FTS5 registers them late. The JSON operators -> and ->> are listed too.
 pub(crate) fn functions(src: &mut dyn LiteSource) -> Result<FunctionList, QueryError> {
     let rows = src.query(
         "SELECT name, MAX(type IN ('a', 'w'))

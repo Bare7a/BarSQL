@@ -693,6 +693,7 @@ dependencies = [
  "hex",
  "httparse",
  "jiff",
+ "libc",
  "mysql_async",
  "regex",
  "rusqlite",

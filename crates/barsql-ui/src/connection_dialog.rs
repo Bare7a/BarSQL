@@ -2,22 +2,26 @@ use std::rc::Rc;
 
 use barsql_app::path_defaults;
 use barsql_core::capabilities::{DefaultSchema, Location};
-use barsql_core::{ConfigError, ConnectionConfig, DriverType, SshConfig};
+use barsql_core::config::path_parts;
+use barsql_core::{ConfigError, ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig, SshConfig};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::connections_panel::parse_color;
 use crate::file_dialogs;
-use crate::form::{self, SelectMenu};
+use crate::form::{self, SelectMenu, ToolButton};
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
+use crate::schema;
 use crate::state;
 use crate::toast;
+use crate::tokens::{ICON_SM, RADIUS, RADIUS_SM, TEXT_BASE, TEXT_SM, TEXT_XS};
 
 pub const DEFAULT_COLOR: &str = "#3b82f6";
 // 500px. 480px fits two rows of 15 swatches with 2px to spare, and device-pixel rounding eats that at some zooms
@@ -223,6 +227,11 @@ pub struct ConnectionForm {
     ssh_enabled: bool,
     ssh_auth: String,
     ignore_host_key: bool,
+    extensions_enabled: bool,
+    extension_files: Vec<ExtensionFile>,
+    selected_extension: Option<usize>,
+    // The row the last Test couldn't load, and why.
+    failed_extension: Option<(usize, SharedString)>,
     fields: Fields,
     error: Option<SharedString>,
     testing: bool,
@@ -291,6 +300,10 @@ impl ConnectionForm {
             ssh_enabled: ssh.enabled,
             ssh_auth: if ssh.auth.is_empty() { "key".into() } else { ssh.auth.clone() },
             ignore_host_key: ssh.ignore_host_key,
+            extensions_enabled: config.extensions.enabled,
+            extension_files: config.extensions.files.clone(),
+            selected_extension: None,
+            failed_extension: None,
             original: config,
             fields,
             error: None,
@@ -364,6 +377,11 @@ impl ConnectionForm {
                 known_hosts: value(&f.ssh_known_hosts),
                 ignore_host_key: self.ignore_host_key,
                 ..self.original.ssh.clone()
+            },
+            extensions: ExtensionsConfig {
+                enabled: self.extensions_enabled,
+                files: self.extension_files.clone(),
+                ..self.original.extensions.clone()
             },
             ..self.original.clone()
         }
@@ -446,10 +464,15 @@ impl ConnectionForm {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.testing = false;
+                let Some(result) = result else { return };
+                this.failed_extension = result.as_ref().err().and_then(|error| {
+                    let failed = error.extension.as_ref()?;
+                    let row = this.extension_files.iter().position(|file| file.path.trim() == failed.path)?;
+                    Some((row, sentence(&failed.reason)))
+                });
                 match result {
-                    Some(Ok(())) => toast::success(t(cx, "toast.connectionSuccess"), cx),
-                    Some(Err(error)) => toast::error(error.message, cx),
-                    None => return,
+                    Ok(()) => toast::success(t(cx, "toast.connectionSuccess"), cx),
+                    Err(error) => toast::error(error.message, cx),
                 }
                 cx.notify();
             });
@@ -494,6 +517,10 @@ impl ConnectionForm {
                 this.saving = false;
                 match result {
                     Some(Ok(saved)) => {
+                        // That save closed the connection, so what was read through it may be stale.
+                        if !this.original.id.is_empty() && !this.original.connects_like(&saved) {
+                            schema::forget(&saved.id, cx);
+                        }
                         window.close_dialog(cx);
                         (this.on_saved.clone())(saved, window, cx);
                     }
@@ -515,18 +542,19 @@ impl ConnectionForm {
         };
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = pick.await else { return };
-            let path = path.display().to_string();
-            let _ = this.update_in(cx, |this, window, cx| match target {
-                Browse::Sqlite => {
-                    Self::set(&this.fields.file_path, &path, window, cx);
-                    if Self::value(&this.fields.name, cx).is_empty() {
-                        let name =
-                            path.rsplit(['/', '\\']).next().filter(|n| !n.is_empty()).unwrap_or("SQLite").to_string();
-                        Self::set(&this.fields.name, &name, window, cx);
+            let _ = this.update_in(cx, |this, window, cx| {
+                let Some(path) = file_dialogs::path_text(&path, cx) else { return };
+                match target {
+                    Browse::Sqlite => {
+                        Self::set(&this.fields.file_path, &path, window, cx);
+                        if Self::value(&this.fields.name, cx).is_empty() {
+                            let name = path.rsplit(['/', '\\']).next().filter(|n| !n.is_empty()).unwrap_or("SQLite");
+                            Self::set(&this.fields.name, name, window, cx);
+                        }
                     }
+                    Browse::SshKey => Self::set(&this.fields.ssh_key_path, &path, window, cx),
+                    Browse::KnownHosts => Self::set(&this.fields.ssh_known_hosts, &path, window, cx),
                 }
-                Browse::SshKey => Self::set(&this.fields.ssh_key_path, &path, window, cx),
-                Browse::KnownHosts => Self::set(&this.fields.ssh_known_hosts, &path, window, cx),
             });
         })
         .detach();
@@ -711,6 +739,9 @@ impl Render for ConnectionForm {
         if location == Location::LocalFile {
             let file_row = self.browse_row(&f.file_path, "browse-sqlite", Browse::Sqlite, window, cx);
             body = body.child(form::group(t(cx, "connection.file"), file_row, cx));
+            if self.driver.capabilities().extensions {
+                body = body.child(self.extensions_section(cx));
+            }
         } else if location == Location::Url {
             body = body
                 .child(form::group(t(cx, "connection.url"), labelled("conn-url", form::input(&f.url, window, cx)), cx))
@@ -906,6 +937,162 @@ impl ConnectionForm {
         }
         section.into_any_element()
     }
+
+    // Edited like the structure editor's lists.
+    fn extensions_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.toggle(
+            "conn-extensions",
+            self.extensions_enabled,
+            "connection.extensions",
+            "connection.extensionsHint",
+            |form| {
+                form.extensions_enabled = !form.extensions_enabled;
+                form.failed_extension = None;
+            },
+            cx,
+        );
+        let section = form::section(cx).child(enabled);
+        if !self.extensions_enabled {
+            return section.into_any_element();
+        }
+        let rows: Vec<AnyElement> =
+            self.extension_files.iter().enumerate().map(|(ix, file)| self.extension_row(ix, &file.path, cx)).collect();
+        let theme = cx.theme();
+        let (border, background, muted, footer) =
+            (theme.border, theme.background, theme.muted_foreground, theme.sidebar);
+        let list = match rows.is_empty() {
+            true => div()
+                .h(rems(3.692))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(TEXT_SM)
+                .text_color(muted)
+                .child(t(cx, "connection.extensionsEmpty"))
+                .into_any_element(),
+            false => v_flex().p(rems(0.308)).gap(rems(0.154)).children(rows).into_any_element(),
+        };
+        let buttons = h_flex()
+            .justify_end()
+            .gap(rems(0.462))
+            .px(rems(0.462))
+            .py(rems(0.385))
+            .border_t_1()
+            .border_color(border)
+            .bg(footer)
+            .child(
+                Button::new("conn-extension-add")
+                    .debug_selector(|| "conn-extension-add".into())
+                    .tool_icon(Icon::new(Lucide::Plus), ICON_SM)
+                    .tooltip(t(cx, "connection.extensionsAdd"))
+                    .on_click(cx.listener(|form, _, window, cx| form.add_extensions(window, cx))),
+            )
+            .child(
+                Button::new("conn-extension-remove")
+                    .debug_selector(|| "conn-extension-remove".into())
+                    .tool_icon(Icon::new(Lucide::Minus), ICON_SM)
+                    .tooltip(t(cx, "connection.extensionsRemove"))
+                    .disabled(self.selected_extension.is_none())
+                    .on_click(cx.listener(|form, _, _, cx| form.remove_extension(cx))),
+            );
+        section
+            .child(
+                v_flex()
+                    .rounded(RADIUS)
+                    .border_1()
+                    .border_color(border)
+                    .bg(background)
+                    .overflow_hidden()
+                    .child(list)
+                    .child(buttons),
+            )
+            .into_any_element()
+    }
+
+    fn extension_row(&self, ix: usize, path: &str, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let (danger, muted, selected_bg, hover_bg) =
+            (theme.danger, theme.muted_foreground, theme.sidebar_accent, theme.accent);
+        let (folder, name) = path_parts(path);
+        let failed = self.failed_extension.as_ref().filter(|(row, _)| *row == ix).map(|(_, reason)| reason.clone());
+        let (icon, icon_color) = match failed {
+            Some(_) => (Lucide::TriangleAlert, danger),
+            None => (Lucide::Puzzle, muted),
+        };
+        let detail_color = if failed.is_some() { danger } else { muted };
+        let detail = failed.unwrap_or_else(|| home_relative(folder).into());
+        let tip = SharedString::from(path.to_string());
+        let selector = format!("conn-extension-{ix}");
+        h_flex()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector.clone())
+            .h(rems(1.846))
+            .px(rems(0.462))
+            .gap(rems(0.615))
+            .rounded(RADIUS_SM)
+            .cursor_pointer()
+            .map(|el| match self.selected_extension == Some(ix) {
+                true => el.bg(selected_bg),
+                false => el.hover(|style| style.bg(hover_bg)),
+            })
+            .child(Icon::new(icon).size(ICON_SM).text_color(icon_color))
+            .child(div().flex_none().text_size(TEXT_BASE).child(name.to_string()))
+            .child(div().flex_1().min_w_0().truncate().text_size(TEXT_XS).text_color(detail_color).child(detail))
+            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            .on_click(cx.listener(move |form, _, _, cx| {
+                form.selected_extension = Some(ix);
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    // A file already listed is selected, not added again.
+    fn add_extensions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pick = file_dialogs::pick_extension_files(cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let picked = pick.await;
+            if picked.is_empty() {
+                return;
+            }
+            let _ = this.update(cx, |this, cx| {
+                for picked in picked {
+                    let Some(path) = file_dialogs::path_text(&picked, cx) else { continue };
+                    let row = this.extension_files.iter().position(|file| file.path == path).unwrap_or_else(|| {
+                        this.extension_files.push(ExtensionFile { path, ..Default::default() });
+                        this.extension_files.len() - 1
+                    });
+                    this.selected_extension = Some(row);
+                }
+                this.failed_extension = None;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn remove_extension(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.selected_extension.take() else { return };
+        self.extension_files.remove(row);
+        self.failed_extension = None;
+        cx.notify();
+    }
+}
+
+// The engine's reasons follow "can't load extension x:". Alone on a row, they start a sentence.
+fn sentence(text: &str) -> SharedString {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()).into(),
+        None => SharedString::default(),
+    }
+}
+
+fn home_relative(folder: &str) -> String {
+    let home = dirs::home_dir().map(|home| home.display().to_string()).filter(|home| !home.is_empty());
+    match home.and_then(|home| folder.strip_prefix(&home).map(str::to_string)) {
+        Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => format!("~{rest}"),
+        _ => folder.to_string(),
+    }
 }
 
 // None or a config with an empty id is a new connection. Enter saves, as Save does.
@@ -939,10 +1126,11 @@ pub fn open(
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{ConnectionConfig, DriverType};
+    use barsql_core::{ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig};
     use gpui_kit::component::input::InputState;
 
     use super::{COLORS, ConnectionForm, DEFAULT_COLOR, Fields, new_connection, open, parse_port};
+    use crate::file_dialogs::Stub;
 
     #[test]
     fn ports_parse_leading_digits_with_a_fallback() {
@@ -1157,6 +1345,120 @@ mod tests {
         assert_eq!(key(cx), first);
         fill(&form, |f| &f.host, "db.example.com", cx);
         assert_ne!(key(cx), first);
+    }
+
+    fn extension_paths(form: &Entity<ConnectionForm>, cx: &mut VisualTestContext) -> Vec<String> {
+        cx.update(|_, cx| form.read(cx).extension_files.iter().map(|file| file.path.clone()).collect())
+    }
+
+    #[gpui_kit::test]
+    fn picked_extensions_are_listed_removed_and_saved(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let cx = window(cx);
+        let (form, saved) = open_form(Some(env.connection.clone()), cx);
+        form.update(cx, |form, _| form.extensions_enabled = true);
+        for path in ["/x/crsqlite.dylib", "/x/vec0.dylib", "/x/crsqlite.dylib"] {
+            cx.update(|_, cx| cx.set_global(Stub(Some(path.into()))));
+            form.update_in(cx, |form, window, cx| form.add_extensions(window, cx));
+            cx.run_until_parked();
+        }
+        assert_eq!(extension_paths(&form, cx), ["/x/crsqlite.dylib", "/x/vec0.dylib"], "no file is listed twice");
+        assert_eq!(cx.update(|_, cx| form.read(cx).selected_extension), Some(0), "picking it again selects it");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("conn-extension-1").is_some(), "both rows are drawn");
+
+        form.update(cx, |form, cx| form.remove_extension(cx));
+        assert_eq!(extension_paths(&form, cx), ["/x/vec0.dylib"]);
+        form.update_in(cx, |form, window, cx| form.save(window, cx));
+        settle(cx, |_| !saved.borrow().is_empty());
+        let stored = saved.borrow()[0].clone();
+        assert_eq!(stored.active_extensions().collect::<Vec<_>>(), ["/x/vec0.dylib"]);
+    }
+
+    #[cfg(unix)]
+    #[gpui_kit::test]
+    fn a_path_that_isnt_text_is_refused(cx: &mut TestAppContext) {
+        use std::os::unix::ffi::OsStrExt;
+        let env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(Some(env.connection.clone()), cx);
+        let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"/x/\xffcrsqlite.dylib"));
+        cx.update(|_, cx| cx.set_global(Stub(Some(path))));
+        form.update_in(cx, |form, window, cx| form.add_extensions(window, cx));
+        form.update_in(cx, |form, window, cx| form.browse(super::Browse::Sqlite, window, cx));
+        cx.run_until_parked();
+        assert!(extension_paths(&form, cx).is_empty());
+        let file = cx.update(|_, cx| ConnectionForm::value(&form.read(cx).fields.file_path, cx));
+        assert_eq!(file, env.connection.file_path, "the database file stays");
+    }
+
+    #[gpui_kit::test]
+    fn a_test_that_cant_load_an_extension_marks_its_row(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let cx = window(cx);
+        let missing = ExtensionFile { path: "/nowhere/crsqlite.dylib".into(), ..Default::default() };
+        let extensions = ExtensionsConfig { enabled: true, files: vec![missing], ..Default::default() };
+        let (form, _) = open_form(Some(ConnectionConfig { extensions, ..env.connection.clone() }), cx);
+        form.update_in(cx, |form, window, cx| form.test(window, cx));
+        settle(cx, |cx| cx.update(|_, cx| !form.read(cx).testing));
+        let failed = cx.update(|_, cx| form.read(cx).failed_extension.clone());
+        assert_eq!(failed, Some((0, "File not found".into())));
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        assert!(
+            toasts.iter().any(|(_, text)| text == "can't load extension crsqlite.dylib: file not found"),
+            "{toasts:?}"
+        );
+
+        form.update(cx, |form, cx| {
+            form.selected_extension = Some(0);
+            form.remove_extension(cx);
+        });
+        assert_eq!(cx.update(|_, cx| form.read(cx).failed_extension.clone()), None, "the mark goes with the row");
+    }
+
+    #[gpui_kit::test]
+    fn a_save_that_reconnects_drops_the_cached_schema(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let id = env.connection.id.clone();
+        let cx = window(cx);
+        let loaded = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| crate::schema::get(cx, &id).is_some_and(|entry| entry.schemas().is_some()))
+        };
+        let edit = |change: fn(&mut ConnectionForm), cx: &mut VisualTestContext| {
+            let stored = env.bar.list_connections().into_iter().find(|c| c.id == id).unwrap();
+            let (form, saved) = open_form(Some(stored), cx);
+            form.update(cx, |form, _| change(form));
+            form.update_in(cx, |form, window, cx| form.save(window, cx));
+            settle(cx, |_| !saved.borrow().is_empty());
+        };
+        // Env's connection skipped the dialog, whose first save fills in its defaults.
+        edit(|_| {}, cx);
+        cx.update(|_, cx| crate::schema::ensure_loaded(&id, DriverType::Sqlite, cx));
+        settle(cx, |cx| loaded(cx));
+        edit(|form| form.color = "#ef4444".into(), cx);
+        assert!(loaded(cx), "a new colour keeps it");
+        edit(
+            |form| {
+                form.extensions_enabled = true;
+                form.extension_files = vec![ExtensionFile { path: "/x/crsqlite.dylib".into(), ..Default::default() }];
+            },
+            cx,
+        );
+        assert!(!loaded(cx), "new extensions drop it");
+    }
+
+    #[gpui_kit::test]
+    fn only_sqlite_shows_extensions(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let drawn = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.debug_bounds("conn-extensions").is_some()
+        };
+        assert!(drawn(cx));
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
+        assert!(!drawn(cx));
     }
 
     #[test]
