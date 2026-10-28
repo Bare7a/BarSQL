@@ -358,6 +358,7 @@ pub(crate) fn pg_error(err: &tokio_postgres::Error) -> QueryError {
         },
         severity: db.severity().to_string(),
         cancelled: db.code().code() == "57014",
+        ..Default::default()
     }
 }
 

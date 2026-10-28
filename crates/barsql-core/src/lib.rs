@@ -8,11 +8,11 @@ pub mod schema;
 pub mod structure;
 
 pub use capabilities::Capabilities;
-pub use config::{ConfigError, ConnectionConfig, DriverType, SshConfig};
+pub use config::{ConfigError, ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig, SshConfig};
 pub use dialect::SqlDialect;
 pub use query::{
-    HistoryEntry, MessageLevel, QueryError, ResultSummary, Row, RowDelete, RowUpdate, SavedQuery, ServerMessage,
-    TableDataRequest, Value,
+    ExtensionFailure, HistoryEntry, MessageLevel, QueryError, ResultSummary, Row, RowDelete, RowUpdate, SavedQuery,
+    ServerMessage, TableDataRequest, Value,
 };
 pub use schema::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,

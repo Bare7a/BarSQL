@@ -16,7 +16,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Win
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::file_dialogs::pick_import_file;
+use crate::file_dialogs::{path_text, pick_import_file};
 use crate::form::{self, SelectMenu};
 use crate::i18n::{count, t, t_count, t_with};
 use crate::modal::{self, Modal};
@@ -260,7 +260,12 @@ impl ImportDialog {
         let picked = pick_import_file(self.kind, cx);
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = picked.await else { return };
-            this.update_in(cx, |this, window, cx| this.choose(path.display().to_string(), window, cx)).ok();
+            this.update_in(cx, |this, window, cx| {
+                if let Some(path) = path_text(&path, cx) {
+                    this.choose(path, window, cx);
+                }
+            })
+            .ok();
         })
         .detach();
     }

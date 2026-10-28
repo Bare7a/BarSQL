@@ -9,6 +9,7 @@ use barsql_app::{
     sqlite_file_payload,
 };
 use barsql_core::capabilities::DefaultSchema;
+use barsql_core::config::path_parts;
 use barsql_core::{ConnectionConfig, SavedQuery};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -791,11 +792,10 @@ impl Workspace {
     }
 
     fn dropped(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
-        let path = paths.paths().iter().map(|path| path.display().to_string()).find(|path| is_sqlite_file(path));
-        if let Some(path) = path {
-            let (file_path, name) = sqlite_file_payload(&path);
-            self.open_sqlite(file_path, name, window, cx);
-        }
+        let Some(path) = paths.paths().iter().find(|path| is_sqlite_file(&path.to_string_lossy())) else { return };
+        let Some(path) = file_dialogs::path_text(path, cx) else { return };
+        let (file_path, name) = sqlite_file_payload(&path);
+        self.open_sqlite(file_path, name, window, cx);
     }
 
     fn drop_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -1755,8 +1755,11 @@ impl Workspace {
         let pick = file_dialogs::pick_sqlite_file(cx);
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = pick.await else { return };
-            let (file_path, name) = sqlite_file_payload(&path.display().to_string());
-            let _ = this.update_in(cx, |this, window, cx| this.open_sqlite(file_path, name, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| {
+                let Some(path) = file_dialogs::path_text(&path, cx) else { return };
+                let (file_path, name) = sqlite_file_payload(&path);
+                this.open_sqlite(file_path, name, window, cx);
+            });
         })
         .detach();
     }
@@ -2074,6 +2077,7 @@ impl Workspace {
             color: parse_color(&connection.color),
             read_only: connection.read_only,
             protected: connection.confirm_changes,
+            extensions: connection.active_extensions().map(|path| path_parts(path).1.to_string()).collect(),
             transaction,
             caret: query.filter(|_| grid.is_none()).map(|tab| tab.caret(cx)),
             aggregate: grid.and_then(|grid| grid.read(cx).aggregate()),

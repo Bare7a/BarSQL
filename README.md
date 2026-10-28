@@ -171,6 +171,7 @@ BarSQL focuses on one thing:
 - SQL Server **named instances** - type `host\INSTANCE`, or fill in the Instance field
 - **SSH tunnel** to reach databases behind a bastion (see below)
 - SQLite file picker, or drop a database file on the window
+- **SQLite extensions** - load extensions such as [cr-sqlite](https://github.com/vlcn-io/cr-sqlite) (`.dylib` / `.so` / `.dll`) into a connection each time it opens, in list order. Test names the file that didn't load and why, such as a build for another OS or CPU. The status bar shows how many a connection loads, and their functions complete and show on hover as coming from them. SQL can't load extensions itself
 
 ### 🔐 SSH Tunnel
 
@@ -401,7 +402,7 @@ A `.sql` file runs statement by statement on one connection, so `SET`, temp tabl
 - Custom shortcuts editor + keyboard tips
 - Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
 - Tab menu: close others, to the right or all, **pin**, duplicate, rename, copy SQL
-- Status bar with the caret's line and column, cursor count, read-only and transaction badges
+- Status bar with the caret's line and column, cursor count, read-only, extension and transaction badges
 - Everything opens instantly - no animations
 - **Window state persistence** - size, position and maximized state restored between sessions
 

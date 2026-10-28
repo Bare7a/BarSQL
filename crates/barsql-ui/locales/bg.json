@@ -98,6 +98,11 @@
     "sslStrict": "Стриктно (TDS 8.0)",
     "confirmChanges": "Питай преди промени",
     "confirmChangesHint": "За продукционни бази: потвърждава INSERT, UPDATE, DELETE, DDL и записи от таблицата, преди да се изпълнят.",
+    "extensions": "Зареждай разширения",
+    "extensionsHint": "Зарежда SQLite разширения като cr-sqlite при всяко отваряне на файла. Те се изпълняват в BarSQL, затова добавяйте само такива, на които имате доверие.",
+    "extensionsEmpty": "Още няма разширения. Добавете файл на библиотека с +.",
+    "extensionsAdd": "Добави разширение",
+    "extensionsRemove": "Премахни разширение",
     "hostRequired": "Хостът е задължителен.",
     "usernameRequired": "Потребителското име е задължително.",
     "urlScheme": "URL адресът на базата данни трябва да започва с libsql://, https://, http://, wss:// или ws://.",
@@ -315,6 +320,7 @@
     "commandPalette": "Палитра с команди…"
   },
   "errors": {
+    "pathNotText": "{{path}} не може да се използва: пътят не е валиден UTF-8. Преименувайте го и опитайте отново.",
     "deleteQueryFailed": "Заявката не можа да бъде изтрита",
     "deleteQueryFailedDetail": "Запазената заявка вече не е в библиотеката.",
     "deleteConnectionFailed": "Връзката не можа да бъде изтрита",
@@ -342,7 +348,9 @@
     "switchConnection": "Смени връзката",
     "connectionSettings": "Настройки на връзката",
     "readOnly": "Само за четене",
-    "protected": "Пита преди промени"
+    "protected": "Пита преди промени",
+    "extensions": "{{count}} разширение",
+    "extensions_other": "{{count}} разширения"
   },
   "theme": {
     "dark": "Тъмна",

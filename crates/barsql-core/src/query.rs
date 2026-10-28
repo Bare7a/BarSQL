@@ -19,6 +19,15 @@ pub struct QueryError {
     pub severity: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub cancelled: bool,
+    // Kept apart from the message so the connection dialog can mark the file's row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension: Option<ExtensionFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionFailure {
+    pub path: String,
+    pub reason: String,
 }
 
 impl QueryError {
@@ -28,6 +37,16 @@ impl QueryError {
 
     pub fn cancelled() -> Self {
         Self { message: "query cancelled".into(), cancelled: true, ..Default::default() }
+    }
+
+    pub fn extension(path: &str, reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        let (_, name) = crate::config::path_parts(path);
+        Self {
+            message: format!("can't load extension {name}: {reason}"),
+            extension: Some(ExtensionFailure { path: path.into(), reason }),
+            ..Default::default()
+        }
     }
 }
 

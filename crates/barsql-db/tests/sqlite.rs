@@ -1,7 +1,8 @@
 mod common;
 
 use barsql_core::{
-    ConnectionConfig, DriverType, FunctionKind, ObjectKind, ObjectRef, Row, RowDelete, RowUpdate, Value,
+    ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig, FunctionKind, ObjectKind, ObjectRef, Row, RowDelete,
+    RowUpdate, Value,
 };
 use barsql_db::sqlite::SqliteConnectOptions;
 use barsql_db::{Cancel, Engine, ScriptEvent};
@@ -26,6 +27,21 @@ async fn exec(engine: &Engine, sql: &str) {
 
 fn row(pairs: &[(&str, Value)]) -> Row {
     pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+}
+
+#[tokio::test]
+async fn an_extension_that_wont_load_fails_the_connection_and_names_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("crsqlite.dylib").display().to_string();
+    let mut cfg = config(&dir.path().join("ext.db"), false);
+    let files = vec![ExtensionFile { path: missing.clone(), ..Default::default() }];
+    cfg.extensions = ExtensionsConfig { enabled: true, files, ..Default::default() };
+    let err = Engine::test(&cfg).await.expect_err("the extension is missing");
+    assert_eq!(err.message, "can't load extension crsqlite.dylib: file not found");
+    let failure = err.extension.expect("names the file");
+    assert_eq!((failure.path, failure.reason.as_str()), (missing, "file not found"));
+    cfg.extensions.enabled = false;
+    Engine::test(&cfg).await.expect("a list that's off isn't loaded");
 }
 
 #[tokio::test]

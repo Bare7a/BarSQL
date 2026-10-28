@@ -34,12 +34,9 @@ impl BarApp {
     pub async fn save_connection(&self, mut cfg: ConnectionConfig) -> Result<ConnectionConfig, QueryError> {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
-        let before = self.inner.stores.connections.get(&cfg.id).map(|mut old| {
-            old.normalize();
-            old.fingerprint()
-        });
+        let before = self.inner.stores.connections.get(&cfg.id);
         let saved = self.inner.stores.connections.save(cfg).map_err(storage_error)?;
-        if before.is_some_and(|before| before != saved.fingerprint()) {
+        if before.is_some_and(|before| !before.connects_like(&saved)) {
             self.disconnect(&saved.id).await;
         }
         Ok(saved)

@@ -71,8 +71,16 @@ impl SqliteEngine {
         Ok(Vec::new())
     }
 
+    // Like a Postgres extension's, an extension's functions are the connection's own.
     pub async fn list_functions(self: &Arc<Self>) -> Result<FunctionList, QueryError> {
-        self.catalog(catalog::functions).await
+        let mut list = self.catalog(catalog::functions).await?;
+        for function in &mut list.functions {
+            if let Some(source) = self.extension_functions.get(&function.name.to_ascii_lowercase()) {
+                function.builtin = false;
+                function.source = source.clone();
+            }
+        }
+        Ok(list)
     }
 
     pub async fn object_ddl(self: &Arc<Self>, object: &ObjectRef) -> Result<String, QueryError> {
