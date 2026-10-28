@@ -5,15 +5,18 @@ use barsql_sql::lang::SqlLabels;
 use gpui_kit::{App, Global, SharedString};
 use serde_json::Value;
 
-pub const LANGUAGES: [(&str, &str); 3] = [("en", "English"), ("de", "Deutsch"), ("bg", "Български")];
+pub const LANGUAGES: [(&str, &str); 4] =
+    [("en", "English"), ("de", "Deutsch"), ("bg", "Български"), ("es", "Español")];
 
 const EN: &str = include_str!("../locales/base/en.json");
 const DE: &str = include_str!("../locales/base/de.json");
 const BG: &str = include_str!("../locales/base/bg.json");
+const ES: &str = include_str!("../locales/base/es.json");
 // Overrides and additions merged over the base locales.
 const EN_OWN: &str = include_str!("../locales/en.json");
 const DE_OWN: &str = include_str!("../locales/de.json");
 const BG_OWN: &str = include_str!("../locales/bg.json");
+const ES_OWN: &str = include_str!("../locales/es.json");
 
 // Lookups fall back to English, then to the key itself.
 pub struct I18n {
@@ -31,6 +34,7 @@ fn source(lang: &str) -> Option<(&'static str, &'static str, &'static str)> {
         "en" => Some(("en", EN, EN_OWN)),
         "de" => Some(("de", DE, DE_OWN)),
         "bg" => Some(("bg", BG, BG_OWN)),
+        "es" => Some(("es", ES, ES_OWN)),
         _ => None,
     }
 }
@@ -118,7 +122,7 @@ impl I18n {
         text.into()
     }
 
-    // Only `key_one` and `key_other`, enough for en, de and bg. The bare key stands in for `_one`.
+    // Only `key_one` and `key_other`, enough for en, de, bg and es. The bare key stands in for `_one`.
     pub fn t_count(&self, key: &str, count: i64, vars: &[(&str, &str)]) -> SharedString {
         let form = if count == 1 { "one" } else { "other" };
         let plural = format!("{key}_{form}");
@@ -130,7 +134,7 @@ impl I18n {
     }
 }
 
-// Bulgarian only groups numbers with five or more digits.
+// Bulgarian and Spanish only group numbers with five or more digits.
 pub fn format_count(n: usize, lang: &str) -> String {
     format_number(n as f64, 0, lang)
 }
@@ -143,6 +147,7 @@ pub fn format_number(value: f64, max_fraction: usize, lang: &str) -> String {
     let (group, decimal, min_grouping) = match lang {
         "de" => ('.', ',', 4),
         "bg" => ('\u{a0}', ',', 5),
+        "es" => ('.', ',', 5),
         _ => (',', '.', 4),
     };
     let shortest = format!("{}", value.abs());
@@ -216,6 +221,7 @@ mod tests {
             ("en", ["0", "999", "1,234", "12,345", "1,234,567"]),
             ("de", ["0", "999", "1.234", "12.345", "1.234.567"]),
             ("bg", ["0", "999", "1234", "12\u{a0}345", "1\u{a0}234\u{a0}567"]),
+            ("es", ["0", "999", "1234", "12.345", "1.234.567"]),
         ];
         for (lang, want) in cases {
             assert_eq!([0, 999, 1234, 12345, 1234567].map(|n| format_count(n, lang)), want, "{lang}");

@@ -2363,6 +2363,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &LanguageEn, window, cx| this.set_language("en", window, cx)))
             .on_action(cx.listener(|this, _: &LanguageDe, window, cx| this.set_language("de", window, cx)))
             .on_action(cx.listener(|this, _: &LanguageBg, window, cx| this.set_language("bg", window, cx)))
+            .on_action(cx.listener(|this, _: &LanguageEs, window, cx| this.set_language("es", window, cx)))
             .on_action(cx.listener(|_, _: &ZoomIn, window, cx| theme::set_zoom(theme::zoom(cx) + 1., window, cx)))
             .on_action(cx.listener(|_, _: &ZoomOut, window, cx| theme::set_zoom(theme::zoom(cx) - 1., window, cx)))
             .on_action(cx.listener(|_, _: &ResetZoom, window, cx| theme::set_zoom(theme::DEFAULT_ZOOM, window, cx)))

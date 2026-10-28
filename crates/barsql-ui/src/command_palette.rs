@@ -65,6 +65,7 @@ fn catalog(cx: &App) -> Vec<(String, Box<dyn Action>)> {
         (language("language.en"), Box::new(LanguageEn)),
         (language("language.de"), Box::new(LanguageDe)),
         (language("language.bg"), Box::new(LanguageBg)),
+        (language("language.es"), Box::new(LanguageEs)),
         (item("menu.keyboardShortcuts"), Box::new(KeyboardShortcuts)),
         (item("menu.keyboardTips"), Box::new(KeyboardTips)),
         (item("menu.about"), Box::new(About)),

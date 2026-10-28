@@ -29,6 +29,7 @@ actions!(
         LanguageEn,
         LanguageDe,
         LanguageBg,
+        LanguageEs,
         ZoomIn,
         ZoomOut,
         ResetZoom,
@@ -161,6 +162,7 @@ fn menus(cx: &App) -> Vec<Menu> {
             MenuItem::action(t(cx, "language.en"), LanguageEn).checked(lang == "en"),
             MenuItem::action(t(cx, "language.de"), LanguageDe).checked(lang == "de"),
             MenuItem::action(t(cx, "language.bg"), LanguageBg).checked(lang == "bg"),
+            MenuItem::action(t(cx, "language.es"), LanguageEs).checked(lang == "es"),
         ],
     );
     let (sidebar_open, json_open) =

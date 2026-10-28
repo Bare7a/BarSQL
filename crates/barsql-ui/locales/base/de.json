@@ -3,7 +3,8 @@
     "label": "Sprache",
     "en": "English",
     "de": "Deutsch",
-    "bg": "Български"
+    "bg": "Български",
+    "es": "Español"
   },
   "theme": {
     "dark": "Dunkles Design",

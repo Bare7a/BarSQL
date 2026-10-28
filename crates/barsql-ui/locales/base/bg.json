@@ -3,7 +3,8 @@
     "label": "Език",
     "en": "English",
     "de": "Deutsch",
-    "bg": "Български"
+    "bg": "Български",
+    "es": "Español"
   },
   "theme": {
     "dark": "Тъмна тема",
