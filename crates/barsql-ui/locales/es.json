@@ -107,7 +107,12 @@
     "sshKeyRequired": "El archivo de clave privada SSH es obligatorio.",
     "sshAuthUnsupported": "Método de autenticación SSH no compatible: {{method}}.",
     "driverUnsupported": "Controlador no compatible: {{driver}}.",
-    "driverNotInBuild": "{{driver}} no está disponible en esta compilación."
+    "driverNotInBuild": "{{driver}} no está disponible en esta compilación.",
+    "extensions": "Cargar extensiones",
+    "extensionsHint": "Carga extensiones de SQLite, como cr-sqlite, cada vez que se abre este archivo. Se ejecutan dentro de BarSQL, así que añade solo las que sean de confianza.",
+    "extensionsEmpty": "Aún no hay extensiones. Añade un archivo de biblioteca con +.",
+    "extensionsAdd": "Añadir extensión",
+    "extensionsRemove": "Quitar extensión"
   },
   "results": {
     "messages": "Mensajes",
@@ -327,7 +332,8 @@
     "historyNotSaved": "No se pudo guardar el historial de consultas: {{error}}. Recientes no mostrará consultas nuevas hasta que el guardado vuelva a funcionar.",
     "code": "Código {{code}}",
     "useName": "Usar {{name}}",
-    "didYouMean": "¿Quisiste decir {{name}}?"
+    "didYouMean": "¿Quisiste decir {{name}}?",
+    "pathNotText": "No se puede usar {{path}}: su ruta no es UTF-8 válido. Renómbralo e inténtalo de nuevo."
   },
   "goToLine": {
     "title": "Ir a la línea",
@@ -352,7 +358,9 @@
     "switchConnection": "Cambiar de conexión",
     "connectionSettings": "Ajustes de la conexión",
     "readOnly": "Solo lectura",
-    "protected": "Pregunta antes de los cambios"
+    "protected": "Pregunta antes de los cambios",
+    "extensions": "{{count}} extensión",
+    "extensions_other": "{{count}} extensiones"
   },
   "theme": {
     "dark": "Oscuro",
