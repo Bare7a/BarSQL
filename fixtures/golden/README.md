@@ -10,7 +10,7 @@ The expected outputs each suite asserts against.
 | `explain/` | Raw EXPLAIN output and the normalized plan it parses into, per engine |
 | `corpus/` | Statement splits, read-only verdicts, table-filter validation, identifier quoting, plan detection, row-edit SQL, CSV reader records and import previews |
 | `export/` | Export and copy formats (text, CSV, JSON, Markdown, SQL INSERT) |
-| `ui/` | Relative history timestamps in en/de/bg across every unit threshold and halfway rounding point |
+| `ui/` | Relative history timestamps in en/de/bg/es across every unit threshold and halfway rounding point |
 
 These files change for a deliberate behaviour change. The database golden tests and the corpus tests write
 `<name>.actual.json` beside a fixture that drifted, so the change can be reviewed and copied over. With the stack up,

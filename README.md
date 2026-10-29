@@ -397,7 +397,7 @@ A `.sql` file runs statement by statement on one connection, so `SET`, temp tabl
 
 - **Dark & light** themes, or **match the system** and follow it as it changes
 - **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
-- **English**, **Deutsch** and **Български**
+- **English**, **Deutsch**, **Български** and **Español**
 - **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs
 - Custom shortcuts editor + keyboard tips
 - Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux

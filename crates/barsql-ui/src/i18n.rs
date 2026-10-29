@@ -5,8 +5,7 @@ use barsql_sql::lang::SqlLabels;
 use gpui_kit::{App, Global, SharedString};
 use serde_json::Value;
 
-pub const LANGUAGES: [(&str, &str); 4] =
-    [("en", "English"), ("de", "Deutsch"), ("bg", "Български"), ("es", "Español")];
+pub const LANGUAGES: [(&str, &str); 4] = [("en", "English"), ("de", "Deutsch"), ("bg", "Български"), ("es", "Español")];
 
 const EN: &str = include_str!("../locales/base/en.json");
 const DE: &str = include_str!("../locales/base/de.json");
