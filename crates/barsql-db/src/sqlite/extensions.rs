@@ -66,8 +66,12 @@ fn resolve(path: &Path) -> Option<PathBuf> {
 
 fn mismatch(file: &Path) -> Option<String> {
     let mut header = Vec::new();
-    match std::fs::File::open(file).and_then(|file| file.take(4096).read_to_end(&mut header)) {
-        Ok(_) => mismatched(&header),
+    let len = std::fs::File::open(file).and_then(|mut file| {
+        file.by_ref().take(4096).read_to_end(&mut header)?;
+        Ok(file.metadata()?.len())
+    });
+    match len {
+        Ok(len) => mismatched(&header).or_else(|| cut_short(&header, len)),
         Err(err) => Some(err.to_string()),
     }
 }
@@ -82,6 +86,32 @@ fn mismatched(header: &[u8]) -> Option<String> {
     let arch = std::env::consts::ARCH;
     let cpus: Vec<&str> = cpus.into_iter().collect::<Option<_>>().filter(|_| cpu(|c| c.name == arch).is_some())?;
     (!cpus.contains(&arch)).then(|| format!("built for {}, but BarSQL runs on {arch}", cpus.join(" and ")))
+}
+
+// glibc maps segments without checking them against the file, so loading a cut-short library would end in a SIGBUS.
+fn cut_short(header: &[u8], len: u64) -> Option<String> {
+    let [0x7f, b'E', b'L', b'F', class, data, ..] = *header else { return None };
+    // Where e_phoff, e_phnum, and a program header's p_offset and p_filesz sit, a header's size, and a word's width.
+    let (phoff, phnum, offset, filesz, entry, word) = match class {
+        1 => (28, 44, 4, 16, 32, 4),
+        2 => (32, 56, 8, 32, 56, 8),
+        _ => return None,
+    };
+    let int = |bytes: &[u8]| {
+        let mut raw = [0; 8];
+        raw[..bytes.len()].copy_from_slice(bytes);
+        if data == 2 {
+            raw[..bytes.len()].reverse();
+        }
+        u64::from_le_bytes(raw)
+    };
+    let start = usize::try_from(int(header.get(phoff..phoff + word)?)).ok()?;
+    let table = header.get(start..)?;
+    let count = int(header.get(phnum..phnum + 2)?) as usize;
+    let field = |segment: &[u8], at: usize| int(&segment[at..at + word]);
+    let end = |segment: &[u8]| field(segment, offset).saturating_add(field(segment, filesz));
+    let past_the_end = table.chunks_exact(entry).take(count).any(|segment| end(segment) > len);
+    past_the_end.then(|| "the file is incomplete; download or copy it again".into())
 }
 
 // Only a hint after a failed load: Mach-O can store exported names in pieces.
@@ -282,7 +312,9 @@ fn with_quarantine_hint(_: &Path, reason: String) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{Format, built_for, entry_point, load, mismatched, missing_entry_point, own_format, resolve};
+    use super::{
+        Format, built_for, cut_short, entry_point, load, mismatched, missing_entry_point, own_format, resolve,
+    };
 
     fn elf(machine: u16) -> Vec<u8> {
         let mut bytes = vec![0x7f, b'E', b'L', b'F', 2, 1];
@@ -311,6 +343,26 @@ mod tests {
         bytes.resize(0x80, 0);
         bytes.extend(b"PE\0\0");
         bytes.extend(machine.to_le_bytes());
+        bytes
+    }
+
+    // An ELF library whose program headers, from byte 64 on, point at these (offset, size) ranges of the file.
+    fn segments(class: u8, data: u8, ranges: &[(u64, u64)]) -> Vec<u8> {
+        let int = |value: u64, width: usize| match data {
+            2 => value.to_be_bytes()[8 - width..].to_vec(),
+            _ => value.to_le_bytes()[..width].to_vec(),
+        };
+        let (magic, count) = (vec![0x7f, b'E', b'L', b'F', class, data], int(ranges.len() as u64, 2));
+        let mut bytes = match class {
+            1 => [magic, vec![0; 22], int(64, 4), vec![0; 12], count, vec![0; 18]].concat(),
+            _ => [magic, vec![0; 26], int(64, 8), vec![0; 16], count, vec![0; 6]].concat(),
+        };
+        for &(offset, size) in ranges {
+            bytes.extend(match class {
+                1 => [int(1, 4), int(offset, 4), vec![0; 8], int(size, 4), vec![0; 12]].concat(),
+                _ => [int(1, 4), vec![0; 4], int(offset, 8), vec![0; 16], int(size, 8), vec![0; 16]].concat(),
+            });
+        }
         bytes
     }
 
@@ -364,6 +416,26 @@ mod tests {
             Format::Pe => pe(0x5064),
         };
         assert_eq!(mismatched(&unknown_cpu), None, "left for the loader");
+    }
+
+    #[test]
+    fn segments_past_the_end_of_the_file_are_refused() {
+        let cut = Some("the file is incomplete; download or copy it again");
+        // Laid out like the libraries cc builds for these tests on Linux, which are 15160 bytes long.
+        let mut library = segments(2, 1, &[(0, 0x4e0), (0x1000, 0x139), (0x2000, 0xcc), (0x2e68, 0x1a0)]);
+        library.extend([0xff; 56]);
+        assert_eq!(cut_short(&library, 15160), None, "bytes past the table aren't program headers");
+        assert_eq!(cut_short(&library, 0x3008), None, "the last segment ends where the file does");
+        assert_eq!(cut_short(&library, 0x3007).as_deref(), cut);
+        assert_eq!(cut_short(&library, 15160 / 2).as_deref(), cut, "half the file");
+        for (class, data) in [(1, 1), (2, 2)] {
+            let other = segments(class, data, &[(0x1000, 0x200)]);
+            assert_eq!(cut_short(&other, 0x1200), None, "class {class}, byte order {data}");
+            assert_eq!(cut_short(&other, 0x11ff).as_deref(), cut, "class {class}, byte order {data}");
+        }
+        assert_eq!(cut_short(&elf(62), 20), None, "too short to say");
+        assert_eq!(cut_short(&pe(0x8664), 1), None, "only ELF");
+        assert_eq!(cut_short(&mach(0x0100_000c), 1), None, "only ELF");
     }
 
     #[test]
@@ -426,11 +498,11 @@ mod tests {
     // 46th routine in its table, which only grows at the end.
     #[cfg(unix)]
     fn build(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
-        build_with(dir, name, "", body)
+        build_with(dir, name, "", body, &[])
     }
 
     #[cfg(unix)]
-    fn build_with(dir: &Path, name: &str, prelude: &str, body: &str) -> std::path::PathBuf {
+    fn build_with(dir: &Path, name: &str, prelude: &str, body: &str, links: &[&Path]) -> std::path::PathBuf {
         let source = dir.join(format!("{name}.c"));
         let entry = super::entry_point(&dir.join(name), false);
         let api = "typedef struct { void *before[45]; int (*create_function)(void *, const char *, int, int, void *, \
@@ -444,6 +516,7 @@ mod tests {
             .args([shared, "-fPIC", "-o"])
             .arg(&library)
             .arg(&source)
+            .args(links)
             .status()
             .expect("run cc");
         assert!(status.success(), "cc failed for {name}");
@@ -470,12 +543,22 @@ mod tests {
         let sql = conn.query_row("SELECT load_extension(?1)", [ok.display().to_string()], |_| Ok(()));
         assert!(sql.is_err(), "SQL still can't load extensions afterwards");
 
+        let dependency = build(dir.path(), "libbarsqldep", "return 0;");
+        let import = "int sqlite3_barsqldep_init(void *, char **, const api_t *);\n";
+        let body = "return sqlite3_barsqldep_init(db, err, api);";
+        let needs = build_with(dir.path(), "barsqlneeds", import, body, &[&dependency]);
+        std::fs::remove_file(&dependency).unwrap();
+        let missing = reason(load(&conn, &[needs]));
+        assert!(missing.contains("libbarsqldep"), "the loader's own, not SQLite's retry with the suffix: {missing}");
+
         let cut = dir.path().join(format!("barsqlcut.{}", std::env::consts::DLL_EXTENSION));
         let bytes = std::fs::read(&ok).unwrap();
         std::fs::write(&cut, &bytes[..bytes.len() / 2]).unwrap();
-        let reason = reason(load(&conn, &[cut]));
-        assert!(!reason.contains(&format!(".{0}.{0}", std::env::consts::DLL_EXTENSION)), "the loader's own: {reason}");
-        assert_ne!(reason, "not a shared library", "past the header check");
+        let cut = reason(load(&conn, &[cut]));
+        assert_ne!(cut, "not a shared library", "past the header check");
+        if own_format() == Format::Elf {
+            assert_eq!(cut, "the file is incomplete; download or copy it again", "glibc would map it and crash");
+        }
     }
 
     #[cfg(unix)]
@@ -488,7 +571,7 @@ mod tests {
              if (f) {{ fputc('x', f); fclose(f); }} }}\n",
             runs.display()
         );
-        let library = build_with(dir.path(), "barsqlonce", &count, "return 0;");
+        let library = build_with(dir.path(), "barsqlonce", &count, "return 0;", &[]);
         let renamed = dir.path().join(format!("barsqlonce-renamed.{}", std::env::consts::DLL_EXTENSION));
         std::fs::copy(&library, &renamed).unwrap();
         let conn = rusqlite::Connection::open_in_memory().unwrap();
