@@ -420,6 +420,32 @@
     "noRows": "Noch keine Zeilen für ein Diagramm.",
     "blank": "(leer)"
   },
+  "algebra": {
+    "button": "Algebra",
+    "tooltip": "Die Abfrage als relationale Algebra anzeigen",
+    "title": "Relationale Algebra",
+    "hint": "Ziehen zum Verschieben · {{modifier}}+Scrollen oder Pinch zum Zoomen · Mit der Maus über einen Operator fahren für die Tabellenvorschau · Klicken, um ihn in der Abfrage zu finden",
+    "moreColumns": "+{{count}} weitere Spalten",
+    "noColumns": "Die Spalten dieser Tabelle sind noch nicht geladen.",
+    "stale": "Die Abfrage hat sich seit dem Zeichnen dieses Graphen geändert. Öffne ihn erneut.",
+    "sourceGone": "Die Abfrage, aus der dieser Graph stammt, ist geschlossen.",
+    "notQuery": "Nur ein einzelnes SELECT kann als relationale Algebra angezeigt werden.",
+    "ops": {
+      "table": "Tabelle",
+      "select": "Selektion",
+      "project": "Projektion",
+      "join": "Verbund",
+      "cross": "Produkt",
+      "group": "Gruppierung",
+      "sort": "Sortierung",
+      "limit": "Limit",
+      "distinct": "Distinct",
+      "union": "Vereinigung",
+      "intersect": "Schnitt",
+      "except": "Differenz",
+      "rename": "Umbenennung"
+    }
+  },
   "erDiagram": {
     "menu": "ER-Diagramm",
     "title": "ER-Diagramm · {{schema}}",

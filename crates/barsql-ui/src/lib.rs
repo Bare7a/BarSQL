@@ -1,5 +1,6 @@
 mod about_dialog;
 mod actions;
+mod algebra_graph;
 mod assets;
 mod cell_content;
 mod cell_viewer;

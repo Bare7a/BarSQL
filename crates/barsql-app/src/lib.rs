@@ -27,7 +27,7 @@ pub use backup::{BackupOutcome, BackupRequest};
 pub use barsql_db::tls::install_default_provider;
 pub use barsql_io::{CsvOptions, ImportPreview};
 pub use barsql_storage::{
-    ConnectionFolder, DiagramRef, EditorSession, EditorTab, HISTORY_LIMIT, StructureRef, TableViewRef,
+    AlgebraRef, ConnectionFolder, DiagramRef, EditorSession, EditorTab, HISTORY_LIMIT, StructureRef, TableViewRef,
 };
 pub use edits::{ApplyError, ResultEdits, ResultTable};
 pub use events::{

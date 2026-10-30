@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use barsql_app::{
-    AppEvent, DiagramRef, EditorSession, EditorTab, StructureRef, TableViewRef, Unsaved, is_sqlite_file,
+    AlgebraRef, AppEvent, DiagramRef, EditorSession, EditorTab, StructureRef, TableViewRef, Unsaved, is_sqlite_file,
     sqlite_file_payload,
 };
 use barsql_core::capabilities::DefaultSchema;
@@ -21,6 +21,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::actions::*;
+use crate::algebra_graph::{self, AlgebraEvent, AlgebraGraph};
 use crate::assets::LOGO;
 use crate::dialogs::{self, Confirm};
 use crate::er_diagram::{self, ErDiagram};
@@ -59,6 +60,7 @@ enum TabView {
     Query(Entity<QueryTab>),
     Table(Entity<TableTab>),
     Diagram(Entity<ErDiagram>),
+    Algebra(Entity<AlgebraGraph>),
     Structure(Entity<StructureTab>),
 }
 
@@ -66,7 +68,7 @@ impl TabView {
     fn query(&self) -> Option<&Entity<QueryTab>> {
         match self {
             Self::Query(tab) => Some(tab),
-            Self::Table(_) | Self::Diagram(_) | Self::Structure(_) => None,
+            Self::Table(_) | Self::Diagram(_) | Self::Algebra(_) | Self::Structure(_) => None,
         }
     }
 
@@ -75,6 +77,7 @@ impl TabView {
             Self::Query(tab) => tab.read(cx).id.clone(),
             Self::Table(tab) => tab.read(cx).id.clone(),
             Self::Diagram(tab) => tab.read(cx).id.clone(),
+            Self::Algebra(tab) => tab.read(cx).id.clone(),
             Self::Structure(tab) => tab.read(cx).id.clone(),
         }
     }
@@ -84,6 +87,7 @@ impl TabView {
             Self::Query(tab) => tab.entity_id(),
             Self::Table(tab) => tab.entity_id(),
             Self::Diagram(tab) => tab.entity_id(),
+            Self::Algebra(tab) => tab.entity_id(),
             Self::Structure(tab) => tab.entity_id(),
         }
     }
@@ -93,6 +97,7 @@ impl TabView {
             Self::Query(tab) => tab.read(cx).title.clone(),
             Self::Table(tab) => tab.read(cx).title.clone(),
             Self::Diagram(tab) => tab.read(cx).title(cx),
+            Self::Algebra(tab) => tab.read(cx).title(cx),
             Self::Structure(tab) => tab.read(cx).title(cx),
         }
     }
@@ -102,6 +107,7 @@ impl TabView {
             Self::Query(tab) => &tab.read(cx).connection,
             Self::Table(tab) => &tab.read(cx).connection,
             Self::Diagram(tab) => &tab.read(cx).connection,
+            Self::Algebra(tab) => &tab.read(cx).connection,
             Self::Structure(tab) => &tab.read(cx).connection,
         }
     }
@@ -111,6 +117,7 @@ impl TabView {
             Self::Query(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
             Self::Table(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
             Self::Diagram(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
+            Self::Algebra(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
             Self::Structure(tab) => tab.update(cx, |tab, cx| tab.set_connection(connection, cx)),
         }
     }
@@ -120,6 +127,7 @@ impl TabView {
             Self::Query(tab) => tab.read(cx).stored(cx),
             Self::Table(tab) => tab.read(cx).stored(cx),
             Self::Diagram(tab) => tab.read(cx).stored(cx),
+            Self::Algebra(tab) => tab.read(cx).stored(cx),
             Self::Structure(tab) => tab.read(cx).stored(cx),
         }
     }
@@ -128,7 +136,7 @@ impl TabView {
     fn persisted(&self, cx: &App) -> bool {
         match self {
             Self::Structure(tab) => tab.read(cx).persisted(),
-            Self::Query(_) | Self::Table(_) | Self::Diagram(_) => true,
+            Self::Query(_) | Self::Table(_) | Self::Diagram(_) | Self::Algebra(_) => true,
         }
     }
 
@@ -150,6 +158,7 @@ impl TabView {
             Self::Query(tab) => tab.update(cx, |tab, cx| tab.focus_editor(window, cx)),
             Self::Table(tab) => tab.update(cx, |tab, cx| tab.focus(window, cx)),
             Self::Diagram(tab) => tab.update(cx, |tab, cx| tab.focus(window, cx)),
+            Self::Algebra(tab) => tab.update(cx, |tab, cx| tab.focus(window, cx)),
             Self::Structure(tab) => tab.update(cx, |tab, cx| tab.focus(window, cx)),
         }
     }
@@ -158,7 +167,7 @@ impl TabView {
         match self {
             Self::Query(tab) => tab.read(cx).focused_row(cx),
             Self::Table(tab) => tab.read(cx).focused_row(cx),
-            Self::Diagram(_) | Self::Structure(_) => None,
+            Self::Diagram(_) | Self::Algebra(_) | Self::Structure(_) => None,
         }
     }
 
@@ -175,6 +184,7 @@ impl TabView {
                 }
             }
             Self::Diagram(_) => Lucide::Workflow,
+            Self::Algebra(_) => Lucide::Sigma,
             Self::Structure(_) => Lucide::Columns3,
         }
     }
@@ -187,7 +197,7 @@ impl TabView {
                 (Some((tab.schema.clone(), tab.table.clone())), String::new())
             }
             // A Structure tab isn't its table's data, which quick search still offers.
-            Self::Diagram(_) | Self::Structure(_) => (None, String::new()),
+            Self::Diagram(_) | Self::Algebra(_) | Self::Structure(_) => (None, String::new()),
         };
         TabEntry {
             id: self.id(cx),
@@ -204,6 +214,7 @@ impl TabView {
             Self::Query(tab) => tab.clone().into(),
             Self::Table(tab) => tab.clone().into(),
             Self::Diagram(tab) => tab.clone().into(),
+            Self::Algebra(tab) => tab.clone().into(),
             Self::Structure(tab) => tab.clone().into(),
         }
     }
@@ -387,7 +398,9 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
                         let (query, table) = match view.read(cx).active_tab() {
                             Some(TabView::Query(tab)) => (Some(tab.read(cx).completion()), None),
                             Some(TabView::Table(tab)) => (None, Some(tab.read(cx).completion())),
-                            Some(TabView::Diagram(_) | TabView::Structure(_)) | None => (None, None),
+                            Some(TabView::Diagram(_) | TabView::Algebra(_) | TabView::Structure(_)) | None => {
+                                (None, None)
+                            }
                         };
                         if let Some(completion) = query {
                             completion.update(cx, |completion, cx| completion.preview(&text, window, cx));
@@ -879,6 +892,18 @@ impl Workspace {
             self.tabs.push(OpenTab { view: TabView::Diagram(view), pinned, _subscriptions: subscriptions });
             return;
         }
+        if let Some(origin) = tab.algebra {
+            let Ok(root) = algebra_graph::parse(&tab.sql, &connection) else { return };
+            let view = cx.new(|cx| AlgebraGraph::new(tab.id, connection, tab.sql, origin, &root, cx));
+            let subscriptions = vec![
+                cx.observe(&view, |_, _, cx| cx.notify()),
+                cx.subscribe_in(&view, window, |this, _, event: &AlgebraEvent, window, cx| {
+                    this.reveal_in_query(event, window, cx)
+                }),
+            ];
+            self.tabs.push(OpenTab { view: TabView::Algebra(view), pinned, _subscriptions: subscriptions });
+            return;
+        }
         if tab.structure.is_some() {
             let view = cx.new(|cx| {
                 let mut view = StructureTab::new(tab, connection, window, cx);
@@ -945,6 +970,10 @@ impl Workspace {
                     let connection = view.read(cx).connection.clone();
                     this.open_table(connection, schema.clone(), table.clone(), None, window, cx);
                 }
+                QueryTabEvent::OpenAlgebra { sql, offset } => {
+                    let (connection, source) = (view.read(cx).connection.clone(), view.read(cx).id.clone());
+                    this.open_algebra(connection, sql.clone(), AlgebraRef { source, offset: *offset }, window, cx);
+                }
             }),
         ];
         self.tabs.push(OpenTab { view: TabView::Query(view), pinned, _subscriptions: subscriptions });
@@ -981,6 +1010,57 @@ impl Workspace {
         self.activate(self.tabs.len() - 1, window, cx);
     }
 
+    // A tab each time it's asked: the graph is of the statement as it was then, and the editor goes on changing.
+    fn open_algebra(
+        &mut self,
+        connection: ConnectionConfig,
+        sql: String,
+        origin: AlgebraRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = algebra_graph::parse(&sql, &connection) {
+            return algebra_graph::report(error, cx);
+        }
+        let tab = EditorTab {
+            id: new_tab_id(),
+            connection_id: connection.id.clone(),
+            title: t(cx, "algebra.title").to_string(),
+            sql,
+            color: connection.color.clone(),
+            algebra: Some(origin),
+            ..Default::default()
+        };
+        self.add_tab(tab, connection, window, cx);
+        self.activate(self.tabs.len() - 1, window, cx);
+    }
+
+    // An operator picked in a graph is marked in the query it came from, which comes to the front. If the query has
+    // changed since, or is gone, the graph says so instead: its ranges would point at other text.
+    fn reveal_in_query(&mut self, event: &AlgebraEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let AlgebraEvent::Reveal { source, offset, sql, range, color } = event;
+        let found = self.tabs.iter().position(|tab| tab.view.id(cx) == *source);
+        let query = found.and_then(|ix| self.tabs[ix].view.query().cloned().map(|query| (ix, query)));
+        let Some((ix, query)) = query else {
+            if range.is_some() {
+                toast::error(t(cx, "algebra.sourceGone"), cx);
+            }
+            return;
+        };
+        if !query.read(cx).holds_at(*offset, sql, cx) {
+            if range.is_some() {
+                toast::error(t(cx, "algebra.stale"), cx);
+            }
+            query.update(cx, |query, cx| query.mark(None, *color, window, cx));
+            return;
+        }
+        let range = range.as_ref().map(|range| offset + range.start..offset + range.end);
+        if range.is_some() {
+            self.activate(ix, window, cx);
+        }
+        query.update(cx, |query, cx| query.mark(range, *color, window, cx));
+    }
+
     // The table the active tab shows, for Edit table structure.
     fn structure_target(&self, cx: &App) -> Option<(ConnectionConfig, String, String)> {
         match self.active_tab()? {
@@ -993,7 +1073,7 @@ impl Workspace {
                 let tab = view.read(cx);
                 tab.persisted().then(|| (tab.connection.clone(), tab.schema.clone(), tab.table.clone()))
             }
-            TabView::Query(_) | TabView::Diagram(_) => None,
+            TabView::Query(_) | TabView::Diagram(_) | TabView::Algebra(_) => None,
         }
     }
 
@@ -1077,7 +1157,7 @@ impl Workspace {
                 let view = view.read(cx);
                 view.connection.id == connection.id && view.schema == schema && view.table == table
             }
-            TabView::Query(_) | TabView::Diagram(_) | TabView::Structure(_) => false,
+            TabView::Query(_) | TabView::Diagram(_) | TabView::Algebra(_) | TabView::Structure(_) => false,
         });
         if let Some(ix) = existing {
             if let (Some(filter), TabView::Table(view)) = (filter, self.tabs[ix].view.clone()) {
@@ -1117,7 +1197,7 @@ impl Workspace {
                     (shown.connection.id == connection_id && shown.schema == schema && shown.table == table)
                         .then(|| (ix, view.clone()))
                 }
-                TabView::Query(_) | TabView::Diagram(_) | TabView::Structure(_) => None,
+                TabView::Query(_) | TabView::Diagram(_) | TabView::Algebra(_) | TabView::Structure(_) => None,
             })
             .collect();
         for (ix, view) in showing.into_iter().rev() {
@@ -1776,7 +1856,9 @@ impl Workspace {
                 let connection = open.view.connection(cx);
                 let tab_color = match &open.view {
                     TabView::Query(tab) => tab.read(cx).color(),
-                    TabView::Table(_) | TabView::Diagram(_) | TabView::Structure(_) => &connection.color,
+                    TabView::Table(_) | TabView::Diagram(_) | TabView::Algebra(_) | TabView::Structure(_) => {
+                        &connection.color
+                    }
                 };
                 let color = parse_color(tab_color).unwrap_or(theme.muted_foreground);
                 let active = ix == self.active;
@@ -2057,7 +2139,7 @@ impl Workspace {
         let live = match tab {
             TabView::Query(tab) => tab.read(cx).live_status(cx),
             TabView::Table(tab) => tab.read(cx).is_loading().then(|| t(cx, "tableView.loading")),
-            TabView::Diagram(_) | TabView::Structure(_) => None,
+            TabView::Diagram(_) | TabView::Algebra(_) | TabView::Structure(_) => None,
         };
         let query = tab.query().map(|tab| tab.read(cx));
         let transaction = query.and_then(|tab| match tab.txn_state() {
@@ -2152,7 +2234,7 @@ impl Workspace {
         match self.active_tab()? {
             TabView::Query(tab) => tab.read(cx).results().read(cx).active_grid(),
             TabView::Table(tab) => Some(tab.read(cx).grid()),
-            TabView::Diagram(_) | TabView::Structure(_) => None,
+            TabView::Diagram(_) | TabView::Algebra(_) | TabView::Structure(_) => None,
         }
     }
 }

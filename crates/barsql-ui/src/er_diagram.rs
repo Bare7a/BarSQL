@@ -1,7 +1,7 @@
 mod layout;
 #[cfg(test)]
 mod tests;
-mod zoom;
+pub(crate) mod zoom;
 
 use std::collections::HashSet;
 use std::rc::Rc;

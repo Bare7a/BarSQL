@@ -430,6 +430,32 @@
     "noRows": "Aún no hay filas para graficar.",
     "blank": "(vacío)"
   },
+  "algebra": {
+    "button": "Álgebra",
+    "tooltip": "Mostrar la consulta como álgebra relacional",
+    "title": "Álgebra relacional",
+    "hint": "Arrastra para desplazarte · {{modifier}}+rueda o pellizca para acercar · Pasa el cursor sobre un operador para ver su tabla · Haz clic para ubicarlo en la consulta",
+    "moreColumns": "+{{count}} columnas más",
+    "noColumns": "Las columnas de esta tabla todavía no se cargaron.",
+    "stale": "La consulta cambió desde que se dibujó este grafo. Ábrelo de nuevo.",
+    "sourceGone": "La consulta de la que salió este grafo está cerrada.",
+    "notQuery": "Solo una consulta SELECT puede mostrarse como álgebra relacional.",
+    "ops": {
+      "table": "Tabla",
+      "select": "Selección",
+      "project": "Proyección",
+      "join": "Reunión",
+      "cross": "Producto",
+      "group": "Agrupación",
+      "sort": "Orden",
+      "limit": "Límite",
+      "distinct": "Distinto",
+      "union": "Unión",
+      "intersect": "Intersección",
+      "except": "Diferencia",
+      "rename": "Renombrar"
+    }
+  },
   "erDiagram": {
     "menu": "Diagrama ER",
     "title": "Diagrama ER · {{schema}}",

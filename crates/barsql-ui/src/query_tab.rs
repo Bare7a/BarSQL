@@ -128,6 +128,8 @@ pub enum QueryTabEvent {
     FocusedRowChanged,
     // Go to Definition on a table, or on a column of it.
     OpenTable { schema: String, table: String },
+    // The statement to draw as relational algebra, in a tab of its own.
+    OpenAlgebra { sql: String, offset: usize },
 }
 
 pub struct QueryTab {
@@ -143,6 +145,8 @@ pub struct QueryTab {
     hover: Entity<HoverCard>,
     _occurrences: Entity<OccurrenceMarks>,
     flash: RangeDecorationCollection,
+    // What a relational algebra tab has picked.
+    marks: RangeDecorationCollection,
     flash_task: Task<()>,
     results: Entity<ResultsPanel>,
     running: Option<Running>,
@@ -198,6 +202,7 @@ impl QueryTab {
         let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language), window, cx));
         let occurrences = cx.new(|cx| OccurrenceMarks::new(&editor, cx));
         let flash = editor.update(cx, |state, cx| state.create_range_decorations_collection(Vec::new(), cx));
+        let marks = editor.update(cx, |state, cx| state.create_range_decorations_collection(Vec::new(), cx));
         let dialect = connection.driver.dialect();
         let (panel_connection, tab_id) = (connection.clone(), tab.id.clone());
         let results = cx.new(|cx| {
@@ -248,6 +253,7 @@ impl QueryTab {
             hover,
             _occurrences: occurrences,
             flash,
+            marks,
             flash_task: Task::ready(()),
             results,
             running: None,
@@ -301,6 +307,7 @@ impl QueryTab {
             table_view: None,
             diagram: None,
             structure: None,
+            algebra: None,
             // The workspace knows.
             pinned: false,
         }
@@ -943,15 +950,45 @@ impl QueryTab {
 
     // Uses the selection, else the statement at the caret, else the whole text.
     fn explain_text(&self, cx: &App) -> String {
+        self.explain_source(cx).0
+    }
+
+    // The text explain takes, and where in the editor it begins.
+    fn explain_source(&self, cx: &App) -> (String, usize) {
         let state = self.editor.read(cx);
         let selected = state.selected_text().to_string();
-        if !selected.trim().is_empty() {
-            return selected.trim().to_string();
-        }
-        match self.statement_at_caret(cx) {
-            Some((text, _)) => text.trim().to_string(),
-            None => state.value().trim().to_string(),
-        }
+        let (text, base) = match () {
+            _ if !selected.trim().is_empty() => (selected, state.selected_range().start),
+            _ => match self.statement_at_caret(cx) {
+                Some((text, start)) => (text, start),
+                None => (state.value().to_string(), 0),
+            },
+        };
+        let lead = text.len() - text.trim_start().len();
+        (text.trim().to_string(), base + lead)
+    }
+
+    // Whether the editor still holds `sql` where it was taken from, so a range of it can still be pointed at.
+    pub(crate) fn holds_at(&self, offset: usize, sql: &str, cx: &App) -> bool {
+        self.sql(cx).get(offset..offset + sql.len()) == Some(sql)
+    }
+
+    // Marks `range` of the editor's text in `color`, and brings it into view. None clears the mark.
+    pub(crate) fn mark(
+        &mut self,
+        range: Option<Range<usize>>,
+        color: Hsla,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(range) = range else { return self.marks.clear(cx) };
+        let mark =
+            RangeDecoration::new(range.clone()).with_style(RangeDecorationStyle::Fill).with_color(color.opacity(0.3));
+        self.marks.set(vec![mark], cx);
+        self.editor.update(cx, |state, cx| {
+            let position = state.text().offset_to_position(range.start);
+            state.set_cursor_position(position, window, cx);
+        });
     }
 
     // Shares the running state because an analyze takes as long as the query and cancels the same way.
@@ -970,6 +1007,13 @@ impl QueryTab {
                 false => tab.explain_sql(sql, false, window, cx),
             })
         });
+    }
+
+    fn show_algebra(&mut self, cx: &mut Context<Self>) {
+        let (sql, offset) = self.explain_source(cx);
+        if !sql.is_empty() {
+            cx.emit(QueryTabEvent::OpenAlgebra { sql, offset });
+        }
     }
 
     fn explain_sql(&mut self, sql: String, analyze: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1045,6 +1089,13 @@ impl QueryTab {
         };
         let left = left
             .child(self.explain_button(cx))
+            .child(
+                Button::new("algebra")
+                    .debug_selector(|| "algebra".into())
+                    .tool(Icon::new(Lucide::Workflow), ICON_XS, t(cx, "algebra.button"))
+                    .tooltip(t(cx, "algebra.tooltip"))
+                    .on_click(cx.listener(|this, _, _, cx| this.show_algebra(cx))),
+            )
             .child(div().w(px(1.)).h(rems(1.231)).mx(rems(0.154)).bg(theme.border))
             .child(
                 Button::new("save-query")
