@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "barsql"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "barsql-app",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-app"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "async-channel",
  "barsql-core",
@@ -668,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-core"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "dirs 7.0.0",
  "hex",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-db"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-io"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "barsql-core",
  "barsql-db",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-sql"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "barsql-core",
  "libc",
@@ -745,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-storage"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "barsql-core",
  "serde",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "barsql-ui"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "async-channel",
