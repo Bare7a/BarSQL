@@ -321,9 +321,12 @@ fn the_setup_names_this_executable_and_data_folder() {
     let setup: Value = serde_json::from_str(&super::setup_json()).unwrap();
     let server = &setup["mcpServers"]["barsql"];
     let exe = std::env::current_exe().unwrap();
-    assert_eq!(server["command"], json!(std::fs::canonicalize(&exe).unwrap_or(exe)));
+    assert_eq!(server["command"], json!(dunce::canonicalize(&exe).unwrap_or(exe)));
     assert_eq!(server["args"], json!(["--mcp"]));
-    assert_eq!(server["env"]["BARSQL_DATA_DIR"], json!(barsql_core::paths::data_dir()));
+    assert_eq!(server["env"]["BARSQL_DATA_DIR"], json!(dunce::simplified(&barsql_core::paths::data_dir())));
+    for path in [&server["command"], &server["env"]["BARSQL_DATA_DIR"]] {
+        assert!(!path.as_str().unwrap().starts_with(r"\\?\"), "an AI app can't start {path}");
+    }
 }
 
 #[test]

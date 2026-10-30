@@ -66,17 +66,18 @@ pub fn serve(data_dir: &Path, runtime: tokio::runtime::Handle) -> io::Result<()>
     Ok(())
 }
 
-// An AppImage runs from a temporary mount, so it's named by its file.
+// An AppImage runs from a temporary mount, so it's named by its file. Windows' canonical paths start with \\?\, 
+// which AI apps can't start a program from, so dunce gives the plain form.
 pub fn setup_json() -> String {
     let install = crate::update::install();
     let command = match install.kind {
         crate::update::Kind::AppImage => install.target.clone(),
-        _ => std::env::current_exe().map(|exe| fs::canonicalize(&exe).unwrap_or(exe)).unwrap_or_default(),
+        _ => std::env::current_exe().map(|exe| dunce::canonicalize(&exe).unwrap_or(exe)).unwrap_or_default(),
     };
     let server = json!({
         "command": command,
         "args": ["--mcp"],
-        "env": { "BARSQL_DATA_DIR": barsql_core::paths::data_dir() },
+        "env": { "BARSQL_DATA_DIR": dunce::simplified(&barsql_core::paths::data_dir()) },
     });
     serde_json::to_string_pretty(&json!({ "mcpServers": { "barsql": server } })).unwrap_or_default()
 }
