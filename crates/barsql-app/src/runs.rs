@@ -441,7 +441,7 @@ impl BarApp {
             return Err(QueryError::message(NO_TRANSACTIONS));
         }
         let statements = split_statement_texts(&cfg.driver, sql);
-        // A SQLite file is on this machine, so ATTACH could reach any other file the user can.
+        // ATTACH could reach any file on this machine.
         if cfg.driver == DriverType::Sqlite
             && statements
                 .iter()

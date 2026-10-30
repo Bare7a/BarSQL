@@ -36,8 +36,8 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
 const INSTRUCTIONS: &str = "Access to the databases the user shared from BarSQL. Start with list_connections, then \
-    list_tables and describe_table before writing SQL in the connection's dialect. run_query only reads, and returns at \
-    most 200 rows, so filter, aggregate or LIMIT in SQL. Only connections with canChange take run_change: preview \
+    list_tables and describe_table before writing SQL in the connection's dialect. run_query only reads, and returns \
+    at most 200 rows, so filter, aggregate or LIMIT in SQL. Only connections with canChange take run_change: preview \
     anything risky first.";
 const NOTHING_SHARED: &str = "No connections are shared with AI assistants yet. In BarSQL, edit a connection and \
     tick \"Allow AI assistants (MCP)\".";
@@ -59,15 +59,14 @@ pub fn serve(data_dir: &Path, runtime: tokio::runtime::Handle) -> io::Result<()>
     for line in io::stdin().lock().split(b'\n') {
         server.receive(&String::from_utf8_lossy(&line?));
     }
-    // A connection the database won't let go of mustn't keep this process alive once the client has quit.
+    // A stuck connection mustn't keep this process alive after the client quits.
     bar.runtime().block_on(async {
         let _ = tokio::time::timeout(STOP_GRACE, bar.shutdown()).await;
     });
     Ok(())
 }
 
-// An AppImage runs from a temporary mount, so it's named by its file. Windows' canonical paths start with \\?\, 
-// which AI apps can't start a program from, so dunce gives the plain form.
+// An AppImage's mount goes away, so name its file. dunce drops the \\?\ prefix AI apps can't start on Windows.
 pub fn setup_json() -> String {
     let install = crate::update::install();
     let command = match install.kind {
@@ -79,7 +78,7 @@ pub fn setup_json() -> String {
         "args": ["--mcp"],
         "env": { "BARSQL_DATA_DIR": dunce::simplified(&barsql_core::paths::data_dir()) },
     });
-    serde_json::to_string_pretty(&json!({ "mcpServers": { "barsql": server } })).unwrap_or_default()
+    serde_json::to_string_pretty(&json!({ "mcpServers": { "BarSQL": server } })).unwrap_or_default()
 }
 
 pub(crate) struct Server {
@@ -91,8 +90,6 @@ pub(crate) struct Server {
     elicitation: AtomicBool,
     next_question: AtomicU64,
     questions: Mutex<HashMap<String, oneshot::Sender<Value>>>,
-    // What the last tools/list offered, so the client hears when that changes.
-    listed_changes: AtomicBool,
 }
 
 struct Call {
@@ -111,7 +108,6 @@ impl Server {
             elicitation: AtomicBool::new(false),
             next_question: AtomicU64::new(1),
             questions: Mutex::default(),
-            listed_changes: AtomicBool::new(false),
         }
     }
 
@@ -145,12 +141,7 @@ impl Server {
                 self.reply(id, initialize(params));
             }
             "ping" => self.reply(id, json!({})),
-            "tools/list" => {
-                let _ = self.bar.reload_connections();
-                let changes = self.bar.list_connections().iter().any(|cfg| cfg.mcp_changes);
-                self.listed_changes.store(changes, Ordering::Relaxed);
-                self.reply(id, json!({ "tools": tools(changes) }));
-            }
+            "tools/list" => self.reply(id, json!({ "tools": tools() })),
             "tools/call" if TOOLS.contains(&params["name"].as_str().unwrap_or_default()) => {
                 // Own tab, so calls don't cancel each other. Registered now, so an immediate cancel finds it.
                 let tab = format!("mcp-{}", self.next_tab.fetch_add(1, Ordering::Relaxed));
@@ -202,10 +193,6 @@ impl Server {
     ) -> Result<String, String> {
         self.bar.reload_connections().map_err(failed)?;
         let shared = self.bar.list_connections();
-        let changes = shared.iter().any(|cfg| cfg.mcp_changes);
-        if self.listed_changes.swap(changes, Ordering::Relaxed) != changes {
-            let _ = self.replies.send(json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }));
-        }
         if tool == "list_connections" {
             return Ok(list_connections(&shared));
         }
@@ -520,21 +507,23 @@ fn initialize(params: &Value) -> Value {
     let asked = params["protocolVersion"].as_str().unwrap_or_default();
     json!({
         "protocolVersion": PROTOCOLS.into_iter().find(|version| *version == asked).unwrap_or(PROTOCOLS[0]),
-        "capabilities": { "tools": { "listChanged": true } },
+        "capabilities": { "tools": {} },
         "serverInfo": { "name": "BarSQL", "version": crate::VERSION },
         "instructions": INSTRUCTIONS,
     })
 }
 
-fn tools(changes: bool) -> Value {
+fn tools() -> Value {
     let connection = json!({ "type": "string", "description": "A connection id from list_connections." });
     let schema =
         json!({ "type": "string", "description": "Schema name. Defaults to the connection's default schema." });
     let sql = json!({ "type": "string", "description": "One read-only statement in the connection's SQL dialect." });
     let kinds = ["table", "view", "materialized view", "function", "procedure", "trigger", "index"];
-    let mut tools = vec![
+    Value::from(vec![
         tool(
             "list_connections",
+            "List connections",
+            Access::Reads,
             "List the database connections the user shared with AI assistants. Every other tool takes a connection id \
              from this list.",
             json!({}),
@@ -542,12 +531,16 @@ fn tools(changes: bool) -> Value {
         ),
         tool(
             "list_tables",
+            "List tables",
+            Access::Reads,
             "List tables and views. Without a schema, it also lists the names of all schemas.",
             json!({ "connection": connection, "schema": schema }),
             &["connection"],
         ),
         tool(
             "describe_table",
+            "Describe table",
+            Access::Reads,
             "Describe a table or view: its columns with types, nullability and defaults, and for a table its primary \
              key, indexes, foreign keys and checks.",
             json!({ "connection": connection, "schema": schema, "table": { "type": "string" } }),
@@ -555,6 +548,8 @@ fn tools(changes: bool) -> Value {
         ),
         tool(
             "show_ddl",
+            "Show DDL",
+            Access::Reads,
             "Show the CREATE statement of a table, view, function, procedure, trigger or index.",
             json!({
                 "connection": connection,
@@ -567,6 +562,8 @@ fn tools(changes: bool) -> Value {
         ),
         tool(
             "run_query",
+            "Run query",
+            Access::Reads,
             "Run read-only SQL and return the rows of its last result, at most 200. Statements that change data or \
              schema are refused.",
             json!({ "connection": connection, "sql": sql }),
@@ -574,18 +571,21 @@ fn tools(changes: bool) -> Value {
         ),
         tool(
             "explain_query",
+            "Explain query",
+            Access::Reads,
             "Show how the database would run a read-only statement. With analyze, the statement runs and the plan \
              includes actual rows and timings.",
             json!({ "connection": connection, "sql": sql, "analyze": { "type": "boolean" } }),
             &["connection", "sql"],
         ),
-    ];
-    if changes {
-        let mut change = tool(
+        // Always listed, as some clients never fetch the list again.
+        tool(
             "run_change",
+            "Run change",
+            Access::Writes,
             "Change data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER...) on a connection whose canChange is true. \
-             It runs in one transaction where the database has them, and reports the rows affected. Set preview to \
-             run it and roll it back. An UPDATE or DELETE without a WHERE needs allRows.",
+             It runs in one transaction where the database has them, and reports the rows affected. Set preview to run \
+             it and roll it back. An UPDATE or DELETE without a WHERE needs allRows.",
             json!({
                 "connection": connection,
                 "sql": { "type": "string", "description": "The change in the connection's SQL dialect, with no \
@@ -594,19 +594,32 @@ fn tools(changes: bool) -> Value {
                 "allRows": { "type": "boolean", "description": "Confirms an UPDATE or DELETE that has no WHERE." },
             }),
             &["connection", "sql"],
-        );
-        change["annotations"] = json!({ "readOnlyHint": false, "destructiveHint": true });
-        tools.push(change);
-    }
-    Value::from(tools)
+        ),
+    ])
 }
 
-fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+// Permission hints for the AI app. Every tool stays in the user's databases, so none is open-world.
+#[derive(Clone, Copy)]
+enum Access {
+    Reads,
+    Writes,
+}
+
+// Newer clients show the tool's title, older ones its annotations'.
+fn tool(name: &str, title: &str, access: Access, description: &str, properties: Value, required: &[&str]) -> Value {
+    let mut annotations = match access {
+        Access::Reads => json!({ "readOnlyHint": true, "openWorldHint": false }),
+        Access::Writes => {
+            json!({ "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false })
+        }
+    };
+    annotations["title"] = json!(title);
     json!({
         "name": name,
+        "title": title,
         "description": description,
         "inputSchema": { "type": "object", "properties": properties, "required": required },
-        "annotations": { "readOnlyHint": true },
+        "annotations": annotations,
     })
 }
 

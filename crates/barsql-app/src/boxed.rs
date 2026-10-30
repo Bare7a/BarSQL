@@ -1,5 +1,4 @@
-// BarApp's public async methods. Each crate that awaits a future compiles its own copy of the async code below it, so
-// these box them: the engines' async code compiles once, here, for the GUI and the MCP server alike.
+// Boxed, so the engines' async code compiles once here, not again in each crate that awaits it (about 3 MB each).
 
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,

@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -20,7 +19,6 @@ struct Setup {
     private: ConnectionConfig,
     server: Arc<Server>,
     replies: mpsc::Receiver<Value>,
-    list_changes: Cell<usize>,
 }
 
 fn setup() -> Setup {
@@ -49,7 +47,7 @@ fn setup() -> Setup {
     let mcp = BarApp::open_for_mcp(&data, runtime.handle().clone()).unwrap();
     let (replies_tx, replies) = mpsc::channel();
     let server = Arc::new(Server::new(mcp, data.join("mcp.log"), replies_tx));
-    Setup { runtime, dir, app, shared, private, server, replies, list_changes: Cell::new(0) }
+    Setup { runtime, dir, app, shared, private, server, replies }
 }
 
 impl Setup {
@@ -61,15 +59,8 @@ impl Setup {
         self.server.receive(&msg.to_string());
     }
 
-    // Skips tool-list notices, counting them.
     fn next(&self) -> Value {
-        loop {
-            let msg = self.replies.recv_timeout(Duration::from_secs(20)).expect("a message");
-            if msg["method"] != "notifications/tools/list_changed" {
-                return msg;
-            }
-            self.list_changes.set(self.list_changes.get() + 1);
-        }
+        self.replies.recv_timeout(Duration::from_secs(20)).expect("a message")
     }
 
     fn request(&self, id: i64, method: &str, params: Value) -> Value {
@@ -143,20 +134,19 @@ fn initialize_answers_with_the_clients_version_or_the_newest() {
 }
 
 #[test]
-fn only_read_tools_are_listed_until_a_connection_allows_changes() {
+fn every_tool_is_listed_and_only_run_change_writes() {
     let s = setup();
-    let listed = |s: &Setup| s.request(1, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().clone();
-    let tools = listed(&s);
+    let tools = s.request(1, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().clone();
     let names: Vec<&str> = tools.iter().map(|tool| tool["name"].as_str().unwrap()).collect();
-    assert_eq!(names, TOOLS[..6]);
-    assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true), "{tools:?}");
-
-    s.allow_changes(false);
-    let (text, _) = s.call("list_connections", json!({}));
-    assert!(text.contains(r#""canChange":true"#), "{text}");
-    assert_eq!(s.list_changes.get(), 1, "the client hears its tools changed");
-    let change = listed(&s).into_iter().find(|tool| tool["name"] == "run_change").expect("run_change is listed");
-    assert_eq!(change["annotations"]["destructiveHint"], true);
+    assert_eq!(names, TOOLS);
+    for tool in &tools {
+        let writes = tool["name"] == "run_change";
+        assert_eq!(tool["annotations"]["readOnlyHint"], !writes, "{tool}");
+        assert_eq!(tool["annotations"]["destructiveHint"] == true, writes, "{tool}");
+        assert_eq!(tool["annotations"]["openWorldHint"], false, "{tool}");
+        assert_eq!(tool["title"], tool["annotations"]["title"], "{tool}");
+    }
+    assert_eq!(tools[3]["title"], "Show DDL");
 }
 
 #[test]
@@ -319,7 +309,7 @@ fn sharing_in_the_app_reaches_a_running_server() {
 #[test]
 fn the_setup_names_this_executable_and_data_folder() {
     let setup: Value = serde_json::from_str(&super::setup_json()).unwrap();
-    let server = &setup["mcpServers"]["barsql"];
+    let server = &setup["mcpServers"]["BarSQL"];
     let exe = std::env::current_exe().unwrap();
     assert_eq!(server["command"], json!(dunce::canonicalize(&exe).unwrap_or(exe)));
     assert_eq!(server["args"], json!(["--mcp"]));
