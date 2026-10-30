@@ -4,8 +4,9 @@ use std::ops::Range;
 
 use barsql_core::SqlDialect;
 use sqlparser::ast::{
-    Distinct, Expr, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, OrderBy, OrderByKind, Query, Select,
-    SelectItem, SetExpr, SetOperator, SetQuantifier, Spanned, Statement, TableAlias, TableFactor, TableWithJoins,
+    BinaryOperator, Distinct, Expr, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, OrderBy, OrderByKind,
+    Query, Select, SelectItem, SetExpr, SetOperator, SetQuantifier, Spanned, Statement, TableAlias, TableFactor,
+    TableWithJoins,
 };
 use sqlparser::dialect::{ClickHouseDialect, Dialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -187,7 +188,9 @@ impl Builder<'_> {
             .reduce(|left, right| AlgebraNode::new("×", "", vec![left, right]))
             .unwrap_or_else(|| AlgebraNode::new("", "()", vec![]));
         if let Some(filter) = &select.selection {
-            root = AlgebraNode::new("σ", filter.to_string(), vec![root]).span(self.range(filter.span()));
+            root = AlgebraNode::new("σ", filter.to_string(), vec![root])
+                .items(conjuncts(filter))
+                .span(self.range(filter.span()));
         }
         match &select.group_by {
             GroupByExpr::Expressions(keys, _) if !keys.is_empty() => {
@@ -199,7 +202,9 @@ impl Builder<'_> {
             GroupByExpr::Expressions(..) => {}
         }
         if let Some(having) = &select.having {
-            root = AlgebraNode::new("σ", having.to_string(), vec![root]).span(self.range(having.span()));
+            root = AlgebraNode::new("σ", having.to_string(), vec![root])
+                .items(conjuncts(having))
+                .span(self.range(having.span()));
         }
         let items = select.projection.iter().map(select_item).collect();
         let span = self.spans(select.projection.iter().map(|item| item.span()));
@@ -280,6 +285,14 @@ fn source_of(expr: &Expr) -> Source {
             Source::Column { qualifier: Some(qualifier), name: name.value.clone() }
         }
         _ => Source::Expr,
+    }
+}
+
+// The conditions a predicate requires together: `a AND b AND c` as three.
+fn conjuncts(expr: &Expr) -> Vec<Item> {
+    match expr {
+        Expr::BinaryOp { left, op: BinaryOperator::And, right } => [conjuncts(left), conjuncts(right)].concat(),
+        other => vec![item_of(other, other.to_string())],
     }
 }
 

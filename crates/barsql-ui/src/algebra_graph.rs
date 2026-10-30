@@ -17,12 +17,11 @@ use crate::i18n::{t, t_with};
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::toast;
-use crate::tokens::{ICON_XS, RADIUS, TEXT_SM, TEXT_XS};
+use crate::tokens::{ICON_XS, RADIUS, TEXT_2XS, TEXT_SM, TEXT_XS};
 
 // Sizes are rems of the 13px root, like the ER diagram's.
 const NODE_W: f32 = 18.462;
 const HEADER_H: f32 = 2.154;
-const BODY_H: f32 = 2.923;
 const GAP_X: f32 = 2.308;
 const GAP_Y: f32 = 2.846;
 const MARGIN: f32 = 1.538;
@@ -32,6 +31,12 @@ const INNER_W: f32 = NODE_W - 1.231;
 const PILL_H: f32 = 1.462;
 const PILL_GAP: f32 = 0.308;
 const MAX_PILL_ROWS: usize = 4;
+const LINE_H: f32 = 1.385;
+const LINE_GAP: f32 = 0.231;
+// Room for the AND that leads a condition.
+const AND_W: f32 = 2.;
+// About how many characters of code fit across a body.
+const CHARS_PER_LINE: usize = 32;
 // A press that moves further pans, and doesn't count as a click.
 const PAN_SLOP: Pixels = px(4.);
 // What the preview lists, with the rest counted.
@@ -48,10 +53,46 @@ pub enum AlgebraEvent {
     Reveal { source: String, offset: usize, sql: String, range: Option<Range<usize>>, color: Hsla },
 }
 
+// What a node shows under its header.
+enum Body {
+    None,
+    // The items of a projection, grouping or sort, a row of pills at a time.
+    Pills(Vec<Vec<String>>),
+    // An expression as code, wrapping to a second line at most.
+    Lines(Vec<String>),
+    // The conditions of a selection, one a row, each one on a single line.
+    Conditions(Vec<String>),
+}
+
 struct Flat {
     node: AlgebraNode,
-    // The items of a projection, grouping or sort, a row of pills at a time.
-    pills: Vec<Vec<String>>,
+    body: Body,
+}
+
+// A join's kind, if it says one, and its condition.
+fn join_parts(detail: &str) -> (Option<&str>, &str) {
+    let (first, rest) = detail.split_once(' ').unwrap_or((detail, ""));
+    let (kind, rest) = match ["LEFT", "RIGHT", "FULL", "CROSS", "SEMI", "ANTI"].contains(&first) {
+        true => (Some(first), rest),
+        false => (None, detail),
+    };
+    (kind, rest.strip_prefix("ON ").unwrap_or(rest))
+}
+
+fn body_of(node: &AlgebraNode) -> Body {
+    let lines = |text: &str| if text.is_empty() { Body::None } else { Body::Lines(vec![text.to_string()]) };
+    match node.symbol {
+        "" => Body::None,
+        "π" | "γ" | "τ" if !node.items.is_empty() => Body::Pills(pill_rows(&node.items)),
+        "ρ" | "limit" if !node.detail.is_empty() => Body::Pills(vec![vec![node.detail.clone()]]),
+        "σ" if node.items.len() > 1 => Body::Conditions(node.items.iter().map(|item| item.expr.clone()).collect()),
+        "⋈" => lines(join_parts(&node.detail).1),
+        _ => lines(&node.detail),
+    }
+}
+
+fn line_count(text: &str) -> usize {
+    text.chars().count().div_ceil(CHARS_PER_LINE).clamp(1, 2)
 }
 
 // Where each operator goes: leaves side by side along the bottom, every parent above and between its children.
@@ -104,23 +145,27 @@ fn pill_rows(items: &[Item]) -> Vec<Vec<String>> {
     rows
 }
 
-fn height_of(node: &AlgebraNode, pills: &[Vec<String>]) -> f32 {
-    match () {
-        _ if !pills.is_empty() => {
-            let rows = pills.len() as f32;
-            HEADER_H + rows * PILL_H + (rows - 1.) * PILL_GAP + 2. * BODY_PAD
+fn height_of(body: &Body) -> f32 {
+    let rows = |count: usize, each: f32, gap: f32| {
+        HEADER_H + count as f32 * each + count.saturating_sub(1) as f32 * gap + 2. * BODY_PAD
+    };
+    match body {
+        Body::None => HEADER_H,
+        Body::Pills(pills) => rows(pills.len(), PILL_H, PILL_GAP),
+        Body::Conditions(list) => rows(list.len(), LINE_H, LINE_GAP),
+        Body::Lines(lines) => {
+            let count: usize = lines.iter().map(|text| line_count(text)).sum();
+            rows(count, LINE_H, LINE_GAP)
         }
-        _ if node.symbol.is_empty() || node.detail.is_empty() => HEADER_H,
-        _ => HEADER_H + BODY_H,
     }
 }
 
 fn arrange(root: &AlgebraNode) -> Layout {
     fn place(node: &AlgebraNode, depth: usize, next: &mut f32, out: &mut Layout, depths: &mut Vec<usize>) -> usize {
         let ix = out.flat.len();
-        let pills = pill_rows(&node.items);
-        let height = height_of(node, &pills);
-        out.flat.push(Flat { node: node.clone(), pills });
+        let body = body_of(node);
+        let height = height_of(&body);
+        out.flat.push(Flat { node: node.clone(), body });
         out.boxes.push((0., 0., height));
         depths.push(depth);
         let children: Vec<usize> =
@@ -304,7 +349,7 @@ impl Preview {
             .collect();
         let hidden = columns.len().saturating_sub(PREVIEW_COLUMNS);
         // What a projection, grouping or sort lists is already the header of the table below.
-        let says_more = !node.symbol.is_empty() && node.items.is_empty();
+        let says_more = !node.symbol.is_empty() && !matches!(node.symbol, "π" | "γ" | "τ");
         Self {
             symbol: node.symbol,
             title,
@@ -593,11 +638,12 @@ impl AlgebraGraph {
             )
     }
 
-    // Like an ER table: a header with the operator, and under it what it works on, as pills where it lists things.
+    // Like an ER table: a header with the operator, and under it what it works on: pills where it lists things, else
+    // the condition or expression as code.
     fn node(&self, ix: usize, tone: Hsla, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let flat = &self.layout.flat[ix];
-        let (node, pills) = (&flat.node, &flat.pills);
+        let node = &flat.node;
         let (x, y, height) = self.layout.boxes[ix];
         let table = node.symbol.is_empty();
         let picked = self.selected == Some(ix);
@@ -605,7 +651,12 @@ impl AlgebraGraph {
             true => node.detail.clone(),
             false => t(cx, &format!("algebra.ops.{}", op(node.symbol))).to_string(),
         };
-        let has_body = !table && !(node.detail.is_empty() && pills.is_empty());
+        // The kind of join sits in the header, and the body keeps the condition.
+        let tag = if node.symbol == "⋈" { join_parts(&node.detail).0.map(str::to_string) } else { None };
+        let has_body = !matches!(flat.body, Body::None);
+        let code = |text: String, lines: usize| {
+            div().min_w_0().font_family(theme.mono_font_family.clone()).text_size(TEXT_XS).line_clamp(lines).child(text)
+        };
         let header = h_flex()
             .h(rems(HEADER_H))
             .flex_none()
@@ -617,43 +668,80 @@ impl AlgebraGraph {
                 true => div().child(Icon::new(Lucide::Table2).size(ICON_XS).text_color(theme.muted_foreground)),
                 false => div().flex_none().min_w(ICON_XS).font_semibold().text_color(tone).child(node.symbol),
             })
-            .child(div().flex_1().min_w_0().truncate().font_semibold().child(title.clone()));
-        let body = if pills.is_empty() {
-            div()
-                .flex_1()
-                .min_h_0()
-                .px(rems(0.615))
-                .py(rems(BODY_PAD))
-                .line_clamp(2)
-                .child(node.detail.clone())
-                .into_any_element()
-        } else {
-            v_flex()
-                .flex_none()
-                .gap(rems(PILL_GAP))
-                .px(rems(0.615))
-                .py(rems(BODY_PAD))
-                .children(pills.iter().map(|row| {
-                    h_flex().gap(rems(PILL_GAP)).children(row.iter().map(|label| {
-                        let more = label.starts_with('+') && label[1..].chars().all(|c| c.is_ascii_digit());
-                        div()
-                            .flex_none()
-                            .h(rems(PILL_H))
-                            .px(rems(0.538))
-                            .flex()
-                            .items_center()
-                            .max_w(rems(INNER_W))
-                            .rounded(rems(PILL_H / 2.))
-                            .border_1()
-                            .border_color(theme.border)
-                            .bg(if more { theme.background } else { theme.secondary })
-                            .text_size(TEXT_XS)
-                            .when(more, |el| el.text_color(theme.muted_foreground))
-                            .truncate()
-                            .child(label.clone())
+            .child(div().flex_1().min_w_0().truncate().font_semibold().child(title.clone()))
+            .children(tag.map(|tag| {
+                div()
+                    .flex_none()
+                    .px(rems(0.462))
+                    .rounded(rems(PILL_H / 2.))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.background)
+                    .text_size(TEXT_2XS)
+                    .text_color(theme.muted_foreground)
+                    .child(tag)
+            }));
+        let body = match &flat.body {
+            Body::None => None,
+            Body::Pills(rows) => Some(
+                v_flex()
+                    .flex_none()
+                    .gap(rems(PILL_GAP))
+                    .px(rems(0.615))
+                    .py(rems(BODY_PAD))
+                    .children(rows.iter().map(|row| {
+                        h_flex().gap(rems(PILL_GAP)).children(row.iter().map(|label| {
+                            let more = label.starts_with('+') && label[1..].chars().all(|c| c.is_ascii_digit());
+                            div()
+                                .flex_none()
+                                .h(rems(PILL_H))
+                                .px(rems(0.538))
+                                .flex()
+                                .items_center()
+                                .max_w(rems(INNER_W))
+                                .rounded(rems(PILL_H / 2.))
+                                .border_1()
+                                .border_color(theme.border)
+                                .bg(if more { theme.background } else { theme.secondary })
+                                .text_size(TEXT_XS)
+                                .when(more, |el| el.text_color(theme.muted_foreground))
+                                .truncate()
+                                .child(label.clone())
+                        }))
                     }))
-                }))
-                .into_any_element()
+                    .into_any_element(),
+            ),
+            Body::Lines(lines) => Some(
+                v_flex()
+                    .flex_none()
+                    .gap(rems(LINE_GAP))
+                    .px(rems(0.615))
+                    .py(rems(BODY_PAD))
+                    .children(lines.iter().map(|text| code(text.clone(), line_count(text))))
+                    .into_any_element(),
+            ),
+            Body::Conditions(list) => Some(
+                v_flex()
+                    .flex_none()
+                    .gap(rems(LINE_GAP))
+                    .px(rems(0.615))
+                    .py(rems(BODY_PAD))
+                    .children(list.iter().enumerate().map(|(row, text)| {
+                        h_flex()
+                            .gap(rems(0.385))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(rems(AND_W))
+                                    .font_family(theme.mono_font_family.clone())
+                                    .text_size(TEXT_2XS)
+                                    .text_color(theme.muted_foreground)
+                                    .child(if row > 0 { "AND" } else { "" }),
+                            )
+                            .child(code(text.clone(), 1).flex_1())
+                    }))
+                    .into_any_element(),
+            ),
         };
         let (preview, connection, title) = (node.clone(), self.connection.clone(), SharedString::from(title));
         v_flex()
@@ -671,7 +759,7 @@ impl AlgebraGraph {
             .text_size(TEXT_SM)
             .cursor_pointer()
             .child(header)
-            .when(has_body, |el| el.child(body))
+            .children(body)
             .tooltip(move |_, cx| {
                 let (node, connection, title) = (preview.clone(), connection.clone(), title.clone());
                 cx.new(|cx| Preview::new(&node, &connection, tone, title, cx)).into()

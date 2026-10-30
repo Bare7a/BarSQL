@@ -85,3 +85,11 @@ fn columns_follow_the_operators() {
     assert_eq!(names(sql, "⋈"), ["u.id", "u.name", "o.id", "o.total"]);
     assert_eq!(names(sql, "π"), ["u.name", "o.t", ".count(*)"]);
 }
+
+#[test]
+fn a_selection_lists_the_conditions_it_requires_together() {
+    let root = algebra("SELECT 1 FROM t WHERE a = 1 AND (b = 2 OR c = 3) AND d BETWEEN 1 AND 2", SqlDialect::Postgres)
+        .unwrap();
+    let items: Vec<_> = find(&root, "σ").items.iter().map(|i| i.expr.as_str()).collect();
+    assert_eq!(items, ["a = 1", "(b = 2 OR c = 3)", "d BETWEEN 1 AND 2"]);
+}
