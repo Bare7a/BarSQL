@@ -164,7 +164,7 @@ BarSQL focuses on one thing:
 - Create, edit, test and manage database connections
 - Organize into **folders** with drag-and-drop reorder
 - Per-connection **tab colors**
-- **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session
+- **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session, and PostgreSQL, MySQL, SQLite and ClickHouse sessions refuse writes in the database too, so even a function that writes can't get through
 - **Ask before changes** for production connections - the editor confirms any statement that changes data or schema before it runs, and so does saving grid edits
 - **Pick the database from a list** - the button beside the database field asks the server for its databases with the credentials you've entered, so you don't have to remember the name
 - PostgreSQL SSL (`disable` / `require` / `verify-full`), MySQL TLS, SQL Server TLS including TDS 8.0 `strict`, ClickHouse over HTTPS, and Turso URLs with an auth token
@@ -384,6 +384,30 @@ A `.sql` file runs statement by statement on one connection, so `SET`, temp tabl
 
 ---
 
+## 🤖 AI Assistants (MCP)
+
+AI apps such as Claude, Cursor or VS Code can look into your databases through the [Model Context Protocol](https://modelcontextprotocol.io). The AI app starts `BarSQL --mcp` in the background - no window - and talks to it over a pipe.
+
+- **Opt-in per connection** - tick **Allow AI assistants (MCP)** in the connection dialog. Other connections stay invisible to the AI
+- **Reads stay read-only** - every query passes BarSQL's read-only check, and on PostgreSQL, MySQL, SQLite and ClickHouse the database session refuses writes too, even one inside a function. SQL Server and Turso only get the check, so give those connections a read-only login or token
+- **Changes only where you allow them** - also tick **Allow changes**, on a connection that isn't read-only, and the AI gets `run_change` for INSERT, UPDATE, DELETE and schema changes
+  - Your AI app asks before each change unless you always allow it. With **Ask before running changes** on, BarSQL asks every time through the AI app, and refuses changes to an AI app that can't ask
+  - Each change runs in one transaction where the database has them, and reports the rows it touched. A preview runs it and rolls it back. MySQL commits schema changes at once, so a change with CREATE, ALTER or DROP can't be previewed there
+  - An UPDATE or DELETE without a WHERE needs the AI to say it means every row, and SQL that begins, commits or rolls back a transaction itself is refused
+- **Tools** - `list_connections`, `list_tables`, `describe_table`, `show_ddl`, `run_query`, `explain_query`, and `run_change` where changes are allowed
+- **Small answers** - at most 200 rows, long values shortened, and a query stops after 30 seconds
+- **No credentials** - the AI sees each connection's name, engine and database, never its password or token
+- **A log of every call** in `BarSQL-data/mcp.log`, with what each change did
+- What the AI reads is sent to its AI service, so share only what you'd show it
+
+To set it up, tick the box, click **Copy MCP setup** and paste it into your AI app's MCP settings - Claude Desktop's `claude_desktop_config.json`, or a project's `.mcp.json` for Claude Code. Or add it to Claude Code from a terminal:
+
+```bash
+claude mcp add barsql -- /Applications/BarSQL.app/Contents/MacOS/BarSQL --mcp
+```
+
+---
+
 ## 🔄 Auto Updates
 
 - Checks for a new version at launch and offers it with a toast
@@ -447,7 +471,7 @@ BarSQL-data/
   settings.json
 ```
 
-`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts.
+`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts. `mcp.log` appears once an AI assistant has used BarSQL.
 
 When the app sits somewhere writable, that folder is created **right next to the executable** (beside the `.app` bundle on macOS) - move it to a USB stick, network drive, or another PC and it just works.
 
@@ -577,7 +601,7 @@ Run the workflow by hand with the version left empty to build the packages witho
 ├── docker-compose.yml     # PostgreSQL / MySQL / MariaDB for the E2E suites
 ├── crates/
 │   ├── barsql/            # the binary: startup, single instance, file arguments
-│   ├── barsql-app/        # orchestration without GPUI: connections, runs, transactions, import, backups, updater
+│   ├── barsql-app/        # orchestration without GPUI: connections, runs, transactions, import, backups, updater, MCP server
 │   ├── barsql-core/       # domain types, settings, the data folder
 │   ├── barsql-db/         # the engines: PostgreSQL, MySQL / MariaDB, SQLite, SSH tunnels
 │   ├── barsql-io/         # CSV and .sql import, export formats, SQL formatting

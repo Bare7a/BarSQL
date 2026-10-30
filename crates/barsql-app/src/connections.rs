@@ -11,7 +11,7 @@ use barsql_storage::ConnectionFolder;
 
 use crate::events::AppEvent;
 use crate::stores::storage_error;
-use crate::{BarApp, PooledEngine, lock};
+use crate::{BarApp, CHANGE_ENGINE, PooledEngine, for_mcp, lock};
 
 // A saturated pool must not wedge the sidebar, which loads these lazily.
 pub(crate) const SCHEMA_TIMEOUT: Duration = Duration::from_secs(15);
@@ -27,11 +27,35 @@ pub(crate) async fn within<T>(
 
 impl BarApp {
     pub fn list_connections(&self) -> Vec<ConnectionConfig> {
-        self.inner.stores.connections.list()
+        let list = self.inner.stores.connections.list();
+        if !self.inner.mcp {
+            return list;
+        }
+        list.into_iter().filter(|cfg| cfg.mcp).map(for_mcp).collect()
+    }
+
+    // MCP mode: picks up sharing changes from the app, and closes engines the assistant may no longer use.
+    pub(crate) fn reload_connections(&self) -> Result<(), QueryError> {
+        self.inner.stores.connections.reload().map_err(storage_error)?;
+        let keys: Vec<String> = lock(&self.inner.engines).keys().cloned().collect();
+        for key in keys {
+            let usable = match key.strip_suffix(CHANGE_ENGINE) {
+                Some(id) => self.config(id).is_ok_and(|cfg| cfg.mcp_changes),
+                None => self.config(&key).is_ok(),
+            };
+            if !usable {
+                let app = self.clone();
+                self.inner.runtime.spawn(async move { app.disconnect(&key).await });
+            }
+        }
+        Ok(())
     }
 
     // Only a change to how it connects closes the connection, so a rename keeps its tabs' transactions.
-    pub async fn save_connection(&self, mut cfg: ConnectionConfig) -> Result<ConnectionConfig, QueryError> {
+    pub(crate) async fn save_connection_inner(
+        &self,
+        mut cfg: ConnectionConfig,
+    ) -> Result<ConnectionConfig, QueryError> {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
         let before = self.inner.stores.connections.get(&cfg.id);
@@ -42,7 +66,7 @@ impl BarApp {
         Ok(saved)
     }
 
-    pub async fn delete_connection(&self, id: &str) -> Result<bool, QueryError> {
+    pub(crate) async fn delete_connection_inner(&self, id: &str) -> Result<bool, QueryError> {
         self.disconnect(id).await;
         self.inner.stores.connections.delete(id).map_err(storage_error)
     }
@@ -51,37 +75,41 @@ impl BarApp {
         self.inner.stores.connections.reorder(ordered_ids).map_err(storage_error)
     }
 
-    pub async fn test_connection(&self, mut cfg: ConnectionConfig) -> Result<(), QueryError> {
+    pub(crate) async fn test_connection_inner(&self, mut cfg: ConnectionConfig) -> Result<(), QueryError> {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
         Engine::test(&cfg).await
     }
 
-    pub async fn list_databases(&self, cfg: ConnectionConfig) -> Result<Vec<String>, QueryError> {
+    pub(crate) async fn list_databases_inner(&self, cfg: ConnectionConfig) -> Result<Vec<String>, QueryError> {
         Engine::databases(&cfg).await
     }
 
-    pub async fn connect(&self, id: &str) -> Result<(), QueryError> {
+    pub(crate) async fn connect_inner(&self, id: &str) -> Result<(), QueryError> {
         self.engine(id).await.map(|_| ())
     }
 
-    // Reconnects when the connection's settings changed since the engine was opened.
     pub(crate) async fn engine(&self, id: &str) -> Result<Engine, QueryError> {
-        let mut cfg = self.config(id)?;
+        let cfg = self.config(id)?;
+        self.pooled_engine(id, cfg).await
+    }
+
+    // Reconnects when the connection's settings changed since the engine was opened. `key` may be a CHANGE_ENGINE one.
+    pub(crate) async fn pooled_engine(&self, key: &str, mut cfg: ConnectionConfig) -> Result<Engine, QueryError> {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
         let fingerprint = cfg.fingerprint();
-        let flight = self.connect_lock(id);
+        let flight = self.connect_lock(key);
         let _flight = flight.lock().await;
-        let existing = lock(&self.inner.engines).get(id).cloned();
+        let existing = lock(&self.inner.engines).get(key).cloned();
         if let Some(pooled) = existing {
             if pooled.fingerprint == fingerprint {
                 return Ok(pooled.engine);
             }
-            self.close_engine(id).await;
+            self.close_engine(key).await;
         }
         let engine = Engine::connect(&cfg).await?;
-        lock(&self.inner.engines).insert(id.to_string(), PooledEngine { engine: engine.clone(), fingerprint });
+        lock(&self.inner.engines).insert(key.to_string(), PooledEngine { engine: engine.clone(), fingerprint });
         Ok(engine)
     }
 
@@ -90,7 +118,7 @@ impl BarApp {
     }
 
     // Cancels running work and rolls back tab transactions before the pool closes.
-    pub async fn disconnect(&self, id: &str) {
+    pub(crate) async fn disconnect_inner(&self, id: &str) {
         let flight = self.connect_lock(id);
         let _flight = flight.lock().await;
         self.close_engine(id).await;
@@ -112,7 +140,7 @@ impl BarApp {
         lock(&self.inner.engines).contains_key(id)
     }
 
-    pub async fn connection_status(&self, id: &str) -> Result<ConnectionStatus, QueryError> {
+    pub(crate) async fn connection_status_inner(&self, id: &str) -> Result<ConnectionStatus, QueryError> {
         let engine = self.engine(id).await?;
         let mut status = engine.connection_info().await?;
         status.connected = true;
@@ -121,7 +149,7 @@ impl BarApp {
 
     // Postgres also preloads "public" (SQL Server "dbo") so the browser isn't empty when the default schema is a
     // custom one.
-    pub async fn load_schema_data(&self, id: &str) -> Result<SchemaBundle, QueryError> {
+    pub(crate) async fn load_schema_data_inner(&self, id: &str) -> Result<SchemaBundle, QueryError> {
         let cfg = self.config(id)?;
         let engine = self.engine(id).await?;
         let mut status = within(SCHEMA_TIMEOUT, engine.connection_info()).await?;
@@ -138,27 +166,37 @@ impl BarApp {
         Ok(SchemaBundle { status, schemas, loaded_tables })
     }
 
-    pub async fn list_schemas(&self, id: &str) -> Result<Vec<SchemaInfo>, QueryError> {
+    pub(crate) async fn list_schemas_inner(&self, id: &str) -> Result<Vec<SchemaInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_schemas()).await
     }
 
-    pub async fn list_tables(&self, id: &str, schema: &str) -> Result<Vec<TableInfo>, QueryError> {
+    pub(crate) async fn list_tables_inner(&self, id: &str, schema: &str) -> Result<Vec<TableInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_tables(schema)).await
     }
 
-    pub async fn list_columns(&self, id: &str, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
+    pub(crate) async fn list_columns_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(COLUMNS_TIMEOUT, engine.list_columns(schema, table)).await
     }
 
-    pub async fn list_indexes(&self, id: &str, schema: &str, table: &str) -> Result<Vec<IndexInfo>, QueryError> {
+    pub(crate) async fn list_indexes_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<IndexInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_indexes(schema, table)).await
     }
 
-    pub async fn list_constraints(
+    pub(crate) async fn list_constraints_inner(
         &self,
         id: &str,
         schema: &str,
@@ -168,23 +206,28 @@ impl BarApp {
         within(SCHEMA_TIMEOUT, engine.list_constraints(schema, table)).await
     }
 
-    pub async fn list_triggers(&self, id: &str, schema: &str, table: &str) -> Result<Vec<TriggerInfo>, QueryError> {
+    pub(crate) async fn list_triggers_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<TriggerInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_triggers(schema, table)).await
     }
 
-    pub async fn list_routines(&self, id: &str, schema: &str) -> Result<Vec<RoutineInfo>, QueryError> {
+    pub(crate) async fn list_routines_inner(&self, id: &str, schema: &str) -> Result<Vec<RoutineInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_routines(schema)).await
     }
 
-    pub async fn list_functions(&self, id: &str) -> Result<FunctionList, QueryError> {
+    pub(crate) async fn list_functions_inner(&self, id: &str) -> Result<FunctionList, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_functions()).await
     }
 
     // Reads the catalog only, so it stays available on read-only connections.
-    pub async fn object_ddl(&self, id: &str, object: &ObjectRef) -> Result<String, QueryError> {
+    pub(crate) async fn object_ddl_inner(&self, id: &str, object: &ObjectRef) -> Result<String, QueryError> {
         if object.name.is_empty() {
             return Err(QueryError::message("object name is required"));
         }
@@ -192,13 +235,19 @@ impl BarApp {
         within(SCHEMA_TIMEOUT, engine.object_ddl(object)).await
     }
 
-    pub async fn count_rows(&self, id: &str, schema: &str, table: &str) -> Result<i64, QueryError> {
+    pub(crate) async fn count_rows_inner(&self, id: &str, schema: &str, table: &str) -> Result<i64, QueryError> {
         self.count_matching(id, schema, table, "").await
     }
 
     // Own session and no deadline, since counting a big table takes a while. A disconnect cancels it. `filter` is a
     // table view's WHERE condition, checked as its page query checks it.
-    pub async fn count_matching(&self, id: &str, schema: &str, table: &str, filter: &str) -> Result<i64, QueryError> {
+    pub(crate) async fn count_matching_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+        filter: &str,
+    ) -> Result<i64, QueryError> {
         let key = format!("count:{id}:{schema}.{table}");
         let (job, cancel) = self.inner.jobs.start(&key, id);
         let result = async {
@@ -231,11 +280,11 @@ impl BarApp {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use barsql_core::{ConnectionConfig, DriverType};
+    use barsql_core::{ConnectionConfig, DriverType, Value};
     use barsql_db::Engine;
 
     use crate::events::{AppEvent, RunEvent};
-    use crate::{BarApp, PooledEngine, lock};
+    use crate::{BarApp, CHANGE_ENGINE, ChangeOutcome, PooledEngine, lock};
 
     fn same(a: &Engine, b: &Engine) -> bool {
         matches!((a, b), (Engine::Sqlite(x), Engine::Sqlite(y)) if Arc::ptr_eq(x, y))
@@ -352,5 +401,82 @@ pub(crate) mod tests {
         drop(flight);
         disconnect.await.unwrap();
         assert!(!app.is_connected(&id));
+    }
+
+    #[tokio::test]
+    async fn mcp_mode_reaches_only_shared_connections_reads_only_and_saves_nothing() {
+        let (app, private, dir) = setup().await;
+        let data = dir.path().join("data");
+        let file = dir.path().join("a.db").display().to_string();
+        let cfg = ConnectionConfig {
+            name: "shared".into(),
+            driver: DriverType::Sqlite,
+            file_path: file,
+            mcp: true,
+            ..Default::default()
+        };
+        let shared = app.save_connection(cfg).await.unwrap().id;
+        let mcp = BarApp::open_for_mcp(&data, tokio::runtime::Handle::current()).unwrap();
+        let listed: Vec<_> = mcp.list_connections().into_iter().map(|cfg| (cfg.id, cfg.read_only)).collect();
+        assert_eq!(listed, [(shared.clone(), true)]);
+        assert!(mcp.connect(&private).await.is_err(), "an unshared connection is out of reach");
+        assert!(mcp.engine(&shared).await.unwrap().read_only(), "the driver session is read-only too");
+        assert_eq!(run_error(&mcp, &shared, "tab", "SELECT 1").await, None);
+        assert!(mcp.execute_query_stream(&shared, "tab", "CREATE TABLE t (a INTEGER)").await.is_err());
+        assert!(!data.join("query_history.json").exists(), "MCP mode keeps no history");
+
+        app.save_connection(ConnectionConfig { mcp: true, ..app.config(&private).unwrap() }).await.unwrap();
+        mcp.reload_connections().unwrap();
+        assert_eq!(mcp.list_connections().len(), 2, "a reload picks up a connection shared since");
+    }
+
+    #[tokio::test]
+    async fn mcp_changes_need_permission_and_a_preview_rolls_back() {
+        let (app, unshared, dir) = setup().await;
+        let file = dir.path().join("lab.db").display().to_string();
+        let lab = ConnectionConfig {
+            name: "lab".into(),
+            driver: DriverType::Sqlite,
+            file_path: file,
+            mcp: true,
+            mcp_changes: true,
+            ..Default::default()
+        };
+        let lab = app.save_connection(lab).await.unwrap();
+        let mcp = BarApp::open_for_mcp(&dir.path().join("data"), tokio::runtime::Handle::current()).unwrap();
+        let count = || async { app.execute_query(&lab.id, "SELECT count(*) FROM t").await.unwrap().rows[0][0].clone() };
+
+        let made =
+            mcp.apply_change(&lab.id, "job", "CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1), (2)", false, false);
+        assert_eq!(made.await.unwrap(), ChangeOutcome { statements: 2, affected_rows: 2, committed: true });
+        let previewed = mcp.apply_change(&lab.id, "job", "DELETE FROM t WHERE a > 0", true, false).await.unwrap();
+        assert_eq!((previewed.affected_rows, previewed.committed), (2, false));
+        assert_eq!(count().await, Value::Int(2), "the preview rolled back");
+        let committing = "DELETE FROM t WHERE a > 0; COMMIT";
+        assert!(mcp.check_change(&lab.id, committing, true).is_err(), "its COMMIT would end the preview");
+        assert!(mcp.apply_change(&lab.id, "job", committing, true, false).await.is_err());
+        assert_eq!(count().await, Value::Int(2));
+        assert!(mcp.execute_query_stream(&lab.id, "tab", "DELETE FROM t").await.is_err(), "reads stay read-only");
+        assert!(mcp.engine(&lab.id).await.unwrap().read_only());
+
+        assert!(mcp.apply_change(&unshared, "job", "DELETE FROM t", false, false).await.is_err(), "not shared");
+        app.save_connection(ConnectionConfig { confirm_changes: true, ..lab.clone() }).await.unwrap();
+        mcp.reload_connections().unwrap();
+        assert!(mcp.apply_change(&lab.id, "job", "DELETE FROM t", false, false).await.is_err(), "not confirmed");
+        assert!(mcp.apply_change(&lab.id, "job", "DELETE FROM t WHERE a = 1", false, true).await.is_ok());
+        let change_engine = format!("{}{CHANGE_ENGINE}", lab.id);
+        assert!(mcp.is_connected(&change_engine), "changes run on an engine of their own");
+        app.save_connection(ConnectionConfig { read_only: true, ..lab.clone() }).await.unwrap();
+        mcp.reload_connections().unwrap();
+        assert!(mcp.apply_change(&lab.id, "job", "DELETE FROM t", false, true).await.is_err(), "read-only");
+        assert!(!mcp.list_connections()[0].mcp_changes, "and listed as unchangeable");
+        assert_eq!(count().await, Value::Int(1));
+        for _ in 0..200 {
+            if !mcp.is_connected(&change_engine) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(!mcp.is_connected(&change_engine), "the reload closed the writable engine");
     }
 }

@@ -98,6 +98,11 @@
     "sslStrict": "Стриктно (TDS 8.0)",
     "confirmChanges": "Питай преди промени",
     "confirmChangesHint": "За продукционни бази: потвърждава INSERT, UPDATE, DELETE, DDL и записи от таблицата, преди да се изпълнят.",
+    "mcp": "Разреши AI асистенти (MCP)",
+    "mcpHint": "AI приложения като Claude могат да четат тази база.",
+    "mcpChanges": "Разреши промени",
+    "mcpChangesHint": "Позволява им INSERT, UPDATE, DELETE и DDL.",
+    "copyMcpSetup": "Копирай MCP настройката",
     "extensions": "Зареждай разширения",
     "extensionsHint": "Зарежда SQLite разширения като cr-sqlite при всяко отваряне на файла. Те се изпълняват в BarSQL, затова добавяйте само такива, на които имате доверие.",
     "extensionsEmpty": "Още няма разширения. Добавете файл на библиотека с +.",
@@ -292,6 +297,7 @@
     "undo": "Отмени"
   },
   "toast": {
+    "copiedMcpSetup": "MCP настройката е копирана в клипборда",
     "historyDeleted": "Записът от историята е изтрит",
     "exportStopped_one": "Експортирането е спряно - {{fileName}} съдържа само първия ред",
     "exportStopped_other": "Експортирането е спряно - {{fileName}} съдържа само първите {{count}} реда"

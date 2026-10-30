@@ -143,6 +143,12 @@ pub struct ConnectionConfig {
     // Asks before the editor runs a statement that changes data or schema, as for a production database.
     #[serde(default, skip_serializing_if = "is_false")]
     pub confirm_changes: bool,
+    // Shared with AI assistants through `BarSQL --mcp`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mcp: bool,
+    // Lets those assistants change data too. Never on a read-only connection.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mcp_changes: bool,
     #[serde(default)]
     pub ssh: SshConfig,
     #[serde(default, skip_serializing_if = "ExtensionsConfig::is_empty")]

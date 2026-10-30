@@ -30,7 +30,9 @@ pub use quote::{
     placeholder, qualified_table, quote_ident, quote_ident_in, quote_ident_list, quote_literal, quote_literal_in,
     table_ref,
 };
-pub use readonly::{READ_ONLY_ERROR, assert_read_only, is_read_only, unbounded_writes, validate_table_filter};
+pub use readonly::{
+    READ_ONLY_ERROR, assert_read_only, controls_transactions, is_read_only, unbounded_writes, validate_table_filter,
+};
 pub use split::{Statement, split_statement_texts, split_statements};
 pub use sql_text::{first_keyword, strip_leading_comments, to_upper};
 pub use type_name::{TypeFamily, display_type, type_family};

@@ -142,7 +142,7 @@ fn partial_path(path: &Path) -> PathBuf {
 impl BarApp {
     // Rows go out as INSERTs of literals the server quoted itself, so every type round-trips exactly.
     // `progress` gets the running row count.
-    pub async fn backup_table(
+    pub(crate) async fn backup_table_inner(
         &self,
         connection_id: &str,
         job: &str,

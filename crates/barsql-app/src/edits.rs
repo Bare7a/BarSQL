@@ -55,17 +55,17 @@ impl BarApp {
         if self.config(connection_id)?.read_only { Err(QueryError::message(READ_ONLY_ERROR)) } else { Ok(()) }
     }
 
-    pub async fn update_row(&self, connection_id: &str, update: &RowUpdate) -> Result<(), QueryError> {
+    pub(crate) async fn update_row_inner(&self, connection_id: &str, update: &RowUpdate) -> Result<(), QueryError> {
         self.update_rows(connection_id, std::slice::from_ref(update)).await
     }
 
-    pub async fn update_rows(&self, connection_id: &str, updates: &[RowUpdate]) -> Result<(), QueryError> {
+    pub(crate) async fn update_rows_inner(&self, connection_id: &str, updates: &[RowUpdate]) -> Result<(), QueryError> {
         self.require_writable(connection_id)?;
         self.engine(connection_id).await?.update_rows(updates).await
     }
 
     // Deletes in batches of keys. On failure the count still covers the batches already deleted.
-    pub async fn delete_rows(&self, connection_id: &str, delete: &RowDelete) -> (i64, Option<QueryError>) {
+    pub(crate) async fn delete_rows_inner(&self, connection_id: &str, delete: &RowDelete) -> (i64, Option<QueryError>) {
         if let Err(err) = self.require_writable(connection_id) {
             return (0, Some(err));
         }
@@ -75,7 +75,7 @@ impl BarApp {
         }
     }
 
-    pub async fn insert_row(
+    pub(crate) async fn insert_row_inner(
         &self,
         connection_id: &str,
         schema: &str,
@@ -88,7 +88,7 @@ impl BarApp {
 
     // Off the tab's session where it can be: a failure inside the tab's transaction would abort it, and a wait would
     // hold up the tab's next run.
-    pub async fn result_table(
+    pub(crate) async fn result_table_inner(
         &self,
         connection_id: &str,
         tab_id: &str,
@@ -213,7 +213,7 @@ impl BarApp {
     }
 
     // Inside the tab's transaction when one is open, else in one of its own. Returns the deletes that found no row.
-    pub async fn apply_result_edits(
+    pub(crate) async fn apply_result_edits_inner(
         &self,
         connection_id: &str,
         tab_id: &str,

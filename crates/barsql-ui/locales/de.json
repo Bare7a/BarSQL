@@ -98,6 +98,11 @@
     "sslStrict": "Strikt (TDS 8.0)",
     "confirmChanges": "Vor Änderungen nachfragen",
     "confirmChangesHint": "Für Produktivdatenbanken: bestätigt INSERT, UPDATE, DELETE, DDL und Tabellenänderungen, bevor sie laufen.",
+    "mcp": "KI-Assistenten erlauben (MCP)",
+    "mcpHint": "KI-Apps wie Claude können diese Datenbank abfragen.",
+    "mcpChanges": "Änderungen erlauben",
+    "mcpChangesHint": "Erlaubt ihnen INSERT, UPDATE, DELETE und DDL.",
+    "copyMcpSetup": "MCP-Einrichtung kopieren",
     "extensions": "Erweiterungen laden",
     "extensionsHint": "Lädt SQLite-Erweiterungen wie cr-sqlite bei jedem Öffnen dieser Datei. Sie laufen in BarSQL, fügen Sie also nur vertrauenswürdige hinzu.",
     "extensionsEmpty": "Noch keine Erweiterungen. Fügen Sie mit + eine Bibliotheksdatei hinzu.",
@@ -292,6 +297,7 @@
     "undo": "Rückgängig"
   },
   "toast": {
+    "copiedMcpSetup": "MCP-Einrichtung in die Zwischenablage kopiert",
     "historyDeleted": "Verlaufseintrag gelöscht",
     "exportStopped_one": "Export abgebrochen - {{fileName}} enthält nur die erste Zeile",
     "exportStopped_other": "Export abgebrochen - {{fileName}} enthält nur die ersten {{count}} Zeilen"

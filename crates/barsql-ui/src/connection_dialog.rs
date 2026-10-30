@@ -222,6 +222,8 @@ pub struct ConnectionForm {
     driver: DriverType,
     read_only: bool,
     confirm_changes: bool,
+    mcp: bool,
+    mcp_changes: bool,
     color: String,
     ssl_mode: String,
     ssh_enabled: bool,
@@ -291,6 +293,8 @@ impl ConnectionForm {
             driver: config.driver.clone(),
             read_only: config.read_only,
             confirm_changes: config.confirm_changes,
+            mcp: config.mcp,
+            mcp_changes: config.mcp_changes,
             color: if config.color.is_empty() { DEFAULT_COLOR.into() } else { config.color.clone() },
             ssl_mode: if config.ssl_mode.is_empty() {
                 default_tls(&config.driver).into()
@@ -365,6 +369,8 @@ impl ConnectionForm {
             schema: value(&f.schema),
             read_only: self.read_only,
             confirm_changes: self.confirm_changes,
+            mcp: self.mcp,
+            mcp_changes: self.mcp && self.mcp_changes && !self.read_only,
             ssh: SshConfig {
                 enabled: self.ssh_enabled,
                 host: value(&f.ssh_host),
@@ -805,7 +811,7 @@ impl Render for ConnectionForm {
                 ))
                 .child(self.ssh_section(window, cx));
         }
-        let body = body.children(self.error.clone().map(|error| form::error(error, cx)));
+        let body = body.child(self.mcp_section(cx)).children(self.error.clone().map(|error| form::error(error, cx)));
         let (testing, busy) = (self.testing, self.busy());
         modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(
             modal::footer(cx)
@@ -936,6 +942,43 @@ impl ConnectionForm {
                 .child(form::group(t(cx, "connection.sshKnownHosts"), known_hosts_row, cx).child(form::hint(hint, cx)));
         }
         section.into_any_element()
+    }
+
+    fn mcp_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let enabled =
+            self.toggle("conn-mcp", self.mcp, "connection.mcp", "connection.mcpHint", |form| form.mcp = !form.mcp, cx);
+        let section = form::section(cx).child(enabled);
+        if !self.mcp {
+            return section.into_any_element();
+        }
+        // Read-only connections never take changes.
+        let changes = form::checkbox(
+            "conn-mcp-changes",
+            self.mcp_changes && !self.read_only,
+            t(cx, "connection.mcpChanges"),
+            self.read_only,
+            cx,
+        )
+        .debug_selector(|| "conn-mcp-changes".into())
+        .when(!self.read_only, |checkbox| {
+            checkbox.on_click(cx.listener(|form, _, _, cx| {
+                form.mcp_changes = !form.mcp_changes;
+                cx.notify();
+            }))
+        });
+        let copy = Button::new("conn-mcp-setup")
+            .debug_selector(|| "conn-mcp-setup".into())
+            .large()
+            .icon(Icon::new(Lucide::Copy))
+            .label(t(cx, "connection.copyMcpSetup"))
+            .on_click(|_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(barsql_app::mcp::setup_json()));
+                toast::success(t(cx, "toast.copiedMcpSetup"), cx);
+            });
+        section
+            .child(v_flex().child(changes).child(form::hint(t(cx, "connection.mcpChangesHint"), cx).pl(rems(2.))))
+            .child(h_flex().child(copy))
+            .into_any_element()
     }
 
     // Edited like the structure editor's lists.
@@ -1459,6 +1502,39 @@ mod tests {
         assert!(drawn(cx));
         form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
         assert!(!drawn(cx));
+    }
+
+    #[gpui_kit::test]
+    fn sharing_with_ai_assistants_offers_the_setup_and_is_saved(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let cx = window(cx);
+        let (form, saved) = open_form(Some(env.connection.clone()), cx);
+        let click = |selector: &'static str, cx: &mut VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let at = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is not drawn")).center();
+            cx.simulate_click(at, gpui_kit::Modifiers::none());
+            cx.run_until_parked();
+        };
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("conn-mcp-setup").is_none(), "the setup waits for sharing");
+        click("conn-mcp", cx);
+        click("conn-mcp-setup", cx);
+        let copied = cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default();
+        assert!(copied.contains(r#""--mcp""#), "{copied}");
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        assert!(toasts.iter().any(|(_, text)| text.starts_with("MCP setup copied")), "{toasts:?}");
+        click("conn-mcp-changes", cx);
+        form.update_in(cx, |form, window, cx| form.save(window, cx));
+        settle(cx, |_| !saved.borrow().is_empty());
+        let stored = saved.borrow()[0].clone();
+        assert!(stored.mcp && stored.mcp_changes);
+
+        let (form, saved) = open_form(Some(ConnectionConfig { read_only: true, ..stored }), cx);
+        click("conn-mcp-changes", cx);
+        assert!(form.read_with(cx, |form, cx| !form.config(cx).mcp_changes), "the box can't be ticked");
+        form.update_in(cx, |form, window, cx| form.save(window, cx));
+        settle(cx, |_| !saved.borrow().is_empty());
+        assert!(!saved.borrow()[0].mcp_changes);
     }
 
     #[test]

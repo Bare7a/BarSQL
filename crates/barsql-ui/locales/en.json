@@ -98,6 +98,11 @@
     "sslStrict": "Strict (TDS 8.0)",
     "confirmChanges": "Ask before running changes",
     "confirmChangesHint": "For production databases: confirms INSERT, UPDATE, DELETE, DDL and grid saves before they run.",
+    "mcp": "Allow AI assistants (MCP)",
+    "mcpHint": "Lets AI apps like Claude query this database.",
+    "mcpChanges": "Allow changes",
+    "mcpChangesHint": "Lets them run INSERT, UPDATE, DELETE and DDL.",
+    "copyMcpSetup": "Copy MCP setup",
     "extensions": "Load extensions",
     "extensionsHint": "Loads SQLite extensions such as cr-sqlite each time this file opens. They run inside BarSQL, so add only ones you trust.",
     "extensionsEmpty": "No extensions yet. Add a library file with +.",
@@ -292,6 +297,7 @@
     "undo": "Undo"
   },
   "toast": {
+    "copiedMcpSetup": "MCP setup copied to clipboard",
     "historyDeleted": "History entry deleted",
     "exportStopped_one": "Export stopped - {{fileName}} holds only the first row",
     "exportStopped_other": "Export stopped - {{fileName}} holds only the first {{count}} rows"

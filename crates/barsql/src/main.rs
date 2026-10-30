@@ -14,6 +14,11 @@ fn main() -> anyhow::Result<()> {
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let data_dir = barsql_core::paths::ensure_data_dir().context("data folder")?;
+    // Started by an AI app: no window, and never handed to a running BarSQL.
+    if args.first().is_some_and(|arg| arg == "--mcp") {
+        let runtime = runtime()?;
+        return barsql_app::mcp::serve(&data_dir, runtime.handle().clone()).context("mcp");
+    }
     let snapshot = std::env::var_os("BARSQL_SNAPSHOT").filter(|p| !p.is_empty()).map(Into::into);
     let screenshots = std::env::var_os("BARSQL_SCREENSHOTS").filter(|p| !p.is_empty()).map(Into::into);
     let listener = match snapshot.as_ref().or(screenshots.as_ref()) {
@@ -24,11 +29,7 @@ fn main() -> anyhow::Result<()> {
         },
     };
     barsql_app::update::sweep_update_leftovers();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .thread_stack_size(barsql_app::WORKER_STACK)
-        .enable_all()
-        .build()
-        .context("tokio runtime")?;
+    let runtime = runtime()?;
     let bar = BarApp::open(&data_dir, runtime.handle().clone()).context("open data folder")?;
     if let Some(path) = find_sqlite_arg(&args) {
         bar.set_pending_file(&path);
@@ -53,4 +54,13 @@ fn main() -> anyhow::Result<()> {
     let options = LaunchOptions { snapshot, snapshot_run, snapshot_panel, snapshot_size, screenshots, check_updates };
     barsql_ui::run(bar, options);
     Ok(())
+}
+
+fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(barsql_app::WORKER_STACK)
+        .enable_all()
+        .build()
+        .context("tokio runtime")?;
+    Ok(runtime)
 }

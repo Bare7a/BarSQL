@@ -176,7 +176,7 @@ impl BarApp {
         }
     }
 
-    pub async fn cleanup_tab(&self, tab_id: &str) {
+    pub(crate) async fn cleanup_tab_inner(&self, tab_id: &str) {
         self.inner.jobs.cancel(tab_id);
         let Some(slot) = self.inner.tabs.remove(tab_id) else { return };
         let mut slot = slot.lock_owned().await;
