@@ -1,3 +1,4 @@
+pub mod algebra;
 pub mod alter;
 pub mod ddl;
 pub mod dialect;
@@ -20,6 +21,7 @@ pub mod structure;
 pub mod system_views;
 pub mod type_name;
 
+pub use algebra::{AlgebraError, AlgebraNode, Column, Item, Source, TableColumns, TableRef, algebra, columns};
 pub use dialect::Dialect;
 pub use explain::{
     ExplainStrategy, PlanRequest, SHOWPLAN_COLUMN, ServerVersion, build_explain, build_explain_sql,
