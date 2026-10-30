@@ -67,17 +67,23 @@ Work with **SQLite**, **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **Cli
 ### 👉 Everything you need. Nothing you don’t.
 
 - Query faster with smart, schema-aware autocomplete - functions included, with their signatures on hover
+- Edit SQL the VS Code way - multiple cursors, line commands, go to definition and a command palette
 - See what the server said - notices, warnings and `PRINT` output in a Messages tab
 - Check what a server is doing in one click - activity, blocking, sessions, table statistics
 - Reach databases behind a bastion over an SSH tunnel
 - Stream results - rows arrive as the driver yields them
 - Run multi-statement scripts and get a result tab per output
-- Explore schemas instantly - down to indexes, constraints and triggers
+- Edit rows in the grid - in a table, or in the results of a `SELECT` from one
+- Plot any result as a bar or line chart
+- Explore schemas instantly - down to indexes, constraints and triggers, or as an ER diagram
+- Design tables in a Structure tab and see the exact SQL before it runs
 - Rename, truncate, drop and back up tables straight from the schema tree
+- Compare two schemas and get the script that syncs them
 - Copy any object's DDL in one click
 - Import a CSV or run a `.sql` script
 - Save and reuse queries
 - Export anything in one click
+- Let AI assistants such as Claude read your databases over MCP - and change them only where you allow it
 - Auto-update with one click
 
 ---
@@ -103,7 +109,12 @@ Work with **SQLite**, **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **Cli
   <tr>
     <td align="center"><img src=".github/screenshots/10.png?raw=true" width="100%"><br><sub><b>Plan viewer</b></sub></td>
     <td align="center"><img src=".github/screenshots/11.png?raw=true" width="100%"><br><sub><b>CSV & SQL import</b></sub></td>
-    <td align="center"><img src=".github/screenshots/12.png?raw=true" width="100%"><br><sub><b>Appearance</b></sub></td>
+    <td align="center"><img src=".github/screenshots/12.png?raw=true" width="100%"><br><sub><b>Structure editor</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src=".github/screenshots/13.png?raw=true" width="100%"><br><sub><b>ER diagram</b></sub></td>
+    <td align="center"><img src=".github/screenshots/14.png?raw=true" width="100%"><br><sub><b>Quick charts</b></sub></td>
+    <td align="center"><img src=".github/screenshots/15.png?raw=true" width="100%"><br><sub><b>Appearance</b></sub></td>
   </tr>
 </table>
 
@@ -171,7 +182,7 @@ BarSQL focuses on one thing:
 - SQL Server **named instances** - type `host\INSTANCE`, or fill in the Instance field
 - **SSH tunnel** to reach databases behind a bastion (see below)
 - SQLite file picker, or drop a database file on the window
-- **SQLite extensions** - load extensions such as [cr-sqlite](https://github.com/vlcn-io/cr-sqlite) (`.dylib` / `.so` / `.dll`) into a connection each time it opens, in list order. Test names the file that didn't load and why, such as a build for another OS or CPU. The status bar shows how many a connection loads, and their functions complete and show on hover as coming from them. SQL can't load extensions itself
+- **SQLite extensions** - load extensions such as [cr-sqlite](https://github.com/vlcn-io/cr-sqlite) (`.dylib` / `.so` / `.dll`) into a connection each time it opens, in list order. Test names the file that didn't load and why, such as a build for another OS or CPU, or a copy that's incomplete. The status bar shows how many a connection loads, and their functions complete and show on hover as coming from them. SQL can't load extensions itself
 
 ### 🔐 SSH Tunnel
 
@@ -200,6 +211,8 @@ Connect to a database that only its bastion can reach - no `ssh -L` in a side te
 - **Query parameters** - `:name` placeholders ask for their values before a run (values are SQL, so quote text; empty means `NULL`) and the last values come back next time. Casts like `::int`, strings and comments are left alone
 - **Every-row guard** - an `UPDATE` or `DELETE` without a `WHERE` asks before it runs
 - **Go to definition** (`F12` or `⌘/Ctrl`-click) - an alias or CTE jumps to where the query declares it, and a table (or a column's table) opens in the grid
+- **Go to line** (`Ctrl+G`, on macOS too) - a line, or `line:column`
+- **Errors point at the problem** - the word where a run failed is underlined in the editor, even when the engine names an unknown column without saying where. When a table or column the schema has is close to that name, **Did you mean …?** comes with a button that swaps it in
 - **Streaming results** - rows render as the driver yields them
 - **Multi-statement scripts** - run several `;`-separated statements at once; they execute in order on one connection, so temp tables, `SET` and scripted `BEGIN` / `COMMIT` hold. SQL Server scripts run batch by batch, split on `GO` (`GO 3` runs a batch three times)
 - **Messages tab** - PostgreSQL notices, MySQL warnings, SQL Server `PRINT` and `RAISERROR` output, grouped under the statement that raised them, with levels and codes; it opens by itself when a run returns nothing else
@@ -233,13 +246,15 @@ Plans are outputs like any other, so a script can mix them freely - `SELECT …;
 
 - Tree view: schemas → tables / views → columns, then **indexes**, **constraints** and **triggers**
 - Views are called out with their own icon and badge; **functions and procedures** close each schema
-- Search tables and columns instantly
+- Columns show an icon for their type, and gold primary-key and blue foreign-key icons, as the grid and ER diagram do. Hover one for its full type, foreign-key target, default, whether it's generated, and the values an enum allows
+- Search tables and columns instantly, with the matches highlighted
+- Arrow keys move through the tree, `→` / `←` expand and collapse, and `Enter` expands a row or inserts a column's name
 - **Click** a column to insert its name at the cursor
 - The 👁 button on a table (or **Browse data**) opens its rows in the grid, editable when it has a primary key
 - **Count rows** answers straight away, without opening a tab
 - **System views** - see what the server is doing (PostgreSQL activity, blocking and long-running queries; MySQL processes and open transactions; SQL Server requests, sessions and blocking; ClickHouse running queries) from the activity button above the tree or a connection's menu, and how a table is doing (statistics, index usage, ClickHouse parts, mutations and merges) from its menu. Each opens as an ordinary SQL tab and runs, so you can tweak it and run it again
 - Refresh the whole schema, or one schema from its right-click menu
-- **ER diagram** of a schema from its right-click menu - every table with all its columns, keys first, laid out so referenced tables stand left of the ones referencing them and the keys cross as little as possible. Drag to pan, zoom with the buttons, `⌘/Ctrl`+scroll or a pinch, and Fit to see it all. Hover or click a table to light up its keys and neighbours, find one by name, show only the key columns, and double-click (or use the open button) to open it
+- **ER diagram** of a schema from its right-click menu, in a tab that comes back with the session - every table with all its columns, keys first, laid out so referenced tables stand left of the ones referencing them and the keys cross as little as possible. Drag to pan, zoom with the buttons, `⌘/Ctrl`+scroll or a pinch, and Fit to see it all. Hover or click a table to light up its keys and neighbours, find one by name, show only the key columns, and double-click (or use the open button) to open it
 - **Compare schema…** with another schema or database of the same engine - missing and extra tables, added, dropped and changed columns, and a sync script you can copy or open in a tab
 
 Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.
@@ -308,8 +323,8 @@ After Apply the tab shows the table as it now is, and the tree, autocomplete and
 - **Virtualized** grid - smooth scroll over thousands of rows
 - **Result-set tabs** - switch between outputs when a run returns multiple result sets
 - **Sortable** columns, **fit columns** to their content, and **show / hide** columns
-- Headers show each column's **type** and **key icons**; numbers are right-aligned, `NULL` is dimmed, and **striped rows** are a View-menu toggle
-- **Status bar sums** - selected cells show their count, and the sum and average of their numbers
+- Headers show each column's **type** and **key icons**; numbers line up on the decimal point (long fractions are rounded for display), `NULL` is dimmed, and **striped rows** are a View-menu toggle
+- **Status bar stats** - cells selected in one column show their count, and the sum, average, min and max of their numbers; click one to copy it. A selection across columns breaks them down per column
 - **Quick charts** - the Chart button plots a result as bars or lines. A panel beside it picks the label column and up to five value columns, each in its own colour, and how rows that share a label combine (sum, count or average). It starts from sensible picks, keeps them when you switch back to the grid, and scrolls sideways through many bars
 - Right-click menus on cells, row numbers and headers: copy as any export format, filter by a value, sort, hide a column, mark rows for delete
 - **Keyboard-first** navigation (arrows, Shift+select, Enter for the cell viewer)
@@ -317,7 +332,7 @@ After Apply the tab shows the table as it now is, and the tree, autocomplete and
 - **Cell viewer** for large values - JSON, XML, HTML, or plain text; beautify/minify; editable in table view
 - **JSON / JSONB** auto-parsed in cell and side viewer
 - **Arrays, maps and tuples** - PostgreSQL arrays and ClickHouse `Array`, `Map` and `Tuple` values read as JSON in both viewers; switch the cell viewer to Text for the literal itself
-- Side **JSON row viewer** with filter / regex search, synced to focused row
+- Side **JSON row viewer**, synced to the focused row and showing its number - filter keys and values (`/…/` for a regex) with the matches highlighted, **Copy JSON**, and **Hide NULL columns**
 
 ---
 
@@ -325,8 +340,9 @@ After Apply the tab shows the table as it now is, and the tree, autocomplete and
 
 View and modify table data directly in the grid - no hand-written `UPDATE` / `DELETE` (writable connections):
 
-- **Browse** any table's rows from the Schema Explorer
+- **Browse** any table's rows from the Schema Explorer, filter them with a `WHERE` condition that autocompletes, and **Count all** the rows the filter lets through
 - **Inline edit** cells in place - changes are staged, then applied on demand (`Ctrl+S`)
+- **Booleans and enums** - a boolean is a checkbox that a click or `Space` flips, and an enum, or a column whose `CHECK` lists its values, edits with a picker, in the add-row dialog too
 - **Edit query results** too - a `SELECT` from one table that includes its primary key edits like a table view:
   - Aliased columns save to the columns they show, while expressions and generated columns stay as they are
   - The engine says where each column comes from (on Turso, the select list does), so a `search_path` or `USE` can't point an edit at another table
@@ -344,8 +360,8 @@ View and modify table data directly in the grid - no hand-written `UPDATE` / `DE
 ## 📚 Query Library & History
 
 - **Saved queries** - name, filter, sort, link tabs with dirty-state tracking
-- Save, update, rename and delete from the sidebar or toolbar
-- **Per-connection query history** with success/error and duration
+- Save, update, rename (`F2`) and delete from the sidebar or toolbar
+- **Per-connection query history** with success/error and duration, filterable to the failed runs
 - Clear history per connection or delete individual entries
 
 ---
@@ -357,7 +373,7 @@ Load a **CSV** (or any delimited file) or run a **`.sql` script**, from the ⬆ 
 ### CSV
 
 - **Delimiter auto-detected** (`,` `;` tab `|`) - the one that splits every line the same way wins, so commas inside quoted values don't fool it; override it if you'd rather
-- **Column mapping** - each source column shows its first value and the target column it loads into; blank the target to skip that column entirely
+- **Column mapping** - each source column shows its first value and the target column it loads into, with a warning when its values may not fit that column's type; blank the target to skip that column entirely
 - **Import into an existing table**, optionally emptying it first, **or create a new one** with types inferred from the data (integer, decimal, boolean, date, timestamp, text) - each one editable before you commit to it, and named in your engine's own dialect
 - Headers optional, `NULL` text configurable (`\N`, `NULL`, whatever your exporter writes), leading lines skippable for files with a preamble, whitespace trimmable
 - **Empty fields keep their meaning**: a bare one is `NULL`, a quoted `""` is an empty string - the same convention Postgres `COPY … FORMAT csv` uses, and what lets a BarSQL CSV export load straight back in. In a numeric or date column, where `""` is never valid, both mean `NULL`
@@ -420,13 +436,14 @@ claude mcp add BarSQL -- /Applications/BarSQL.app/Contents/MacOS/BarSQL --mcp
 ## 🌍 UX
 
 - **Dark & light** themes, or **match the system** and follow it as it changes
+- **Welcome screen** while no tab is open - a new connection or a SQLite file to start with, then a new query or the tab you closed last, plus the shortcuts to get around
 - **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
 - **English**, **Deutsch**, **Български** and **Español**
 - **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs
 - Custom shortcuts editor + keyboard tips
 - Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
 - Tab menu: close others, to the right or all, **pin**, duplicate, rename, copy SQL
-- Status bar with the caret's line and column, cursor count, read-only, extension and transaction badges
+- **Status bar** - the tab's connection (click to switch it), the caret's line and column (click to go to a line), cursor count, the open transaction, and a running query with its **Stop** button. Read-only, ask-before-changes and extension chips open the connection's settings, and a guarded connection with a tab color tints the whole bar with it
 - Everything opens instantly - no animations
 - **Window state persistence** - size, position and maximized state restored between sessions
 
@@ -434,13 +451,16 @@ claude mcp add BarSQL -- /Applications/BarSQL.app/Contents/MacOS/BarSQL --mcp
 
 ## ⌨️ Keyboard Shortcuts
 
-Every shortcut is remappable in the in-app shortcuts editor.
+The in-app shortcuts editor remaps all of these except the editor's own keys: go to definition, go to line, comments and cursors.
 
 | Action                       | Shortcut                                    |
 | ---------------------------- | ------------------------------------------- |
 | Quick Search palette         | `Ctrl/⌘ + P`                                |
 | Command palette              | `Ctrl/⌘ + Shift + P`                        |
 | Go to definition             | `F12`                                       |
+| Go to line                   | `Ctrl + G` (Control on macOS too)           |
+| Toggle comment               | `Ctrl/⌘ + /`                                |
+| Add a cursor at the next occurrence | `Ctrl/⌘ + D`                         |
 | Run selection or statement   | `Ctrl/⌘ + Enter`                            |
 | Run all statements           | `Ctrl/⌘ + Shift + Enter`                    |
 | Explain query plan           | `Ctrl/⌘ + Shift + E`                        |
@@ -598,14 +618,14 @@ Run the workflow by hand with the version left empty to build the packages witho
 ├── .github/               # test and release workflows, PR and issue templates, the README screenshots
 ├── Cargo.toml             # the workspace; GPUI Kit pinned to an exact version
 ├── rust-toolchain.toml    # the Rust version rustup installs
-├── docker-compose.yml     # PostgreSQL / MySQL / MariaDB for the E2E suites
+├── docker-compose.yml     # PostgreSQL / MySQL / MariaDB / ClickHouse / libSQL / SQL Server for the E2E suites
 ├── crates/
-│   ├── barsql/            # the binary: startup, single instance, file arguments
-│   ├── barsql-app/        # orchestration without GPUI: connections, runs, transactions, import, backups, updater, MCP server
+│   ├── barsql/            # the binary: startup, single instance, file arguments, --mcp
+│   ├── barsql-app/        # orchestration without GPUI: connections, runs, transactions, edits, structure changes, import, backups, updater, MCP server
 │   ├── barsql-core/       # domain types, settings, the data folder
-│   ├── barsql-db/         # the engines: PostgreSQL, MySQL / MariaDB, SQLite, SSH tunnels
+│   ├── barsql-db/         # the engines: PostgreSQL, MySQL / MariaDB, SQLite, SQL Server, ClickHouse, Turso / libSQL, SSH tunnels
 │   ├── barsql-io/         # CSV and .sql import, export formats, SQL formatting
-│   ├── barsql-sql/        # statement splitting, quoting, DDL, the SQL language service
+│   ├── barsql-sql/        # statement splitting, quoting, the read-only check, DDL and ALTER scripts, schema diffs, the SQL language service
 │   ├── barsql-storage/    # the JSON files in BarSQL-data
 │   └── barsql-ui/         # the GPUI views, locales and whole-window scenarios
 ├── xtask/                 # cargo xtask: lint, e2e, screenshots, docs-images, icons, package, bump-version
@@ -629,6 +649,8 @@ Run the workflow by hand with the version left empty to build the packages witho
 | PostgreSQL | [tokio-postgres](https://github.com/sfackler/rust-postgres)       |
 | MySQL      | [mysql_async](https://github.com/blackbeam/mysql_async)           |
 | SQLite     | [rusqlite](https://github.com/rusqlite/rusqlite) (bundled SQLite) |
+| SQL Server | [tiberius](https://github.com/prisma/tiberius)                    |
+| ClickHouse & Turso | BarSQL's own HTTP client, on [httparse](https://github.com/seanmonstar/httparse) |
 | SSH        | [russh](https://github.com/Eugeny/russh)                          |
 | TLS        | [rustls](https://github.com/rustls/rustls)                        |
 | Formatting | [sqlformat](https://github.com/shssoichiro/sqlformat-rs)          |

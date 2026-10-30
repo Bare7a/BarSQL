@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BarSQL - A fast, local-first SQL workbench</title>
-  <meta name="description" content="BarSQL is a fast, local-first SQL workbench for PostgreSQL, MySQL / MariaDB, SQL Server, ClickHouse, Turso / libSQL and SQLite. Native, GPU-rendered and written in Rust. No accounts, no telemetry." />
+  <meta name="description" content="BarSQL is a fast, local-first SQL workbench for PostgreSQL, MySQL / MariaDB, SQL Server, ClickHouse, Turso / libSQL and SQLite. Native, GPU-rendered and written in Rust, with an MCP server for AI assistants. No accounts, no telemetry." />
   <link rel="canonical" href="https://barsql.bare7a.eu/" />
   <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
@@ -88,6 +88,12 @@
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-message-square-text" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/> <path d="M7 11h10"/> <path d="M7 15h6"/> <path d="M7 7h8"/></symbol>
   <symbol id="i-square-function" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/> <path d="M9 17c2 0 2.8-1 2.8-2.8V10c0-2 1-3.3 3.2-3"/> <path d="M9 11.2h5.7"/></symbol>
+  <symbol id="i-text-cursor-input" viewBox="0 0 24 24"><path d="M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6"/> <path d="M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7"/> <path d="M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1"/> <path d="M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1"/> <path d="M9 6v12"/></symbol>
+  <symbol id="i-chart-column" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/> <path d="M18 17V9"/> <path d="M13 17V5"/> <path d="M8 17v-3"/></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/> <rect x="2" y="16" width="6" height="6" rx="1"/> <rect x="9" y="2" width="6" height="6" rx="1"/> <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/> <path d="M12 12V8"/></symbol>
+  <symbol id="i-table-properties" viewBox="0 0 24 24"><path d="M15 3v18"/> <rect width="18" height="18" x="3" y="3" rx="2"/> <path d="M21 9H3"/> <path d="M21 15H3"/></symbol>
+  <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/> <path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></symbol>
 </svg>
 
 <a class="skip-link" href="#main">Skip to content</a>
@@ -266,7 +272,7 @@
           <ul>
             <li>Open a file, or drop it on the window</li>
             <li>Opens straight from Finder or Explorer</li>
-            <li>Read-only mode for files you only inspect</li>
+            <li>Extensions such as cr-sqlite, loaded as it opens</li>
             <li>Local libSQL and Turso files open here too</li>
             <li>Bundled SQLite via rusqlite</li>
           </ul>
@@ -291,19 +297,23 @@
             <tr><th scope="row">Read-only mode</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
             <tr><th scope="row">SSH tunnel</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><sup>1</sup><span class="sr-only">Yes, self-hosted sqld only</span></td><td class="no"><span aria-hidden="true">n/a</span><span class="sr-only">Not applicable</span></td></tr>
             <tr><th scope="row">Transactions pinned to a tab</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="no"><span aria-hidden="true">–</span><sup>2</sup><span class="sr-only">No, though a script's own BEGIN … COMMIT works</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
-            <tr><th scope="row">Edit rows in the grid</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
+            <tr><th scope="row">Edit rows and query results</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
+            <tr><th scope="row">Structure editor</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><sup>3</sup><span class="sr-only">Yes, columns only</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
             <tr><th scope="row">Function completion and hover</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
             <tr><th scope="row">Messages tab</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td></tr>
             <tr><th scope="row">System views</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td></tr>
             <tr><th scope="row">Query plan tree</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
             <tr><th scope="row">Measured plans (explain analyze)</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td><td class="no"><span aria-hidden="true">–</span><span class="sr-only">No</span></td></tr>
             <tr><th scope="row">Copy DDL and table backups</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
+            <tr><th scope="row">AI assistants (MCP)</th><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><sup>4</sup><span class="sr-only">Yes, with a read-only login</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><sup>4</sup><span class="sr-only">Yes, with a read-only token</span></td><td class="yes"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span class="sr-only">Yes</span></td></tr>
           </tbody>
         </table>
       </div>
       <p class="matrix-notes">
         <sup>1</sup> To a self-hosted <code>sqld</code>; Turso Cloud is reached directly.
         <sup>2</sup> Turso holds no transaction between runs, but a script's own <code>BEGIN … COMMIT</code> works.
+        <sup>3</sup> Columns only.
+        <sup>4</sup> The server doesn't refuse writes by itself here, so give the AI's connection a read-only login or token.
         ClickHouse has no transactions and no primary keys to edit rows by, so its tables are browse-only.
       </p>
     </div>
@@ -320,11 +330,12 @@
           <h3>Write SQL at full speed</h3>
           <p>Suggestions know your schema and your engine: tables, columns, aliases and CTEs, every built-in function with its arguments, and <code>JOIN</code> snippets where a join fits.</p>
           <ul class="ticks">
-            <li>Run a selection, a statement from the gutter, or the whole script</li>
-            <li>Multi-statement scripts on one connection, with a result tab per output</li>
-            <li>Notices, warnings and <code>PRINT</code> output in a Messages tab beside the results</li>
+            <li>Run the statement at the caret, a selection, or the whole script</li>
+            <li>Multiple cursors, line commands and go to definition, as in VS Code</li>
+            <li><code>:name</code> parameters ask for their values, and remember them</li>
+            <li>A result tab per output, and notices, warnings and <code>PRINT</code> output in a Messages tab</li>
             <li>Pinned transactions per tab: <code>BEGIN</code>, then commit or roll back from the toolbar</li>
-            <li>Rows stream in as they arrive, and Stop cancels the running query</li>
+            <li>An error is underlined where it happened, and a mistyped name gets a one-click fix</li>
           </ul>
         </div>
         <button type="button" class="shot" data-shot="2" aria-label="View the transactions screenshot full size">
@@ -357,10 +368,11 @@
         <div class="spotlight-text">
           <span class="eyebrow">Table data</span>
           <h3>Edit rows, not <code>UPDATE</code> statements</h3>
-          <p>Browse any table, filter it with a <code>WHERE</code> condition that autocompletes, and change it in place.</p>
+          <p>Browse any table, filter it with a <code>WHERE</code> condition that autocompletes, and change it in place. A query's results edit the same way, when they come from one table with its primary key.</p>
           <ul class="ticks">
             <li>Edits and deletes are staged until you apply them, with undo and redo</li>
             <li>Paste blocks of cells, set NULL, insert rows</li>
+            <li>Checkboxes for booleans, and a picker for enums</li>
             <li>Jump through foreign keys to the row a cell points at</li>
             <li>The focused row as JSON beside the grid, filterable by key</li>
           </ul>
@@ -374,21 +386,60 @@
 
       <div class="spotlight spotlight-flip">
         <div class="spotlight-text">
+          <span class="eyebrow">Results</span>
+          <h3>See the shape of a result</h3>
+          <p>The <strong>Chart</strong> button plots any result as bars or lines, beside the grid it came from. Pick the labels and up to five values, summed, counted or averaged where labels repeat.</p>
+          <ul class="ticks">
+            <li>Sensible picks to start from, kept when you switch back to the grid</li>
+            <li>The count, sum, average, min and max of a selection in the status bar</li>
+            <li>Numbers lined up on the decimal point, and each column's type and keys in its header</li>
+            <li>Many bars scroll sideways rather than squeeze together</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="14" aria-label="View the chart screenshot full size">
+          <img src="screenshots/14-640.webp" srcset="screenshots/14-640.webp 640w, screenshots/14-800.webp 800w, screenshots/14-1280.webp 1280w, screenshots/14.webp 2560w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async"
+            alt="Posts a month as grouped bars, beside the popular and top-rated ones, with the chart's picks in a panel" />
+        </button>
+      </div>
+
+      <div class="spotlight">
+        <div class="spotlight-text">
           <span class="eyebrow">Schema</span>
           <h3>Your schema, down to the triggers</h3>
           <p>Schemas, tables and columns, then indexes, constraints, triggers and functions, fetched only when you open them.</p>
           <ul class="ticks">
+            <li>An ER diagram of a schema, with a table's keys lit as you point at it</li>
+            <li>Compare two schemas and get the script that syncs them</li>
             <li>Copy any object's DDL, or open it in a tab ready to run</li>
             <li>Rename, truncate and drop, with the exact SQL shown first</li>
             <li>Back a table up to a <code>.sql</code> file that restores it exactly</li>
             <li>System views for what the server is doing, or how a table is doing</li>
-            <li>Search tables and columns as you type</li>
           </ul>
         </div>
-        <button type="button" class="shot" data-shot="9" aria-label="View the DDL screenshot full size">
-          <img src="screenshots/9-640.webp" srcset="screenshots/9-640.webp 640w, screenshots/9-800.webp 800w, screenshots/9-1280.webp 1280w, screenshots/9.webp 2560w"
+        <button type="button" class="shot" data-shot="13" aria-label="View the ER diagram screenshot full size">
+          <img src="screenshots/13-640.webp" srcset="screenshots/13-640.webp 640w, screenshots/13-800.webp 800w, screenshots/13-1280.webp 1280w, screenshots/13.webp 2560w"
             sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async"
-            alt="A table's DDL in an editor tab beside its indexes and constraints in the schema tree" />
+            alt="The forum schema's ER diagram, with the posts table's keys lit" />
+        </button>
+      </div>
+
+      <div class="spotlight spotlight-flip">
+        <div class="spotlight-text">
+          <span class="eyebrow">Structure editor</span>
+          <h3>Change a table without writing <code>ALTER</code></h3>
+          <p>Edit a table's columns, indexes, foreign keys and checks in a Structure tab, or design a new table there. The SQL it will run sits right below, and follows every edit.</p>
+          <ul class="ticks">
+            <li>Added rows in green, changed fields in yellow, dropped ones struck through</li>
+            <li>One transaction on PostgreSQL and SQL Server, and a single <code>ALTER TABLE</code> on MySQL</li>
+            <li>SQLite tables rebuilt in a transaction when <code>ALTER</code> can't do the job</li>
+            <li>If the server refuses, its message shows and your edits stay as they are</li>
+          </ul>
+        </div>
+        <button type="button" class="shot" data-shot="12" aria-label="View the structure editor screenshot full size">
+          <img src="screenshots/12-640.webp" srcset="screenshots/12-640.webp 640w, screenshots/12-800.webp 800w, screenshots/12-1280.webp 1280w, screenshots/12.webp 2560w"
+            sizes="(min-width: 960px) 620px, calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async"
+            alt="The posts table's Structure tab with a column added, one changed and one dropped, above the SQL it will run" />
         </button>
       </div>
 
@@ -410,6 +461,28 @@
             alt="The import dialog with a CSV's columns mapped onto an existing table" />
         </button>
       </div>
+
+      <div class="spotlight spotlight-flip">
+        <div class="spotlight-text">
+          <span class="eyebrow">AI assistants</span>
+          <h3>Your databases, in your AI assistant</h3>
+          <p>BarSQL is an MCP server too. Claude, Cursor, VS Code and other AI apps start <code>BarSQL --mcp</code> in the background, with no window, and work with the connections you share.</p>
+          <ul class="ticks">
+            <li>Opt in per connection: the rest stay invisible to the AI</li>
+            <li>Queries pass BarSQL's read-only check, and PostgreSQL, MySQL, SQLite and ClickHouse sessions refuse writes too</li>
+            <li>Changes only where you allow them, with a preview that rolls back</li>
+            <li>No password or token reaches the AI, and every call is logged</li>
+            <li>Set up with one paste: tick <strong>Allow AI assistants</strong>, then <strong>Copy MCP setup</strong></li>
+          </ul>
+        </div>
+        <pre class="code-block" aria-label="The tools BarSQL gives AI assistants"><code>list_connections  shared connections
+list_tables       schemas and tables
+describe_table    columns and keys
+show_ddl          CREATE statements
+run_query         read-only SQL
+explain_query     query plans
+run_change        changes you allow</code></pre>
+      </div>
     </div>
   </section>
 
@@ -419,24 +492,30 @@
       <div class="card-grid card-grid-3 features">
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><h3>Smart autocomplete</h3><p>Fuzzy and context-aware: <code>schema.table.column</code> dot completion, quoted identifiers, aliases, CTEs and <code>JOIN</code> snippets.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-square-function"/></svg></span><h3>Function help</h3><p>Every built-in function of your engine, plus the server's own, completes with its arguments. Hover one for its signatures and what it does.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-text-cursor-input"/></svg></span><h3>Multiple cursors</h3><p>Add a cursor at the next occurrence or at every one, and edit them all at once. Line commands, go to definition and go to line work as in VS Code.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-message-square-text"/></svg></span><h3>Messages tab</h3><p>PostgreSQL notices, MySQL warnings and SQL Server <code>PRINT</code> output, grouped under the statement that raised them, with levels and codes.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-scroll-text"/></svg></span><h3>Multi-statement scripts</h3><p>Statements run in order on one connection, so temp tables, <code>SET</code> and scripted transactions hold. SQL Server scripts run by <code>GO</code> batch.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg></span><h3>Pinned transactions</h3><p><code>BEGIN</code>, <code>COMMIT</code> and <code>ROLLBACK</code> as SQL or from the toolbar. Queries run inside the tab's open transaction until it ends.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg></span><h3>Streaming results</h3><p>Rows render as the driver yields them, in a virtualized grid that scrolls smoothly through thousands of rows.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-chart-column"/></svg></span><h3>Quick charts</h3><p>Plot a result as bars or lines: pick the labels and up to five value columns, summed, counted or averaged.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-route"/></svg></span><h3>Query plan viewer</h3><p>Estimated or measured plans as one tree on every engine, with heat bars and flagged estimates. Type <code>EXPLAIN</code> yourself and it opens there too.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-gauge"/></svg></span><h3>System views</h3><p>Activity, blocking, sessions and running queries, or a table's statistics, index usage, parts and merges, each in a tab you can tweak.</p></article>
-        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-folder-tree"/></svg></span><h3>Schema explorer</h3><p>Tables, views, columns, indexes, constraints, triggers and functions, with instant search and a row count that needs no tab.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-folder-tree"/></svg></span><h3>Schema explorer</h3><p>Tables, views, columns, indexes, constraints, triggers and functions, with type and key icons, instant search and a row count that needs no tab.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-network"/></svg></span><h3>ER diagrams and compare</h3><p>Every table and key of a schema in a diagram you can pan, zoom and search, and a compare with another schema that writes the sync script.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-table-properties"/></svg></span><h3>Structure editor</h3><p>Edit columns, indexes, foreign keys and checks, or design a new table. The exact SQL shows as you go, in a script your engine can apply safely.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-wrench"/></svg></span><h3>Schema changes</h3><p>Rename, truncate and drop from the tree. Each dialog shows the exact SQL for your engine, with Cascade on PostgreSQL.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive-download"/></svg></span><h3>Table backups</h3><p>Structure and rows to a <code>.sql</code> file. The server writes every value as a literal, so dates, JSON and binary survive the round trip.</p></article>
-        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-square-pen"/></svg></span><h3>Edit data in the grid</h3><p>Staged edits, deletes and new rows applied on demand, with undo, paste and foreign-key jumps, guarded by primary keys.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-square-pen"/></svg></span><h3>Edit data in the grid</h3><p>In a table, or a query's results from one: staged edits, deletes and new rows with undo, paste and foreign-key jumps, checkboxes for booleans and pickers for enums.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-braces"/></svg></span><h3>Cell and JSON viewers</h3><p>A cell editor for large values (JSON, XML, HTML or text), and a JSON view of the row. PostgreSQL arrays and ClickHouse maps and tuples read as JSON too.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-file-up"/></svg></span><h3>CSV and SQL import</h3><p>Column mapping, inferred types, configurable NULL text and header rows, or a <code>.sql</code> script run statement by statement.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-file-down"/></svg></span><h3>One-click export</h3><p>Text, CSV, JSON, Markdown or SQL <code>INSERT</code> written for your engine, for all or the selected rows, to the clipboard or a file.</p></article>
-        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-bookmark"/></svg></span><h3>Saved queries and history</h3><p>Save and reuse queries with unsaved-change tracking, plus per-connection history with status and duration.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-bookmark"/></svg></span><h3>Saved queries and history</h3><p>Save and reuse queries with unsaved-change tracking, plus per-connection history with status and duration, filterable to failed runs.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg></span><h3>Safety nets</h3><p>Ask before changes on production connections, a check before an <code>UPDATE</code> or <code>DELETE</code> without <code>WHERE</code>, and read-only mode the server enforces too, where it can.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-key-round"/></svg></span><h3>SSH tunnel</h3><p>Reach a database only its bastion can see, with a key, a password or ssh-agent, and host keys checked against <code>known_hosts</code>.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg></span><h3>Connection manager</h3><p>Folders, tab colors, read-only mode and a database list fetched from the server, plus SQL Server named instances and Turso tokens.</p></article>
-        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg></span><h3>Keyboard-first</h3><p>Quick Search jumps to tabs, tables, saved queries and connections. VS Code-style line commands, and every shortcut remappable.</p></article>
-        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg></span><h3>Instant and polished</h3><p>Dark and light themes, English, Deutsch, Български and Español, no animations in the way, and your window restored where you left it.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-puzzle"/></svg></span><h3>SQLite extensions</h3><p>Load extensions such as cr-sqlite into a connection each time it opens. Their functions complete and show on hover, and Test says why a file didn't load.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg></span><h3>Keyboard-first</h3><p>Quick Search jumps to tabs, tables, saved queries and connections, and the command palette runs any command, with its shortcut. Shortcuts are remappable.</p></article>
+        <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg></span><h3>Instant and polished</h3><p>Dark and light themes that can follow the system, English, Deutsch, Български and Español, no animations in the way, and your window restored where you left it.</p></article>
         <article class="card"><span class="chip"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></span><h3>Updates itself</h3><p>A new release shows up with its notes. One click downloads it, checks its SHA-256 and restarts into it.</p></article>
       </div>
     </div>
@@ -458,7 +537,10 @@
         <figure><button type="button" class="shot" data-shot="9" data-caption="DDL viewer"><img src="screenshots/9-640.webp" srcset="screenshots/9-640.webp 640w, screenshots/9-800.webp 800w, screenshots/9-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="A table's DDL beside the schema tree" /></button><figcaption>DDL viewer</figcaption></figure>
         <figure><button type="button" class="shot" data-shot="10" data-caption="Plan viewer"><img src="screenshots/10-640.webp" srcset="screenshots/10-640.webp 640w, screenshots/10-800.webp 800w, screenshots/10-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="A measured query plan with heat bars" /></button><figcaption>Plan viewer</figcaption></figure>
         <figure><button type="button" class="shot" data-shot="11" data-caption="CSV &amp; SQL import"><img src="screenshots/11-640.webp" srcset="screenshots/11-640.webp 640w, screenshots/11-800.webp 800w, screenshots/11-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="A CSV mapped onto an existing table" /></button><figcaption>CSV &amp; SQL import</figcaption></figure>
-        <figure><button type="button" class="shot" data-shot="12" data-caption="Appearance"><img src="screenshots/12-640.webp" srcset="screenshots/12-640.webp 640w, screenshots/12-800.webp 800w, screenshots/12-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="The light theme with the View menu open" /></button><figcaption>Appearance</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="12" data-caption="Structure editor"><img src="screenshots/12-640.webp" srcset="screenshots/12-640.webp 640w, screenshots/12-800.webp 800w, screenshots/12-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="A table's Structure tab with changes staged above the SQL they run" /></button><figcaption>Structure editor</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="13" data-caption="ER diagram"><img src="screenshots/13-640.webp" srcset="screenshots/13-640.webp 640w, screenshots/13-800.webp 800w, screenshots/13-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="A schema's ER diagram with one table's keys lit" /></button><figcaption>ER diagram</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="14" data-caption="Quick charts"><img src="screenshots/14-640.webp" srcset="screenshots/14-640.webp 640w, screenshots/14-800.webp 800w, screenshots/14-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="A result plotted as grouped bars" /></button><figcaption>Quick charts</figcaption></figure>
+        <figure><button type="button" class="shot" data-shot="15" data-caption="Appearance"><img src="screenshots/15-640.webp" srcset="screenshots/15-640.webp 640w, screenshots/15-800.webp 800w, screenshots/15-1280.webp 1280w" sizes="(min-width: 1120px) 341px, (min-width: 1001px) calc((100vw - 96px) / 3), (min-width: 641px) calc((100vw - 72px) / 2), calc(100vw - 32px)" width="2560" height="1440" loading="lazy" decoding="async" alt="The light theme with the View menu open" /></button><figcaption>Appearance</figcaption></figure>
       </div>
     </div>
   </section>
@@ -466,13 +548,17 @@
   <section class="section section-alt" id="shortcuts">
     <div class="container">
       <h2>Keyboard-first</h2>
-      <p class="section-sub">Every shortcut can be remapped in the app's shortcuts editor.</p>
+      <p class="section-sub">Most can be remapped in the app's shortcuts editor. The editor's own keys work as in VS Code.</p>
       <dl class="keys">
         <div><dt>Quick Search</dt><dd><kbd data-mod>Ctrl</kbd><kbd>P</kbd></dd></div>
-        <div><dt>Run selection</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Enter</kbd></dd></div>
+        <div><dt>Command palette</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></dd></div>
+        <div><dt>Run selection, or the statement at the caret</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Enter</kbd></dd></div>
         <div><dt>Run all statements</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>Enter</kbd></dd></div>
         <div><dt>Explain the query plan</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>E</kbd></dd></div>
         <div><dt>Explain analyze</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></dd></div>
+        <div><dt>Go to definition</dt><dd><kbd>F12</kbd></dd></div>
+        <div><dt>Go to line</dt><dd><kbd>Ctrl</kbd><kbd>G</kbd></dd></div>
+        <div><dt>Add a cursor at the next occurrence</dt><dd><kbd data-mod>Ctrl</kbd><kbd>D</kbd></dd></div>
         <div><dt>Save the query, or apply staged edits</dt><dd><kbd data-mod>Ctrl</kbd><kbd>S</kbd></dd></div>
         <div><dt>New tab / close tab</dt><dd><kbd data-mod>Ctrl</kbd><kbd>T</kbd> <span>/</span> <kbd data-mod>Ctrl</kbd><kbd>W</kbd></dd></div>
         <div><dt>Reopen a closed tab</dt><dd><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd></dd></div>

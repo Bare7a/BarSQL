@@ -268,6 +268,14 @@ impl StructureTab {
         self.sheet(self.section).grid.clone()
     }
 
+    // README screenshots. Changes the draft as edits in the grid would.
+    #[cfg(feature = "snapshot")]
+    pub(crate) fn stage(&mut self, change: impl FnOnce(&mut Draft), window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.draft.clone();
+        change(&mut self.draft);
+        self.record(before, window, cx);
+    }
+
     // Read-only connections get a viewer, and nothing is editable until the structure has loaded.
     pub(crate) fn editable(&self) -> bool {
         !self.connection.read_only

@@ -775,6 +775,7 @@ kbd {
   .stack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .keys div { flex-direction: column; align-items: flex-start; gap: 6px; }
   .keys dd { justify-content: flex-start; }
+  .code-block { padding: 20px 18px; }
   .lightbox { padding: 64px 8px 24px; gap: 6px; }
   .lightbox-prev, .lightbox-next { position: absolute; bottom: 18px; }
   .lightbox-prev { left: calc(50% - 56px); }

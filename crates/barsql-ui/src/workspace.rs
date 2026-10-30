@@ -2228,6 +2228,20 @@ impl Workspace {
         self.close_tab(self.active, window, cx);
     }
 
+    pub(crate) fn structure_tab(&self) -> Option<Entity<StructureTab>> {
+        match self.active_tab() {
+            Some(TabView::Structure(tab)) => Some(tab.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn diagram_tab(&self) -> Option<Entity<ErDiagram>> {
+        match self.active_tab() {
+            Some(TabView::Diagram(tab)) => Some(tab.clone()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn set_json_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.json_open != open {
             self.toggle_json_panel(window, cx);

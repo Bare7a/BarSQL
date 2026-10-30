@@ -406,6 +406,14 @@ fn a_double_click_in_the_er_diagram_opens_the_table(cx: &mut TestAppContext) {
     assert!(app.titles().iter().any(|title| title == "ER diagram · main"), "the diagram stays open");
 }
 
+#[gpui_kit::test]
+fn the_er_toolbar_lines_up_with_the_sidebar_tabs(cx: &mut TestAppContext) {
+    let mut app = er_diagram(cx);
+    let toolbar = app.bounds("er-toolbar").expect("the toolbar");
+    let tabs = app.bounds("sidebar-tabs").expect("the sidebar's tabs");
+    assert_eq!((toolbar.origin.y, toolbar.size.height), (tabs.origin.y, tabs.size.height));
+}
+
 // Comparing with another database lists what differs, and its sync script opens in a tab of that database.
 #[gpui_kit::test]
 fn a_schema_compares_with_another_database_and_opens_the_sync_script(cx: &mut TestAppContext) {

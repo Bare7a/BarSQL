@@ -1268,7 +1268,7 @@ impl ResultsPanel {
         Some(self.sets.get(self.active)?.editor.as_ref()?.table().to_string())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "snapshot"))]
     pub(crate) fn chart(&self) -> Option<Entity<ChartView>> {
         self.sets.get(self.active).filter(|set| set.charting)?.chart.clone()
     }
