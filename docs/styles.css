@@ -108,8 +108,6 @@ p, li, figcaption, dd { text-wrap: pretty; }
 
 .container { width: 100%; max-width: var(--container); margin: 0 auto; padding: 0 var(--gutter); }
 
-.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
-
 .icon {
   width: 1.15em;
   height: 1.15em;
@@ -456,7 +454,16 @@ p, li, figcaption, dd { text-wrap: pretty; }
 .engine-head .logo { width: 20px; height: 20px; color: var(--accent-text); }
 .matrix tbody tr:last-child > * { border-bottom: 0; }
 .matrix tbody tr:hover > * { background: var(--card-hover); }
-.matrix .yes .icon { width: 18px; height: 18px; vertical-align: -4px; color: var(--accent-text); stroke-width: 2.6; }
+.matrix .yes::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  vertical-align: -4px;
+  background: var(--accent-text);
+  -webkit-mask: no-repeat center / 18px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  mask: no-repeat center / 18px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+}
 .matrix .no { color: var(--muted); }
 .matrix sup { margin-left: 2px; color: var(--accent-text); font-size: 0.7rem; font-weight: 700; }
 
@@ -524,6 +531,9 @@ p, li, figcaption, dd { text-wrap: pretty; }
   -webkit-mask: no-repeat center / 13px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
   mask: no-repeat center / 13px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
 }
+
+.spotlight-more { display: inline-flex; align-items: center; gap: 4px; margin-top: 22px; font-weight: 600; }
+.spotlight-more .icon { width: 17px; height: 17px; }
 
 .spotlight .shot img { box-shadow: var(--shadow); }
 
@@ -740,6 +750,11 @@ kbd {
   .spotlight-flip .spotlight-text { order: 0; }
   .spotlight + .spotlight { margin-top: 72px; }
   .keys { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Beside the five sections, Docs only fits from about 790px */
+@media (max-width: 800px) {
+  .nav-docs { display: none; }
 }
 
 @media (max-width: 720px) {

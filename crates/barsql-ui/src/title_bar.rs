@@ -3,7 +3,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, TITLE_BAR_HEIGHT
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::assets::{MARK_DARK, MARK_LIGHT};
+use crate::assets::{MARK_DARK, MARK_LIGHT, vector_img};
 use crate::tokens::TEXT_SM;
 
 // macOS has traffic lights and the system menu bar, so its bar only shows the title.
@@ -23,7 +23,7 @@ pub fn render(
         Some(menu_bar) => h_flex()
             .size_full()
             .gap_1()
-            .child(img(if theme.is_dark() { MARK_DARK } else { MARK_LIGHT }).size(px(16.)).flex_none())
+            .child(vector_img(if theme.is_dark() { MARK_DARK } else { MARK_LIGHT }, px(16.)).flex_none())
             .child(menu_bar.clone())
             .child(div().flex_1())
             .when(mac_screenshot, |bar| bar.child(window_controls(cx))),

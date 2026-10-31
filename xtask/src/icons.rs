@@ -9,8 +9,10 @@ use tiny_skia::{Pixmap, Transform};
 use crate::report;
 
 const MASTER: &str = "packaging/icon.svg";
-// The master at one size each: the About dialog and the landing page.
-const PNGS: [(&str, u32); 2] = [("crates/barsql-ui/images/barsql-icon.png", 256), ("docs/icon.png", 256)];
+// The master at one size: the landing page.
+const PNGS: [(&str, u32); 1] = [("docs/icon.png", 256)];
+// The master as is, for the app to rasterize at each size it draws it, and for the landing page.
+const COPIES: [&str; 2] = ["crates/barsql-ui/images/barsql-icon.svg", "docs/icon.svg"];
 // Windows and Linux show the stack without its tile. Their taskbars and docks are mostly dark, where the dark tile
 // disappears and the stack alone looked small beside other apps' icons.
 const LINUX_PNGS: [(&str, u32); 3] = [
@@ -40,7 +42,6 @@ const MACOS_SHADOW: &str = concat!(
 
 // The master's stack without its tile, framed square around its centre, for Windows, Linux and the title bar's marks.
 const STACK_VIEW_BOX: &str = "66 66 380 380";
-const MARK_SIZE: u32 = 32;
 
 // The ellipse is the top face; the paths are the disks from the top down.
 struct Tones {
@@ -53,7 +54,7 @@ const DARK: Tones = Tones { top: "#93c5fd", disks: ["#60a5fa", "#3b82f6", "#2563
 // A shade deeper, so the stack holds up on light ones.
 const LIGHT: Tones = Tones { top: "#3b82f6", disks: ["#2563eb", "#1d4ed8", "#1e40af"] };
 const MARKS: [(&str, Tones); 2] =
-    [("crates/barsql-ui/images/barsql-mark-dark.png", DARK), ("crates/barsql-ui/images/barsql-mark-light.png", LIGHT)];
+    [("crates/barsql-ui/images/barsql-mark-dark.svg", DARK), ("crates/barsql-ui/images/barsql-mark-light.svg", LIGHT)];
 
 pub fn run(root: &Path) -> Result<(), String> {
     let source = fs::read_to_string(root.join(MASTER)).map_err(|e| format!("{MASTER}: {e}"))?;
@@ -61,7 +62,9 @@ pub fn run(root: &Path) -> Result<(), String> {
     for (path, size) in PNGS {
         write(&root.join(path), &render(&master, size, MASTER)?)?;
     }
-    write(&root.join("docs/icon.svg"), source.as_bytes())?;
+    for path in COPIES {
+        write(&root.join(path), source.as_bytes())?;
+    }
 
     let stack = parse(&stack_variant(&source, &DARK)?, "the stack")?;
     for (path, size) in LINUX_PNGS {
@@ -78,8 +81,10 @@ pub fn run(root: &Path) -> Result<(), String> {
     write(&root.join("packaging/macos/icons.icns"), &icns_file(ICNS_ENTRIES.map(|(kind, size)| (kind, &pngs[&size]))))?;
 
     for (path, tones) in MARKS {
-        let mark = parse(&stack_variant(&source, &tones)?, path)?;
-        write(&root.join(path), &render(&mark, MARK_SIZE, path)?)?;
+        let mark = stack_variant(&source, &tones)?;
+        // A broken variant fails here rather than as a blank mark in the app.
+        parse(&mark, path)?;
+        write(&root.join(path), mark.as_bytes())?;
     }
     Ok(())
 }

@@ -10,7 +10,7 @@
 No cloud. No accounts. No telemetry.  
 Just a focused, native desktop tool for working with databases.
 
-🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)**
+🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)** · 📖 **[User Guide](guide/README.md)**
 
 ---
 
@@ -34,21 +34,7 @@ No account required - just download and run.
 
 Every build above updates itself. The installer, the Linux packages and copies in protected folders ask for admin rights first.
 
-Prefer to build it yourself? See **Installation & Development** below.
-
----
-
-## 🚀 Try it in seconds
-
-```bash
-cargo run -p barsql --release
-```
-
-Or during development:
-
-```bash
-cargo run -p barsql
-```
+Prefer to build it yourself? See **Build from source** below.
 
 ---
 
@@ -148,8 +134,6 @@ BarSQL focuses on one thing:
 
 ---
 
-# ⚡ Features
-
 ## 🗄️ Supported Databases
 
 | Database       | Read & write | Read-only mode | Secure transport                            | SSH tunnel |
@@ -162,502 +146,44 @@ BarSQL focuses on one thing:
 | **ClickHouse** |      ✅      |       ✅       | HTTP or HTTPS - `disable` / `require` / `verify-full` | ✅ |
 | **Turso / libSQL** |  ✅      |       ✅       | HTTPS, or HTTP for a local `sqld`           | self-hosted `sqld` |
 
-### Engine notes
-
-- **SQL Server** - 2017 or newer, with SQL logins. Named instances (`host\INSTANCE`) are found through SQL Browser, though not over SSH. Read-only connections are guarded in the app and also ask the server for read intent. Stopping a running batch closes the tab's connection, so its temp tables, `SET` options and open transaction go with it; the next run opens a new one, and BarSQL says so
-- **ClickHouse** - no transactions, and table views are read-only, since ClickHouse has no primary keys to edit rows by. Read-only connections also run with `readonly=2` on the server. Each tab keeps its own session, so `SET`, `USE` and temporary tables last between runs
-- **Turso / libSQL** - spoken to over HTTP (Hrana). Streams expire when idle: BarSQL opens a new one by itself, and tells you when a `PRAGMA` or an attached database was lost with it. There's no server-side cancel (Stop drops the request) and no transaction held between runs, though a script's own `BEGIN … COMMIT` works. Give read-only connections a read-only token
+Per-engine details are in the **[engine notes](guide/connections.md#engine-notes)**.
 
 ---
 
-## 🔌 Connections
+## 📖 User Guide
 
-- Create, edit, test and manage database connections
-- Organize into **folders** with drag-and-drop reorder
-- Per-connection **tab colors**
-- **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session, and PostgreSQL, MySQL, SQLite and ClickHouse sessions refuse writes in the database too, so even a function that writes can't get through
-- **Ask before changes** for production connections - the editor confirms any statement that changes data or schema before it runs, and so does saving grid edits
-- **Pick the database from a list** - the button beside the database field asks the server for its databases with the credentials you've entered, so you don't have to remember the name
-- PostgreSQL SSL (`disable` / `require` / `verify-full`), MySQL TLS, SQL Server TLS including TDS 8.0 `strict`, ClickHouse over HTTPS, and Turso URLs with an auth token
-- SQL Server **named instances** - type `host\INSTANCE`, or fill in the Instance field
-- **SSH tunnel** to reach databases behind a bastion (see below)
-- SQLite file picker, or drop a database file on the window
-- **SQLite extensions** - load extensions such as [cr-sqlite](https://github.com/vlcn-io/cr-sqlite) (`.dylib` / `.so` / `.dll`) into a connection each time it opens, in list order. Test names the file that didn't load and why, such as a build for another OS or CPU, or a copy that's incomplete. The status bar shows how many a connection loads, and their functions complete and show on hover as coming from them. SQL can't load extensions itself
+Every feature in detail, one area per page:
 
-### 🔐 SSH Tunnel
-
-Connect to a database that only its bastion can reach - no `ssh -L` in a side terminal.
-
-- Auth by **private key** (with passphrase), **password**, or a running **ssh-agent**
-- Host keys verified against `~/.ssh/known_hosts` by default, with an override for a custom file
-- Unknown bastion? The error tells you the exact `ssh-keyscan` line to run - or tick **Skip host key check**
-- Keepalives hold the tunnel open under a long, idle session
-- The database host stays what the bastion resolves (usually `localhost`), and `verify-full` still checks the real certificate
+| Page | What it covers |
+| ---- | -------------- |
+| [🔌 Connections](guide/connections.md) | Folders, read-only mode, SSL and TLS, SSH tunnels, SQLite extensions, engine notes |
+| [🧠 SQL Editor](guide/editor.md) | Autocomplete, multiple cursors, scripts, transactions, the query plan viewer, saved queries and history |
+| [🗃️ Schema Explorer](guide/schema.md) | The schema tree, ER diagrams, schema compare, Copy DDL, schema changes, the structure editor, table backups |
+| [📊 Results Grid](guide/results.md) | Sorting, selection stats, quick charts, the cell and JSON viewers, editing data |
+| [📥 Import & Export](guide/import-export.md) | CSV and SQL import, export formats |
+| [🤖 AI Assistants (MCP)](guide/ai-assistants.md) | Letting AI apps read your databases, and change them only where you allow it |
+| [🌍 The App](guide/app.md) | Themes, languages, palettes, the status bar, keyboard shortcuts, the data folder, auto updates |
 
 ---
 
-## 🧠 SQL Editor
+## 🧳 Portable by Design
 
-- **Tabbed** workspace with drag-and-drop tabs and **session restore**
-- A native code editor with tree-sitter highlighting, code folding, find & replace and dark/light themes
-- **Smart autocomplete** - fuzzy matching, context-aware (`SELECT` / `FROM` / `JOIN` / `WHERE` / `UPDATE` / `DELETE` / `INSERT`), `schema.table.column` dot completion, quoted identifiers, aliases and CTEs
-- Built-in **`JOIN` snippets** where a join fits
-- **Function completion and hover** for every engine - each dialect's built-in functions (from about 150 on SQLite to over 400 on ClickHouse) plus the server's own (user functions, extensions, ClickHouse combinators like `sumIf`), each with its signatures, return type and a short description
-- Driver-correct identifier quoting (PostgreSQL, MySQL, SQLite, SQL Server `[brackets]`, ClickHouse)
-- **VS Code-style multiple cursors** - `Ctrl/⌘+D` adds a cursor at the next occurrence of the word or selection, `Ctrl/⌘+Shift+L` at every one, `Ctrl/⌘+K Ctrl/⌘+D` skips one and `Ctrl/⌘+U` takes the last back
-- **Occurrence highlighting** - the word at the caret, or the selected text, is marked wherever else it appears
-- **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, toggle comments
-- **Run selection** (`Ctrl+Enter`) - with nothing selected it runs the statement under the caret, briefly highlighting it / **run all** (`Ctrl+Shift+Enter`) / **stop** long-running queries
-- **Query parameters** - `:name` placeholders ask for their values before a run (values are SQL, so quote text; empty means `NULL`) and the last values come back next time. Casts like `::int`, strings and comments are left alone
-- **Every-row guard** - an `UPDATE` or `DELETE` without a `WHERE` asks before it runs
-- **Go to definition** (`F12` or `⌘/Ctrl`-click) - an alias or CTE jumps to where the query declares it, and a table (or a column's table) opens in the grid
-- **Go to line** (`Ctrl+G`, on macOS too) - a line, or `line:column`
-- **Errors point at the problem** - the word where a run failed is underlined in the editor, even when the engine names an unknown column without saying where. When a table or column the schema has is close to that name, **Did you mean …?** comes with a button that swaps it in
-- **Streaming results** - rows render as the driver yields them
-- **Multi-statement scripts** - run several `;`-separated statements at once; they execute in order on one connection, so temp tables, `SET` and scripted `BEGIN` / `COMMIT` hold. SQL Server scripts run batch by batch, split on `GO` (`GO 3` runs a batch three times)
-- **Messages tab** - PostgreSQL notices, MySQL warnings, SQL Server `PRINT` and `RAISERROR` output, grouped under the statement that raised them, with levels and codes; it opens by itself when a run returns nothing else
-- **Multiple result outputs** - a script or stored procedure that returns several result sets shows each in its own switchable result tab, query plans included; a failing statement reports its error and stops the run
-- **Pinned transactions** per tab - run `BEGIN` / `COMMIT` / `ROLLBACK` as SQL or from the toolbar; queries run inside the open transaction until you commit or roll back (on every engine that holds one: not ClickHouse or Turso). Closing the tab, quitting or restarting for an update asks before rolling it back. On macOS so do the Dock's Quit, logging out and shutting down, which BarSQL cancels to ask. Renaming a connection or moving it to a folder keeps it open; disconnecting, or changing how it connects, rolls its tabs' transactions back and says so. Savepoints you make last until the transaction ends, across runs
-- **Query plan viewer** (`Ctrl+Shift+E`) - see below
-- `UPDATE` / `DELETE` / `INSERT` with **`RETURNING`** flow back to the Results Grid
-- Gutter icons to run individual statements
-- Right-click menu with run, explain, go to definition, **change all occurrences**, toggle comment and **format SQL**
-- **Remappable keyboard shortcuts**
+Everything lives in a single **`BarSQL-data/`** folder. When the app sits somewhere writable, that folder is created **right next to the executable** (beside the `.app` bundle on macOS) - move it to a USB stick, network drive, or another PC and it just works.
 
-### 🧭 Query Plan Viewer
-
-**Explain** (`Ctrl+Shift+E`) plans the statement under the cursor and shows the engine's plan as one tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates. **Explain analyze** (`Ctrl+Shift+A`, or the menu on the toolbar's Explain button) _executes_ the statement instead and reports what really happened: measured rows, real timings, loop counts.
-
-Typing `EXPLAIN` yourself works the same way - **Run** recognises it and opens the plan viewer instead of dumping the engine's raw rows into the grid. Statements whose output already carries structure (any `FORMAT JSON`, MySQL's `EXPLAIN ANALYZE`, `EXPLAIN QUERY PLAN`) run exactly as typed; the rest are asked again in JSON. Name a format on purpose (`EXPLAIN (FORMAT TEXT)`, `FORMAT=TRADITIONAL`) or use SQLite's bytecode `EXPLAIN` and you get the raw rows, as asked.
-
-Plans are outputs like any other, so a script can mix them freely - `SELECT …; EXPLAIN SELECT …;` gives you `Result 1 · Plan 1` as switchable tabs, each keeping its own state.
-
-- **Heat map** over the tree - each node's bar is its own share of the run's time, cost or rows, so the expensive step is the one you see first; switch the metric to re-rank
-- **Own vs. total** for time and cost, side by side - a node isn't flagged just because its children are slow. Loop counts are folded in, so a node inside a nested loop compares fairly to its siblings
-- **Bad row estimates flagged** - when the measured count is 10x off the planner's guess, the node is marked with the factor: usually where a missing index or stale statistics hides
-- **Relations and indexes** called out per node, plus the filter or join condition behind it
-- **Node details** - every field the engine reported (sort method, buffer hits, rows removed by filter, …), and the untouched engine output on a raw tab
-- Per engine: PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, MySQL `EXPLAIN FORMAT=JSON` and `EXPLAIN ANALYZE`, MariaDB `ANALYZE FORMAT=JSON`, SQL Server's Showplan XML (`SET SHOWPLAN_XML` for an estimate, `SET STATISTICS XML` for actuals), SQLite and libSQL `EXPLAIN QUERY PLAN`, ClickHouse `EXPLAIN PLAN json = 1, indexes = 1` (plan shape and index use only - SQLite and ClickHouse report no cost or timings)
-- **Analyzing a write never leaves data behind** - `EXPLAIN ANALYZE` executes the statement, so a write runs inside a transaction that is always rolled back (and says so). On a tab with an open transaction it runs there, exactly where a plain **Run** would have
+What's in it, and where it goes when the app can't write beside itself: **[The App](guide/app.md#-portable-by-design)**.
 
 ---
 
-## 🗃️ Schema Explorer
-
-- Tree view: schemas → tables / views → columns, then **indexes**, **constraints** and **triggers**
-- Views are called out with their own icon and badge; **functions and procedures** close each schema
-- Columns show an icon for their type, and gold primary-key and blue foreign-key icons, as the grid and ER diagram do. Hover one for its full type, foreign-key target, default, whether it's generated, and the values an enum allows
-- Search tables and columns instantly, with the matches highlighted
-- Arrow keys move through the tree, `→` / `←` expand and collapse, and `Enter` expands a row or inserts a column's name
-- **Click** a column to insert its name at the cursor
-- The 👁 button on a table (or **Browse data**) opens its rows in the grid, editable when it has a primary key
-- **Count rows** answers straight away, without opening a tab
-- **System views** - see what the server is doing (PostgreSQL activity, blocking and long-running queries; MySQL processes and open transactions; SQL Server requests, sessions and blocking; ClickHouse running queries) from the activity button above the tree or a connection's menu, and how a table is doing (statistics, index usage, ClickHouse parts, mutations and merges) from its menu. Each opens as an ordinary SQL tab and runs, so you can tweak it and run it again
-- Refresh the whole schema, or one schema from its right-click menu
-- **ER diagram** of a schema from its right-click menu, in a tab that comes back with the session - every table with all its columns, keys first, laid out so referenced tables stand left of the ones referencing them and the keys cross as little as possible. Drag to pan, zoom with the buttons, `⌘/Ctrl`+scroll or a pinch, and Fit to see it all. Hover or click a table to light up its keys and neighbours, find one by name, show only the key columns, and double-click (or use the open button) to open it
-- **Compare schema…** with another schema or database of the same engine - missing and extra tables, added, dropped and changed columns, and a sync script you can copy or open in a tab
-
-Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.
-
-Each group row carries what you actually want at a glance: an index's columns and whether it's unique, a foreign key's target (`(org_id) → orgs(id)`), a check's expression, a trigger's timing and events.
-
-### 📋 Copy DDL
-
-Right-click any object - table, view, index, constraint, trigger, function - for **Copy DDL** and **Open DDL in new tab**. The second opens an ordinary SQL tab, so the statement arrives with syntax highlighting, search and editing, ready to run or tweak.
-
-- **SQLite**, **libSQL**, **MySQL / MariaDB** and **ClickHouse** hand back the engine's own text (`sqlite_master`, `SHOW CREATE …`), so what you copy is what the server stored
-- **SQL Server** tables are composed from the catalog as well: identity and computed columns, keys with their clustering, foreign keys with their actions, checks, and indexes with `INCLUDE` and filters. Views, procedures, functions and triggers come from `OBJECT_DEFINITION`
-- **PostgreSQL** has no `SHOW CREATE TABLE`, so the statement is composed from the catalog: columns with their types, defaults, identity and generated expressions, collations, every table constraint, the indexes no constraint already implies, and `COMMENT ON` for anything documented
-- A table's DDL includes its standalone indexes, so pasting it elsewhere rebuilds the table whole
-
-### 🛠️ Changing the Schema
-
-The same menus change things, too:
-
-- **Tables and views** - Rename, Truncate (tables), Drop
-- **Columns** - Rename, Drop
-- **Indexes, constraints, triggers, functions and procedures** - Drop
-
-Every change opens a dialog that shows the **exact SQL** it will run, written for your engine (`RENAME TABLE` on MySQL, `ALTER VIEW … RENAME` on PostgreSQL, `DELETE FROM` for a SQLite truncate, and so on). PostgreSQL adds **Cascade** and, for a truncate, **Restart identity**. If the server refuses - say, because a view depends on the table - the dialog stays open with its message, so you can tick Cascade and try again.
-
-- A change runs on a connection of its own, lands in the query history, and can be cancelled while it waits on a lock
-- The tree, autocomplete and open tabs follow it: a renamed table's tab switches to the new name, a dropped table's tab closes
-- Read-only connections show the menu items but can't run them
-- What an engine can't do isn't offered - SQLite can't rename a view or drop a constraint, for example
-
-#### 🧱 Structure Editor
-
-**Edit structure…** on a table (or the **Structure** button in its data tab, or **Edit table structure** in the command palette) opens it in a **Structure** tab of its own, with its columns, indexes, foreign keys and checks in sections you switch between. **New table…** on a schema opens an empty one, with an `id` key column to start from.
-
-- **Columns** - name, type (typed, or picked from the engine's usual types and the ones your tables already use), nullable, primary key, default, identity / auto-increment and, where the engine keeps them, comments
-- **Indexes** - columns in the order you pick them, unique, and the index method on PostgreSQL. A new index is named after its columns until you name it; expression and partial indexes are kept as written and can be dropped
-- **Foreign keys** - columns, the referenced table and its columns (its primary key, once you pick the table), and `ON UPDATE` / `ON DELETE` with only the actions the engine supports
-- **Checks** - a name and a condition
-- Added rows show green, changed fields yellow, dropped rows red and struck through, and the toolbar counts what's pending. **Revert** drops it all
-- The **SQL preview** under the rows is the exact script **Apply** (or `⌘/Ctrl`+`S`) runs, and the Apply dialog shows it once more first. If the server refuses, the dialog stays open with its message and your edits stay as they are
-
-Each engine gets a script it can run safely:
-
-- **PostgreSQL** and **SQL Server** run the whole change in one transaction, so it applies completely or not at all. On SQL Server a column's default constraint is dropped and added back around a type change
-- **MySQL / MariaDB** can't roll DDL back, so the change goes into **one `ALTER TABLE`** that applies whole or not at all. Only dropping or changing a foreign key takes a statement of its own first, and the dialog says so
-- **SQLite / libSQL** use a plain `ALTER TABLE` where it can do the job, and otherwise **rebuild the table**: a new table in the new shape, the rows copied over, the old one swapped out, its indexes and triggers recreated - all in one transaction, checked with `PRAGMA foreign_key_check`. The dialog says when it rebuilds
-- **ClickHouse** edits columns, with `Nullable(…)` for the nullable ones, and keeps the sorting key's columns as they are
-
-After Apply the tab shows the table as it now is, and the tree, autocomplete and an open data tab of the table follow. Changes made elsewhere are noticed too: a tab with no edits reloads, one with edits says the table changed and offers **Reload**, and closing it or quitting with unapplied edits asks first. Read-only connections get the same tab as a viewer.
-
-### 💾 Table Backups
-
-**Back up to file…** writes a table to a `.sql` file - its structure, its rows, or both - that recreates it when you run the file or load it with **Import → SQL script**.
-
-- **Values come back exactly** - the server writes every value as an SQL literal itself (PostgreSQL `quote_nullable`, MySQL `QUOTE` and hex for binary, SQLite `quote`, ClickHouse `formatRowNoNewline('Values', …)`, and per-type conversions on SQL Server: `N''` strings, exact money and float styles, ISO dates, `0x` binary), so dates, JSON, arrays, binary data and floating-point values survive the round trip
-- **Rows restore in any order** - PostgreSQL and SQL Server add foreign keys after the data, MySQL and SQLite pause foreign-key checks, so a table that references itself restores cleanly
-- **Sequences follow** - restored PostgreSQL identity and serial columns carry on after the highest id, and SQL Server identities are written with `SET IDENTITY_INSERT`; MySQL `TIMESTAMP`s are written in UTC, so they restore correctly in any time zone
-- Generated columns are left for the database to compute
-- Rows are grouped into multi-row `INSERT`s, with live progress and a **Stop** button
-- The file only replaces an older one once the backup has finished, so a failed or stopped backup leaves the older file untouched
-
----
-
-## 📊 Results Grid
-
-- **Virtualized** grid - smooth scroll over thousands of rows
-- **Result-set tabs** - switch between outputs when a run returns multiple result sets
-- **Sortable** columns, **fit columns** to their content, and **show / hide** columns
-- Headers show each column's **type** and **key icons**; numbers line up on the decimal point (long fractions are rounded for display), `NULL` is dimmed, and **striped rows** are a View-menu toggle
-- **Status bar stats** - cells selected in one column show their count, and the sum, average, min and max of their numbers; click one to copy it. A selection across columns breaks them down per column
-- **Quick charts** - the Chart button plots a result as bars or lines. A panel beside it picks the label column and up to five value columns, each in its own colour, and how rows that share a label combine (sum, count or average). It starts from sensible picks, keeps them when you switch back to the grid, and scrolls sideways through many bars
-- Right-click menus on cells, row numbers and headers: copy as any export format, filter by a value, sort, hide a column, mark rows for delete
-- **Keyboard-first** navigation (arrows, Shift+select, Enter for the cell viewer)
-- Column/row selection with Ctrl+click and Shift+click; `Ctrl+C` copies in the format you pick
-- **Cell viewer** for large values - JSON, XML, HTML, or plain text; beautify/minify; editable in table view
-- **JSON / JSONB** auto-parsed in cell and side viewer
-- **Arrays, maps and tuples** - PostgreSQL arrays and ClickHouse `Array`, `Map` and `Tuple` values read as JSON in both viewers; switch the cell viewer to Text for the literal itself
-- Side **JSON row viewer**, synced to the focused row and showing its number - filter keys and values (`/…/` for a regex) with the matches highlighted, **Copy JSON**, and **Hide NULL columns**
-
----
-
-## ✏️ Editing Data
-
-View and modify table data directly in the grid - no hand-written `UPDATE` / `DELETE` (writable connections):
-
-- **Browse** any table's rows from the Schema Explorer, filter them with a `WHERE` condition that autocompletes, and **Count all** the rows the filter lets through
-- **Inline edit** cells in place - changes are staged, then applied on demand (`Ctrl+S`)
-- **Booleans and enums** - a boolean is a checkbox that a click or `Space` flips, and an enum, or a column whose `CHECK` lists its values, edits with a picker, in the add-row dialog too
-- **Edit query results** too - a `SELECT` from one table that includes its primary key edits like a table view:
-  - Aliased columns save to the columns they show, while expressions and generated columns stay as they are
-  - The engine says where each column comes from (on Turso, the select list does), so a `search_path` or `USE` can't point an edit at another table
-  - Edits run on the tab's own session: inside its transaction when one is open, otherwise all together or not at all
-  - Joins, `GROUP BY`, set operations and views stay read-only
-  - Running again, closing the tab or quitting asks before dropping changes that weren't applied
-- **Undo / redo** staged changes, **paste** blocks of cells, **set NULL** (`Ctrl+Backspace`)
-- **Insert** new rows and **bulk-delete** selected ones
-- **Jump through foreign keys** - a referencing cell opens the row it points at
-- Safe by design: edits require a primary key and **read-only** connections are blocked in the app and inside the driver. ClickHouse tables are browse-only
-- `INSERT` / `UPDATE` / `DELETE … RETURNING` results flow straight back into the grid
-
----
-
-## 📚 Query Library & History
-
-- **Saved queries** - name, filter, sort, link tabs with dirty-state tracking
-- Save, update, rename (`F2`) and delete from the sidebar or toolbar
-- **Per-connection query history** with success/error and duration, filterable to the failed runs
-- Clear history per connection or delete individual entries
-
----
-
-## 📥 Import
-
-Load a **CSV** (or any delimited file) or run a **`.sql` script**, from the ⬆ button in the Schema Explorer or a schema's or table's right-click menu.
-
-### CSV
-
-- **Delimiter auto-detected** (`,` `;` tab `|`) - the one that splits every line the same way wins, so commas inside quoted values don't fool it; override it if you'd rather
-- **Column mapping** - each source column shows its first value and the target column it loads into, with a warning when its values may not fit that column's type; blank the target to skip that column entirely
-- **Import into an existing table**, optionally emptying it first, **or create a new one** with types inferred from the data (integer, decimal, boolean, date, timestamp, text) - each one editable before you commit to it, and named in your engine's own dialect
-- Headers optional, `NULL` text configurable (`\N`, `NULL`, whatever your exporter writes), leading lines skippable for files with a preamble, whitespace trimmable
-- **Empty fields keep their meaning**: a bare one is `NULL`, a quoted `""` is an empty string - the same convention Postgres `COPY … FORMAT csv` uses, and what lets a BarSQL CSV export load straight back in. In a numeric or date column, where `""` is never valid, both mean `NULL`
-- UTF-8 BOMs stripped, ragged rows tolerated, and the preview warns when a file isn't UTF-8 (like Excel's Windows-1252 CSVs), whose unreadable characters would load as `�`
-- **Bad rows are skipped and reported**, not fatal - or tick **stop at the first error** if you'd rather nothing partial lands
-- Rows load in batches with live progress, and **Stop** ends a long run
-
-### SQL scripts
-
-A `.sql` file runs statement by statement on one connection, so `SET`, temp tables and scripted transactions behave. You get a progress bar and a count - not thousands of result tabs. It's also how a table backup comes back. The file must be UTF-8 (a BOM is fine); any other encoding is refused rather than loaded with `�` in place of what it can't read.
-
-> Batches are committed as they go, so a stopped or failed import keeps the rows it had already
-> loaded and tells you how many that was. Read-only connections refuse imports outright.
-
----
-
-## 📤 Export
-
-- **Text** / **CSV** / **JSON** / **Markdown** / **SQL INSERT** - SQL is written for the connection's own engine: its identifier quoting, `N''` strings and `1`/`0` booleans on SQL Server, and literals that read the same whatever the server's string settings
-- Export all or **selected** rows and columns
-- Copy to clipboard or **save to file**
-- Remembers your last export format
-- **CSV and SQL exports import back cleanly** - `NULL` stays apart from an empty string, and cells that spreadsheets would treat as formulas are guarded on the way out and unguarded on the way in
-
----
-
-## 🤖 AI Assistants (MCP)
-
-AI apps such as Claude, Cursor or VS Code can look into your databases through the [Model Context Protocol](https://modelcontextprotocol.io). The AI app starts `BarSQL --mcp` in the background - no window - and talks to it over a pipe.
-
-- **Opt-in per connection** - tick **Allow AI assistants (MCP)** in the connection dialog. Other connections stay invisible to the AI
-- **Reads stay read-only** - every query passes BarSQL's read-only check, and on PostgreSQL, MySQL, SQLite and ClickHouse the database session refuses writes too, even one inside a function. SQL Server and Turso only get the check, so give those connections a read-only login or token
-- **Changes only where you allow them** - also tick **Allow changes**, on a connection that isn't read-only, and the AI gets `run_change` for INSERT, UPDATE, DELETE and schema changes
-  - Your AI app asks before each change unless you always allow it. With **Ask before running changes** on, BarSQL asks every time through the AI app, and refuses changes to an AI app that can't ask
-  - Each change runs in one transaction where the database has them, and reports the rows it touched. A preview runs it and rolls it back. MySQL commits schema changes at once, so a change with CREATE, ALTER or DROP can't be previewed there
-  - An UPDATE or DELETE without a WHERE needs the AI to say it means every row, and SQL that begins, commits or rolls back a transaction itself is refused
-- **Tools** - `list_connections`, `list_tables`, `describe_table`, `show_ddl`, `run_query`, `explain_query`, and `run_change`, which connections without **Allow changes** refuse
-- **Small answers** - at most 200 rows, long values shortened, and a query stops after 30 seconds
-- **No credentials** - the AI sees each connection's name, engine and database, never its password or token
-- **A log of every call** in `BarSQL-data/mcp.log`, with what each change did
-- What the AI reads is sent to its AI service, so share only what you'd show it
-
-To set it up, tick the box, click **Copy MCP setup** and paste it into your AI app's MCP settings - Claude Desktop's `claude_desktop_config.json`, or a project's `.mcp.json` for Claude Code. Or add it to Claude Code from a terminal:
+## ⚙️ Build from source
 
 ```bash
-claude mcp add BarSQL -- /Applications/BarSQL.app/Contents/MacOS/BarSQL --mcp
+cargo run -p barsql --release
 ```
 
----
-
-## 🔄 Auto Updates
-
-- Checks for a new version at launch and offers it with a toast
-- The update dialog shows the release notes
-- One-click download, checksum-verified install and restart
-- Works for every download, and asks for admin rights when the app sits in a protected folder or came as a Linux package
+Requirements, tests and the project layout are in **[CONTRIBUTING.md](CONTRIBUTING.md)**, packaging and releases in **[RELEASING.md](RELEASING.md)**.
 
 ---
 
-## 🌍 UX
-
-- **Dark & light** themes, or **match the system** and follow it as it changes
-- **Welcome screen** while no tab is open - a new connection or a SQLite file to start with, then a new query or the tab you closed last, plus the shortcuts to get around
-- **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
-- **English**, **Deutsch**, **Български** and **Español**
-- **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs
-- Custom shortcuts editor + keyboard tips
-- Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
-- Tab menu: close others, to the right or all, **pin**, duplicate, rename, copy SQL
-- **Status bar** - the tab's connection (click to switch it), the caret's line and column (click to go to a line), cursor count, the open transaction, and a running query with its **Stop** button. Read-only, ask-before-changes and extension chips open the connection's settings, and a guarded connection with a tab color tints the whole bar with it
-- Everything opens instantly - no animations
-- **Window state persistence** - size, position and maximized state restored between sessions
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-The in-app shortcuts editor remaps all of these except the editor's own keys: go to definition, go to line, comments and cursors.
-
-| Action                       | Shortcut                                    |
-| ---------------------------- | ------------------------------------------- |
-| Quick Search palette         | `Ctrl/⌘ + P`                                |
-| Command palette              | `Ctrl/⌘ + Shift + P`                        |
-| Go to definition             | `F12`                                       |
-| Go to line                   | `Ctrl + G` (Control on macOS too)           |
-| Toggle comment               | `Ctrl/⌘ + /`                                |
-| Add a cursor at the next occurrence | `Ctrl/⌘ + D`                         |
-| Run selection or statement   | `Ctrl/⌘ + Enter`                            |
-| Run all statements           | `Ctrl/⌘ + Shift + Enter`                    |
-| Explain query plan           | `Ctrl/⌘ + Shift + E`                        |
-| Explain query plan (analyze) | `Ctrl/⌘ + Shift + A`                        |
-| Save query                   | `Ctrl/⌘ + S`                                |
-| Rename saved query           | `F2`                                        |
-| New / close tab              | `Ctrl/⌘ + T` / `Ctrl/⌘ + W`                 |
-| Reopen closed tab            | `Ctrl/⌘ + Shift + T`                        |
-| Next / previous tab          | `Ctrl/⌘ + Tab` / `Ctrl/⌘ + Shift + Tab`     |
-| Toggle sidebar / JSON panel  | `Ctrl/⌘ + B` / `Ctrl/⌘ + J`                 |
-| Zoom in / out / reset        | `Ctrl/⌘ + =` / `Ctrl/⌘ + -` / `Ctrl/⌘ + 0`  |
-| Editor font size + / −       | `Ctrl/⌘ + Shift + .` / `Ctrl/⌘ + Shift + ,` |
-| Fullscreen                   | `F11`                                       |
-
----
-
-# 🧳 Portable by Design
-
-Everything lives in a single **`BarSQL-data/`** folder:
-
-```text
-BarSQL(.exe)
-BarSQL-data/
-  connections.json
-  editor_session.json
-  query_history.json
-  saved_queries.json
-  settings.json
-```
-
-`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts. `mcp.log` appears once an AI assistant has used BarSQL.
-
-When the app sits somewhere writable, that folder is created **right next to the executable** (beside the `.app` bundle on macOS) - move it to a USB stick, network drive, or another PC and it just works.
-
-If the app lives in a read-only location (e.g. `/Applications` or a system path), it falls back to the OS per-user data directory instead:
-
-- **macOS** → `~/Library/Application Support/BarSQL-data`
-- **Linux** → `~/.config/BarSQL-data`
-- **Windows** → `%AppData%\BarSQL-data`
-
-Override the location with `BARSQL_DATA_DIR`. A debug build (`cargo run`) keeps its data in `./BarSQL-data`, in the folder you run it from.
-
----
-
-# 🖥️ Built with GPUI
-
-BarSQL's interface is drawn with **[GPUI](https://www.gpui.rs/)**, the UI framework the Zed editor is built on, and the components of **[GPUI Kit](https://gpui-kit.com/)**.
-
-- One Rust codebase from the database drivers to the window
-- The whole window is rendered on the GPU
-- A background runtime (Tokio) talks to the databases, so the UI thread only draws
-
----
-
-# ⚙️ Installation & Development
-
-## Requirements
-
-- [Rust](https://rustup.rs/) - rustup installs the toolchain pinned in `rust-toolchain.toml` on first use
-- **Linux** also needs GPUI's libraries: `clang libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev`
-- Docker or Podman, only for the test databases (PostgreSQL, MySQL, MariaDB, ClickHouse, libSQL and, optionally, SQL Server)
-
-## Run
-
-```bash
-cargo run -p barsql
-```
-
-## Build
-
-```bash
-cargo build -p barsql --release   # or: cargo xtask package  (this OS's packages, in target/package/dist)
-```
-
-## Tests
-
-```bash
-cargo test --workspace   # unit, SQLite and whole-window UI tests
-cargo xtask lint         # rustfmt and clippy, as CI runs them
-cargo xtask e2e up       # PostgreSQL, MySQL, MariaDB, ClickHouse and libSQL from docker-compose.yml
-cargo xtask e2e          # the suites that need them
-cargo xtask e2e down
-cargo xtask screenshots  # the README screenshots, against the PostgreSQL above
-cargo xtask docs-images  # the landing page's images, from those screenshots
-```
-
-`cargo xtask` is this repository's task runner (the `xtask/` crate); run it alone to list its commands. `COMPOSE="podman compose"` makes it use Podman.
-
-The databases listen on 55432 (PostgreSQL), 33306 (MySQL), 33307 (MariaDB), 38123 (ClickHouse) and 38080 (libSQL's `sqld`). SQL Server is opt-in: `BARSQL_E2E_MSSQL=1` with `cargo xtask e2e up` adds it on 31433 (Azure SQL Edge on Apple silicon, where SQL Server itself doesn't run), and the same variable turns its tests on.
-
-- The UI tests in `crates/barsql-ui` run on GPUI's `TestAppContext` against a SQLite database, with real keystrokes, clicks, file drops and window resizes. `src/scenarios` drives the whole window.
-- `--features e2e` adds the per-engine scenarios and the fixtures in `fixtures/golden`, which pin down value display, DDL, EXPLAIN plans and errors for each engine. `BARSQL_GOLDEN_WRITE=1` rewrites them when an engine's output changes on purpose; review the diff before keeping it.
-
-CI (`.github/workflows/test.yml`) runs the Linux checks and the E2E suites, SQL Server 2022 included, on every pull request and push to master. macOS and Windows run before a release and when you start the workflow by hand (Actions → Tests → Run workflow). Starting it by hand with **regenerate goldens** ticked rewrites the SQL Server fixtures on the real server and uploads them as an artifact to review.
-
-## Screenshots
-
-`cargo xtask screenshots` takes the pictures above again, at 2048 × 1152 points (4096 × 2304 pixels on a Retina display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in `crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run. It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size lossless WebP plus 640, 800 and 1280px copies, which the landing page picks from to fit the screen.
-
-For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png` at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE` sets the window's size in points (`2048x1152`), `BARSQL_SNAPSHOT_RUN=1` runs the active tab first, and `BARSQL_SNAPSHOT_PANEL` chooses what the screenshot shows:
-
-- the sidebar panels: `saved`, `recent`, `connections`
-- the grid: `cell`, `export`, `json`
-- dialogs: `connection-dialog`, `import`, `about`, `shortcuts`, `tips`
-- the update dialog: `update`, `update-current`, `update-downloading`, `update-ready`, `update-failed`
-- other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`, `palette` (the command palette), `chart` (the first result as a chart, with `BARSQL_SNAPSHOT_RUN=1`), `er` (the `main` schema's ER diagram), `structure` (a table's Structure tab: the first in `main`, or `structure=<table>`)
-
----
-
-# 🔄 How Updates Work
-
-Release builds check [Bare7a/BarSQL](https://github.com/Bare7a/BarSQL)'s releases at launch and offer a newer one with a toast. About → Check for Updates does the same at any time. The code lives in `crates/barsql-app/src/update*` and `crates/barsql-ui/src/update_dialog.rs`.
-
-1. **Check.** The latest release, if it is newer than this build. The asset depends on how this copy was installed: the `.zip` or `.tar.gz` named for this platform and architecture, or the `.AppImage`, `.deb`, `.rpm` or `.pkg.tar.zst` when the app came as one. Its digest comes from `SHA256SUMS`.
-2. **Install Update.** The download goes to a fresh `barsql-update-*` folder in the temp directory, with progress. Its SHA-256 is checked, then the archive's single top-level entry is unpacked, guarded against zip-slip, links and oversized entries. An AppImage or a package stays as it is. An asset that `SHA256SUMS` does not list is refused. Closing the dialog leaves the download running, and Check for Updates reopens it where it got to. A folder left by an app that quit or crashed without applying its download is removed at a later launch, once that app is gone and nothing has touched the folder for an hour.
-3. **Restart & Apply.** The app relaunches itself as a helper with the `BARSQL_UPDATER_*` variables set, then quits. The helper first marks the download's folder as in use, so a BarSQL started meanwhile leaves it alone. It waits for the app to exit, swaps `BarSQL.app`, the binary or the AppImage while keeping a backup until the new version has launched, restores the backup on failure, and logs to `update.log` in the data folder, starting it afresh each time.
-   - When the folder isn't writable, like Program Files or `/usr/local/bin`, the swap runs as `BarSQL --barsql-update-swap` behind the system's admin prompt (UAC, the macOS password dialog or pkexec). On Windows it also updates the installer's version under Installed apps.
-   - Windows can't delete the running `BarSQL.exe`, so the swap moves it aside as `BarSQL.exe.old.<n>`. The new version deletes that once the helper has exited, or, in a folder that needs admin rights, Windows deletes it at the next restart.
-   - The Linux packages are installed with `dpkg -i`, `rpm -U` or `pacman -U` through pkexec instead.
-   - If the prompt is cancelled or anything fails, the old version starts again.
-
----
-
-# 🚢 Releasing
-
-1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`, `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current version.
-2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
-3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds on Ubuntu 22.04, Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`.
-
-Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
-
-`cargo xtask package` builds this OS's packages locally, into `target/package/dist` (on Linux, after `cargo install cargo-deb cargo-generate-rpm`). `BARSQL_RELEASE_DIR=<that folder> cargo test -p barsql-app a_packaged_release_stages_its_app` runs the updater over them.
-
-## Packages
-
-| Script                                                                    | Portable updater asset (one top-level entry)                                           | Other downloads                                                |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `scripts/package-macos.sh`                                                | `BarSQL-darwin-arm64.zip`, `BarSQL-darwin-amd64.zip` (the same universal `BarSQL.app`) | `BarSQL-macos-universal.dmg`                                   |
-| `scripts/package-windows.sh`                                              | `BarSQL-windows-amd64.zip` (`BarSQL.exe`)                                              | `BarSQL.exe`, `BarSQL-amd64-installer.exe`                     |
-| `scripts/package-linux.sh`                                                | `BarSQL-linux-amd64.tar.gz` (`BarSQL`)                                                 | `BarSQL`, `BarSQL.deb`, `BarSQL.rpm`, `BarSQL-x86_64.AppImage` |
-| `packaging/linux/PKGBUILD` (release workflow, in an Arch Linux container) |                                                                                        | `BarSQL.pkg.tar.zst`                                           |
-
-- Only the portable updater assets name both a platform and an architecture, so portable copies never pick another download. The AppImage and the packages update from their own asset, and the installer and the dmg from the `.zip`.
-- Release builds turn on the `production` feature, which enables the update check at launch. The release profile uses thin LTO and strips symbols.
-- **macOS:** a `lipo` universal `.app` for macOS 12 and later with an ad-hoc signature; the dmg adds an `Applications` link. `BARSQL_NATIVE_ONLY=1` builds this Mac's architecture alone.
-- **Windows:** `crates/barsql/build.rs` embeds the icon and the version block. `packaging/windows/installer.nsi` installs the app with the `SQLite Database` file class for `.db`, `.sqlite`, `.sqlite3`, `.s3db` and `.sl3`.
-- **Linux:** [`cargo-deb`](https://crates.io/crates/cargo-deb) and [`cargo-generate-rpm`](https://crates.io/crates/cargo-generate-rpm) build the deb and rpm from `crates/barsql/Cargo.toml`, and `makepkg` builds the Arch package from `packaging/linux/PKGBUILD`. Each installs `/usr/bin/BarSQL` and a desktop entry that opens SQLite files; the deb and rpm work out their library dependencies from the binary. The window's app id is `BarSQL`, so Wayland docks match it to `BarSQL.desktop`.
-- The icon's source is `packaging/icon.svg`. The macOS `.icns` sets it on Apple's icon grid (an 824px body on a 1024px canvas, with a shadow). Windows and Linux show the stack without its tile, since their taskbars and docks are mostly dark and the dark tile would disappear there, leaving the stack looking small. The title bar shows the stack too, in a dark and a light version (`crates/barsql-ui/images/barsql-mark-*.png`). `cargo xtask icons` regenerates the set from it: the Linux PNGs, `icon.ico`, `icons.icns`, the marks, the About dialog's icon and the copies in `docs/`, each size rendered from the vector.
-
----
-
-# 🧱 Project Structure
-
-```text
-├── .github/               # test and release workflows, PR and issue templates, the README screenshots
-├── Cargo.toml             # the workspace; GPUI Kit pinned to an exact version
-├── rust-toolchain.toml    # the Rust version rustup installs
-├── docker-compose.yml     # PostgreSQL / MySQL / MariaDB / ClickHouse / libSQL / SQL Server for the E2E suites
-├── crates/
-│   ├── barsql/            # the binary: startup, single instance, file arguments, --mcp
-│   ├── barsql-app/        # orchestration without GPUI: connections, runs, transactions, edits, structure changes, import, backups, updater, MCP server
-│   ├── barsql-core/       # domain types, settings, the data folder
-│   ├── barsql-db/         # the engines: PostgreSQL, MySQL / MariaDB, SQLite, SQL Server, ClickHouse, Turso / libSQL, SSH tunnels
-│   ├── barsql-io/         # CSV and .sql import, export formats, SQL formatting
-│   ├── barsql-sql/        # statement splitting, quoting, the read-only check, DDL and ALTER scripts, schema diffs, the SQL language service
-│   ├── barsql-storage/    # the JSON files in BarSQL-data
-│   └── barsql-ui/         # the GPUI views, locales and whole-window scenarios
-├── xtask/                 # cargo xtask: lint, e2e, screenshots, docs-images, icons, package, bump-version
-├── docs/                  # the landing page at barsql.bare7a.eu (GitHub Pages)
-├── fixtures/
-│   ├── golden/            # per-engine expectations for the E2E suites
-│   └── screenshots/       # the README screenshots' forum database, CSV and data folder
-├── packaging/             # the icon and the macOS / Windows / Linux packaging
-└── scripts/               # package-macos.sh / package-windows.sh / package-linux.sh
-```
-
----
-
-# 🧰 Tech Stack
-
-| Layer      | Technology                                                        |
-| ---------- | ----------------------------------------------------------------- |
-| Language   | [Rust](https://www.rust-lang.org/)                                |
-| UI         | [GPUI](https://www.gpui.rs/) + [GPUI Kit](https://gpui-kit.com/)  |
-| Async      | [Tokio](https://tokio.rs/)                                        |
-| PostgreSQL | [tokio-postgres](https://github.com/sfackler/rust-postgres)       |
-| MySQL      | [mysql_async](https://github.com/blackbeam/mysql_async)           |
-| SQLite     | [rusqlite](https://github.com/rusqlite/rusqlite) (bundled SQLite) |
-| SQL Server | [tiberius](https://github.com/prisma/tiberius)                    |
-| ClickHouse & Turso | BarSQL's own HTTP client, on [httparse](https://github.com/seanmonstar/httparse) |
-| SSH        | [russh](https://github.com/Eugeny/russh)                          |
-| TLS        | [rustls](https://github.com/rustls/rustls)                        |
-| Formatting | [sqlformat](https://github.com/shssoichiro/sqlformat-rs)          |
-| Icons      | [Lucide](https://lucide.dev/)                                     |
-
----
-
-# 📄 License
+## 📄 License
 
 GPL-3.0-only; see [LICENSE](LICENSE).

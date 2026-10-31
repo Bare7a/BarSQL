@@ -4,7 +4,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::*;
 
-use crate::assets::LOGO;
+use crate::assets::{LOGO, vector_img};
 use crate::form::ToolButton;
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
@@ -67,7 +67,7 @@ pub fn open(window: &mut Window, cx: &mut App) {
         let hero = v_flex()
             .items_center()
             .gap(rems(0.308))
-            .child(img(LOGO).size(rems(4.923)).mb(rems(0.462)))
+            .child(vector_img(LOGO, rems(4.923)).mb(rems(0.462)))
             .child(div().text_size(TEXT_LG).font_semibold().child(info.name.clone()))
             .child(
                 h_flex()

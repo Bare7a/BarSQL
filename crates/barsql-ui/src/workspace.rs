@@ -21,7 +21,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::actions::*;
-use crate::assets::LOGO;
+use crate::assets::{LOGO, vector_img};
 use crate::dialogs::{self, Confirm};
 use crate::er_diagram::{self, ErDiagram};
 use crate::grid::RowRef;
@@ -1727,7 +1727,7 @@ impl Workspace {
                 v_flex()
                     .items_center()
                     .gap(rems(0.308))
-                    .child(img(LOGO).size(rems(4.308)).mb(rems(0.462)))
+                    .child(vector_img(LOGO, rems(4.308)).mb(rems(0.462)))
                     .child(div().text_size(TEXT_LG).font_semibold().child(t(cx, "app.emptyTitle")))
                     .child(div().text_color(theme.muted_foreground).child(t(cx, "about.tagline"))),
             )
