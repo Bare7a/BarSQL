@@ -7,13 +7,23 @@ use crate::BarApp;
 use crate::connections::{SCHEMA_TIMEOUT, within};
 
 impl BarApp {
-    pub async fn table_structure(&self, id: &str, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
+    pub(crate) async fn table_structure_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<TableStructure, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.table_structure(schema, table)).await
     }
 
     // Like execute_statement: a session of its own, cancellable as `job`, and one history entry for the script.
-    pub async fn apply_structure(&self, connection_id: &str, job: &str, plan: &ChangePlan) -> Result<(), QueryError> {
+    pub(crate) async fn apply_structure_inner(
+        &self,
+        connection_id: &str,
+        job: &str,
+        plan: &ChangePlan,
+    ) -> Result<(), QueryError> {
         let driver = self.config(connection_id)?.driver;
         let script = plan.script(&driver);
         self.guard_execute(connection_id, &script)?;

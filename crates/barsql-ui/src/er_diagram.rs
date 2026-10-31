@@ -320,10 +320,12 @@ impl ErDiagram {
         let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
         let hint = t_with(cx, "erDiagram.hint", &[("modifier", modifier)]);
         h_flex()
+            .debug_selector(|| "er-toolbar".into())
             .flex_none()
+            .h(rems(3.077))
             .gap(rems(0.462))
-            .px(rems(1.231))
-            .py(rems(0.615))
+            .px(rems(0.769))
+            .bg(theme.sidebar)
             .border_b_1()
             .border_color(theme.border)
             .child(div().flex_none().w(rems(15.385)).debug_selector(|| "er-search".into()).child(form::filter_input(
@@ -624,6 +626,27 @@ fn paint_edges(layout: &Layout, only: Option<&[usize]>, bounds: Bounds<Pixels>, 
                 }
             }
         }
+    }
+}
+
+// README screenshots.
+#[cfg(feature = "snapshot")]
+impl ErDiagram {
+    pub(crate) fn fitted(&self) -> bool {
+        self.fitted
+    }
+
+    // Lights up a table's keys, as a click on it does.
+    pub(crate) fn select_table(&mut self, name: &str, cx: &mut Context<Self>) {
+        if let State::Ready(tables) = &self.state {
+            self.selected = tables.iter().position(|table| table.name == name);
+            cx.notify();
+        }
+    }
+
+    // As the zoom buttons do, past Fit's 100% cap.
+    pub(crate) fn set_zoom(&mut self, zoom: f32, window: &Window, cx: &mut Context<Self>) {
+        self.zoom_to(zoom, None, window, cx);
     }
 }
 

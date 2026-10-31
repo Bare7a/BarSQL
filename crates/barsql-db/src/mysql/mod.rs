@@ -27,6 +27,8 @@ const MAX_CONNECTIONS: usize = 10;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 // Sessions start in UTC, as dumps do, whatever the server's zone. NOW() and TIMESTAMP literals follow it too.
 const SESSION_SETUP: &str = "SET time_zone = '+00:00'";
+// Makes the server refuse writes the SQL check can't see, like one inside a function.
+const READ_ONLY_SETUP: &str = "SET SESSION TRANSACTION READ ONLY";
 
 #[derive(Debug, Clone)]
 pub struct MyConnectOptions {
@@ -101,7 +103,12 @@ impl MyEngine {
             // Runs again each time the pool resets a connection.
             .setup(vec![SESSION_SETUP])
             .into();
-        let pool = Pool::new(opts.clone());
+        let pooled: Opts = if options.read_only {
+            OptsBuilder::from_opts(opts.clone()).setup(vec![SESSION_SETUP, READ_ONLY_SETUP]).into()
+        } else {
+            opts.clone()
+        };
+        let pool = Pool::new(pooled);
         let engine = Arc::new(Self {
             options,
             opts,
@@ -287,6 +294,24 @@ fn may_set_time_zone(stmt: &str) -> bool {
     }
 }
 
+// SHOW WARNINGS or ERRORS, which can't run code.
+fn reads_diagnostics(stmt: &str) -> bool {
+    let stmt = strip_leading_comments(stmt).trim_end_matches(|c: char| c == ';' || c.is_whitespace()).to_uppercase();
+    let words: Vec<&str> = stmt.split_whitespace().collect();
+    let (kind, limit) = match words.as_slice() {
+        ["SHOW", "COUNT(*)", kind] => (*kind, &[][..]),
+        ["SHOW", kind, limit @ ..] => (*kind, limit),
+        _ => return false,
+    };
+    let number = |word: &&str| word.bytes().all(|b| b.is_ascii_digit() || b == b',');
+    matches!(kind, "WARNINGS" | "ERRORS")
+        && match limit {
+            [] => true,
+            ["LIMIT", numbers @ ..] => (1..=2).contains(&numbers.len()) && numbers.iter().all(number),
+            _ => false,
+        }
+}
+
 // An UPDATE's info line, "Rows matched: 1  Changed: 0  Warnings: 0".
 fn matched_rows(info: &str) -> Option<u64> {
     info.strip_prefix("Rows matched:")?.split_whitespace().next()?.parse().ok()
@@ -319,6 +344,10 @@ impl StatementRunner for MySession {
         sink: &Sink,
         cancel: &Cancel,
     ) -> StatementRun {
+        // A function can make the session writable, so each statement resets it. Not SHOW WARNINGS: SET clears them.
+        if self.read_only() && !reads_diagnostics(stmt) {
+            let _ = self.lease.conn.query_drop(READ_ONLY_SETUP).await;
+        }
         let run = {
             // Only while the statement runs, so a late cancel can't kill the queries after it.
             let _server_cancel = cancel.on_server(self.engine.server_cancel(self.id));
@@ -603,5 +632,15 @@ mod tests {
         assert_eq!(offset("UTC"), 0);
         assert_eq!(offset("SYSTEM"), 0);
         assert_eq!(offset("Mars/Olympus_Mons"), 0);
+    }
+
+    #[test]
+    fn only_warning_lists_skip_the_read_only_reset() {
+        for stmt in ["SHOW WARNINGS", "show errors;", "-- why\nSHOW COUNT(*) WARNINGS", "SHOW WARNINGS LIMIT 0, 5"] {
+            assert!(reads_diagnostics(stmt), "{stmt}");
+        }
+        for stmt in ["SHOW TABLES WHERE purge() OR WARNINGS", "SHOW WARNINGS LIMIT f()", "SELECT 1", "SHOW"] {
+            assert!(!reads_diagnostics(stmt), "{stmt}");
+        }
     }
 }

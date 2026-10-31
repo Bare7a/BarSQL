@@ -430,6 +430,20 @@ impl Render for ChartView {
     }
 }
 
+// README screenshots. `values` as grouped bars against the `label` column, as picked in the panel.
+#[cfg(feature = "snapshot")]
+impl ChartView {
+    pub(crate) fn plot_bars(&mut self, label: usize, values: &[usize], cx: &mut Context<Self>) {
+        let mut picked = [None; SLOTS];
+        for (slot, &column) in picked.iter_mut().zip(values) {
+            *slot = Some(column);
+        }
+        self.settings = Settings { kind: Kind::Bars, label, values: picked, aggregate: Aggregate::Sum };
+        self.touched = true;
+        cx.notify();
+    }
+}
+
 #[cfg(test)]
 impl ChartView {
     pub(crate) fn settings(&self) -> &Settings {

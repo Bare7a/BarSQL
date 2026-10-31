@@ -37,8 +37,8 @@ impl BarApp {
     }
 
     pub(crate) fn record_history_all(&self, entries: Vec<HistoryEntry>) {
-        // Else report() would mark a failing store as saved.
-        if entries.is_empty() {
+        // Else report() would mark a failing store as saved. MCP mode saves none, as it would overwrite the app's.
+        if entries.is_empty() || self.inner.mcp {
             return;
         }
         let added = self.inner.stores.history.add_all(entries);

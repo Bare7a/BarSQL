@@ -139,7 +139,7 @@ impl BarApp {
 
     // Returns once the run is registered, then progress and the outcome arrive as events.
     // Only its own id cancels it, not other work on the connection.
-    pub async fn import_csv(
+    pub(crate) async fn import_csv_inner(
         &self,
         connection_id: &str,
         import_id: &str,
@@ -162,7 +162,7 @@ impl BarApp {
         }))
     }
 
-    pub async fn import_sql(
+    pub(crate) async fn import_sql_inner(
         &self,
         connection_id: &str,
         import_id: &str,

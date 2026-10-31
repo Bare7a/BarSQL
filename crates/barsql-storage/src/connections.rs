@@ -31,9 +31,13 @@ pub fn load_connections(data_dir: &Path) -> io::Result<ConnectionsFile> {
     load_json_file(&data_dir.join("connections.json"))
 }
 
+// The file's bytes: two saves can share a modified time and a size.
+type Stamp = Option<Vec<u8>>;
+
 pub struct ConnectionStore {
     path: PathBuf,
     state: Mutex<ConnectionsFile>,
+    reloaded: Mutex<Option<Stamp>>,
 }
 
 impl ConnectionStore {
@@ -41,7 +45,7 @@ impl ConnectionStore {
         fs::create_dir_all(data_dir)?;
         let path = data_dir.join("connections.json");
         let state = load_json_file(&path)?;
-        Ok(Self { path, state: Mutex::new(state) })
+        Ok(Self { path, state: Mutex::new(state), reloaded: Mutex::default() })
     }
 
     pub fn list(&self) -> Vec<ConnectionConfig> {
@@ -90,6 +94,26 @@ impl ConnectionStore {
         }
         reordered.extend(state.connections.iter().filter(|c| !seen.contains(c.id.as_str())).cloned());
         update(&self.path, &mut *state, |next| next.connections = reordered)
+    }
+
+    // Unlike open(), a broken file is left in place and the state kept.
+    pub fn reload(&self) -> io::Result<()> {
+        let stamp = match fs::read(&self.path) {
+            Ok(bytes) => Some(bytes),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err),
+        };
+        let mut reloaded = self.reloaded.lock().unwrap_or_else(|e| e.into_inner());
+        if reloaded.as_ref() == Some(&stamp) {
+            return Ok(());
+        }
+        let state = match &stamp {
+            Some(bytes) => serde_json::from_slice::<Option<ConnectionsFile>>(bytes).map_err(io::Error::other)?,
+            None => None,
+        };
+        *self.lock() = state.unwrap_or_default();
+        *reloaded = Some(stamp);
+        Ok(())
     }
 
     pub fn folders(&self) -> Vec<ConnectionFolder> {
@@ -283,5 +307,24 @@ mod tests {
         assert!(store.save_folder(ConnectionFolder { name: "Home".into(), ..Default::default() }).is_err());
         assert!(store.delete_folder(&folder.id).is_err());
         assert_eq!((store.list(), store.folders()), before);
+    }
+
+    #[test]
+    fn a_reload_picks_up_another_writer_and_leaves_a_broken_file_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ours, theirs) = (ConnectionStore::open(tmp.path()).unwrap(), ConnectionStore::open(tmp.path()).unwrap());
+        theirs.save(named("a")).unwrap();
+        assert!(ours.list().is_empty());
+        ours.reload().unwrap();
+        assert_eq!(ours.get("a").map(|c| c.id), Some("a".into()));
+        // The same size, and likely the same modified time.
+        theirs.save(ConnectionConfig { name: "b".into(), ..theirs.get("a").unwrap() }).unwrap();
+        ours.reload().unwrap();
+        assert_eq!(ours.get("a").map(|c| c.name), Some("b".into()));
+        let path = tmp.path().join("connections.json");
+        fs::write(&path, "{broken").unwrap();
+        assert!(ours.reload().is_err());
+        assert_eq!(ours.list().len(), 1, "the state stays");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{broken", "and so does the file");
     }
 }

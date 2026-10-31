@@ -8,7 +8,7 @@ use futures_util::{StreamExt, pin_mut};
 use tokio_postgres::SimpleQueryMessage;
 use tokio_postgres::types::{Format, IsNull, ToSql, Type, to_sql_checked};
 
-use super::{PgLease, pg_error, type_name};
+use super::{PgLease, READ_ONLY_SETUP, pg_error, type_name};
 use crate::event::{ScriptEvent, Sink, StatementResult, emit};
 use crate::script::{
     self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows, touches_transaction,
@@ -179,8 +179,15 @@ impl StatementRunner for PgSession {
             StatementRun { sets: 1, error: Some(error) }
         };
 
+        // set_config() can turn read-only off, so each statement turns it on again, pipelined with the prepare.
+        let read_only = async {
+            if self.read_only() {
+                let _ = self.simple(READ_ONLY_SETUP).await;
+            }
+        };
         // The simple protocol reports no column types or origins, so prepare the statement to get them.
-        let (oids, origins): (Vec<u32>, Vec<Option<ColumnOrigin>>) = match self.lease.client().prepare(stmt).await {
+        let (_, prepared) = tokio::join!(read_only, self.lease.client().prepare(stmt));
+        let (oids, origins): (Vec<u32>, Vec<Option<ColumnOrigin>>) = match prepared {
             Ok(prepared) => prepared.columns().iter().map(|c| (c.type_().oid(), origin(c))).unzip(),
             Err(err) if err.as_db_error().is_some() || self.lease.client().is_closed() => {
                 self.send_notices(first_index, sink).await;

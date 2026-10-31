@@ -98,6 +98,11 @@
     "sslStrict": "Estricto (TDS 8.0)",
     "confirmChanges": "Preguntar antes de ejecutar cambios",
     "confirmChangesHint": "Para bases de datos de producción: pide confirmación para INSERT, UPDATE, DELETE, DDL y los guardados de la cuadrícula antes de ejecutarlos.",
+    "mcp": "Permitir asistentes de IA (MCP)",
+    "mcpHint": "Permite que apps de IA como Claude consulten esta base de datos.",
+    "mcpChanges": "Permitir cambios",
+    "mcpChangesHint": "Les permite ejecutar INSERT, UPDATE, DELETE y DDL.",
+    "copyMcpSetup": "Copiar configuración MCP",
     "hostRequired": "El servidor es obligatorio.",
     "usernameRequired": "El usuario es obligatorio.",
     "urlScheme": "La URL de la base de datos debe empezar por libsql://, https://, http://, wss:// o ws://.",
@@ -292,6 +297,7 @@
     "undo": "Deshacer"
   },
   "toast": {
+    "copiedMcpSetup": "Configuración MCP copiada al portapapeles",
     "historyDeleted": "Entrada del historial eliminada",
     "exportStopped_one": "Exportación detenida - {{fileName}} solo contiene la primera fila",
     "exportStopped_other": "Exportación detenida - {{fileName}} solo contiene las primeras {{count}} filas"

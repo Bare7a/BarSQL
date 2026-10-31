@@ -322,6 +322,12 @@ fn read_only_words(masked: &str, lex: &LexRules, rules: &ReadOnlyRules) -> bool 
     if rules.denied_first.contains(&first.as_str()) || !rules.allowed_first.contains(&first.as_str()) {
         return false;
     }
+    // A read-write transaction would undo a session the server keeps read-only.
+    if matches!(first.as_str(), "BEGIN" | "START")
+        && toks.windows(2).any(|pair| word(Some(&pair[0])) == Some("READ") && word(Some(&pair[1])) == Some("WRITE"))
+    {
+        return false;
+    }
     let write_after_cte = toks
         .windows(2)
         .any(|w| w[0].0 == Tok::Close && word(Some(&w[1])).is_some_and(|x| WRITES_AFTER_CTE.contains(&x)));
@@ -404,6 +410,48 @@ pub fn unbounded_writes(driver: &DriverType, sql: &str) -> Vec<&'static str> {
             verb
         })
         .collect()
+}
+
+// Transaction control. MCP mode refuses it: it could commit a preview, or begin read-write on a read-only session.
+pub fn controls_transactions(driver: &DriverType, sql: &str) -> bool {
+    let tsql = driver.dialect() == Some(SqlDialect::TSql);
+    interpretations(driver).iter().any(|lex| {
+        statement_chunks(sql, lex).into_iter().any(|chunk| {
+            let toks = tokens(&mask_exact(chunk, lex, true), lex);
+            let words: Vec<&str> = toks.iter().filter_map(|tok| word(Some(tok))).collect();
+            if tsql { tsql_controls(&words) } else { controls(&words) }
+        })
+    })
+}
+
+const TRANSACTION_SETTINGS: &[&str] = &[
+    "TRANSACTION",
+    "CHARACTERISTICS",
+    "AUTOCOMMIT",
+    "TRANSACTION_READ_ONLY",
+    "TX_READ_ONLY",
+    "DEFAULT_TRANSACTION_READ_ONLY",
+    "COMPLETION_TYPE",
+];
+
+fn controls(words: &[&str]) -> bool {
+    match words {
+        ["BEGIN" | "START" | "COMMIT" | "END" | "ROLLBACK" | "ABORT" | "SAVEPOINT" | "RELEASE" | "XA", ..] => true,
+        ["PREPARE", "TRANSACTION", ..] => true,
+        ["SET", settings @ ..] => settings.iter().any(|setting| TRANSACTION_SETTINGS.contains(setting)),
+        _ => false,
+    }
+}
+
+// T-SQL needs no separator between statements, so these count anywhere. BEGIN alone opens a block.
+fn tsql_controls(words: &[&str]) -> bool {
+    words.iter().any(|w| matches!(*w, "COMMIT" | "ROLLBACK"))
+        || words.windows(2).any(|pair| {
+            matches!(
+                pair,
+                ["BEGIN" | "SAVE", "TRAN" | "TRANSACTION" | "DISTRIBUTED"] | ["SET", "IMPLICIT_TRANSACTIONS"]
+            )
+        })
 }
 
 // With an argument only an inspection pragma reads. A quoted name is masked away, so it counts as a write.
@@ -682,5 +730,47 @@ mod tests {
         assert!(!is_read_only(&mysql, "SELECT 1 /*!; DELETE FROM t */"));
         assert!(!is_read_only(&mysql, "SELECT 1 /*M!100000 ; DELETE FROM t */"));
         assert!(is_read_only(&mysql, "SELECT /*!40001 SQL_NO_CACHE */ * FROM t"));
+    }
+
+    #[test]
+    fn a_read_write_transaction_is_not_read_only() {
+        let cases = [
+            ("BEGIN", true),
+            ("BEGIN READ ONLY", true),
+            ("START TRANSACTION READ ONLY", true),
+            ("SELECT 'READ WRITE'", true),
+            ("BEGIN READ WRITE", false),
+            ("start transaction read write", false),
+            ("BEGIN ISOLATION LEVEL SERIALIZABLE, READ WRITE", false),
+        ];
+        for driver in [DriverType::Postgres, DriverType::MySql] {
+            for (sql, want) in cases {
+                assert_eq!(is_read_only(&driver, sql), want, "{driver}: {sql}");
+            }
+        }
+    }
+
+    #[test]
+    fn transaction_control_is_found_in_any_statement() {
+        let cases: &[(DriverType, &str, bool)] = &[
+            (DriverType::Postgres, "SELECT 1", false),
+            (DriverType::Postgres, "SELECT 'COMMIT'", false),
+            (DriverType::Postgres, "SET search_path = app", false),
+            (DriverType::Postgres, "SELECT 1; COMMIT; SELECT 2", true),
+            (DriverType::Postgres, "begin read write", true),
+            (DriverType::Postgres, "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE", true),
+            (DriverType::Postgres, "PREPARE TRANSACTION 'x'", true),
+            (DriverType::MySql, "SET autocommit = 1", true),
+            (DriverType::MySql, "SET @@session.transaction_read_only = 0", true),
+            (DriverType::MySql, "XA START 'x'", true),
+            (DriverType::Sqlite, "END", true),
+            (DriverType::SqlServer, "BEGIN TRY SELECT 1 END TRY BEGIN CATCH SELECT 2 END CATCH", false),
+            (DriverType::SqlServer, "SELECT 1 COMMIT", true),
+            (DriverType::SqlServer, "BEGIN TRAN; UPDATE t SET a = 1", true),
+            (DriverType::SqlServer, "SET IMPLICIT_TRANSACTIONS ON", true),
+        ];
+        for (driver, sql, want) in cases {
+            assert_eq!(controls_transactions(driver, sql), *want, "{driver}: {sql}");
+        }
     }
 }

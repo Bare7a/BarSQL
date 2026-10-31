@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 
 mod backup;
+mod boxed;
 mod connections;
 mod edits;
 mod events;
@@ -8,6 +9,7 @@ mod files;
 mod import;
 mod info;
 mod jobs;
+pub mod mcp;
 mod runs;
 mod stores;
 mod structure;
@@ -37,8 +39,12 @@ pub use files::{find_sqlite_arg, is_sqlite_file, path_from_file_url, sqlite_file
 pub use import::{CsvImportRequest, ImportResult, SqlImportRequest};
 pub use info::{AppInfo, PathDefaults, app_info, path_defaults};
 pub use runs::BufferedResult;
+pub(crate) use runs::ChangeOutcome;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Pool key suffix of the writable engine MCP changes run on.
+pub(crate) const CHANGE_ENGINE: &str = "\0change";
 
 // Stack for the runtime's workers. A debug build gives every future a match arm makes a stack slot of its own, and
 // the engine dispatch makes one per engine, so deep calls can outgrow tokio's default 2 MiB.
@@ -61,6 +67,7 @@ struct Inner {
     pending_file: Mutex<Option<String>>,
     // Per Unsaved store, set while its writes fail, so a run of failures is reported once.
     unsaved: [AtomicBool; 3],
+    mcp: bool,
 }
 
 #[derive(Clone)]
@@ -71,6 +78,15 @@ struct PooledEngine {
 
 impl BarApp {
     pub fn open(data_dir: &Path, runtime: tokio::runtime::Handle) -> std::io::Result<Self> {
+        Self::open_as(data_dir, runtime, false)
+    }
+
+    // For `BarSQL --mcp`: shared connections only, read-only, and no saving, as the app may use the same folder.
+    pub(crate) fn open_for_mcp(data_dir: &Path, runtime: tokio::runtime::Handle) -> std::io::Result<Self> {
+        Self::open_as(data_dir, runtime, true)
+    }
+
+    fn open_as(data_dir: &Path, runtime: tokio::runtime::Handle, mcp: bool) -> std::io::Result<Self> {
         install_default_provider();
         let app = Self {
             inner: Arc::new(Inner {
@@ -83,6 +99,7 @@ impl BarApp {
                 events: async_channel::unbounded(),
                 pending_file: Mutex::new(None),
                 unsaved: Default::default(),
+                mcp,
             }),
         };
         app.spawn_idle_sweep();
@@ -115,12 +132,20 @@ impl BarApp {
         let _ = self.inner.events.0.try_send(event);
     }
 
+    // Every connect and run goes through here, so MCP mode's limits can't be bypassed.
     pub(crate) fn config(&self, connection_id: &str) -> Result<ConnectionConfig, QueryError> {
-        self.inner.stores.connections.get(connection_id).ok_or_else(|| QueryError::message("connection not found"))
+        let cfg = self
+            .inner
+            .stores
+            .connections
+            .get(connection_id)
+            .filter(|cfg| cfg.mcp || !self.inner.mcp)
+            .ok_or_else(|| QueryError::message("connection not found"))?;
+        Ok(if self.inner.mcp { for_mcp(cfg) } else { cfg })
     }
 
     // Rolls back open transactions before the pools close. All tabs at once, as in close_tab_sessions.
-    pub async fn shutdown(&self) {
+    pub(crate) async fn shutdown_inner(&self) {
         self.inner.jobs.cancel_all();
         let tab_ids = self.inner.tabs.ids();
         futures_util::future::join_all(tab_ids.iter().map(|tab_id| self.cleanup_tab(tab_id))).await;
@@ -130,6 +155,13 @@ impl BarApp {
             engine.close().await;
         }
     }
+}
+
+// An assistant only reads, and changes data only where allowed on a connection that isn't read-only.
+pub(crate) fn for_mcp(mut cfg: ConnectionConfig) -> ConnectionConfig {
+    cfg.mcp_changes &= !cfg.read_only;
+    cfg.read_only = true;
+    cfg
 }
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

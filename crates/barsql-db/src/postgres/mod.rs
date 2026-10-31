@@ -29,6 +29,8 @@ pub(crate) const MAX_CONNECTIONS: usize = 10;
 const MAX_IDLE: usize = 2;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const SESSION_SETUP: &str = "SET DateStyle = 'ISO'; SET extra_float_digits = 3; SET bytea_output = 'hex'";
+// Makes the server refuse writes the SQL check can't see, like one inside a function.
+const READ_ONLY_SETUP: &str = "SET default_transaction_read_only = on";
 
 #[derive(Debug, Clone)]
 pub struct PgConnectOptions {
@@ -236,6 +238,9 @@ impl PgEngine {
             .await
             .map_err(|_| QueryError::message("failed to connect: timeout"))??;
         client.batch_execute(SESSION_SETUP).await.map_err(|err| pg_error(&err))?;
+        if self.options.read_only {
+            client.batch_execute(READ_ONLY_SETUP).await.map_err(|err| pg_error(&err))?;
+        }
         let cancel = client.cancel_token();
         Ok(PgConn { client, cancel, notices })
     }

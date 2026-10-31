@@ -56,8 +56,9 @@ mod script {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
-    use barsql_core::{ConnectionConfig, DriverType};
+    use barsql_core::{ConnectionConfig, DriverType, StructColumn, StructIndex};
     use barsql_sql::lang::TxnControl;
+    use barsql_sql::structure::{ColumnRow, Draft, Row};
     use gpui_kit::component::{Root, WindowExt};
     use gpui_kit::*;
     use image::DynamicImage;
@@ -95,6 +96,14 @@ INSERT INTO categories
   ('Kotlin', 'Talk about anything related to Kotlin.', '{\"allowLinks\": true}')
 RETURNING *;
 ";
+    const CHART_SQL: &str = "SELECT date_trunc('month', created_at)::date AS month,
+       COUNT(*) AS posts,
+       COUNT(*) FILTER (WHERE score >= 500) AS popular,
+       COUNT(*) FILTER (WHERE score >= 900) AS top_rated
+FROM posts
+WHERE created_at >= '2025-01-01' AND created_at < '2026-06-01'
+GROUP BY 1
+ORDER BY 1;";
     // Column indexes in `public.users`.
     const USERNAME: usize = 1;
     const DISPLAY_NAME: usize = 3;
@@ -172,7 +181,9 @@ RETURNING *;
             let deadline = Instant::now() + WAIT;
             loop {
                 self.draw(cx).await;
+                // What it waited for may have arrived after that frame, so it gets one of its own before use.
                 if self.act(cx, &check)? {
+                    self.draw(cx).await;
                     return Ok(());
                 }
                 if Instant::now() > deadline {
@@ -331,6 +342,30 @@ RETURNING *;
 
     fn query_running(workspace: &Entity<Workspace>, cx: &App) -> bool {
         workspace.read(cx).query_tab().is_some_and(|tab| tab.read(cx).is_running())
+    }
+
+    // A slug column with a unique index, a longer title and is_locked dropped, typed as the catalog spells them.
+    fn stage_posts(draft: &mut Draft) {
+        let mut text = String::new();
+        for row in &mut draft.columns {
+            match row.column.name.as_str() {
+                "title" => {
+                    text = row.column.data_type.clone();
+                    row.column.data_type = text.replace("255", "300");
+                }
+                "is_locked" => row.dropped = true,
+                _ => {}
+            }
+        }
+        let slug = StructColumn { name: "slug".into(), data_type: text, nullable: true, ..Default::default() };
+        draft.columns.push(ColumnRow { origin: None, dropped: false, column: slug, primary: false });
+        let index = StructIndex {
+            name: "posts_slug_idx".into(),
+            columns: vec!["slug".into()],
+            unique: true,
+            ..Default::default()
+        };
+        draft.indexes.push(Row::added(index));
     }
 
     fn new_connection() -> ConnectionConfig {
@@ -642,13 +677,93 @@ RETURNING *;
         robot.capture(cx, &shot(11)).await?;
         robot.close_dialog(cx).await?;
 
-        // 12: light theme with the View menu open.
+        // 12: posts in a Structure tab, with changes staged in its columns and indexes.
+        robot.workspace(cx, |workspace, window, cx| workspace.set_json_open(false, window, cx))?;
+        robot.panel_widths(cx).await?;
+        robot.workspace(cx, |workspace, window, cx| {
+            let forum = workspace.sidebar().read(cx).connection("forum").cloned().ok_or("no forum connection")?;
+            workspace.open_structure(forum, "public".into(), Some("posts".into()), window, cx);
+            Ok::<(), String>(())
+        })??;
+        robot
+            .settle(cx, "the posts structure", |workspace, _, cx| {
+                workspace.read(cx).structure_tab().is_some_and(|tab| tab.read(cx).editable())
+            })
+            .await?;
+        robot.act(cx, |workspace, window, cx| {
+            let tab = workspace.read(cx).structure_tab()?;
+            tab.update(cx, |tab, cx| tab.stage(stage_posts, window, cx));
+            Some(())
+        })?;
+        robot
+            .settle(cx, "the staged changes", |workspace, _, cx| {
+                workspace.read(cx).structure_tab().is_some_and(|tab| tab.read(cx).has_changes())
+            })
+            .await?;
+        robot.capture(cx, &shot(12)).await?;
+        robot.act(cx, |workspace, window, cx| {
+            let tab = workspace.read(cx).structure_tab()?;
+            tab.update(cx, |tab, cx| tab.revert(window, cx));
+            Some(())
+        })?;
+        robot.workspace(cx, |workspace, window, cx| workspace.close_active(window, cx))?;
+
+        // 13: the public schema's ER diagram, zoomed in, with posts' keys lit.
+        robot.act(cx, |workspace, _, cx| {
+            let tree = workspace.read(cx).sidebar().read(cx).panels().0;
+            tree.update(cx, |tree, cx| tree.open_er_diagram("public".into(), cx));
+        })?;
+        robot
+            .settle(cx, "the diagram", |workspace, _, cx| {
+                workspace.read(cx).diagram_tab().is_some_and(|diagram| diagram.read(cx).fitted())
+            })
+            .await?;
+        robot.act(cx, |workspace, window, cx| {
+            let diagram = workspace.read(cx).diagram_tab()?;
+            diagram.update(cx, |diagram, cx| {
+                diagram.select_table("posts", cx);
+                diagram.set_zoom(1.75, window, cx);
+            });
+            Some(())
+        })?;
+        robot.capture(cx, &shot(13)).await?;
+        robot.workspace(cx, |workspace, window, cx| workspace.close_active(window, cx))?;
+
+        // 14: posts a month as grouped bars, beside the popular and top-rated ones.
+        robot.open_query(cx, "Query 3 · Forum", CHART_SQL).await?;
+        robot.act(cx, |workspace, window, cx| {
+            let tab = workspace.read(cx).query_tab()?;
+            tab.update(cx, |tab, cx| tab.run_all(window, cx));
+            Some(())
+        })?;
+        robot
+            .settle(cx, "the monthly posts", |workspace, _, cx| {
+                !query_running(workspace, cx)
+                    && workspace.read(cx).active_grid(cx).is_some_and(|grid| grid.read(cx).rows_shown() == 17)
+            })
+            .await?;
+        robot.act(cx, |workspace, window, cx| {
+            query_tab::set_results_share(62., cx);
+            let results = workspace.read(cx).query_tab()?.read(cx).results();
+            results.update(cx, |results, cx| results.toggle_chart(window, cx));
+            let chart = results.read(cx).chart()?;
+            chart.update(cx, |chart, cx| chart.plot_bars(0, &[1, 2, 3], cx));
+            Some(())
+        })?;
+        robot.capture(cx, &shot(14)).await?;
+        robot.act(cx, |_, _, cx| query_tab::set_results_share(40., cx))?;
+        robot.workspace(cx, |workspace, window, cx| workspace.close_active(window, cx))?;
+
+        // 15: light theme with the View menu open, over the users table.
+        robot.activate(cx, "users").await?;
+        robot.workspace(cx, |workspace, window, cx| workspace.set_json_open(true, window, cx))?;
+        robot.panel_widths(cx).await?;
         robot.act(cx, |_, window, cx| theme::set_choice(theme::ThemeChoice::Light, window, cx))?;
         robot.draw(cx).await;
         // File is at (44, 17), past the bar's padding, logo and gap. The keys then open View > Theme.
         robot.click(cx, point(px(44.), px(17.)), Modifiers::none(), 1).await;
         robot.keys(cx, "right right down down right").await?;
-        robot.capture(cx, &shot(12)).await?;
+        robot.capture(cx, &shot(15)).await?;
         Ok(())
     }
 }

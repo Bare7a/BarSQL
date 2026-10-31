@@ -1,20 +1,46 @@
 use std::time::Instant;
 
 use barsql_core::clock::now_rfc3339;
-use barsql_core::{DriverType, HistoryEntry, QueryError, SqlDialect, TableDataRequest, Value};
+use barsql_core::{ConnectionConfig, DriverType, HistoryEntry, QueryError, SqlDialect, TableDataRequest, Value};
 use barsql_db::{Cancel, ScriptEvent, Session};
 use barsql_sql::plan::{NOTE_ROLLED_BACK, NOTE_TAB_TRANSACTION};
 use barsql_sql::{
-    ExplainStrategy, QueryPlan, ServerVersion, assert_read_only, build_explain, is_read_only, parse_plan,
-    single_statement, split_statement_texts,
+    ExplainStrategy, QueryPlan, ServerVersion, assert_read_only, build_explain, controls_transactions, first_keyword,
+    is_read_only, parse_plan, single_statement, split_statement_texts, strip_leading_comments,
 };
+use serde::Serialize;
 
-use crate::BarApp;
 use crate::events::{RunEvent, RunHandle, RunResult};
 use crate::stores::history_entry;
 use crate::tabs::Slot;
+use crate::{BarApp, CHANGE_ENGINE};
 
 const RUN_CHANNEL: usize = 16;
+const NO_TRANSACTIONS: &str =
+    "leave out BEGIN, COMMIT, ROLLBACK and transaction settings: BarSQL runs each call in its own session";
+// Statements MySQL commits at once, with what came before them. A CALL may run any of them.
+const COMMITS_AT_ONCE: &[&str] = &[
+    "ALTER",
+    "ANALYZE",
+    "CACHE",
+    "CALL",
+    "CHECK",
+    "CREATE",
+    "DROP",
+    "FLUSH",
+    "GRANT",
+    "INSTALL",
+    "LOAD",
+    "LOCK",
+    "OPTIMIZE",
+    "RENAME",
+    "REPAIR",
+    "RESET",
+    "REVOKE",
+    "TRUNCATE",
+    "UNINSTALL",
+    "UNLOCK",
+];
 
 // Only used by the tests.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -28,17 +54,29 @@ pub struct BufferedResult {
     pub duration_ms: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeOutcome {
+    pub statements: usize,
+    pub affected_rows: i64,
+    pub committed: bool,
+}
+
 impl BarApp {
     pub(crate) fn guard_execute(&self, connection_id: &str, sql: &str) -> Result<DriverType, QueryError> {
         let cfg = self.config(connection_id)?;
         if cfg.read_only {
             assert_read_only(&cfg.driver, sql).map_err(QueryError::message)?;
         }
+        // An assistant's BEGIN or COMMIT could only get around the read-only session.
+        if self.inner.mcp && controls_transactions(&cfg.driver, sql) {
+            return Err(QueryError::message(NO_TRANSACTIONS));
+        }
         Ok(cfg.driver)
     }
 
     // Runs on the tab's own session and ends with Done. A new run cancels the tab's previous one.
-    pub async fn execute_query_stream(
+    pub(crate) async fn execute_query_stream_inner(
         &self,
         connection_id: &str,
         tab_id: &str,
@@ -145,7 +183,7 @@ impl BarApp {
     }
 
     // Always one result set, with the primary keys attached for editing.
-    pub async fn query_table_stream(
+    pub(crate) async fn query_table_stream_inner(
         &self,
         connection_id: &str,
         tab_id: &str,
@@ -229,7 +267,7 @@ impl BarApp {
         Ok(())
     }
 
-    pub async fn begin_transaction(&self, connection_id: &str, tab_id: &str) -> Result<(), QueryError> {
+    pub(crate) async fn begin_transaction_inner(&self, connection_id: &str, tab_id: &str) -> Result<(), QueryError> {
         if tab_id.is_empty() {
             return Err(QueryError::message("tab id is required"));
         }
@@ -248,11 +286,11 @@ impl BarApp {
         result
     }
 
-    pub async fn commit_transaction(&self, tab_id: &str) -> Result<(), QueryError> {
+    pub(crate) async fn commit_transaction_inner(&self, tab_id: &str) -> Result<(), QueryError> {
         self.finish_transaction(tab_id, true).await
     }
 
-    pub async fn rollback_transaction(&self, tab_id: &str) -> Result<(), QueryError> {
+    pub(crate) async fn rollback_transaction_inner(&self, tab_id: &str) -> Result<(), QueryError> {
         self.finish_transaction(tab_id, false).await
     }
 
@@ -279,7 +317,7 @@ impl BarApp {
 
     // A measured plan of a write runs in a transaction that is always rolled back. A tab with an open
     // transaction explains inside it instead.
-    pub async fn explain_query(
+    pub(crate) async fn explain_query_inner(
         &self,
         connection_id: &str,
         tab_id: &str,
@@ -310,7 +348,12 @@ impl BarApp {
     }
 
     // Sidebar-built SQL such as a rename, drop or truncate. Runs on a session of its own.
-    pub async fn execute_statement(&self, connection_id: &str, job: &str, sql: &str) -> Result<(), QueryError> {
+    pub(crate) async fn execute_statement_inner(
+        &self,
+        connection_id: &str,
+        job: &str,
+        sql: &str,
+    ) -> Result<(), QueryError> {
         let driver = self.guard_execute(connection_id, sql)?;
         let (job_id, cancel) = self.inner.jobs.start(job, connection_id);
         let started = Instant::now();
@@ -327,8 +370,102 @@ impl BarApp {
         result
     }
 
+    // Lets the AI app check a change before asking the user about it.
+    pub(crate) fn check_change(&self, connection_id: &str, sql: &str, preview: bool) -> Result<(), QueryError> {
+        self.plan_change(connection_id, sql, preview).map(|_| ())
+    }
+
+    // MCP mode: runs on a writable engine of its own, in one transaction where the database has them.
+    pub(crate) async fn apply_change(
+        &self,
+        connection_id: &str,
+        job: &str,
+        sql: &str,
+        preview: bool,
+        confirmed: bool,
+    ) -> Result<ChangeOutcome, QueryError> {
+        let (cfg, statements) = self.plan_change(connection_id, sql, preview)?;
+        if cfg.confirm_changes && !confirmed {
+            return Err(QueryError::message("this connection asks before every change"));
+        }
+        let transactional = cfg.driver.capabilities().interactive_transactions;
+        let (job_id, cancel) = self.inner.jobs.start(job, connection_id);
+        let result = async {
+            let key = format!("{connection_id}{CHANGE_ENGINE}");
+            let mut session = self.pooled_engine(&key, cfg.clone()).await?.session().await?;
+            if transactional {
+                session.begin().await?;
+            }
+            let mut affected_rows = 0;
+            for (ix, stmt) in statements.iter().enumerate() {
+                match session.buffered(stmt, &cancel).await {
+                    Ok(done) => affected_rows += done.summary.map_or(0, |summary| summary.affected_rows.max(0)),
+                    Err(error) => {
+                        if transactional {
+                            let _ = session.rollback().await;
+                        }
+                        return Err(left_applied(error, &cfg.driver, &statements[..ix], Some(stmt)));
+                    }
+                }
+            }
+            match (transactional, preview) {
+                (true, true) => session.rollback().await?,
+                (true, false) => {
+                    session.commit().await.map_err(|error| left_applied(error, &cfg.driver, &statements, None))?
+                }
+                _ => {}
+            }
+            Ok(ChangeOutcome { statements: statements.len(), affected_rows, committed: !preview })
+        }
+        .await;
+        self.inner.jobs.end(job, job_id);
+        result
+    }
+
+    fn plan_change(
+        &self,
+        connection_id: &str,
+        sql: &str,
+        preview: bool,
+    ) -> Result<(ConnectionConfig, Vec<String>), QueryError> {
+        let mut cfg = self.config(connection_id)?;
+        if !self.inner.mcp || !cfg.mcp_changes {
+            return Err(QueryError::message(
+                "this connection doesn't let AI assistants change data; the user can allow it in BarSQL",
+            ));
+        }
+        // Safe: for_mcp() clears mcp_changes on read-only connections.
+        cfg.read_only = false;
+        // A COMMIT in it would end the transaction early, preview or not.
+        if controls_transactions(&cfg.driver, sql) {
+            return Err(QueryError::message(NO_TRANSACTIONS));
+        }
+        let statements = split_statement_texts(&cfg.driver, sql);
+        // ATTACH could reach any file on this machine.
+        if cfg.driver == DriverType::Sqlite
+            && statements
+                .iter()
+                .any(|stmt| matches!(first_keyword(strip_leading_comments(stmt)).as_str(), "ATTACH" | "DETACH"))
+        {
+            return Err(QueryError::message("ATTACH and DETACH are refused: a change stays in this database"));
+        }
+        if preview && !cfg.driver.capabilities().interactive_transactions {
+            return Err(QueryError::message("this database can't roll back, so a change can't be previewed"));
+        }
+        if preview && statements.iter().any(|stmt| commits_at_once(&cfg.driver, stmt)) {
+            return Err(QueryError::message(
+                "this database commits schema changes at once, so they can't be previewed",
+            ));
+        }
+        Ok((cfg, statements))
+    }
+
     // Test support. Runs on a fresh session and returns the last result set.
-    pub async fn execute_query(&self, connection_id: &str, sql: &str) -> Result<BufferedResult, QueryError> {
+    pub(crate) async fn execute_query_inner(
+        &self,
+        connection_id: &str,
+        sql: &str,
+    ) -> Result<BufferedResult, QueryError> {
         let driver = self.guard_execute(connection_id, sql)?;
         let started = Instant::now();
         let result = async {
@@ -354,6 +491,34 @@ impl BarApp {
         self.record_history(connection_id, sql, duration, result.as_ref().err());
         result
     }
+}
+
+fn commits_at_once(driver: &DriverType, stmt: &str) -> bool {
+    !driver.capabilities().transactional_ddl
+        && COMMITS_AT_ONCE.contains(&first_keyword(strip_leading_comments(stmt)).as_str())
+}
+
+// Notes what the rollback couldn't undo; `failing` is None for a failed COMMIT. A failing schema statement may or may
+// not have committed what came before it.
+fn left_applied(mut error: QueryError, driver: &DriverType, done: &[String], failing: Option<&String>) -> QueryError {
+    let committed = done.iter().rposition(|stmt| commits_at_once(driver, stmt)).map_or(0, |last| last + 1);
+    let failing_commits = failing.is_some_and(|stmt| commits_at_once(driver, stmt));
+    let (kept, sure) = match (driver.capabilities().interactive_transactions, failing_commits) {
+        (false, _) => (done.len(), true),
+        (true, true) => (done.len(), committed == done.len()),
+        (true, false) => (committed, true),
+    };
+    let stay = match (sure, kept) {
+        (false, _) => "may stay",
+        (true, 1) => "stays",
+        (true, _) => "stay",
+    };
+    match kept {
+        0 => {}
+        1 => error.message += &format!("; the first statement {stay} applied"),
+        n => error.message += &format!("; the first {n} statements {stay} applied"),
+    }
+    error
 }
 
 async fn explain_in(
@@ -417,4 +582,36 @@ async fn plan_of(
     let mut plan = parse_plan(driver, stmt, &strategy.display_sql(), analyze, &rows).map_err(QueryError::message)?;
     plan.duration_ms = started.elapsed().as_millis() as i64;
     Ok(plan)
+}
+
+#[cfg(test)]
+mod tests {
+    use barsql_core::{DriverType, QueryError};
+
+    use super::left_applied;
+
+    fn left(driver: DriverType, statements: &[&str]) -> String {
+        let statements: Vec<String> = statements.iter().map(|stmt| stmt.to_string()).collect();
+        let (failing, done) = statements.split_last().unwrap();
+        left_applied(QueryError::message("failed"), &driver, done, Some(failing)).message
+    }
+
+    #[test]
+    fn a_failed_change_says_what_its_rollback_left_applied() {
+        let ddl_then_bad = ["CREATE TABLE a (id int)", "INSERT INTO a VALUES (1)", "INSERT INTO missing VALUES (1)"];
+        assert_eq!(left(DriverType::Postgres, &ddl_then_bad), "failed");
+        assert_eq!(left(DriverType::MySql, &ddl_then_bad), "failed; the first statement stays applied");
+        let no_commit = ["SET @x = 1", "INSERT INTO a VALUES (@x)", "SELECT 1", "INSERT INTO missing VALUES (1)"];
+        assert_eq!(left(DriverType::MySql, &no_commit), "failed");
+        let failing_ddl = ["INSERT INTO a VALUES (1)", "ALTER TABLE missing ADD c int"];
+        assert_eq!(left(DriverType::MySql, &failing_ddl), "failed; the first statement may stay applied");
+        let ddl_only = ["CREATE TABLE a (id int)", "CREATE TABLE b (id int)", "CREATE TABLE a (id int)"];
+        assert_eq!(left(DriverType::MySql, &ddl_only), "failed; the first 2 statements stay applied");
+        let no_transactions =
+            ["INSERT INTO a VALUES (1)", "INSERT INTO a VALUES (2)", "INSERT INTO missing VALUES (1)"];
+        assert_eq!(left(DriverType::Turso, &no_transactions), "failed; the first 2 statements stay applied");
+        let done = ["CREATE TABLE a (id int)".to_string(), "INSERT INTO a VALUES (1)".to_string()];
+        let commit = left_applied(QueryError::message("failed"), &DriverType::MySql, &done, None);
+        assert_eq!(commit.message, "failed; the first statement stays applied");
+    }
 }

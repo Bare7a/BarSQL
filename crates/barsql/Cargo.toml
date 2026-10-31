@@ -28,6 +28,9 @@ barsql-ui.workspace = true
 [build-dependencies]
 embed-resource = "3"
 
+[dev-dependencies]
+tempfile.workspace = true
+
 # Linux packages. cargo-deb resolves asset paths from this folder, cargo-generate-rpm from the repo root.
 [package.metadata.deb]
 maintainer = "Bare7a"
