@@ -133,9 +133,13 @@ impl BarApp {
             let mut reported = false;
             while let Ok(event) = inner_rx.recv().await {
                 let event = match event {
-                    ScriptEvent::Meta { result_index, columns } => {
-                        RunEvent::Meta { result_index, columns, schema_name: String::new(), table_name: String::new() }
-                    }
+                    ScriptEvent::Meta { result_index, columns, statement } => RunEvent::Meta {
+                        result_index,
+                        columns,
+                        statement,
+                        schema_name: String::new(),
+                        table_name: String::new(),
+                    },
                     ScriptEvent::Rows { result_index, chunk } => RunEvent::Rows { result_index, chunk },
                     ScriptEvent::Messages { result_index, messages, dropped } => {
                         RunEvent::Messages { result_index, messages, dropped }
@@ -235,9 +239,10 @@ impl BarApp {
         let forward = async {
             while let Ok(event) = inner_rx.recv().await {
                 let event = match event {
-                    ScriptEvent::Meta { result_index, columns } => RunEvent::Meta {
+                    ScriptEvent::Meta { result_index, columns, statement } => RunEvent::Meta {
                         result_index,
                         columns,
+                        statement,
                         schema_name: req.schema.clone(),
                         table_name: req.table.clone(),
                     },

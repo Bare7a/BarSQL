@@ -172,7 +172,7 @@ async fn plan_set<R: StatementRunner>(
         let mut plan: Option<(usize, PlanRows)> = None;
         while let Ok(event) = rx.recv().await {
             match event {
-                ScriptEvent::Meta { result_index, columns }
+                ScriptEvent::Meta { result_index, columns, .. }
                     if plan.is_none() && columns.iter().any(|c| c.name == column) =>
                 {
                     let names = columns.iter().map(|c| c.name.clone()).collect();
@@ -296,7 +296,8 @@ async fn run_plan<R: StatementRunner>(
             .await;
         }
         Err(_) => {
-            emit(sink, ScriptEvent::Meta { result_index: index, columns: res.columns.clone() }).await;
+            let meta = ScriptEvent::Meta { result_index: index, columns: res.columns.clone(), statement: stmt.into() };
+            emit(sink, meta).await;
             let summary = res.summary.clone();
             if res.rows() > 0 {
                 emit(sink, ScriptEvent::Rows { result_index: index, chunk: Arc::new(res.chunk) }).await;

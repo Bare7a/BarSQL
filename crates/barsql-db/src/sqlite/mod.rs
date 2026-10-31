@@ -330,7 +330,7 @@ fn stream_statement(
             origin: origin(&prepared, i),
         })
         .collect();
-    emit(ScriptEvent::Meta { result_index: index, columns: columns.clone() });
+    emit(ScriptEvent::Meta { result_index: index, columns: columns.clone(), statement: stmt.into() });
     let time_columns: Vec<bool> = columns.iter().map(|c| values::is_time_type(&c.type_name)).collect();
     let mut rows = prepared.raw_query();
     let mut builder = ChunkBuilder::new(width, batch_rows.min(1024));

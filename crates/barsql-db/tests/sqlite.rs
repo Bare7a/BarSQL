@@ -113,6 +113,25 @@ async fn result_columns_name_the_table_columns_they_come_from() {
 }
 
 #[tokio::test]
+async fn each_results_columns_come_with_its_statement() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("statements.db"), false).await;
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)").await;
+    let mut session = engine.session().await.unwrap();
+    let (tx, rx) = async_channel::unbounded();
+    let script = ["SELECT id FROM t".to_string(), "SELECT 1 AS one".to_string()];
+    session.run_script(&script, &tx, &Cancel::new()).await.unwrap();
+    drop(tx);
+    let named: Vec<(usize, String)> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            ScriptEvent::Meta { result_index, statement, .. } => Some((result_index, statement)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(named, [(0, script[0].clone()), (1, script[1].clone())]);
+}
+
+#[tokio::test]
 async fn connecting_needs_a_file_path() {
     let err = Engine::connect(&ConnectionConfig { driver: DriverType::Sqlite, ..Default::default() }).await.err();
     assert!(err.is_some_and(|e| e.message.contains("file path")));

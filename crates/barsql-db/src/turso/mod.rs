@@ -353,7 +353,10 @@ impl Streaming<'_> {
             .collect();
         self.time_columns = columns.iter().map(|c| values::is_time_type(&c.type_name)).collect();
         self.builder = ChunkBuilder::new(columns.len(), self.batch_rows.min(1024));
-        let _ = self.sink.send(ScriptEvent::Meta { result_index: self.index, columns: columns.clone() }).await;
+        let _ = self
+            .sink
+            .send(ScriptEvent::Meta { result_index: self.index, columns: columns.clone(), statement: self.stmt.into() })
+            .await;
         self.columns = Some(columns);
     }
 

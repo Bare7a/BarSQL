@@ -941,9 +941,9 @@ impl Workspace {
                         this.sync_json_panel(window, cx);
                     }
                 }
-                QueryTabEvent::OpenTable { schema, table } => {
+                QueryTabEvent::OpenTable { schema, table, filter } => {
                     let connection = view.read(cx).connection.clone();
-                    this.open_table(connection, schema.clone(), table.clone(), None, window, cx);
+                    this.open_table(connection, schema.clone(), table.clone(), filter.clone(), window, cx);
                 }
             }),
         ];

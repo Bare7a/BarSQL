@@ -604,28 +604,17 @@ impl TableTab {
         }
     }
 
-    // SQLite leaves the column empty for a reference to the primary key, so look it up on the target.
     fn open_foreign_key(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.grid.read(cx);
         let Some(name) = state.set().columns.get(column).map(|c| c.name.clone()) else { return };
         let Some((table, target)) = self.foreign.get(&name).cloned() else { return };
-        let value = state.shown(row, column);
-        let driver = self.connection.driver.clone();
+        let value = OwnedCell::new(state.shown(row, column));
         let schema = self.schema.clone();
-        if !target.is_empty() {
-            let filter = foreign_key_filter(&target, value, &driver);
-            cx.emit(TableTabEvent::OpenTable { schema, table, filter });
-            return;
-        }
-        let value = OwnedCell::new(value);
-        let load = schema::columns(&self.connection.id, &schema, &table, cx);
+        let filter = referenced_row(&self.connection, &schema, &table, &target, value, cx);
         cx.spawn_in(window, async move |this, cx| {
-            let key = load.await.ok().and_then(|columns| columns.iter().find(|c| c.is_primary).map(|c| c.name.clone()));
-            this.update(cx, |_, cx| match key {
-                Some(key) => {
-                    let filter = foreign_key_filter(&key, value.cell(), &driver);
-                    cx.emit(TableTabEvent::OpenTable { schema, table, filter });
-                }
+            let filter = filter.await;
+            this.update(cx, |_, cx| match filter {
+                Some(filter) => cx.emit(TableTabEvent::OpenTable { schema, table, filter }),
                 None => toast::error(t(cx, "tableView.foreignKeyUnresolved"), cx),
             })
             .ok();
@@ -903,6 +892,28 @@ impl Render for TableTab {
             .child(self.filter_bar(window, cx))
             .child(div().flex_1().min_h_0().child(self.body(cx)))
             .child(self.footer(cx))
+    }
+}
+
+// The filter that finds the row `value` points at in `table`, by its `column`. SQLite leaves the column empty for a
+// reference to the primary key, so that is looked up on the target. None when it has none.
+pub(crate) fn referenced_row(
+    connection: &ConnectionConfig,
+    schema: &str,
+    table: &str,
+    column: &str,
+    value: OwnedCell,
+    cx: &mut App,
+) -> impl Future<Output = Option<String>> + use<> {
+    let driver = connection.driver.clone();
+    let load = column.is_empty().then(|| schema::columns(&connection.id, schema, table, cx));
+    let column = column.to_string();
+    async move {
+        let column = match load {
+            Some(load) => load.await.ok()?.iter().find(|c| c.is_primary)?.name.clone(),
+            None => column,
+        };
+        Some(foreign_key_filter(&column, value.cell(), &driver))
     }
 }
 

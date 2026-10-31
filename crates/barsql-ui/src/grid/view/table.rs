@@ -133,6 +133,7 @@ impl Grid {
         self.sorting = None;
         self.selection.clear();
         self.editing = None;
+        self.numbered = 0;
         if !same {
             self.hidden.clear();
             self.columns = (0..count).collect();
@@ -223,8 +224,9 @@ impl Grid {
         }
     }
 
+    // A query result that takes no edits only carries its table's keys, so the keys go on as from a plain result.
     pub(super) fn table_event(&mut self, event: GridEvent, cx: &mut Context<Self>) {
-        if self.overlay.is_none() {
+        if self.overlay.as_ref().is_none_or(|overlay| overlay.local && !overlay.editable) {
             cx.propagate();
             return;
         }
@@ -413,10 +415,8 @@ impl Grid {
         let col = self.columns.iter().position(|&c| c == editing.column)?;
         let m = &self.metrics;
         let scroll = self.scroll.position();
-        let origin = point(
-            m.gutter_width + self.col_x[col] - scroll.x,
-            m.header_height + m.row_height * display as f32 - scroll.y,
-        );
+        let origin =
+            point(m.gutter_width + self.col_x[col] - scroll.x, self.row_top(display) - self.scroll.grid().top());
         let size = size(self.col_x[col + 1] - self.col_x[col], m.row_height);
         Some((editing.input.clone(), Bounds::new(origin, size)))
     }

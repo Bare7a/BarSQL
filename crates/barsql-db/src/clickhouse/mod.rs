@@ -368,7 +368,10 @@ impl Streaming<'_> {
         self.kinds = columns.iter().map(|c| types::kind(&c.type_name)).collect();
         self.builder = ChunkBuilder::new(columns.len(), self.batch_rows.min(1024));
         let columns: Arc<[ColumnMeta]> = columns.into();
-        let _ = self.sink.send(ScriptEvent::Meta { result_index: self.index, columns: columns.clone() }).await;
+        let _ = self
+            .sink
+            .send(ScriptEvent::Meta { result_index: self.index, columns: columns.clone(), statement: self.stmt.into() })
+            .await;
         self.columns = Some(columns);
     }
 

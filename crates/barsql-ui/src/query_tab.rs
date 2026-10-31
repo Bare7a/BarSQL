@@ -126,8 +126,8 @@ pub enum QueryTabEvent {
     RunFinished,
     // For the JSON row panel.
     FocusedRowChanged,
-    // Go to Definition on a table, or on a column of it.
-    OpenTable { schema: String, table: String },
+    // Go to Definition on a table, or on a column of it, or a foreign key's jump to the row it references.
+    OpenTable { schema: String, table: String, filter: Option<String> },
 }
 
 pub struct QueryTab {
@@ -192,7 +192,7 @@ impl QueryTab {
             // A table link opens the table. Anything else is a place in this text.
             lsp.show_document = Some(Rc::new(move |params: &ShowDocumentParams, _: &mut Window, cx: &mut App| {
                 let Some((schema, table)) = linked_table(&params.uri) else { return false };
-                this.update(cx, |_, cx| cx.emit(QueryTabEvent::OpenTable { schema, table })).is_ok()
+                this.update(cx, |_, cx| cx.emit(QueryTabEvent::OpenTable { schema, table, filter: None })).is_ok()
             }));
         });
         let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language), window, cx));
@@ -228,6 +228,10 @@ impl QueryTab {
                     this.track_statement(*failed);
                     this.sync_transaction(*failed, cx);
                     cx.notify();
+                }
+                ResultsEvent::OpenTable { schema, table, filter } => {
+                    let (schema, table, filter) = (schema.clone(), table.clone(), Some(filter.clone()));
+                    cx.emit(QueryTabEvent::OpenTable { schema, table, filter });
                 }
             }),
             cx.observe_global_in::<Schemas>(window, |this, window, cx| this.schedule_diagnostics(window, cx)),

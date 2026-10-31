@@ -10,7 +10,7 @@ use crate::import::ImportResult;
 // Arrives in order and already filtered to one run.
 #[derive(Debug)]
 pub enum RunEvent {
-    Meta { result_index: usize, columns: Arc<[ColumnMeta]>, schema_name: String, table_name: String },
+    Meta { result_index: usize, columns: Arc<[ColumnMeta]>, statement: String, schema_name: String, table_name: String },
     Rows { result_index: usize, chunk: Arc<ResultChunk> },
     // Before or after the statement's Result. `dropped` counts the ones not kept.
     Messages { result_index: usize, messages: Vec<ServerMessage>, dropped: usize },

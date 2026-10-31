@@ -190,7 +190,11 @@ mod tests {
             ("TIMESTAMPTZ", "timestamptz"),
             ("_TEXT", "text[]"),
             ("_INT4", "integer[]"),
-            ("1266", "1266"),
+            ("TIMETZ", "timetz"),
+            ("mood", "mood"),
+            ("mood[]", "mood[]"),
+            ("\"TransactionType\"", "\"TransactionType\""),
+            ("\"TransactionType\"[]", "\"TransactionType\"[]"),
         ];
         for (raw, want) in cases {
             assert_eq!(display_type(Some(SqlDialect::Postgres), raw), want, "{raw:?}");

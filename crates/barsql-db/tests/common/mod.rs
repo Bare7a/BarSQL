@@ -302,12 +302,15 @@ pub async fn probe(session: &mut Session, driver: &DriverType, sql: &str) -> Jso
     };
     while let Ok(event) = rx.try_recv() {
         match event {
-            ScriptEvent::Meta { result_index, columns } => {
+            ScriptEvent::Meta { result_index, columns, .. } => {
                 at(result_index, &mut results);
                 let r = results.get_mut(&result_index).unwrap();
                 if !columns.is_empty() {
                     r.insert("columns".into(), json!(columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>()));
-                    r.insert("columnTypes".into(), json!(stable_types(columns.iter().map(|c| c.type_name.clone()))));
+                    r.insert(
+                        "columnTypes".into(),
+                        json!(columns.iter().map(|c| c.type_name.clone()).collect::<Vec<_>>()),
+                    );
                 }
             }
             ScriptEvent::Rows { result_index, chunk } => {
@@ -368,15 +371,6 @@ fn cell_json(cell: Cell<'_>) -> Json {
         Cell::Text(s) => json!(s),
         Cell::Number(s) => s.parse::<i64>().map(|i| json!(i)).unwrap_or_else(|_| json!(s.parse::<f64>().ok())),
     }
-}
-
-fn stable_types(types: impl Iterator<Item = String>) -> Vec<String> {
-    types
-        .map(|t| match t.parse::<u32>() {
-            Ok(oid) if oid >= 16384 => "$userOid".to_string(),
-            _ => t,
-        })
-        .collect()
 }
 
 pub fn fixture_probe(probe: &Json) -> Json {

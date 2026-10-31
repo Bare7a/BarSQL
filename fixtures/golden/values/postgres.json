@@ -7,6 +7,7 @@
     "CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA golden",
     "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA golden",
     "CREATE TYPE golden.mood AS ENUM ('sad', 'happy')",
+    "CREATE TYPE golden.\"TransactionType\" AS ENUM ('Calculation', 'Refund')",
     "CREATE DOMAIN golden.posint AS integer CHECK (VALUE > 0)",
     "CREATE TYPE golden.pair AS (a integer, b text)",
     "CREATE TABLE golden.customers (\n\t\tid serial PRIMARY KEY,\n\t\temail text NOT NULL UNIQUE,\n\t\tname varchar(100) NOT NULL DEFAULT 'anon',\n\t\tmood golden.mood,\n\t\tcreated_at timestamptz NOT NULL DEFAULT now(),\n\t\tCONSTRAINT customers_name_check CHECK (length(name) > 0)\n\t)",
@@ -937,7 +938,7 @@
             "v"
           ],
           "columnTypes": [
-            "1266"
+            "TIMETZ"
           ],
           "rows": [
             [
@@ -1261,7 +1262,7 @@
             "v"
           ],
           "columnTypes": [
-            "790"
+            "MONEY"
           ],
           "rows": [
             [
@@ -1558,7 +1559,7 @@
             "v"
           ],
           "columnTypes": [
-            "2205"
+            "REGCLASS"
           ],
           "rows": [
             [
@@ -1585,7 +1586,7 @@
             "v"
           ],
           "columnTypes": [
-            "3220"
+            "PG_LSN"
           ],
           "rows": [
             [
@@ -1603,6 +1604,37 @@
       ]
     },
     {
+      "name": "quoted enum and its array",
+      "sql": "SELECT 'Refund'::golden.\"TransactionType\" AS v, ARRAY['Calculation']::golden.\"TransactionType\"[] AS a",
+      "results": [
+        {
+          "statement": "SELECT 'Refund'::golden.\"TransactionType\" AS v, ARRAY['Calculation']::golden.\"TransactionType\"[] AS a",
+          "columns": [
+            "v",
+            "a"
+          ],
+          "columnTypes": [
+            "\"TransactionType\"",
+            "\"TransactionType\"[]"
+          ],
+          "rows": [
+            [
+              "Refund",
+              "{Calculation}"
+            ]
+          ],
+          "display": [
+            [
+              "Refund",
+              "{Calculation}"
+            ]
+          ],
+          "rowCount": 1,
+          "affectedRows": 0
+        }
+      ]
+    },
+    {
       "name": "enum",
       "sql": "SELECT 'happy'::golden.mood AS v",
       "results": [
@@ -1612,7 +1644,7 @@
             "v"
           ],
           "columnTypes": [
-            "$userOid"
+            "mood"
           ],
           "rows": [
             [
@@ -1666,7 +1698,7 @@
             "v"
           ],
           "columnTypes": [
-            "$userOid"
+            "pair"
           ],
           "rows": [
             [
@@ -1720,7 +1752,7 @@
             "v"
           ],
           "columnTypes": [
-            "$userOid"
+            "hstore"
           ],
           "rows": [
             [
@@ -1747,7 +1779,7 @@
             "v"
           ],
           "columnTypes": [
-            "$userOid"
+            "citext"
           ],
           "rows": [
             [
@@ -1988,7 +2020,7 @@
             "INT4",
             "TEXT",
             "VARCHAR",
-            "$userOid",
+            "mood",
             "TIMESTAMPTZ"
           ],
           "rows": [

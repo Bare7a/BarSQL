@@ -24,7 +24,6 @@ Conventions:
   sessions there work in UTC.
 - `display` is the grid's display string; `null` means SQL NULL.
 - `emitError` marks a result that cannot be delivered as JSON (NaN/±Inf); the tests count it as a deviation.
-- `$userOid` replaces Postgres OIDs of user-defined types, which change on every run; Postgres names types it cannot decode by OID.
 - EXPLAIN check mode re-parses the stored raw output instead of re-running it, because costs and timings vary.
 - Corpus outputs are keyed by SQL dialect: `postgres`, `mysql`, `sqlite`, `tsql` and `clickhouse`. Every case needs
   all five. Turso speaks SQLite, so it shares `sqlite`. A table filter's `error` holds for every dialect unless

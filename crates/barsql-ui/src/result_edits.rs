@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use barsql_app::{ResultEdits, ResultTable};
 use barsql_core::schema::primary_keys;
-use barsql_core::{RowDelete, RowUpdate, SqlDialect};
+use barsql_core::{ColumnInfo, RowDelete, RowUpdate, SqlDialect};
 use barsql_db::{Cell, CellKind, ChunkBuilder, ResultSet};
 use barsql_sql::{TypeFamily, type_family};
 
@@ -84,29 +84,7 @@ impl ResultEditor {
             }
             deleted = pending.deletes.iter().filter_map(|key| keys.row_of(key)).collect();
         }
-        let info = |column: usize| {
-            let name = self.table.columns.get(column)?.as_deref()?;
-            self.table.catalog.iter().find(|c| c.name == name)
-        };
-        let choices = (0..set.columns.len())
-            .filter_map(|column| {
-                let info = info(column).filter(|c| !c.enum_values.is_empty())?;
-                Some((
-                    column,
-                    Choices { values: info.enum_values.clone().into(), nullable: info.is_nullable, open: false },
-                ))
-            })
-            .collect();
-        TableOverlay {
-            staged: Arc::new(staged),
-            deleted,
-            primary: self.key_columns.iter().map(|(column, _)| *column).collect(),
-            choices,
-            locked_columns: (0..set.columns.len()).filter(|&c| info(c).is_none_or(|c| c.is_computed)).collect(),
-            local: true,
-            editable,
-            ..Default::default()
-        }
+        TableOverlay { staged: Arc::new(staged), deleted, editable, ..table_overlay(&self.table, set) }
     }
 
     // Brings an overlay from `overlay` up to date with the last change alone, as building it again is a pass over
@@ -200,6 +178,36 @@ impl ResultEditor {
         self.staging.clear();
         (applied, removed)
     }
+}
+
+// The table's column behind a result column. None for an expression or another table's value.
+pub fn column_info(table: &ResultTable, column: usize) -> Option<&ColumnInfo> {
+    let name = table.columns.get(column)?.as_deref()?;
+    table.catalog.iter().find(|c| c.name == name)
+}
+
+// What the table says of the result's columns, whether or not its rows can be edited: its keys, where its foreign keys
+// lead and the values a column takes from a list.
+pub fn table_overlay(table: &ResultTable, set: &ResultSet) -> TableOverlay {
+    let mut overlay = TableOverlay { local: true, ..Default::default() };
+    for column in 0..set.columns.len() {
+        let info = column_info(table, column);
+        if info.is_none_or(|c| c.is_computed) {
+            overlay.locked_columns.insert(column);
+        }
+        let Some(info) = info else { continue };
+        if info.is_primary {
+            overlay.primary.insert(column);
+        }
+        if info.is_foreign && !info.foreign_table.is_empty() {
+            overlay.foreign.insert(column, info.foreign_table.clone());
+        }
+        if !info.enum_values.is_empty() {
+            let values = info.enum_values.clone().into();
+            overlay.choices.insert(column, Choices { values, nullable: info.is_nullable, open: false });
+        }
+    }
+    overlay
 }
 
 fn keyed<'a>(keyed: &'a mut Option<Keys>, set: &ResultSet, columns: &[(usize, String)]) -> &'a Keys {
@@ -367,6 +375,22 @@ mod tests {
         let catalog = vec![ColumnInfo { name: "id".into(), ..Default::default() }];
         let keyless = ResultTable { columns: vec![Some("id".into()), None, None], catalog, ..Default::default() };
         assert!(ResultEditor::new(keyless, &set).is_none(), "no primary key");
+    }
+
+    #[test]
+    fn a_tables_keys_show_without_an_editor() {
+        let set = set(&[[Some("1"), Some("ann"), Some("ANN")]]);
+        let key = |name: &str| ColumnInfo { name: name.into(), is_primary: true, ..Default::default() };
+        let foreign = ColumnInfo { name: "name".into(), is_foreign: true, foreign_table: "names".into(), ..key("") };
+        let catalog = vec![key("user_id"), key("lang"), ColumnInfo { is_primary: false, ..foreign }];
+        let columns = vec![Some("user_id".into()), Some("name".into()), None];
+        let table = ResultTable { columns, catalog, ..Default::default() };
+        let overlay = table_overlay(&table, &set);
+        assert_eq!(overlay.primary, HashSet::from([0]));
+        assert_eq!(overlay.foreign, HashMap::from([(1, "names".to_string())]));
+        assert_eq!(overlay.locked_columns, HashSet::from([2]));
+        assert!(overlay.local && !overlay.editable);
+        assert!(ResultEditor::new(table, &set).is_none(), "half the primary key");
     }
 
     #[test]

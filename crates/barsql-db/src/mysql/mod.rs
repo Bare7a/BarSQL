@@ -431,7 +431,7 @@ async fn stream_query(
                 .map(|c| ColumnMeta { name: c.name_str().into_owned(), type_name: type_name(c), origin: origin(c) })
                 .collect();
             let decoders: Vec<Decoder> = columns.iter().map(Decoder::for_column).collect();
-            emit(sink, ScriptEvent::Meta { result_index: index, columns: meta.clone() }).await;
+            emit(sink, ScriptEvent::Meta { result_index: index, columns: meta.clone(), statement: stmt.into() }).await;
             let mut builder = ChunkBuilder::new(meta.len(), batch_rows.min(1024));
             let mut rows = 0usize;
             let failed = loop {

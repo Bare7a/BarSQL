@@ -190,6 +190,48 @@ fn header_titles_select_columns_and_chevrons_sort(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_gutter_fits_the_row_numbers_on_screen(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 100_000);
+    let metrics = |cx: &mut VisualTestContext| {
+        draw(cx);
+        read(&grid, cx, |g| g.metrics)
+    };
+    let top = metrics(cx);
+    let shown = read(&grid, cx, |g| g.row_at(g.scroll.viewport().bottom() - px(1.)) + 1);
+    assert!(fits_only(top, shown), "rows 1 to {shown}");
+    cx.simulate_keystrokes("end");
+    let bottom = metrics(cx);
+    assert!(fits_only(bottom, 100_000));
+    cx.simulate_keystrokes("home");
+    assert_eq!(metrics(cx).gutter_width, bottom.gutter_width, "scrolling back up keeps the room");
+    for rem in [10., 22.] {
+        cx.update(|window, cx| crate::theme::set_zoom(rem, window, cx));
+        assert!(fits_only(metrics(cx), 100_000), "at {rem}px");
+    }
+    grid.update(cx, |grid, cx| grid.reset(columns(), cx));
+    assert!(fits_only(metrics(cx), 1), "a table view's next page load starts at one digit");
+}
+
+// Room for every digit of `number`, and not for one more.
+fn fits_only(m: Metrics, number: usize) -> bool {
+    let (digits, room) = (number.to_string().len() as f32, m.gutter_width - m.gutter_pad_x * 2. - px(1.));
+    room >= m.ch * digits && room < m.ch * (digits + 1.)
+}
+
+// Rows that came before the grid's first frame get their room in that frame, which opening the window draws.
+#[gpui_kit::test]
+fn the_first_frame_fits_the_row_numbers_it_shows(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let grid = cx.new(|cx| Grid::new(columns(), cx));
+    grid.update(cx, |grid, cx| grid.push(Arc::new(sample(500).finish()), cx));
+    let view = grid.clone();
+    let window = cx.add_window(move |window, cx| Root::new(view, window, cx));
+    let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    let (m, shown) = read(&grid, cx, |g| (g.metrics, g.row_at(g.scroll.viewport().bottom() - px(1.)) + 1));
+    assert!(shown >= 10 && fits_only(m, shown), "rows 1 to {shown}");
+}
+
+#[gpui_kit::test]
 fn large_results_sort_in_the_background(cx: &mut TestAppContext) {
     let (_env, grid, cx) = open(cx, 30_000);
     let chevron = header_chevron(&grid, 1, cx);
@@ -381,6 +423,29 @@ fn edits(grid: &Entity<Grid>, cx: &mut VisualTestContext) -> Edits {
     edits
 }
 
+// A query result that only shows its table's keys passes undo and refresh on, as a plain result does.
+#[gpui_kit::test]
+fn a_result_that_takes_no_edits_lets_undo_through(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    let undos = Rc::new(RefCell::new(0));
+    let sink = undos.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&grid, move |_, event: &GridEvent, _| {
+            if matches!(event, GridEvent::Undo) {
+                *sink.borrow_mut() += 1;
+            }
+        })
+        .detach()
+    });
+    let keys = |editable| TableOverlay { primary: HashSet::from([0]), local: true, editable, ..Default::default() };
+    grid.update(cx, |grid, cx| grid.set_overlay(keys(false), cx));
+    cx.simulate_keystrokes(&format!("{}-z", modifier()));
+    assert_eq!(*undos.borrow(), 0);
+    grid.update(cx, |grid, cx| grid.set_overlay(keys(true), cx));
+    cx.simulate_keystrokes(&format!("{}-z", modifier()));
+    assert_eq!(*undos.borrow(), 1, "an editable one keeps its undo");
+}
+
 // A click or Space flips a boolean in an editable table view, and does nothing in query results.
 #[gpui_kit::test]
 fn a_checkbox_flips_a_boolean_only_where_the_grid_can_be_edited(cx: &mut TestAppContext) {
@@ -511,7 +576,7 @@ fn the_list_hides_once_its_cell_scrolls_away(cx: &mut TestAppContext) {
     draw(cx);
     assert!(cx.debug_bounds("grid-choices").is_some());
     grid.update(cx, |grid, cx| {
-        grid.scroll.scroll_to(point(px(0.), px(2000.)));
+        grid.scroll.scroll_to(px(0.), 2000.);
         cx.notify();
     });
     draw(cx);
@@ -580,6 +645,41 @@ fn column_edges_resize_and_fit_resets_them(cx: &mut TestAppContext) {
     grid.update(cx, |grid, cx| grid.fit_columns(cx));
     cx.run_until_parked();
     assert_eq!(read(&grid, cx, |g| g.width_px(0)), before);
+}
+
+// At the end of 3.3M rows an f32 offset holds only multiples of 8px. Rows still sit one height apart, a pointer near a
+// row's edge finds the row drawn there, and a 1px scroll moves.
+#[gpui_kit::test]
+fn the_end_of_millions_of_rows_draws_and_scrolls_evenly(cx: &mut TestAppContext) {
+    let rows = 3_300_535;
+    let mut builder = ChunkBuilder::new(1, rows);
+    for _ in 0..rows {
+        builder.push_number(|s| s.push('7'));
+        builder.end_row();
+    }
+    let one = [ColumnMeta { name: "n".into(), type_name: "INTEGER".into(), ..Default::default() }];
+    let _env = Env::new(cx);
+    let (grid, cx) = mount_with(one.to_vec().into(), builder, cx);
+    cx.simulate_keystrokes("end");
+    draw(cx);
+    read(&grid, cx, |g| {
+        let height = g.metrics.row_height;
+        for row in rows - 20..rows {
+            let top = g.row_top(row);
+            assert_eq!(g.row_top(row + 1) - top, height, "row {row}");
+            assert_eq!([g.row_at(top + px(1.)), g.row_at(top + height - px(1.))], [row, row]);
+        }
+        assert_eq!(g.row_top(rows), g.scroll.viewport().bottom(), "the last row ends at the bottom");
+    });
+    let at = read(&grid, cx, |g| g.cell_point(rows - 5, 0));
+    let before = read(&grid, cx, |g| g.scroll.y());
+    cx.simulate_event(ScrollWheelEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(0.), px(1.))),
+        modifiers: Modifiers::default(),
+        touch_phase: TouchPhase::Moved,
+    });
+    assert_eq!(read(&grid, cx, |g| g.scroll.y()), before - 1.);
 }
 
 #[gpui_kit::test]

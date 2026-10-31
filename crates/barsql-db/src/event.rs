@@ -14,7 +14,8 @@ pub const MAX_MESSAGES: usize = 1000;
 // the statement is done.
 #[derive(Debug)]
 pub enum ScriptEvent {
-    Meta { result_index: usize, columns: Arc<[ColumnMeta]> },
+    // `statement` is the text its Result will carry, so the rows can be traced to a table while they stream.
+    Meta { result_index: usize, columns: Arc<[ColumnMeta]>, statement: String },
     Rows { result_index: usize, chunk: Arc<ResultChunk> },
     // `dropped` counts the messages past MAX_MESSAGES since the last event.
     Messages { result_index: usize, messages: Vec<ServerMessage>, dropped: usize },

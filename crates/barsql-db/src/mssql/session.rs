@@ -397,7 +397,8 @@ impl<'s> Batch<'s> {
             let first: Vec<&ColumnData<'static>> = row.cells().map(|(_, data)| data).collect();
             let meta = meta(&set.columns, &first);
             set.meta = Some(meta.clone());
-            emit(self.sink, ScriptEvent::Meta { result_index: self.index, columns: meta }).await;
+            let statement = self.sql.to_string();
+            emit(self.sink, ScriptEvent::Meta { result_index: self.index, columns: meta, statement }).await;
         }
         for ((_, data), (_, column)) in row.cells().zip(&set.columns) {
             values::push(data, *column, &mut set.builder);
@@ -416,7 +417,8 @@ impl<'s> Batch<'s> {
             Some(meta) => meta,
             None => {
                 let meta = meta(&set.columns, &[]);
-                emit(self.sink, ScriptEvent::Meta { result_index: self.index, columns: meta.clone() }).await;
+                let statement = self.sql.to_string();
+                emit(self.sink, ScriptEvent::Meta { result_index: self.index, columns: meta.clone(), statement }).await;
                 meta
             }
         };

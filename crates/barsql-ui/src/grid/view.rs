@@ -341,7 +341,7 @@ impl Metrics {
             line_height: r(1.231),
             row_height: px(row_height(rem)),
             header_height: header_height(rem),
-            gutter_width: r(4.),
+            gutter_width: px(0.),
             cell_pad_x: r(0.769),
             cell_pad_y: r(0.308),
             gutter_pad_x: r(0.615),
@@ -353,6 +353,12 @@ impl Metrics {
             jump_inset: r(0.231),
             ch,
         }
+    }
+
+    // As wide as row number `number` needs, and no wider.
+    fn fit_gutter(&mut self, number: usize) {
+        let digits = number.max(1).ilog10() + 1;
+        self.gutter_width = (self.ch * digits as f32 + self.gutter_pad_x * 2. + px(1.)).ceil();
     }
 }
 
@@ -394,6 +400,8 @@ pub struct Grid {
     aggregate: std::cell::RefCell<Option<(AggregateKey, Option<Aggregate>)>>,
     load_armed: bool,
     scrolled_to: Pixels,
+    // The highest row number shown yet, which the gutter keeps room for.
+    numbered: usize,
 }
 
 impl EventEmitter<GridEvent> for Grid {}
@@ -437,6 +445,7 @@ impl Grid {
             aggregate: Default::default(),
             load_armed: true,
             scrolled_to: px(0.),
+            numbered: 0,
         }
     }
 
@@ -634,6 +643,7 @@ impl Grid {
         self.sync_order(cx);
         self.sync_widths();
         self.metrics = Metrics::new(&grid_font(cx), window);
+        self.metrics.fit_gutter(self.numbered);
         let mut x = px(0.);
         self.col_x.clear();
         self.col_x.push(x);
@@ -641,6 +651,46 @@ impl Grid {
             x += self.width_px(column);
             self.col_x.push(x);
         }
+    }
+
+    // Sets the cells out in `bounds`. The gutter makes room for the row numbers this layout brings on screen and keeps it
+    // when they get shorter, so neither rows streaming in under the first ones nor scrolling back up moves the columns.
+    fn lay_out(&mut self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+        let width = self.col_x.last().copied().unwrap_or_default();
+        let height = f64::from(self.metrics.row_height) * self.order.len() as f64;
+        loop {
+            let origin = bounds.origin + point(self.metrics.gutter_width, self.metrics.header_height);
+            // The body stops at the bars' lanes, and so do the header and gutter.
+            let body = self.scroll.set_layout(bounds, origin, width, height);
+            let bottom = self.scroll.y() + f64::from(body.size.height);
+            let last = ((bottom / f64::from(self.metrics.row_height)).ceil() as usize).min(self.order.len());
+            if last <= self.numbered {
+                return body;
+            }
+            self.numbered = last;
+            self.metrics.fit_gutter(last);
+        }
+    }
+
+    // The first display row on screen, and how far it starts above the cells. Rows are placed from it rather than from
+    // the top of the result, which past a few million rows is too far down for an f32 to place them evenly.
+    fn first_shown(&self) -> (usize, Pixels) {
+        let (y, height) = (self.scroll.y(), f64::from(self.metrics.row_height));
+        let first = (y / height).floor() as usize;
+        (first, px((y - height * first as f64) as f32))
+    }
+
+    // In window coordinates.
+    fn row_top(&self, row: usize) -> Pixels {
+        let (first, above) = self.first_shown();
+        place_row(self.scroll.viewport().top(), first, above, self.metrics.row_height, row)
+    }
+
+    // The display row drawn at window `y`, which may be past the last.
+    fn row_at(&self, y: Pixels) -> usize {
+        let (first, above) = self.first_shown();
+        let below = ((y - self.scroll.viewport().top() + above) / self.metrics.row_height).floor().max(0.);
+        first.saturating_add(below as usize)
     }
 
     fn view(&self) -> View<'_> {
@@ -803,26 +853,26 @@ impl Grid {
     }
 
     fn reveal(&mut self, row: usize, col: isize) {
-        self.scroll.set_rows_height(self.metrics.row_height * self.order.len() as f32);
+        let height = f64::from(self.metrics.row_height);
+        self.scroll.set_rows_height(height * self.order.len() as f64);
         let size = self.scroll.viewport().size;
-        let mut position = self.scroll.position();
-        let top = self.metrics.row_height * row as f32;
-        let bottom = top + self.metrics.row_height;
-        if top < position.y {
-            position.y = top;
-        } else if bottom > position.y + size.height {
-            position.y = bottom - size.height;
+        let (mut x, mut y) = (self.scroll.position().x, self.scroll.y());
+        let top = height * row as f64;
+        if top < y {
+            y = top;
+        } else if top + height > y + f64::from(size.height) {
+            y = top + height - f64::from(size.height);
         }
         if let Ok(col) = usize::try_from(col)
             && let (Some(&left), Some(&right)) = (self.col_x.get(col), self.col_x.get(col + 1))
         {
-            if left < position.x {
-                position.x = left;
-            } else if right > position.x + size.width {
-                position.x = (right - size.width).min(left);
+            if left < x {
+                x = left;
+            } else if right > x + size.width {
+                x = (right - size.width).min(left);
             }
         }
-        self.scroll.scroll_to(position);
+        self.scroll.scroll_to(x, y);
     }
 
     fn arrow(&mut self, arrow: Arrow, extend: bool, cx: &mut Context<Self>) {
@@ -897,12 +947,7 @@ impl Grid {
         let in_header = local.y < m.header_height;
         let in_gutter = local.x < m.gutter_width;
         let col = (!in_gutter).then(|| self.column_at(local.x - m.gutter_width + scroll.x)).flatten();
-        let row = (!in_header)
-            .then(|| {
-                let row = ((local.y - m.header_height + scroll.y) / m.row_height).floor() as usize;
-                (row < self.order.len()).then_some(row)
-            })
-            .flatten();
+        let row = (!in_header).then(|| self.row_at(position.y)).filter(|&row| row < self.order.len());
         match (in_header, in_gutter) {
             (true, true) => Some(Target::Corner),
             (true, false) => {
@@ -948,7 +993,7 @@ impl Grid {
     fn check_box(&self, row: usize, col: usize) -> Bounds<Pixels> {
         let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         let left = bounds.left() + m.gutter_width + self.col_x[col] - scroll.x;
-        let top = bounds.top() + m.header_height + m.row_height * row as f32 - scroll.y;
+        let top = self.row_top(row);
         let center = point(left + (self.col_x[col + 1] - self.col_x[col]) / 2., top + (m.row_height - px(1.)) / 2.);
         Bounds::new(center - point(m.check / 2., m.check / 2.), size(m.check, m.check))
     }
@@ -968,7 +1013,7 @@ impl Grid {
         let m = &self.metrics;
         let scroll = self.scroll.position();
         let right = bounds.left() + m.gutter_width + self.col_x[col + 1] - scroll.x - px(1.) - m.jump_inset;
-        let top = bounds.top() + m.header_height + m.row_height * row as f32 - scroll.y;
+        let top = self.row_top(row);
         Bounds::new(
             point(right - m.chevron, top + (m.row_height - px(1.) - m.chevron) / 2.),
             size(m.chevron, m.chevron),
@@ -983,9 +1028,8 @@ impl Grid {
         }
         let (body, scroll) = (self.scroll.viewport(), self.scroll.position());
         // Not clamp, which panics on a body squeezed under 1px.
-        let y = position.y.max(body.top()).min(body.bottom() - px(1.)) - body.top() + scroll.y;
+        let row = self.row_at(position.y.max(body.top()).min(body.bottom() - px(1.))).min(rows - 1);
         let x = position.x.max(body.left()).min(body.right() - px(1.)) - body.left() + scroll.x;
-        let row = ((y / self.metrics.row_height).floor() as usize).min(rows - 1);
         let col = self.column_at(x).unwrap_or(self.columns.len() - 1);
         Some(CellCoord { row, col })
     }
@@ -1115,9 +1159,9 @@ impl Grid {
         let (ax, ay) = (delta.x.abs(), delta.y.abs());
         let shift = event.modifiers.shift;
         let vertical = can_y && !shift && ay > ax && (ax == px(0.) || ay > ax * 1.5);
-        let mut position = self.scroll.position();
+        let (mut x, mut y) = (self.scroll.position().x, self.scroll.y());
         if vertical || !can_x {
-            position.y -= delta.y;
+            y -= f64::from(delta.y);
         } else {
             let sideways = if shift {
                 if delta.y != px(0.) { delta.y } else { delta.x }
@@ -1126,17 +1170,22 @@ impl Grid {
             } else {
                 delta.y
             };
-            let before = position.x;
-            position.x = (position.x - sideways).clamp(px(0.), max.x);
-            if position.x == before {
-                position.y -= delta.y;
+            let before = x;
+            x = (x - sideways).clamp(px(0.), max.x);
+            if x == before {
+                y -= f64::from(delta.y);
             }
         }
-        if self.scroll.scroll_to(position) {
+        if self.scroll.scroll_to(x, y) {
             cx.notify();
         }
         cx.stop_propagation();
     }
+}
+
+// Where display row `row` starts, below `top`, from the first row shown and how far above `top` that starts.
+fn place_row(top: Pixels, first: usize, above: Pixels, height: Pixels, row: usize) -> Pixels {
+    top - above + height * (row as f64 - first as f64) as f32
 }
 
 fn grid_font(cx: &App) -> Font {
@@ -1440,13 +1489,11 @@ impl Shaper {
 }
 
 fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) -> Frame {
+    let body = entity.update(cx, |grid, _| grid.lay_out(bounds));
     let grid = entity.read(cx);
     let m = grid.metrics;
-    let origin = bounds.origin + point(m.gutter_width, m.header_height);
     let total_width = grid.col_x.last().copied().unwrap_or_default();
     let rows = grid.order.len();
-    // The body stops at the bars' lanes, and so do the header and gutter.
-    let body = grid.scroll.set_layout(bounds, origin, size(total_width, m.row_height * rows as f32));
     let scroll = grid.scroll.position();
     let colors = Colors::new(cx);
     let base = grid_font(cx);
@@ -1454,12 +1501,13 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     let mut italic = Shaper::new(Font { style: FontStyle::Italic, ..base.clone() }, m.font_size, window);
     let mut bold = Shaper::new(Font { weight: FontWeight::SEMIBOLD, ..base }, m.font_size, window);
 
-    let first_row = ((scroll.y / m.row_height).floor() as usize).min(rows);
-    let last_row = (((scroll.y + body.size.height) / m.row_height).ceil() as usize).min(rows);
+    let (first_shown, above) = grid.first_shown();
+    let first_row = first_shown.min(rows);
+    let last_row = (first_shown + ((body.size.height + above) / m.row_height).ceil() as usize).min(rows);
     let first_col = grid.column_at(scroll.x).unwrap_or(grid.columns.len());
     let end_col = grid.col_x.partition_point(|&left| left < scroll.x + body.size.width).min(grid.columns.len());
     let visible_cols = first_col..end_col.max(first_col);
-    let row_top = |row: usize| body.top() + m.row_height * row as f32 - scroll.y;
+    let row_top = |row: usize| place_row(body.top(), first_shown, above, m.row_height, row);
     let col_left = |col: usize| body.left() + grid.col_x[col] - scroll.x;
     let columns_right = body.left() + total_width - scroll.x;
     let rows_bottom = row_top(rows);
@@ -1906,7 +1954,7 @@ impl Grid {
         let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         point(
             bounds.left() + m.gutter_width + (self.col_x[col] + self.col_x[col + 1]) / 2. - scroll.x,
-            bounds.top() + m.header_height + m.row_height * (row as f32 + 0.5) - scroll.y,
+            self.row_top(row) + m.row_height / 2.,
         )
     }
 }
@@ -1916,7 +1964,7 @@ impl Grid {
 impl Grid {
     pub(crate) fn scroll_to_cell(&mut self, row: usize, col: usize, cx: &mut Context<Self>) {
         let x = self.col_x.get(col).copied().unwrap_or_default();
-        self.scroll.scroll_to(point(x, self.metrics.row_height * row as f32));
+        self.scroll.scroll_to(x, f64::from(self.metrics.row_height) * row as f64);
         cx.notify();
     }
 }
@@ -1937,10 +1985,9 @@ impl Grid {
     }
 
     pub(crate) fn gutter_point(&self, row: usize) -> Point<Pixels> {
-        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
         point(
-            bounds.left() + m.gutter_width / 2.,
-            bounds.top() + m.header_height + m.row_height * (row as f32 + 0.5) - scroll.y,
+            self.scroll.grid().left() + self.metrics.gutter_width / 2.,
+            self.row_top(row) + self.metrics.row_height / 2.,
         )
     }
 
@@ -1955,6 +2002,14 @@ impl Grid {
 
     pub(crate) fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    pub(crate) fn takes_edits(&self) -> bool {
+        self.editable()
+    }
+
+    pub(crate) fn key_icons(&self) -> Vec<Option<Lucide>> {
+        (0..self.set.columns.len()).map(|column| self.key_icon(column)).collect()
     }
 
     pub(crate) fn is_invalid(&self, row: usize, column: usize) -> bool {

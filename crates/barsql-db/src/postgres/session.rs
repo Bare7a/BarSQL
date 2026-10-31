@@ -187,8 +187,8 @@ impl StatementRunner for PgSession {
         };
         // The simple protocol reports no column types or origins, so prepare the statement to get them.
         let (_, prepared) = tokio::join!(read_only, self.lease.client().prepare(stmt));
-        let (oids, origins): (Vec<u32>, Vec<Option<ColumnOrigin>>) = match prepared {
-            Ok(prepared) => prepared.columns().iter().map(|c| (c.type_().oid(), origin(c))).unzip(),
+        let (types, origins): (Vec<Type>, Vec<Option<ColumnOrigin>>) = match prepared {
+            Ok(prepared) => prepared.columns().iter().map(|c| (c.type_().clone(), origin(c))).unzip(),
             Err(err) if err.as_db_error().is_some() || self.lease.client().is_closed() => {
                 self.send_notices(first_index, sink).await;
                 return fail(mark_cancelled(pg_error(&err), cancel), None).await;
@@ -240,14 +240,22 @@ impl StatementRunner for PgSession {
                         .enumerate()
                         .map(|(i, c)| ColumnMeta {
                             name: c.name().to_string(),
-                            type_name: oids.get(i).map(|&oid| type_name(oid)).unwrap_or_default(),
+                            type_name: types.get(i).map(type_name).unwrap_or_default(),
                             origin: origins.get(i).cloned().flatten(),
                         })
                         .collect();
                     let decoders = (0..columns.len())
-                        .map(|i| oids.get(i).map_or(Decoder::Text, |&o| Decoder::for_oid(o)))
+                        .map(|i| types.get(i).map_or(Decoder::Text, |t| Decoder::for_oid(t.oid())))
                         .collect();
-                    emit(sink, ScriptEvent::Meta { result_index: first_index, columns: columns.clone() }).await;
+                    emit(
+                        sink,
+                        ScriptEvent::Meta {
+                            result_index: first_index,
+                            columns: columns.clone(),
+                            statement: stmt.into(),
+                        },
+                    )
+                    .await;
                     let width = columns.len();
                     set = Some((columns, decoders, ChunkBuilder::new(width, batch_rows.min(1024)), 0));
                 }

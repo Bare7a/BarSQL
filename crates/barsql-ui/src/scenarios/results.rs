@@ -156,6 +156,35 @@ fn a_table_view_visit_keeps_the_query_grid_state(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_query_results_foreign_key_jumps_to_the_referenced_row(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.seed(
+        "CREATE TABLE e2e_qfk_parent (id INTEGER PRIMARY KEY, name VARCHAR(50));
+         INSERT INTO e2e_qfk_parent VALUES (1, 'Alice'), (2, 'Bob');
+         CREATE TABLE e2e_qfk_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES e2e_qfk_parent (id));
+         INSERT INTO e2e_qfk_child VALUES (1, 2), (2, NULL)",
+    );
+    app.connect();
+    app.run("SELECT * FROM e2e_qfk_child ORDER BY id");
+    let grid = grid(&mut app);
+    app.settle(|cx| cx.update(|_, cx| grid.read(cx).jumps_at(0, 1)));
+    let buttons = app.cx.update(|_, cx| (grid.read(cx).jumps_at(0, 0), grid.read(cx).jumps_at(1, 1)));
+    assert_eq!(buttons, (false, false), "only a filled foreign-key cell has one");
+    let at = app.grid_point(&grid, |grid| grid.jump_point(0, 1));
+    app.click_at(at, Modifiers::none());
+    let workspace = app.workspace.clone();
+    app.settle(|cx| cx.update(|_, cx| workspace.read(cx).active_title(cx) == "e2e_qfk_parent"));
+    let tab = app.cx.update(|_, cx| workspace.read(cx).table_tab()).expect("a table view");
+    app.settle(|cx| cx.update(|_, cx| tab.read(cx).idle()));
+    let (filter, grid) = app.cx.update(|_, cx| (tab.read(cx).applied_filter().to_string(), tab.read(cx).grid()));
+    assert_eq!(filter, "id = 2");
+    assert_eq!(
+        app.cx.update(|_, cx| (grid.read(cx).rows_shown(), grid.read(cx).text_at(0, 1))),
+        (1, Some("Bob".into()))
+    );
+}
+
+#[gpui_kit::test]
 fn the_json_viewer_mirrors_the_focused_row_and_filters_by_key(cx: &mut TestAppContext) {
     let mut app = open(cx);
     app.connect();

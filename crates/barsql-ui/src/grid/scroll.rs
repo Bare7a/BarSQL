@@ -13,33 +13,40 @@ pub struct GridScroll(Rc<RefCell<State>>);
 
 #[derive(Default)]
 struct State {
-    // Positive distances. ScrollbarHandle offsets are negated.
-    position: Point<Pixels>,
+    // Positive distances. ScrollbarHandle offsets are negated. Down is an f64, as past a few million rows an f32 holds
+    // only multiples of 8px: rows would be spaced unevenly and small scrolls lost.
+    x: Pixels,
+    y: f64,
     // The whole grid, with its gutter and header.
     grid: Bounds<Pixels>,
     viewport: Bounds<Pixels>,
-    content: Size<Pixels>,
+    width: Pixels,
+    height: f64,
     // The bars' lanes along the grid's right and bottom edges. Zero on an axis that doesn't scroll.
     lanes: Size<Pixels>,
 }
 
 impl State {
-    fn max(&self) -> Point<Pixels> {
-        point(
-            (self.content.width - self.viewport.size.width).max(px(0.)),
-            (self.content.height - self.viewport.size.height).max(px(0.)),
-        )
+    fn max(&self) -> (Pixels, f64) {
+        let viewport = self.viewport.size;
+        ((self.width - viewport.width).max(px(0.)), (self.height - f64::from(viewport.height)).max(0.))
     }
 
     fn clamp(&mut self) {
-        let max = self.max();
-        self.position = point(self.position.x.clamp(px(0.), max.x), self.position.y.clamp(px(0.), max.y));
+        let (x, y) = self.max();
+        (self.x, self.y) = (self.x.clamp(px(0.), x), self.y.clamp(0., y));
     }
 }
 
 impl GridScroll {
+    // Down rounds to an f32 here. Row positions need `y`.
     pub fn position(&self) -> Point<Pixels> {
-        self.0.borrow().position
+        let state = self.0.borrow();
+        point(state.x, px(state.y as f32))
+    }
+
+    pub fn y(&self) -> f64 {
+        self.0.borrow().y
     }
 
     pub fn viewport(&self) -> Bounds<Pixels> {
@@ -66,42 +73,49 @@ impl GridScroll {
     }
 
     pub fn max(&self) -> Point<Pixels> {
-        self.0.borrow().max()
+        let (x, y) = self.0.borrow().max();
+        point(x, px(y as f32))
     }
 
     // `origin` is the top left of the cells, right of the gutter and below the header. Each axis that scrolls keeps
     // a lane for its bar along the grid's far edge, so the bar never covers cells. Returns the cells' viewport, which
     // stops at the lanes.
-    pub fn set_layout(&self, grid: Bounds<Pixels>, origin: Point<Pixels>, content: Size<Pixels>) -> Bounds<Pixels> {
+    pub fn set_layout(
+        &self,
+        grid: Bounds<Pixels>,
+        origin: Point<Pixels>,
+        width: Pixels,
+        height: f64,
+    ) -> Bounds<Pixels> {
         let lane = |scrolls: bool| if scrolls { LANE } else { px(0.) };
         let room = size(grid.right() - origin.x, grid.bottom() - origin.y);
         // A lane takes room from the other axis, which can then scroll too.
-        let down = content.height > room.height;
-        let across = content.width > room.width - lane(down);
-        let down = content.height > room.height - lane(across);
+        let down = height > f64::from(room.height);
+        let across = width > room.width - lane(down);
+        let down = height > f64::from(room.height - lane(across));
         let lanes = size(lane(down), lane(across));
         let viewport = size((room.width - lanes.width).max(px(0.)), (room.height - lanes.height).max(px(0.)));
         let mut state = self.0.borrow_mut();
         state.grid = grid;
         state.lanes = lanes;
         state.viewport = Bounds::new(origin, viewport);
-        state.content = content;
+        (state.width, state.height) = (width, height);
         state.clamp();
         state.viewport
     }
 
     // Rows pushed since the last layout, so a reveal before the next one can reach them.
-    pub fn set_rows_height(&self, height: Pixels) {
-        self.0.borrow_mut().content.height = height;
+    pub fn set_rows_height(&self, height: f64) {
+        self.0.borrow_mut().height = height;
     }
 
     // Whether the position moved.
-    pub fn scroll_to(&self, position: Point<Pixels>) -> bool {
+    pub fn scroll_to(&self, x: Pixels, y: f64) -> bool {
         let mut state = self.0.borrow_mut();
-        let before = state.position;
-        state.position = position;
+        let before = (state.x, state.y);
+        (state.x, state.y) = (x, y);
         state.clamp();
-        state.position != before
+        (state.x, state.y) != before
     }
 
     pub fn bar(&self, axis: Axis) -> BarHandle {
@@ -135,8 +149,13 @@ impl ScrollbarHandle for BarHandle {
         -self.scroll.position()
     }
 
+    // A bar moves its own axis only. It hands back the other one rounded to an f32.
     fn set_offset(&self, offset: Point<Pixels>) {
-        self.scroll.scroll_to(-offset);
+        let (x, y) = (self.scroll.position().x, self.scroll.y());
+        match self.axis {
+            Axis::Vertical => self.scroll.scroll_to(x, -f64::from(offset.y)),
+            Axis::Horizontal => self.scroll.scroll_to(-offset.x, y),
+        };
     }
 
     // As much longer than the cells as the bar is than the viewport, so the thumb reaches the end of its track just as
@@ -144,7 +163,7 @@ impl ScrollbarHandle for BarHandle {
     fn content_size(&self) -> Size<Pixels> {
         let bar = self.viewport_bounds().size;
         let state = self.scroll.0.borrow();
-        state.content + bar - state.viewport.size
+        size(state.width, px(state.height as f32)) + bar - state.viewport.size
     }
 }
 
@@ -156,8 +175,21 @@ mod tests {
     fn lay_out(content: Size<Pixels>) -> GridScroll {
         let scroll = GridScroll::default();
         let grid = Bounds::new(point(px(0.), px(0.)), size(px(450.), px(330.)));
-        scroll.set_layout(grid, point(px(50.), px(30.)), content);
+        scroll.set_layout(grid, point(px(50.), px(30.)), content.width, f64::from(content.height));
         scroll
+    }
+
+    // An f32 down there holds only multiples of 8px.
+    #[test]
+    fn three_million_rows_down_a_pixel_still_scrolls() {
+        let (scroll, rows) = (GridScroll::default(), 25. * 3_300_535.);
+        let grid = Bounds::new(point(px(0.), px(0.)), size(px(450.), px(330.)));
+        scroll.set_layout(grid, point(px(50.), px(30.)), px(1000.), rows);
+        let far = rows - 1000.5;
+        assert!(scroll.scroll_to(px(0.), far) && scroll.scroll_to(px(0.), far + 1.));
+        assert_eq!(scroll.y(), far + 1.);
+        scroll.bar(Axis::Horizontal).set_offset(point(px(-40.), -scroll.position().y));
+        assert_eq!((scroll.position().x, scroll.y()), (px(40.), far + 1.), "a sideways bar keeps the place down");
     }
 
     fn viewport(width: f32, height: f32) -> (f32, f32) {
