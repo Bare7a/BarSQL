@@ -742,6 +742,7 @@ dependencies = [
  "roxmltree 0.21.2",
  "serde",
  "serde_json",
+ "sqlparser",
 ]
 
 [[package]]
@@ -8227,6 +8228,15 @@ checksum = "36bd8e29bf08189a005b2df1df99823aa0861cabe9044e5f31ed54ca292ee618"
 dependencies = [
  "cc",
  "rsqlite-vfs",
+]
+
+[[package]]
+name = "sqlparser"
+version = "0.63.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3679862809bd1f92e563cf6fd820e28f39135303668001c10331d5027183e8b4"
+dependencies = [
+ "log",
 ]
 
 [[package]]

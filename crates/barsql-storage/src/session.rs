@@ -31,6 +31,16 @@ pub struct DiagramRef {
     pub schema: String,
 }
 
+// A relational algebra tab, by the query tab its statement came from and where in that tab the statement began.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlgebraRef {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub offset: usize,
+}
+
 // A Structure tab, by the table it shows. A new table's tab has none, so it isn't restored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +74,9 @@ pub struct EditorTab {
     pub diagram: Option<DiagramRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structure: Option<StructureRef>,
+    // A relational algebra tab, drawn from `sql`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub algebra: Option<AlgebraRef>,
     // Pinned tabs sit first and stay open through Close Others, To the Right and All.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
@@ -175,6 +188,27 @@ mod tests {
         let body = fs::read_to_string(tmp.path().join("editor_session.json")).unwrap();
         assert_eq!(body.matches("\"diagram\"").count(), 1, "{body}");
         assert!(body.contains("\"schema\": \"public\""), "{body}");
+        assert_eq!(SessionStore::open(tmp.path()).unwrap().get(), session);
+    }
+
+    // A relational algebra tab comes back from its statement. Other tabs write nothing for it.
+    #[test]
+    fn an_algebra_tab_persists_its_statement() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        let algebra = EditorTab {
+            id: "ra1".into(),
+            connection_id: "c1".into(),
+            sql: "SELECT 1".into(),
+            algebra: Some(AlgebraRef { source: "q1".into(), offset: 7 }),
+            ..Default::default()
+        };
+        let query = EditorTab { id: "q1".into(), connection_id: "c1".into(), ..Default::default() };
+        let session = EditorSession { tabs: vec![algebra, query], active_tab: "ra1".into() };
+        store.save(session.clone()).unwrap();
+        let body = fs::read_to_string(tmp.path().join("editor_session.json")).unwrap();
+        assert_eq!(body.matches("\"algebra\"").count(), 1, "{body}");
+        assert!(body.contains("\"offset\": 7"), "{body}");
         assert_eq!(SessionStore::open(tmp.path()).unwrap().get(), session);
     }
 

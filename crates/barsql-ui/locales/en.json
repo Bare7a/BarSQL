@@ -426,6 +426,32 @@
     "noRows": "No rows to chart yet.",
     "blank": "(empty)"
   },
+  "algebra": {
+    "button": "Algebra",
+    "tooltip": "Show the query as relational algebra",
+    "title": "Relational algebra",
+    "hint": "Drag to pan · {{modifier}}+scroll or pinch to zoom · Hover an operator to preview its table · Click to find it in the query",
+    "moreColumns": "+{{count}} more columns",
+    "noColumns": "The columns of this table haven't loaded yet.",
+    "stale": "The query has changed since this graph was drawn. Open it again.",
+    "sourceGone": "The query this graph came from is closed.",
+    "notQuery": "Only a single SELECT can be shown as relational algebra.",
+    "ops": {
+      "table": "Table",
+      "select": "Selection",
+      "project": "Projection",
+      "join": "Join",
+      "cross": "Product",
+      "group": "Grouping",
+      "sort": "Sort",
+      "limit": "Limit",
+      "distinct": "Distinct",
+      "union": "Union",
+      "intersect": "Intersection",
+      "except": "Difference",
+      "rename": "Rename"
+    }
+  },
   "erDiagram": {
     "menu": "ER diagram",
     "title": "ER diagram · {{schema}}",
