@@ -52,7 +52,7 @@ BarSQL-data/
   settings.json
 ```
 
-`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts. `mcp.log` appears once an AI assistant has used BarSQL.
+`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts. `mcp.log` appears once an AI assistant has used BarSQL, and `crash.log` if BarSQL ever closes on an error.
 
 When the app sits somewhere writable, that folder is created **right next to the executable** (beside the `.app` bundle on macOS) - move it to a USB stick, network drive, or another PC and it just works.
 

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use barsql_core::schema::primary_keys;
@@ -15,9 +15,9 @@ use barsql_sql::ddl::{
 use barsql_sql::structure::check_body;
 use barsql_sql::{enum_values, qualified_table, quote_ident, quote_literal_in};
 use tokio_postgres::Row;
-use tokio_postgres::types::ToSql;
+use tokio_postgres::types::{FromSql, ToSql};
 
-use super::{PgEngine, pg_error};
+use super::{PgEngine, decode_error, pg_error};
 use crate::dump::DumpColumn;
 
 const PG: DriverType = DriverType::Postgres;
@@ -60,6 +60,11 @@ const FUNCTIONS_SQL: &str = "WITH hidden AS (
         AND p.oid NOT IN (SELECT oid FROM hidden)
     ORDER BY 1, 2, 5";
 
+// A Postgres-compatible server can send other types or NULLs here, which fails the read rather than the app.
+fn get<'a, T: FromSql<'a>>(row: &'a Row, ix: usize) -> Result<T, QueryError> {
+    row.try_get(ix).map_err(|err| decode_error(&err))
+}
+
 // A name's overloads can differ in kind: rank is a window function and a hypothetical-set aggregate.
 fn overload_kind(a: FunctionKind, b: FunctionKind) -> FunctionKind {
     match (a, b) {
@@ -82,9 +87,9 @@ impl PgEngine {
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
         Ok(ConnectionStatus {
             connected: true,
-            database: row.get::<_, Option<String>>(0).unwrap_or_default(),
-            schema: row.get::<_, Option<String>>(1).unwrap_or_default(),
-            user: row.get::<_, Option<String>>(2).unwrap_or_default(),
+            database: get::<Option<String>>(row, 0)?.unwrap_or_default(),
+            schema: get::<Option<String>>(row, 1)?.unwrap_or_default(),
+            user: get::<Option<String>>(row, 2)?.unwrap_or_default(),
             host: self.options.host.clone(),
         })
     }
@@ -98,7 +103,7 @@ impl PgEngine {
                 &[],
             )
             .await?;
-        Ok(rows.iter().map(|r| r.get(0)).collect())
+        rows.iter().map(|r| get(r, 0)).collect()
     }
 
     pub(crate) async fn dump_columns(
@@ -120,16 +125,17 @@ impl PgEngine {
                 &[&schema, &table],
             )
             .await?;
-        Ok(rows
-            .iter()
-            .map(|r| DumpColumn {
-                name: r.get(0),
-                generated: r.get(1),
-                identity_always: r.get(2),
-                serial: r.get(3),
-                ..Default::default()
+        rows.iter()
+            .map(|r| {
+                Ok(DumpColumn {
+                    name: get(r, 0)?,
+                    generated: get(r, 1)?,
+                    identity_always: get(r, 2)?,
+                    serial: get(r, 3)?,
+                    ..Default::default()
+                })
             })
-            .collect())
+            .collect()
     }
 
     // Fully qualified to pg_catalog, so search_path is irrelevant here.
@@ -143,7 +149,7 @@ impl PgEngine {
                 &[],
             )
             .await?;
-        Ok(rows.iter().map(|r| SchemaInfo { name: r.get(0) }).collect())
+        rows.iter().map(|r| Ok(SchemaInfo { name: get(r, 0)? })).collect()
     }
 
     pub async fn list_tables(self: &Arc<Self>, schema: &str) -> Result<Vec<TableInfo>, QueryError> {
@@ -167,10 +173,9 @@ impl PgEngine {
                 &[&schema],
             )
             .await?;
-        Ok(rows
-            .iter()
-            .map(|r| TableInfo { schema: r.get(0), name: r.get(1), kind: r.get::<_, String>(2).to_lowercase() })
-            .collect())
+        rows.iter()
+            .map(|r| Ok(TableInfo { schema: get(r, 0)?, name: get(r, 1)?, kind: get::<String>(r, 2)?.to_lowercase() }))
+            .collect()
     }
 
     pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
@@ -220,32 +225,31 @@ impl PgEngine {
                 &[&schema, &table],
             )
             .await?;
-        Ok(rows
-            .iter()
+        rows.iter()
             .map(|r| {
-                let name: String = r.get(0);
-                let foreign_table: String = r.get(5);
-                let labels: Vec<String> = r.get(9);
+                let name: String = get(r, 0)?;
+                let foreign_table: String = get(r, 5)?;
+                let labels: Vec<String> = get(r, 9)?;
                 let enum_values = if labels.is_empty() {
-                    enum_values::from_checks(&name, &r.get::<_, Vec<String>>(10), &PG)
+                    enum_values::from_checks(&name, &get::<Vec<String>>(r, 10)?, &PG)
                 } else {
                     labels
                 };
-                ColumnInfo {
+                Ok(ColumnInfo {
                     name,
-                    data_type: r.get::<_, Option<String>>(1).unwrap_or_default(),
-                    is_nullable: r.get(2),
-                    default_val: r.get(3),
-                    is_primary: r.get(4),
+                    data_type: get::<Option<String>>(r, 1)?.unwrap_or_default(),
+                    is_nullable: get(r, 2)?,
+                    default_val: get(r, 3)?,
+                    is_primary: get(r, 4)?,
                     is_foreign: !foreign_table.is_empty(),
                     foreign_table,
-                    foreign_column: r.get(6),
-                    is_identity: r.get(7),
-                    is_computed: r.get(8),
+                    foreign_column: get(r, 6)?,
+                    is_identity: get(r, 7)?,
+                    is_computed: get(r, 8)?,
                     enum_values,
-                }
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn list_indexes(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<IndexInfo>, QueryError> {
@@ -267,19 +271,19 @@ impl PgEngine {
             .await?;
         let mut out: Vec<IndexInfo> = Vec::new();
         for r in &rows {
-            let name: String = r.get(0);
+            let name: String = get(r, 0)?;
             if out.last().is_none_or(|idx| idx.name != name) && !out.iter().any(|idx| idx.name == name) {
                 out.push(IndexInfo {
                     name: name.clone(),
                     schema: schema.clone(),
                     table: table.to_string(),
-                    is_unique: r.get(1),
-                    is_primary: r.get(2),
-                    method: r.get(3),
+                    is_unique: get(r, 1)?,
+                    is_primary: get(r, 2)?,
+                    method: get(r, 3)?,
                     columns: Vec::new(),
                 });
             }
-            let column: Option<String> = r.get(4);
+            let column: Option<String> = get(r, 4)?;
             if let (Some(column), Some(idx)) = (column, out.iter_mut().find(|idx| idx.name == name)) {
                 idx.columns.push(column);
             }
@@ -314,23 +318,23 @@ impl PgEngine {
             .await?;
         let mut out: Vec<ConstraintInfo> = Vec::new();
         for r in &rows {
-            let name: String = r.get(0);
+            let name: String = get(r, 0)?;
             if !out.iter().any(|c| c.name == name) {
                 out.push(ConstraintInfo {
                     name: name.clone(),
                     schema: schema.clone(),
                     table: table.to_string(),
-                    kind: constraint_type_name(&r.get::<_, String>(1)),
-                    definition: r.get::<_, Option<String>>(2).unwrap_or_default(),
-                    ref_table: r.get(3),
+                    kind: constraint_type_name(&get::<String>(r, 1)?),
+                    definition: get::<Option<String>>(r, 2)?.unwrap_or_default(),
+                    ref_table: get(r, 3)?,
                     ..Default::default()
                 });
             }
             let c = out.iter_mut().find(|c| c.name == name).expect("constraint just added");
-            if let Some(column) = r.get::<_, Option<String>>(4) {
+            if let Some(column) = get::<Option<String>>(r, 4)? {
                 c.columns.push(column);
             }
-            if let Some(column) = r.get::<_, Option<String>>(5) {
+            if let Some(column) = get::<Option<String>>(r, 5)? {
                 c.ref_columns.push(column);
             }
         }
@@ -351,13 +355,12 @@ impl PgEngine {
                 &[&schema, &table],
             )
             .await?;
-        Ok(rows
-            .iter()
+        rows.iter()
             .map(|r| {
-                let (timing, events) = decode_trigger_type(r.get(1));
-                TriggerInfo { name: r.get(0), schema: schema.clone(), table: table.to_string(), timing, events }
+                let (timing, events) = decode_trigger_type(get(r, 1)?);
+                Ok(TriggerInfo { name: get(r, 0)?, schema: schema.clone(), table: table.to_string(), timing, events })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn list_routines(self: &Arc<Self>, schema: &str) -> Result<Vec<RoutineInfo>, QueryError> {
@@ -375,19 +378,18 @@ impl PgEngine {
                 &[&schema],
             )
             .await?;
-        Ok(rows
-            .iter()
+        rows.iter()
             .map(|r| {
-                let procedure = r.get::<_, String>(1) == "p";
-                RoutineInfo {
-                    name: r.get(0),
+                let procedure = get::<String>(r, 1)? == "p";
+                Ok(RoutineInfo {
+                    name: get(r, 0)?,
                     schema: schema.clone(),
                     kind: if procedure { ObjectKind::Procedure } else { ObjectKind::Function },
-                    return_type: if procedure { String::new() } else { r.get(2) },
-                    args: r.get(3),
-                }
+                    return_type: if procedure { String::new() } else { get(r, 2)? },
+                    args: get(r, 3)?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     // Overloads fold into one function per schema and name.
@@ -395,15 +397,15 @@ impl PgEngine {
         let rows = self.rows(FUNCTIONS_SQL, &[]).await?;
         let mut functions: Vec<FunctionInfo> = Vec::new();
         for r in &rows {
-            let (schema, name): (String, String) = (r.get(0), r.get(1));
-            let kind = match r.get::<_, String>(2).as_str() {
+            let (schema, name): (String, String) = (get(r, 0)?, get(r, 1)?);
+            let kind = match get::<String>(r, 2)?.as_str() {
                 "a" => FunctionKind::Aggregate,
                 "w" => FunctionKind::Window,
-                _ if r.get::<_, bool>(3) => FunctionKind::Table,
+                _ if get(r, 3)? => FunctionKind::Table,
                 _ => FunctionKind::Scalar,
             };
-            let signature = FunctionSignature { args: r.get(4), returns: r.get(5) };
-            let description: String = r.get(6);
+            let signature = FunctionSignature { args: get(r, 4)?, returns: get(r, 5)? };
+            let description: String = get(r, 6)?;
             match functions.last_mut() {
                 Some(last) if last.schema == schema && last.name == name => {
                     last.kind = overload_kind(last.kind, kind);
@@ -414,8 +416,8 @@ impl PgEngine {
                 }
                 _ => functions.push(FunctionInfo {
                     builtin: schema == "pg_catalog",
-                    qualified_only: !r.get::<_, bool>(8),
-                    source: r.get(7),
+                    qualified_only: !get::<bool>(r, 8)?,
+                    source: get(r, 7)?,
                     name,
                     schema,
                     kind,
@@ -587,19 +589,18 @@ impl PgEngine {
                 &[&schema, &table],
             )
             .await?;
-        Ok(rows
-            .iter()
+        rows.iter()
             .map(|r| {
-                let data_type: String = r.get::<_, Option<String>>(1).unwrap_or_default();
-                let default_expr: String = r.get(3);
-                let identity: String = r.get::<_, Option<String>>(4).unwrap_or_default();
-                let generated: String = r.get::<_, Option<String>>(5).unwrap_or_default();
-                let is_serial: bool = r.get(7);
+                let data_type: String = get::<Option<String>>(r, 1)?.unwrap_or_default();
+                let default_expr: String = get(r, 3)?;
+                let identity: String = get::<Option<String>>(r, 4)?.unwrap_or_default();
+                let generated: String = get::<Option<String>>(r, 5)?.unwrap_or_default();
+                let is_serial: bool = get(r, 7)?;
                 let mut col = DdlColumn {
-                    name: r.get(0),
+                    name: get(r, 0)?,
                     data_type: data_type.clone(),
-                    not_null: r.get(2),
-                    collation: r.get(6),
+                    not_null: get(r, 2)?,
+                    collation: get(r, 6)?,
                     ..Default::default()
                 };
                 match (generated.as_str(), identity.as_str()) {
@@ -613,9 +614,9 @@ impl PgEngine {
                     }
                     _ => col.default = default_expr,
                 }
-                col
+                Ok(col)
             })
-            .collect())
+            .collect()
     }
 
     pub async fn table_structure(self: &Arc<Self>, schema: &str, table: &str) -> Result<TableStructure, QueryError> {
@@ -630,15 +631,14 @@ impl PgEngine {
                 &[&schema, &table],
             )
             .await?;
-        let comment = |name: &str| {
-            comments.iter().find(|r| r.get::<_, String>(0) == name).map(|r| r.get::<_, String>(1)).unwrap_or_default()
-        };
+        let comments: HashMap<String, String> =
+            comments.iter().map(|r| Ok((get(r, 0)?, get(r, 1)?))).collect::<Result<_, QueryError>>()?;
         let columns: Vec<StructColumn> = self
             .ddl_columns(&schema, table, false)
             .await?
             .into_iter()
             .map(|col| StructColumn {
-                comment: comment(&col.name),
+                comment: comments.get(&col.name).cloned().unwrap_or_default(),
                 nullable: !col.not_null,
                 identity: match col.identity.as_str() {
                     "ALWAYS" => Identity::Always,
@@ -678,9 +678,9 @@ impl PgEngine {
             key_columns("confkey", "confrelid"),
         );
         let (mut primary_key, mut indexes, mut foreign_keys, mut checks) = (None, Vec::new(), Vec::new(), Vec::new());
-        for r in self.rows(&sql, &[&schema, &table]).await? {
-            let (name, columns): (String, Vec<String>) = (r.get(0), r.get(2));
-            match r.get::<_, String>(1).as_str() {
+        for r in &self.rows(&sql, &[&schema, &table]).await? {
+            let (name, columns): (String, Vec<String>) = (get(r, 0)?, get(r, 2)?);
+            match get::<String>(r, 1)?.as_str() {
                 "p" => primary_key = Some(PrimaryKey { name, columns }),
                 "u" => {
                     indexes.push(StructIndex { name, columns, unique: true, constraint: true, ..Default::default() })
@@ -688,13 +688,13 @@ impl PgEngine {
                 "f" => foreign_keys.push(ForeignKey {
                     name,
                     columns,
-                    ref_schema: r.get(4),
-                    ref_table: r.get(5),
-                    ref_columns: r.get(6),
-                    on_update: RefAction::parse(&r.get::<_, String>(7)),
-                    on_delete: RefAction::parse(&r.get::<_, String>(8)),
+                    ref_schema: get(r, 4)?,
+                    ref_table: get(r, 5)?,
+                    ref_columns: get(r, 6)?,
+                    on_update: RefAction::parse(&get::<String>(r, 7)?),
+                    on_delete: RefAction::parse(&get::<String>(r, 8)?),
                 }),
-                _ => checks.push(Check { name, expression: check_body(&r.get::<_, String>(3)) }),
+                _ => checks.push(Check { name, expression: check_body(&get::<String>(r, 3)?) }),
             }
         }
         // Indexes no constraint stands for. An expression or partial one is kept as the server writes it.
@@ -717,14 +717,16 @@ impl PgEngine {
                 &[&schema, &table],
             )
             .await?;
-        indexes.extend(listed.iter().map(|r| StructIndex {
-            name: r.get(0),
-            unique: r.get(1),
-            method: r.get(2),
-            columns: r.get(3),
-            definition: r.get(4),
-            constraint: false,
-        }));
+        for r in &listed {
+            indexes.push(StructIndex {
+                name: get(r, 0)?,
+                unique: get(r, 1)?,
+                method: get(r, 2)?,
+                columns: get(r, 3)?,
+                definition: get(r, 4)?,
+                constraint: false,
+            });
+        }
         Ok(TableStructure {
             schema,
             name: table.to_string(),
@@ -756,15 +758,15 @@ impl PgEngine {
         Ok(rows
             .iter()
             .map(|r| {
-                let column: String = r.get(0);
+                let column: String = get(r, 0)?;
                 let target = if column.is_empty() {
                     format!("TABLE {qualified}")
                 } else {
                     format!("COLUMN {qualified}.{}", quote_ident(&PG, &column))
                 };
-                format!("COMMENT ON {target} IS {};", quote_literal_in(SqlDialect::Postgres, &r.get::<_, String>(1)))
+                Ok(format!("COMMENT ON {target} IS {};", quote_literal_in(SqlDialect::Postgres, &get::<String>(r, 1)?)))
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, QueryError>>()?
             .join("\n"))
     }
 
@@ -778,7 +780,7 @@ impl PgEngine {
         let rows = self.rows(sql, params).await?;
         match rows.first() {
             None => Err(QueryError::message(format!("{kind} {name} not found"))),
-            Some(row) => Ok(terminate_statement(&row.get::<_, Option<String>>(0).unwrap_or_default())),
+            Some(row) => Ok(terminate_statement(&get::<Option<String>>(row, 0)?.unwrap_or_default())),
         }
     }
 

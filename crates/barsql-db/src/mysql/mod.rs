@@ -278,7 +278,10 @@ impl MySession {
     }
 
     async fn read_time_zone(&mut self) {
-        if let Ok(Some(name)) = self.lease.conn.query_first::<String, _>("SELECT @@session.time_zone").await {
+        // A typed row panics on a NULL or non-text value, which a MySQL-compatible server may send.
+        if let Ok(Some(row)) = self.lease.conn.query_first::<Row, _>("SELECT @@session.time_zone").await
+            && let Some(name) = schema::text(&row, 0)
+        {
             self.time_zone = parse_time_zone(&name);
         }
     }

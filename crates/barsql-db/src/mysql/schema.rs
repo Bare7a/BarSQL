@@ -18,7 +18,7 @@ use crate::dump::DumpColumn;
 const MY: DriverType = DriverType::MySql;
 const SYSTEM_SCHEMAS: &[&str] = &["information_schema", "performance_schema", "mysql", "sys"];
 
-fn text(row: &Row, i: usize) -> Option<String> {
+pub(super) fn text(row: &Row, i: usize) -> Option<String> {
     match row.as_ref(i)? {
         MyValue::NULL => None,
         MyValue::Bytes(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
@@ -468,7 +468,8 @@ impl MyEngine {
             .iter()
             .map(|r| {
                 let extra = string(r, 4);
-                let lower = extra.to_lowercase();
+                // ASCII only, so offsets found in `lower` slice `extra` at the same place.
+                let lower = extra.to_ascii_lowercase();
                 let leftover = ["auto_increment", "default_generated", "virtual generated", "stored generated"]
                     .iter()
                     .fold(lower.clone(), |text, flag| text.replace(flag, ""));

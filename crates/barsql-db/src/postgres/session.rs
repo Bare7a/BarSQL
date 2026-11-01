@@ -8,7 +8,7 @@ use futures_util::{StreamExt, pin_mut};
 use tokio_postgres::SimpleQueryMessage;
 use tokio_postgres::types::{Format, IsNull, ToSql, Type, to_sql_checked};
 
-use super::{PgLease, READ_ONLY_SETUP, pg_error, type_name};
+use super::{PgLease, READ_ONLY_SETUP, decode_error, pg_error, type_name};
 use crate::event::{ScriptEvent, Sink, StatementResult, emit};
 use crate::script::{
     self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows, touches_transaction,
@@ -110,7 +110,9 @@ impl PgSession {
     async fn transaction_state(&self) -> TxState {
         match self.lease.client().simple_query("SELECT now() <> statement_timestamp()").await {
             Ok(messages)
-                if messages.iter().any(|m| matches!(m, SimpleQueryMessage::Row(row) if row.get(0) == Some("t"))) =>
+                if messages.iter().any(
+                    |m| matches!(m, SimpleQueryMessage::Row(row) if row.try_get(0).is_ok_and(|v| v == Some("t"))),
+                ) =>
             {
                 TxState::Open
             }
@@ -261,8 +263,15 @@ impl StatementRunner for PgSession {
                 }
                 Some(Ok(SimpleQueryMessage::Row(row))) => {
                     let Some((columns, decoders, builder, rows)) = set.as_mut() else { continue };
-                    for (i, decoder) in decoders.iter().enumerate() {
-                        decoder.push(row.get(i), &local, builder);
+                    // After a SET client_encoding, like a LATIN1 dump's, the server's text may not be UTF-8.
+                    let decoded = decoders.iter().enumerate().try_for_each(|(i, decoder)| {
+                        decoder.push(row.try_get(i)?, &local, builder);
+                        Ok(())
+                    });
+                    if let Err(err) = decoded {
+                        let summary = close_set(set.take(), first_index, sink, started).await;
+                        self.send_notices(first_index, sink).await;
+                        return fail(decode_error(&err), summary).await;
                     }
                     builder.end_row();
                     *rows += 1;

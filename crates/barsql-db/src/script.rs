@@ -79,9 +79,6 @@ impl Buffered {
     }
 
     pub fn text(&self, row: usize, col: usize) -> Option<&str> {
-        if row >= self.chunk.rows() || col >= self.chunk.columns() {
-            return None;
-        }
         self.chunk.display(row, col)
     }
 

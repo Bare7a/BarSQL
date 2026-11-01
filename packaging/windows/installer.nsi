@@ -1,4 +1,5 @@
 Unicode true
+SetCompressor /SOLID lzma
 
 # Keep the install folder, uninstall key and file classes as they are so upgrades install over the old copy.
 # The in-app updater also sets DisplayVersion under the uninstall key.

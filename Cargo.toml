@@ -71,6 +71,10 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 [profile.dev.package."*"]
 debug = false
 
+# Fat LTO in one codegen unit. The binary comes out about 15% smaller, for about twice the build time.
 [profile.release]
-lto = "thin"
+lto = "fat"
+codegen-units = 1
 strip = true
+# Leaves out the unwinding code and tables, a large share of the binary. main.rs logs the panic to crash.log first.
+panic = "abort"

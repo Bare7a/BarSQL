@@ -2,6 +2,8 @@
 
 mod single_instance;
 
+use std::path::Path;
+
 use anyhow::Context as _;
 use barsql_app::{BarApp, find_sqlite_arg};
 use barsql_ui::LaunchOptions;
@@ -14,6 +16,7 @@ fn main() -> anyhow::Result<()> {
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let data_dir = barsql_core::paths::ensure_data_dir().context("data folder")?;
+    log_panics(&data_dir);
     // Started by an AI app: no window, and never handed to a running BarSQL.
     if args.first().is_some_and(|arg| arg == "--mcp") {
         let runtime = runtime()?;
@@ -54,6 +57,23 @@ fn main() -> anyhow::Result<()> {
     let options = LaunchOptions { snapshot, snapshot_run, snapshot_panel, snapshot_size, screenshots, check_updates };
     barsql_ui::run(bar, options);
     Ok(())
+}
+
+// Release builds abort on a panic, background tasks' too, so it goes to crash.log in the data folder first.
+fn log_panics(data_dir: &Path) {
+    let path = data_dir.join("crash.log");
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let thread = std::thread::current();
+        let report = format!(
+            "BarSQL {}: thread '{}' {info}\n\n{backtrace:#}\n",
+            env!("CARGO_PKG_VERSION"),
+            thread.name().unwrap_or("<unnamed>")
+        );
+        let _ = std::fs::write(&path, report);
+        default(info);
+    }));
 }
 
 fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {

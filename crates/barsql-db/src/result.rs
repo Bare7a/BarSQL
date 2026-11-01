@@ -92,7 +92,11 @@ impl ResultChunk {
         self.columns
     }
 
+    // Out of range reads as NULL, like ResultSet::cell, for helpers that read cell (0, n) of a short result.
     pub fn cell(&self, row: usize, col: usize) -> Cell<'_> {
+        if row >= self.rows || col >= self.columns {
+            return Cell::Null;
+        }
         let ix = row * self.columns + col;
         let kind = CellKind::from_bits(self.kinds[ix / CELLS_PER_WORD] >> ((ix % CELLS_PER_WORD) * 2));
         let start = if ix == 0 { 0 } else { self.ends[ix - 1] as usize };
@@ -262,6 +266,7 @@ mod tests {
         assert_eq!(set.cell(41, 0), Cell::Number("41"));
         assert_eq!(set.display(41, 1), Some("false"));
         assert_eq!(set.cell(42, 0), Cell::Null);
+        assert_eq!(ChunkBuilder::new(5, 1).finish().cell(0, 4), Cell::Null, "an empty chunk");
         assert_eq!(Cell::Number("9").to_value(), Value::Int(9));
         assert_eq!(Cell::Number("1.5").to_value(), Value::Float(1.5));
     }

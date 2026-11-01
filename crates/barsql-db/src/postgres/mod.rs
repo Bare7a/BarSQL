@@ -348,6 +348,14 @@ impl Drop for PgLease {
     }
 }
 
+// A try_get error's text names only the column. Its source says what was wrong with the value.
+pub(crate) fn decode_error(err: &tokio_postgres::Error) -> QueryError {
+    match std::error::Error::source(err) {
+        Some(cause) => QueryError::message(format!("{err}: {cause}")),
+        None => pg_error(err),
+    }
+}
+
 pub(crate) fn pg_error(err: &tokio_postgres::Error) -> QueryError {
     let Some(db) = err.as_db_error() else {
         return QueryError::message(err.to_string());
