@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 use crate::event::{ScriptEvent, Sink, StatementResult, emit};
 use crate::lite::{LiteRef, LiteRows, LiteSource, LiteValue, values};
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
-use crate::{Cancel, ChunkBuilder, ColumnMeta, ColumnOrigin};
+use crate::{Cancel, ChunkBuilder, ColumnMeta, ColumnOrigin, join_error};
 
 pub use crate::lite::values::parse_time;
 
@@ -66,7 +66,7 @@ impl SqliteEngine {
             Ok((conn, added))
         })
         .await
-        .map_err(|err| QueryError::message(err.to_string()))??;
+        .map_err(join_error)??;
         let interrupt = Arc::new(conn.get_interrupt_handle());
         let extension_functions = added.into_iter().collect();
         Ok(Arc::new(Self { options, conn: Arc::new(Mutex::new(conn)), interrupt, extension_functions }))
@@ -89,7 +89,7 @@ impl SqliteEngine {
         work: impl FnOnce(&Connection) -> Result<T, QueryError> + Send + 'static,
     ) -> Result<T, QueryError> {
         let guard = self.conn.clone().lock_owned().await;
-        tokio::task::spawn_blocking(move || work(&guard)).await.map_err(|err| QueryError::message(err.to_string()))?
+        tokio::task::spawn_blocking(move || work(&guard)).await.map_err(join_error)?
     }
 
     fn server_cancel(&self) -> impl Fn() + Send + Sync + 'static {
@@ -151,7 +151,7 @@ impl SqliteSession {
             (guard, out)
         })
         .await
-        .map_err(|err| QueryError::message(err.to_string()))?;
+        .map_err(join_error)?;
         self.in_transaction = !guard.is_autocommit();
         self.guard = Some(guard);
         Ok(out)

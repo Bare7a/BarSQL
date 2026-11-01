@@ -2,12 +2,18 @@
 
 mod single_instance;
 
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::path::Path;
 
 use anyhow::Context as _;
 use barsql_app::{BarApp, find_sqlite_arg};
+use barsql_core::clock::now_rfc3339;
 use barsql_ui::LaunchOptions;
 use single_instance::Instance;
+
+// Past this the log starts over, so a run of panics can't fill the disk.
+const CRASH_LOG_LIMIT: u64 = 1 << 20;
 
 fn main() -> anyhow::Result<()> {
     barsql_app::install_default_provider();
@@ -59,7 +65,8 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Release builds abort on a panic, background tasks' too, so it goes to crash.log in the data folder first.
+// A window launch has nowhere to print a panic, so it goes to crash.log in the data folder. Appended: a panic in an
+// OS callback panics again on its way out ("cannot unwind"), and that report mustn't replace the first.
 fn log_panics(data_dir: &Path) {
     let path = data_dir.join("crash.log");
     let default = std::panic::take_hook();
@@ -67,13 +74,21 @@ fn log_panics(data_dir: &Path) {
         let backtrace = std::backtrace::Backtrace::force_capture();
         let thread = std::thread::current();
         let report = format!(
-            "BarSQL {}: thread '{}' {info}\n\n{backtrace:#}\n",
+            "{} BarSQL {}: thread '{}' {info}\n\n{backtrace:#}\n",
+            now_rfc3339(),
             env!("CARGO_PKG_VERSION"),
             thread.name().unwrap_or("<unnamed>")
         );
-        let _ = std::fs::write(&path, report);
+        let _ = record(&path, &report);
         default(info);
     }));
+}
+
+fn record(path: &Path, report: &str) -> std::io::Result<()> {
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > CRASH_LOG_LIMIT) {
+        return std::fs::write(path, report);
+    }
+    OpenOptions::new().create(true).append(true).open(path)?.write_all(report.as_bytes())
 }
 
 fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
@@ -83,4 +98,29 @@ fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
         .build()
         .context("tokio runtime")?;
     Ok(runtime)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CRASH_LOG_LIMIT, log_panics, record};
+
+    #[test]
+    fn crash_log_starts_over_once_it_passes_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crash.log");
+        record(&path, &"x".repeat(CRASH_LOG_LIMIT as usize + 1)).unwrap();
+        record(&path, "latest\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "latest\n");
+    }
+
+    #[test]
+    fn a_second_panic_adds_to_crash_log_instead_of_replacing_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        log_panics(dir.path());
+        let _ = std::panic::catch_unwind(|| panic!("the real panic"));
+        let _ = std::panic::catch_unwind(|| panic!("panic in a function that cannot unwind"));
+        let log = std::fs::read_to_string(dir.path().join("crash.log")).unwrap();
+        let (first, second) = (log.find("the real panic"), log.find("cannot unwind"));
+        assert!(first.is_some() && first < second, "{log}");
+    }
 }

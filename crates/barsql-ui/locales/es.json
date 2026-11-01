@@ -339,6 +339,7 @@
     "code": "Código {{code}}",
     "useName": "Usar {{name}}",
     "didYouMean": "¿Quisiste decir {{name}}?",
+    "bug": "BarSQL encontró un fallo interno. Los detalles están en crash.log, en la carpeta de datos.",
     "pathNotText": "No se puede usar {{path}}: su ruta no es UTF-8 válido. Renómbralo e inténtalo de nuevo."
   },
   "goToLine": {

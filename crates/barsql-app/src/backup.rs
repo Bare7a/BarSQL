@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use barsql_core::QueryError;
-use barsql_db::{Cancel, Cell, ScriptEvent};
+use barsql_db::{Cancel, Cell, ScriptEvent, join_error};
 use barsql_sql::ddl::terminate_statement;
 use barsql_sql::table_ref;
 
@@ -56,10 +56,6 @@ impl Output {
 }
 
 fn io_error(error: std::io::Error) -> QueryError {
-    QueryError::message(error.to_string())
-}
-
-fn join_error(error: tokio::task::JoinError) -> QueryError {
     QueryError::message(error.to_string())
 }
 

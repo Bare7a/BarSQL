@@ -76,5 +76,5 @@ body:
     id: logs
     attributes:
       label: Error message or log
-      description: Paste it as text. If BarSQL closed by itself, add `crash.log` from the [data folder](https://github.com/Bare7a/BarSQL/blob/master/guide/app.md#-portable-by-design). For an update or AI assistant problem, add the end of `update.log` or `mcp.log`. Leave out passwords, connection strings and private data.
+      description: Paste it as text. If BarSQL closed by itself or said it hit a bug, add `crash.log` from the [data folder](https://github.com/Bare7a/BarSQL/blob/master/guide/app.md#-portable-by-design). For an update or AI assistant problem, add the end of `update.log` or `mcp.log`. Leave out passwords, connection strings and private data.
       render: text

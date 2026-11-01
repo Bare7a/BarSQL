@@ -1,3 +1,4 @@
+use std::panic::AssertUnwindSafe;
 use std::time::Instant;
 
 use barsql_core::clock::now_rfc3339;
@@ -8,6 +9,7 @@ use barsql_sql::{
     ExplainStrategy, QueryPlan, ServerVersion, assert_read_only, build_explain, controls_transactions, first_keyword,
     is_read_only, parse_plan, single_statement, split_statement_texts, strip_leading_comments,
 };
+use futures_util::FutureExt as _;
 use serde::Serialize;
 
 use crate::events::{RunEvent, RunHandle, RunResult};
@@ -95,19 +97,40 @@ impl BarApp {
             self.inner.jobs.end(tab_id, stream_id);
             return Err(error);
         }
-        let (tx, rx) = async_channel::bounded(RUN_CHANNEL);
-        let app = self.clone();
         let (tab, connection) = (tab_id.to_string(), connection_id.to_string());
-        self.inner.runtime.spawn(async move {
-            let done = match app.run_batch(&tab, slot, &connection, &statements, &tx, &cancel).await {
+        Ok(self.spawn_run(tab_id, stream_id, Some(slot.clone()), move |app, tx| async move {
+            match app.run_batch(&tab, slot, &connection, &statements, &tx, &cancel).await {
                 Ok(result_count) => RunEvent::Done { result_count, error: None },
                 Err(error) => RunEvent::Done { result_count: 0, error: Some(error) },
+            }
+        }))
+    }
+
+    // Ends with Done even when `work` panics. A bug can leave the tab's session mid-run, so the session goes too.
+    fn spawn_run<F, Fut>(&self, tab_id: &str, stream_id: u64, slot: Option<Slot>, work: F) -> RunHandle
+    where
+        F: FnOnce(BarApp, async_channel::Sender<RunEvent>) -> Fut + Send + 'static,
+        Fut: Future<Output = RunEvent> + Send,
+    {
+        let (tx, rx) = async_channel::bounded(RUN_CHANNEL);
+        let app = self.clone();
+        let tab = tab_id.to_string();
+        self.inner.runtime.spawn(async move {
+            let work = AssertUnwindSafe(work(app.clone(), tx.clone()));
+            let done = match work.catch_unwind().await {
+                Ok(done) => done,
+                Err(panic) => RunEvent::Done { result_count: 0, error: Some(QueryError::from_panic(panic)) },
             };
+            if let (RunEvent::Done { error: Some(error), .. }, Some(slot)) = (&done, slot)
+                && error.bug
+            {
+                app.end_bugged_session(&tab, slot).await;
+            }
             // Ended first, so a cancel after Done finds nothing running.
             app.inner.jobs.end(&tab, stream_id);
             let _ = tx.send(done).await;
         });
-        Ok(RunHandle { stream_id, events: rx })
+        RunHandle { stream_id, events: rx }
     }
 
     async fn run_batch(
@@ -200,12 +223,10 @@ impl BarApp {
             req.limit = 100;
         }
         let (stream_id, cancel) = self.inner.jobs.start(tab_id, connection_id);
-        let (tx, rx) = async_channel::bounded(RUN_CHANNEL);
-        let app = self.clone();
-        let (tab, connection) = (tab_id.to_string(), connection_id.to_string());
-        self.inner.runtime.spawn(async move {
+        let connection = connection_id.to_string();
+        Ok(self.spawn_run(tab_id, stream_id, None, move |app, tx| async move {
             // So Stop works while the connection is still opening.
-            let done = match app.engine_unless_cancelled(&connection, &cancel).await {
+            match app.engine_unless_cancelled(&connection, &cancel).await {
                 Err(error) => RunEvent::Done { result_count: 0, error: Some(error) },
                 Ok(engine) => {
                     if let Err(error) = app.stream_table_page(&engine, &req, &tx, &cancel).await {
@@ -214,11 +235,8 @@ impl BarApp {
                     }
                     RunEvent::Done { result_count: 1, error: None }
                 }
-            };
-            app.inner.jobs.end(&tab, stream_id);
-            let _ = tx.send(done).await;
-        });
-        Ok(RunHandle { stream_id, events: rx })
+            }
+        }))
     }
 
     async fn stream_table_page(
@@ -591,9 +609,42 @@ async fn plan_of(
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{DriverType, QueryError};
+    use std::time::Duration;
+
+    use barsql_core::{DriverType, QueryError, Value};
 
     use super::left_applied;
+    use crate::connections::tests::setup;
+    use crate::events::{AppEvent, RunEvent, RunHandle};
+
+    async fn boom<T>() -> T {
+        panic!("boom")
+    }
+
+    async fn drain(run: RunHandle) -> Vec<RunEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = run.events.recv().await {
+            events.push(event);
+        }
+        events
+    }
+
+    #[tokio::test]
+    async fn a_run_that_panics_ends_with_a_bug_and_rolls_back_its_tab() {
+        let (app, id, _dir) = setup().await;
+        let notices = app.events();
+        app.begin_transaction(&id, "tab").await.unwrap();
+        drain(app.execute_query_stream(&id, "tab", "CREATE TABLE t (a INTEGER)").await.unwrap()).await;
+        let (stream_id, _) = app.inner.jobs.start("tab", &id);
+        let events = drain(app.spawn_run("tab", stream_id, Some(app.inner.tabs.slot("tab")), |_, _| boom())).await;
+        assert!(matches!(events.as_slice(), [RunEvent::Done { error: Some(error), .. }] if error.bug), "{events:?}");
+        assert!(!app.cancel_query("tab"), "the run's job ended");
+        assert!(!app.transaction_status("tab"));
+        assert_eq!(notices.try_recv(), Ok(AppEvent::TransactionsEnded { tab_ids: vec!["tab".into()] }));
+        let count = app.execute_query(&id, "SELECT count(*) FROM sqlite_master WHERE name = 't'");
+        let made = tokio::time::timeout(Duration::from_secs(5), count).await.expect("the tab kept the connection");
+        assert_eq!(made.unwrap().rows, [[Value::Int(0)]], "the tab's transaction was rolled back");
+    }
 
     fn left(driver: DriverType, statements: &[&str]) -> String {
         let statements: Vec<String> = statements.iter().map(|stmt| stmt.to_string()).collect();

@@ -1,7 +1,10 @@
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+
+const BUG: &str = "BarSQL hit a bug. The details are in crash.log in the data folder.";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +22,8 @@ pub struct QueryError {
     pub severity: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub cancelled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bug: bool,
     // Kept apart from the message so the connection dialog can mark the file's row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extension: Option<ExtensionFailure>,
@@ -37,6 +42,15 @@ impl QueryError {
 
     pub fn cancelled() -> Self {
         Self { message: "query cancelled".into(), cancelled: true, ..Default::default() }
+    }
+
+    // A panic caught where a task ends. The panic hook has already written it and its backtrace to crash.log.
+    pub fn from_panic(payload: Box<dyn Any + Send>) -> Self {
+        let detail = match payload.downcast::<String>() {
+            Ok(text) => *text,
+            Err(payload) => payload.downcast_ref::<&str>().map(|text| text.to_string()).unwrap_or_default(),
+        };
+        Self { message: BUG.into(), detail, bug: true, ..Default::default() }
     }
 
     pub fn extension(path: &str, reason: impl Into<String>) -> Self {
@@ -250,4 +264,26 @@ fn is_zero(v: &u32) -> bool {
 
 fn is_false(v: &bool) -> bool {
     !*v
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+    use std::panic::UnwindSafe;
+
+    use super::QueryError;
+
+    fn payload(panics: impl FnOnce() + UnwindSafe) -> Box<dyn Any + Send> {
+        std::panic::catch_unwind(panics).unwrap_err()
+    }
+
+    #[test]
+    fn a_panic_reads_as_a_bug_that_keeps_its_message() {
+        let error = QueryError::from_panic(payload(|| panic!("index out of bounds")));
+        assert!(error.bug);
+        assert_eq!(error.detail, "index out of bounds");
+        let formatted = QueryError::from_panic(payload(|| panic!("row {} of {}", 3, 2)));
+        assert_eq!(formatted.detail, "row 3 of 2", "a formatted message is a String payload");
+        assert!(!QueryError::message("syntax error").bug);
+    }
 }

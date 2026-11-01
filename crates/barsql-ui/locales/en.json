@@ -339,7 +339,8 @@
     "historyNotSaved": "Query history could not be saved: {{error}}. Recent won't list new queries until saving works again.",
     "code": "Code {{code}}",
     "useName": "Use {{name}}",
-    "didYouMean": "Did you mean {{name}}?"
+    "didYouMean": "Did you mean {{name}}?",
+    "bug": "BarSQL hit a bug. The details are in crash.log in the data folder."
   },
   "goToLine": { "title": "Go to line", "label": "Line, or line:column", "go": "Go" },
   "status": {

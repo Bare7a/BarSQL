@@ -339,7 +339,8 @@
     "historyNotSaved": "Der Abfrageverlauf konnte nicht gespeichert werden: {{error}}. Neue Abfragen erscheinen erst wieder unter „Zuletzt“, wenn das Speichern gelingt.",
     "code": "Code {{code}}",
     "useName": "{{name}} verwenden",
-    "didYouMean": "Meinten Sie {{name}}?"
+    "didYouMean": "Meinten Sie {{name}}?",
+    "bug": "In BarSQL ist ein interner Fehler aufgetreten. Details stehen in crash.log im Datenordner."
   },
   "goToLine": { "title": "Gehe zu Zeile", "label": "Zeile oder Zeile:Spalte", "go": "Gehe zu" },
   "status": {

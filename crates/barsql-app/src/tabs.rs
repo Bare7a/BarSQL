@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use barsql_core::QueryError;
-use barsql_db::{Cancel, Engine, Session};
+use barsql_db::{Cancel, Engine, Session, join_error};
 use futures_util::future::join_all;
 use tokio::sync::OwnedMutexGuard;
 
+use crate::events::AppEvent;
 use crate::{BarApp, lock};
 
 // Each open editor tab gets its own session so SET, temp tables and transactions stay with that tab.
@@ -149,11 +150,7 @@ impl BarApp {
         let app = self.clone();
         let id = connection_id.to_string();
         let connect = self.inner.runtime.spawn(async move { app.engine(&id).await });
-        unless_cancelled(
-            async { connect.await.unwrap_or_else(|err| Err(QueryError::message(err.to_string()))) },
-            cancel,
-        )
-        .await
+        unless_cancelled(async { connect.await.unwrap_or_else(|err| Err(join_error(err))) }, cancel).await
     }
 
     // Called when the tab's work is done with the slot.
@@ -213,6 +210,13 @@ impl BarApp {
         self.inner.tabs.unbind(tab_id);
         self.inner.tabs.mark(tab_id, false);
         rolled_back
+    }
+
+    pub(crate) async fn end_bugged_session(&self, tab_id: &str, slot: Slot) {
+        let mut slot = slot.lock().await;
+        if self.end_session(tab_id, &mut slot).await {
+            self.emit(AppEvent::TransactionsEnded { tab_ids: vec![tab_id.to_string()] });
+        }
     }
 }
 

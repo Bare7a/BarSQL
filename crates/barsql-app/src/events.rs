@@ -50,6 +50,7 @@ pub struct ImportProgress {
 pub struct ImportDone {
     pub result: Option<ImportResult>,
     pub error: String,
+    pub bug: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

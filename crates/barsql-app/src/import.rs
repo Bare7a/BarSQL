@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,7 @@ use barsql_sql::dml::{
     build_batch_insert_with, build_import_create_table, build_truncate, is_bit_column,
 };
 use barsql_sql::{Dialect, READ_ONLY_ERROR, split_statement_texts};
+use futures_util::FutureExt as _;
 use serde::{Deserialize, Serialize};
 
 use crate::BarApp;
@@ -193,17 +195,18 @@ impl BarApp {
         self.inner.runtime.spawn(async move {
             let emitter = Emitter { events: tx.clone(), total_rows: 0, last: None };
             let started = Instant::now();
-            let outcome = work(app.clone(), emitter, cancel.clone()).await;
+            let work = AssertUnwindSafe(work(app.clone(), emitter, cancel.clone()));
+            let outcome = work.catch_unwind().await.unwrap_or_else(|panic| Err(QueryError::from_panic(panic)));
             let done = match outcome {
                 Ok(mut result) => {
                     result.duration_ms = started.elapsed().as_millis() as i64;
-                    ImportDone { result: Some(result), error: String::new() }
+                    ImportDone { result: Some(result), ..Default::default() }
                 }
                 Err(err) if cancel.is_cancelled() || err.cancelled => ImportDone {
                     result: Some(ImportResult { cancelled: true, ..Default::default() }),
-                    error: String::new(),
+                    ..Default::default()
                 },
-                Err(err) => ImportDone { result: None, error: err.message },
+                Err(err) => ImportDone { result: None, error: err.message, bug: err.bug },
             };
             app.inner.jobs.end(&key, job);
             let _ = tx.send(ImportEvent::Done(done)).await;
@@ -732,6 +735,19 @@ fn mysql_datetime(v: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn boom<T>() -> T {
+        panic!("boom")
+    }
+
+    #[tokio::test]
+    async fn an_import_that_panics_ends_with_a_bug() {
+        let (app, id, _dir) = crate::connections::tests::setup().await;
+        let handle = app.run_import("import", &id, |_, _, _| boom());
+        let event = handle.events.recv().await;
+        assert!(matches!(&event, Ok(ImportEvent::Done(done)) if done.bug && done.result.is_none()), "{event:?}");
+        assert!(!app.cancel_query("import"), "the import's job ended");
+    }
 
     #[test]
     fn sql_scripts_must_be_utf8_and_lose_their_bom() {

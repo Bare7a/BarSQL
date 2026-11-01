@@ -537,6 +537,7 @@ impl ImportDialog {
     fn apply(&mut self, event: ImportEvent, cx: &mut Context<Self>) {
         match event {
             ImportEvent::Progress(progress) => self.progress = Some(progress),
+            ImportEvent::Done(done) if done.bug => self.error = Some(t(cx, "errors.bug")),
             ImportEvent::Done(done) if !done.error.is_empty() => self.error = Some(done.error.into()),
             ImportEvent::Done(done) => {
                 if let Some(result) = &done.result
@@ -1080,12 +1081,25 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use barsql_app::{ImportDone, ImportEvent};
     use barsql_core::Value;
     use gpui_kit::component::Root;
     use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext};
 
     use super::{ImportDialog, Kind, Target, fits, table_name_for};
+    use crate::i18n::I18n;
     use crate::test_support::{Env, settle};
+
+    #[gpui_kit::test]
+    fn an_import_that_hit_a_bug_says_so_in_the_ui_language(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        cx.update(|cx| cx.set_global(I18n::new("de")));
+        let (view, cx) = open(&env, cx, Rc::new(Cell::new(0)));
+        let done = ImportDone { error: "BarSQL hit a bug.".into(), bug: true, ..Default::default() };
+        view.update(cx, |dialog, cx| dialog.apply(ImportEvent::Done(done), cx));
+        let said = "In BarSQL ist ein interner Fehler aufgetreten. Details stehen in crash.log im Datenordner.";
+        assert_eq!(view.read_with(cx, |dialog, _| dialog.error.clone()).as_deref(), Some(said));
+    }
 
     fn open<'a>(
         env: &Env,

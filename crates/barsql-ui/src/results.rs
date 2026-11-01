@@ -60,7 +60,8 @@ impl ShownError {
         if error.cancelled {
             return Self { message: t(cx, "dialog.queryCancelled"), info: None, fix: None, scroll };
         }
-        Self { message: error.message.clone().into(), info: Some(error), fix: None, scroll }
+        let message = if error.bug { t(cx, "errors.bug") } else { error.message.clone().into() };
+        Self { message, info: Some(error), fix: None, scroll }
     }
 
     // Centred in the pane. `action` sits next to the copy button, and `fix` next to the hint.
@@ -1532,9 +1533,21 @@ mod editor_tests {
     use gpui_kit::assets::IconName as Lucide;
 
     use super::messages_tests::{apply, done, panel};
-    use super::{ResultsEvent, ResultsPanel};
+    use super::{ResultsEvent, ResultsPanel, ShownError};
     use crate::grid::GridEvent;
+    use crate::i18n::I18n;
     use crate::test_support::{Env, settle};
+
+    #[gpui_kit::test]
+    fn a_bug_reads_in_the_ui_language_and_keeps_the_panic_as_detail(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(I18n::new("de"));
+            let shown = ShownError::new(QueryError::from_panic(Box::new("boom")), cx);
+            let said = "In BarSQL ist ein interner Fehler aufgetreten. Details stehen in crash.log im Datenordner.";
+            assert_eq!(shown.message, said);
+            assert_eq!(shown.info.map(|info| info.detail), Some("boom".to_string()));
+        });
+    }
 
     // Result `index`: one row of (id, name).
     fn people(index: usize, statement: &str) -> Vec<RunEvent> {

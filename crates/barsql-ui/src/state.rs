@@ -1,9 +1,10 @@
 use std::future::Future;
 
 use barsql_app::BarApp;
-use gpui_kit::{App, AppContext as _, Global, Task};
+use gpui_kit::{App, Global, Task};
 
-use crate::i18n::I18n;
+use crate::i18n::{I18n, t};
+use crate::toast;
 
 pub struct AppState {
     pub bar: BarApp,
@@ -49,8 +50,47 @@ pub fn set_setting_json<T: serde::Serialize>(cx: &App, key: &str, value: &T) {
     }
 }
 
-// Network futures run on tokio, never on GPUI's executors.
+// Network futures run on tokio, never on GPUI's executors. A panic there ends the task empty, with a toast.
 pub fn spawn<T: Send + 'static>(cx: &App, work: impl Future<Output = T> + Send + 'static) -> Task<Option<T>> {
     let handle = cx.global::<AppState>().bar.runtime().spawn(work);
-    cx.background_spawn(async move { handle.await.ok() })
+    cx.spawn(async move |cx| match handle.await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            if error.is_panic() {
+                cx.update(|cx| toast::error(t(cx, "errors.bug"), cx));
+            }
+            None
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use gpui_kit::TestAppContext;
+
+    use crate::test_support::Env;
+    use crate::toast::{self, ToastKind};
+
+    async fn boom() {
+        panic!("boom")
+    }
+
+    #[gpui_kit::test]
+    fn a_task_that_panics_shows_an_error_toast(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let _task = cx.update(|cx| super::spawn(cx, boom()));
+        let mut toasts = Vec::new();
+        for _ in 0..1000 {
+            cx.run_until_parked();
+            toasts = cx.update(|cx| toast::messages(cx));
+            if !toasts.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let said = "BarSQL hit a bug. The details are in crash.log in the data folder.";
+        assert_eq!(toasts, [(ToastKind::Error, said.to_string())]);
+    }
 }

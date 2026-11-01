@@ -27,7 +27,7 @@ use crate::lite::{LiteRows, LiteSource, LiteValue, catalog, values};
 use crate::script::{self, Buffered, StatementRun, StatementRunner, summary_for_exec, summary_for_rows};
 use crate::ssh::{SshOptions, TunnelSlot};
 use crate::tls::{TlsMode, http_client_config};
-use crate::{Cancel, ChunkBuilder, ColumnMeta};
+use crate::{Cancel, ChunkBuilder, ColumnMeta, join_error};
 use hrana::{
     CursorBatch, CursorBody, CursorEntry, CursorHead, CursorStep, Endpoint, HError, PipelineBody, PipelineOk,
     PipelineRequest, PipelineResponse, PipelineResult, Stmt, StmtResult, request_error,
@@ -172,7 +172,7 @@ impl TursoEngine {
         let handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || work(&mut HranaSource { engine: &engine, handle }))
             .await
-            .map_err(|err| QueryError::message(err.to_string()))?
+            .map_err(join_error)?
     }
 
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {

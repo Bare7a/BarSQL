@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use barsql_core::QueryError;
 use tokio::sync::Notify;
+use tokio::task::JoinError;
 
 type ServerCancel = Box<dyn Fn() + Send + Sync>;
 
@@ -72,10 +74,33 @@ impl Drop for ServerCancelGuard {
     }
 }
 
+// A task that didn't finish either panicked or was aborted, as the runtime does when it shuts down.
+pub fn join_error(error: JoinError) -> QueryError {
+    match error.try_into_panic() {
+        Ok(panic) => QueryError::from_panic(panic),
+        Err(_) => QueryError::cancelled(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    async fn boom() {
+        panic!("boom")
+    }
+
+    #[tokio::test]
+    async fn a_panicked_task_reads_as_a_bug_and_an_aborted_one_as_cancelled() {
+        let panicked = join_error(tokio::spawn(boom()).await.unwrap_err());
+        assert!(panicked.bug && !panicked.cancelled);
+        assert_eq!(panicked.detail, "boom");
+        let pending = tokio::spawn(std::future::pending::<()>());
+        pending.abort();
+        let aborted = join_error(pending.await.unwrap_err());
+        assert!(aborted.cancelled && !aborted.bug);
+    }
 
     #[tokio::test]
     async fn cancel_wakes_waiters_and_reaches_the_server_once() {

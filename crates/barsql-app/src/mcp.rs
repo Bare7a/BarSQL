@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -11,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError};
 use barsql_db::{ColumnMeta, ResultChunk};
+use futures_util::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
@@ -162,7 +164,8 @@ impl Server {
         let result = if *cancelled.borrow() {
             Err(CANCELLED.into())
         } else {
-            self.run(tool, args, &tab, cancelled.clone()).await
+            let run = AssertUnwindSafe(self.run(tool, args, &tab, cancelled.clone()));
+            run.catch_unwind().await.unwrap_or_else(|panic| Err(failed(QueryError::from_panic(panic))))
         };
         // Gives the connection back at once: SQLite has only one.
         self.bar.cleanup_tab(&tab).await;
