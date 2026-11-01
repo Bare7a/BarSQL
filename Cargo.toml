@@ -71,8 +71,6 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 [profile.dev.package."*"]
 debug = false
 
-# Fat LTO in one codegen unit. The binary comes out about 16% smaller, for about twice the build time.
 [profile.release]
-lto = "fat"
-codegen-units = 1
+lto = "thin"
 strip = true
