@@ -23,8 +23,8 @@ body:
     id: version
     attributes:
       label: BarSQL version
-      description: Shown in About.
-      placeholder: 1.0.0
+      description: Help → About BarSQL, then the copy button next to the version.
+      placeholder: BarSQL 1.2.2 (macOS arm64)
     validations:
       required: true
 
@@ -32,9 +32,24 @@ body:
     id: os
     attributes:
       label: Operating system
-      placeholder: macOS 15, Windows 11, Ubuntu 24.04 (Wayland)
+      description: With the display scaling, if it isn't 100%.
+      placeholder: macOS 15, Windows 11 at 150%, Ubuntu 24.04 (Wayland)
     validations:
       required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      description: Updates work differently for each download.
+      options:
+        - Windows installer
+        - Windows zip or BarSQL.exe
+        - macOS zip or dmg
+        - Linux tar.gz or standalone binary
+        - AppImage
+        - deb, rpm or pkg.tar.zst
+        - Built from source
 
   - type: dropdown
     id: database
@@ -46,11 +61,20 @@ body:
         - MySQL
         - MariaDB
         - SQLite
+        - SQL Server
+        - ClickHouse
+        - Turso / libSQL
         - Not database-specific
+
+  - type: input
+    id: database-version
+    attributes:
+      label: Database version
+      placeholder: PostgreSQL 17.2, MySQL 8.4, SQL Server 2022
 
   - type: textarea
     id: logs
     attributes:
-      label: Error message
-      description: Paste it as text. Leave out passwords and connection strings.
+      label: Error message or log
+      description: Paste it as text. For an update or AI assistant problem, add the end of `update.log` or `mcp.log` from the [data folder](https://github.com/Bare7a/BarSQL/blob/master/guide/app.md#-portable-by-design). Leave out passwords, connection strings and private data.
       render: text

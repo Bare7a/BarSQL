@@ -6,12 +6,14 @@ body:
     id: idea
     attributes:
       label: What would you like BarSQL to do?
-      description: The problem it solves, and how you picture it working.
+      description: The problem it solves and how you picture it working. Mention any tool that already does it well.
     validations:
       required: true
 
-  - type: textarea
-    id: alternatives
+  - type: checkboxes
+    id: build
     attributes:
-      label: Alternatives
-      description: How you handle it today, or how other tools do it.
+      label: Contributing
+      description: For a big change, wait for a reply on the approach before you start.
+      options:
+        - label: I'd like to build this myself
