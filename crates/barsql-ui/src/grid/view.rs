@@ -20,6 +20,7 @@ use super::range::{self, CellCoord};
 use super::scroll::{GridScroll, LANE};
 use super::selection::{Arrow, GUTTER, Selection, View};
 use super::sort::{RowOrder, SortState, sort_order};
+use crate::actions::os_binding;
 use crate::i18n::t;
 use crate::state::{set_setting, setting, setting_bool};
 use crate::toast;
@@ -115,11 +116,6 @@ actions!(
     ]
 );
 
-#[cfg(target_os = "macos")]
-const MOD: &str = "cmd";
-#[cfg(not(target_os = "macos"))]
-const MOD: &str = "ctrl";
-
 pub fn init(cx: &mut App) {
     let context = Some(CONTEXT);
     cx.bind_keys([
@@ -138,18 +134,18 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", ClearSelection, context),
         KeyBinding::new("enter", ViewCell, context),
         KeyBinding::new("shift-enter", ViewCellValue, context),
-        KeyBinding::new(&format!("{MOD}-c"), Copy, context),
-        KeyBinding::new(&format!("{MOD}-a"), SelectAll, context),
+        os_binding("secondary-c", Copy, context, cx),
+        os_binding("secondary-a", SelectAll, context, cx),
         KeyBinding::new("delete", ToggleDeleteRow, context),
         KeyBinding::new("backspace", ToggleDeleteRow, context),
-        KeyBinding::new(&format!("{MOD}-delete"), SetNull, context),
-        KeyBinding::new(&format!("{MOD}-backspace"), SetNull, context),
-        KeyBinding::new(&format!("{MOD}-v"), Paste, context),
-        KeyBinding::new(&format!("{MOD}-z"), Undo, context),
-        KeyBinding::new(&format!("{MOD}-shift-z"), Redo, context),
-        KeyBinding::new(&format!("{MOD}-y"), Redo, context),
-        KeyBinding::new(&format!("{MOD}-s"), ApplyChanges, context),
-        KeyBinding::new(&format!("{MOD}-r"), RefreshData, context),
+        os_binding("secondary-delete", SetNull, context, cx),
+        os_binding("secondary-backspace", SetNull, context, cx),
+        os_binding("secondary-v", Paste, context, cx),
+        os_binding("secondary-z", Undo, context, cx),
+        os_binding("secondary-shift-z", Redo, context, cx),
+        os_binding("secondary-y", Redo, context, cx),
+        os_binding("secondary-s", ApplyChanges, context, cx),
+        os_binding("secondary-r", RefreshData, context, cx),
         KeyBinding::new("f5", RefreshData, context),
         // Not in a cell's editor, where it types a space.
         KeyBinding::new("space", ToggleValue, Some(&format!("{CONTEXT} && !Input"))),
@@ -1152,7 +1148,7 @@ impl Grid {
     }
 
     // Each wheel event scrolls one axis only. Shift scrolls sideways.
-    fn scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(self.metrics.row_height);
         let max = self.scroll.max();
         let (can_x, can_y) = (max.x > px(1.), max.y > px(1.));
@@ -1272,7 +1268,7 @@ impl Render for Grid {
             .on_action(cx.listener(|_, _: &ExportResults, _, cx| cx.emit(GridEvent::Export)))
             .on_action(cx.listener(|this, _: &Copy, window, cx| this.copy(true, window, cx)))
             .on_action(cx.listener(|this, _: &SelectAll, _, cx| this.select_all(cx)))
-            .on_scroll_wheel(cx.listener(Self::scroll_wheel))
+            .on_scroll(cx.listener(Self::scroll_wheel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
             .child(

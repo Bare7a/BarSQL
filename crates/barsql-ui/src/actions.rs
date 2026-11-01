@@ -1,10 +1,12 @@
+use std::rc::Rc;
+
 use gpui_kit::component::GlobalState;
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::{
-    Action, App, AsKeystroke, Entity, Global, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, WeakEntity, Window,
-    actions,
+    Action, App, Entity, Global, KeyBinding, KeyBindingContextPredicate, KeybindingKeystroke, Keystroke, Menu,
+    MenuItem, OsAction, SystemMenuType, WeakEntity, Window, actions,
 };
 
 use crate::i18n::{I18n, t};
@@ -64,11 +66,6 @@ actions!(
     ]
 );
 
-#[cfg(target_os = "macos")]
-const MOD: &str = "cmd";
-#[cfg(not(target_os = "macos"))]
-const MOD: &str = "ctrl";
-
 // Quit isn't remappable. Remappable shortcuts and their menu accelerators come from `shortcuts`.
 pub fn init(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| crate::workspace::quit(cx));
@@ -77,10 +74,7 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &ShowAllApps, cx| cx.unhide_other_apps());
     cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
     // Suggestions open with Ctrl+Space on every platform, macOS included.
-    cx.bind_keys([
-        KeyBinding::new(&format!("{MOD}-q"), Quit, None),
-        KeyBinding::new("ctrl-space", TriggerSuggest, None),
-    ]);
+    cx.bind_keys([os_binding("secondary-q", Quit, None, cx), KeyBinding::new("ctrl-space", TriggerSuggest, None)]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-h", HideApp, None),
@@ -91,10 +85,21 @@ pub fn init(cx: &mut App) {
     }
 }
 
+// KeyBinding::new panics on `secondary-` (Cmd on macOS, Ctrl elsewhere), which a loaded binding resolves.
+pub fn os_binding(keys: &str, action: impl Action, context: Option<&str>, cx: &App) -> KeyBinding {
+    let context = context.map(|context| Rc::new(KeyBindingContextPredicate::parse(context).unwrap()));
+    KeyBinding::load(keys, Box::new(action), context, false, None, cx).unwrap()
+}
+
 // Key glyphs on macOS, Ctrl+J style text elsewhere.
 pub fn shortcut_label(action: &dyn Action, window: &Window) -> Option<String> {
     let binding = window.highest_precedence_binding_for_action(action)?;
-    Some(Kbd::format(binding.keystrokes().first()?.as_keystroke()))
+    Some(keystroke_label(binding.keystrokes().first()?))
+}
+
+// The keys to press. Windows matches Shift and a symbol by the character typed, so Ctrl+Shift+. is bound as ctrl->.
+pub fn keystroke_label(key: &KeybindingKeystroke) -> String {
+    Kbd::format(&Keystroke { modifiers: *key.modifiers(), key: key.key().into(), key_char: None })
 }
 
 fn menu(name: impl Into<gpui_kit::SharedString>, items: Vec<MenuItem>) -> Menu {
@@ -225,4 +230,15 @@ fn menus(cx: &App) -> Vec<Menu> {
     }
     menus.push(menu(t(cx, "menu.help"), help));
     menus
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use gpui_kit::{KeybindingKeystroke, Keystroke, Modifiers};
+
+    #[test]
+    fn a_shifted_symbol_shows_the_keys_pressed() {
+        let key = KeybindingKeystroke::new(Keystroke::parse("ctrl->").unwrap(), Modifiers::control_shift(), ".".into());
+        assert_eq!(super::keystroke_label(&key), "Ctrl+Shift+.");
+    }
 }

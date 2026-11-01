@@ -5,7 +5,7 @@ use std::rc::Rc;
 use barsql_core::{ColumnInfo, ConnectionConfig};
 use gpui_kit::component::Root;
 use gpui_kit::{
-    AppContext as _, Bounds, Entity, Modifiers, MouseButton, PinchEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
+    AppContext as _, Bounds, Entity, Modifiers, MouseButton, PinchEvent, Pixels, Point, ScrollDelta, ScrollEvent,
     TestAppContext, TouchPhase, VisualTestContext, point, px, size,
 };
 
@@ -99,7 +99,7 @@ fn offset(view: &Entity<ErDiagram>, cx: &mut VisualTestContext) -> Point<Pixels>
 }
 
 fn wheel(cx: &mut VisualTestContext, at: Point<Pixels>, dy: f32, modifiers: Modifiers) {
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: at,
         delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
         modifiers,

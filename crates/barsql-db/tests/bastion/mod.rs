@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use russh::Channel;
 use russh::keys::{PrivateKey, PublicKey};
-use russh::server::{self, Auth, ChannelOpenHandle, Msg, Session};
+use russh::server::{self, Auth, ChannelOpenHandle, Msg, Session, VerifiedPublicKey};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 
@@ -38,8 +38,9 @@ impl server::Handler for Handler {
         Ok(if user == USER && password == PASSWORD { Auth::Accept } else { Auth::reject() })
     }
 
-    async fn auth_publickey(&mut self, user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        Ok(if user == USER && key.key_data() == self.client_key.key_data() { Auth::Accept } else { Auth::reject() })
+    async fn auth_publickey(&mut self, user: &str, key: VerifiedPublicKey<'_>) -> Result<Auth, Self::Error> {
+        let known = key.public_key.key_data() == self.client_key.key_data();
+        Ok(if user == USER && known { Auth::Accept } else { Auth::reject() })
     }
 
     async fn channel_open_direct_tcpip(

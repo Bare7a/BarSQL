@@ -152,23 +152,16 @@ impl BarClearance {
         (Scrollbar::width() - edge.to_pixels(window.rem_size())).max(px(0.))
     }
 
-    // Goes after the list, so it runs once the list is laid out.
-    pub fn watch(&self, handle: impl ScrollbarHandle) -> impl IntoElement {
+    // For `on_prepaint` after the list, so it runs once the list is laid out.
+    pub fn watch<H: ScrollbarHandle>(&self, handle: H) -> impl FnOnce(Bounds<Pixels>, &mut Window, &mut App) + use<H> {
         let used = self.0.clone();
-        canvas(
-            move |_, window, cx| {
-                let scrolls = scrolls(&handle);
-                if used.replace(scrolls) != scrolls {
-                    let view = window.current_view();
-                    window.defer(cx, move |_, cx| cx.notify(view));
-                }
-            },
-            |_, _, _, _| {},
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
+        move |_, window, cx| {
+            let scrolls = scrolls(&handle);
+            if used.replace(scrolls) != scrolls {
+                let view = window.current_view();
+                window.defer(cx, move |_, cx| cx.notify(view));
+            }
+        }
     }
 }
 

@@ -415,7 +415,7 @@ fn hovering_a_table_lists_every_column_and_scrolls(cx: &mut TestAppContext) {
     assert_eq!(row.size.height, gpui_kit::px(20.), "one line per column at the editor's 13px");
     assert!(cx.debug_bounds("hover-row-39").is_none(), "the last column is below the fold");
     cx.simulate_mouse_move(card.center(), None, Modifiers::none());
-    cx.simulate_event(gpui_kit::ScrollWheelEvent {
+    cx.simulate_event(gpui_kit::ScrollEvent {
         position: card.center(),
         delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-2000.))),
         ..Default::default()

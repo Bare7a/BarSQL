@@ -9,6 +9,7 @@ use barsql_sql::lang::quoting::build_qualified_table;
 use barsql_sql::system_views::{ViewScope, views};
 use barsql_sql::{TypeFamily, display_type, type_family};
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
@@ -1781,7 +1782,7 @@ impl Render for SchemaTree {
                         .px(LIST_INSET)
                         .pb(LIST_INSET),
                 )
-                .child(self.clearance.watch(self.scroll.clone()))
+                .on_prepaint(self.clearance.watch(self.scroll.clone()))
                 .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };

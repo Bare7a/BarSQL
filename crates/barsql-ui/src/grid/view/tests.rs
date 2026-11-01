@@ -9,8 +9,8 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Root;
 use gpui_kit::{
     AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
-    Styled as _, TestAppContext, TouchPhase, VisualTestContext, Window, div, point, px,
+    MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled as _,
+    TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
 use super::{Choices, Grid, GridEvent, LANE, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
@@ -673,11 +673,11 @@ fn the_end_of_millions_of_rows_draws_and_scrolls_evenly(cx: &mut TestAppContext)
     });
     let at = read(&grid, cx, |g| g.cell_point(rows - 5, 0));
     let before = read(&grid, cx, |g| g.scroll.y());
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: at,
         delta: ScrollDelta::Pixels(point(px(0.), px(1.))),
         modifiers: Modifiers::default(),
-        touch_phase: TouchPhase::Moved,
+        ..Default::default()
     });
     assert_eq!(read(&grid, cx, |g| g.scroll.y()), before - 1.);
 }
@@ -686,11 +686,11 @@ fn the_end_of_millions_of_rows_draws_and_scrolls_evenly(cx: &mut TestAppContext)
 fn the_wheel_scrolls_down_and_shift_turns_it_sideways(cx: &mut TestAppContext) {
     let (_env, grid, cx) = open(cx, 500);
     let position = cell(&grid, 1, 0, cx);
-    let wheel = |y: f32, modifiers: Modifiers| ScrollWheelEvent {
+    let wheel = |y: f32, modifiers: Modifiers| ScrollEvent {
         position,
         delta: ScrollDelta::Pixels(point(px(0.), px(y))),
         modifiers,
-        touch_phase: TouchPhase::Moved,
+        ..Default::default()
     };
     cx.simulate_event(wheel(-100., Modifiers::default()));
     assert_eq!(read(&grid, cx, |g| g.scroll.position().y), px(100.));

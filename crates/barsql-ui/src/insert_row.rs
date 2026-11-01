@@ -130,7 +130,6 @@ pub struct InsertRowForm {
     error: Option<SharedString>,
     invalid: Option<Invalid>,
     on_inserted: OnInserted,
-    scroll: ScrollHandle,
 }
 
 impl InsertRowForm {
@@ -172,7 +171,6 @@ impl InsertRowForm {
             error: None,
             invalid: None,
             on_inserted,
-            scroll: ScrollHandle::new(),
         }
     }
 
@@ -413,7 +411,7 @@ impl Render for InsertRowForm {
                 .child(v_flex().gap(rems(0.923)).mt(rems(0.615)).children(fields))
         };
         let (ready, saving) = (self.ready(), self.saving);
-        modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(
+        modal::scroll_content().child(modal::scroll_body(body)).child(
             modal::footer(cx)
                 .child(
                     Button::new("insert-row-cancel")

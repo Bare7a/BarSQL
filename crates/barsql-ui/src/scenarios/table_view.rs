@@ -1,5 +1,5 @@
 use barsql_core::Value;
-use gpui_kit::{Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
+use gpui_kit::{Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, point, px};
 
 use super::driver::{Driver, open, selector};
 use crate::cell_viewer::{CellViewer, Opened};
@@ -364,12 +364,7 @@ fn scrolling_to_the_bottom_loads_the_next_page(cx: &mut TestAppContext) {
     for _ in 0..20 {
         let position = app.grid_point(&grid, |grid| grid.cell_point(0, 0));
         let delta = ScrollDelta::Pixels(point(px(0.), px(-4000.)));
-        app.cx.simulate_event(ScrollWheelEvent {
-            position,
-            delta,
-            modifiers: Modifiers::none(),
-            touch_phase: TouchPhase::Moved,
-        });
+        app.cx.simulate_event(ScrollEvent { position, delta, modifiers: Modifiers::none(), ..Default::default() });
         wait(&mut app);
         if rows(&mut app) == 150 {
             break;

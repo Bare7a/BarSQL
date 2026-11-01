@@ -33,7 +33,6 @@ fn remember(values: &[(String, String)], cx: &App) {
 
 struct ParamsForm {
     inputs: Vec<(String, Entity<InputState>)>,
-    scroll: ScrollHandle,
     on_run: OnRun,
 }
 
@@ -65,7 +64,7 @@ impl Render for ParamsForm {
             })
             .collect();
         let body = modal::body().child(modal::description(t(cx, "params.description"), cx)).children(fields);
-        modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(
+        modal::scroll_content().child(modal::scroll_body(body)).child(
             modal::footer(cx)
                 .child(
                     Button::new("params-cancel")
@@ -103,7 +102,7 @@ pub fn open(
                 (name, input)
             })
             .collect();
-        ParamsForm { inputs, scroll: ScrollHandle::new(), on_run: Rc::new(on_run) }
+        ParamsForm { inputs, on_run: Rc::new(on_run) }
     });
     let first = form.read(cx).inputs.first().map(|(_, input)| input.clone());
     window.open_dialog(cx, move |dialog, window, cx| {

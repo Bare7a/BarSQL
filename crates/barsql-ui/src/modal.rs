@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Editor, EditorState};
-use gpui_kit::component::scroll::ScrollbarAxis;
+use gpui_kit::component::scroll::{ScrollableElement as _, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -35,11 +33,6 @@ impl Size {
         (window.rem_size() * width).min(window.viewport_size().width * share)
     }
 }
-
-#[derive(Default)]
-struct Heights(HashMap<SharedString, Pixels>);
-
-impl Global for Heights {}
 
 pub struct Modal {
     id: SharedString,
@@ -93,14 +86,7 @@ impl Modal {
 
     pub fn build(self, dialog: Dialog, content: impl IntoElement, window: &mut Window, cx: &mut App) -> Dialog {
         let theme = cx.theme().clone();
-        let viewport = window.viewport_size();
-        let max_height = (viewport.height * 0.9).floor();
-        // Centre on the last measured height. Until there is one, sit a tenth of the way down.
-        let top = match cx.try_global::<Heights>().and_then(|heights| heights.0.get(&self.id).copied()) {
-            Some(height) => ((viewport.height - height.min(max_height)) / 2.).max(Pixels::ZERO).round(),
-            None => viewport.height / 10.,
-        };
-        let id = self.id.clone();
+        let max_height = (window.viewport_size().height * 0.9).floor();
         let close_group = SharedString::from(format!("{}-close", self.id));
         let header = h_flex()
             .flex_none()
@@ -151,8 +137,8 @@ impl Modal {
             });
         dialog
             .close_button(false)
+            .centered()
             .w(self.size.width(window))
-            .margin_top(top)
             .p_0()
             .bg(theme.sidebar)
             .rounded(RADIUS_LG)
@@ -161,21 +147,6 @@ impl Modal {
                     .relative()
                     .max_h(max_height)
                     .when_some(self.height, |el, height| el.h(height.min(max_height)))
-                    .child(
-                        canvas(
-                            move |bounds, window, cx| {
-                                let height = bounds.size.height;
-                                let heights = &mut cx.default_global::<Heights>().0;
-                                if heights.get(&id).is_none_or(|known| (*known - height).abs() > px(0.5)) {
-                                    heights.insert(id, height);
-                                    window.on_next_frame(|window, _| window.refresh());
-                                }
-                            },
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .size_full(),
-                    )
                     .child(header)
                     .child(content),
             )
@@ -186,18 +157,10 @@ pub fn body() -> Div {
     v_flex().p(rems(1.231)).gap(rems(0.923))
 }
 
-// Header and footer stay put. A plain scroll container, because GPUI Kit's scrollable wrapper adds no height
-// to a column that sizes to its content.
+// Header and footer stay put. No bounce on macOS, like the app's other scroll areas.
 #[track_caller]
-pub fn scroll_body(handle: &ScrollHandle, body: Div) -> impl IntoElement {
-    div()
-        .relative()
-        .flex()
-        .flex_col()
-        .flex_auto()
-        .min_h_0()
-        .child(div().id("modal-scroll").flex_auto().min_h_0().overflow_y_scroll().track_scroll(handle).child(body))
-        .hover_scrollbar(handle, ScrollbarAxis::Vertical)
+pub fn scroll_body(body: Div) -> impl IntoElement {
+    body.flex_auto().overflow_y_scrollbar().scroll_bounce(false).scrollbars_on_hover()
 }
 
 // Shrinks to the frame so the body can scroll.

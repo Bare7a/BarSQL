@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu};
@@ -178,13 +179,7 @@ impl SelectMenu for Button {
         div()
             .relative()
             .child(self.dropdown_menu(move |menu, window, cx| items(menu, window, cx).min_w(width.get().max(floor))))
-            .child(
-                canvas(move |bounds, _, _| measured.set(bounds.size.width), |_, _, _, _| {})
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full(),
-            )
+            .on_prepaint(move |bounds, _, _| measured.set(bounds.size.width))
     }
 }
 

@@ -736,7 +736,7 @@ fn dismissal(card: WeakEntity<HoverCard>, keep_open: Bounds<Pixels>, inside: Bou
             });
             window.on_mouse_event({
                 let card = card.clone();
-                move |event: &ScrollWheelEvent, phase, _, cx| {
+                move |event: &ScrollEvent, phase, _, cx| {
                     if phase.capture() && !inside.contains(&event.position) {
                         hide(&card, cx);
                     }

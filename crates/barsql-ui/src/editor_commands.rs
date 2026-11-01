@@ -6,6 +6,7 @@ use gpui_kit::component::input::{Copy, Cut, EditorState, Escape, GoToDefinition,
 use gpui_kit::*;
 use lsp_types::Position;
 
+use crate::actions::os_binding;
 use crate::dialogs::{self, Prompt};
 use crate::i18n::t;
 use crate::occurrences::{self, Query, Session, find_all, find_next, overlaps, word_at};
@@ -39,23 +40,22 @@ const WHOLE_LINE: &str = "barsql-whole-line";
 
 pub fn init(cx: &mut App) {
     let context = Some("CodeEditor > Input");
-    let m = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
     cx.bind_keys([
-        KeyBinding::new(&format!("{m}-x"), CutLine, context),
-        KeyBinding::new(&format!("{m}-c"), CopyLine, context),
-        KeyBinding::new(&format!("{m}-v"), PasteLine, context),
-        KeyBinding::new(&format!("{m}-d"), SelectNextOccurrence, context),
-        KeyBinding::new(&format!("{m}-shift-l"), SelectAllOccurrences, context),
-        KeyBinding::new(&format!("{m}-k {m}-d"), SkipOccurrence, context),
-        KeyBinding::new(&format!("{m}-u"), UnselectLastOccurrence, context),
-        KeyBinding::new(&format!("{m}-l"), SelectLine, context),
+        os_binding("secondary-x", CutLine, context, cx),
+        os_binding("secondary-c", CopyLine, context, cx),
+        os_binding("secondary-v", PasteLine, context, cx),
+        os_binding("secondary-d", SelectNextOccurrence, context, cx),
+        os_binding("secondary-shift-l", SelectAllOccurrences, context, cx),
+        os_binding("secondary-k secondary-d", SkipOccurrence, context, cx),
+        os_binding("secondary-u", UnselectLastOccurrence, context, cx),
+        os_binding("secondary-l", SelectLine, context, cx),
         KeyBinding::new("alt-up", MoveLineUp, context),
         KeyBinding::new("alt-down", MoveLineDown, context),
         KeyBinding::new("shift-alt-up", DuplicateLineUp, context),
         KeyBinding::new("shift-alt-down", DuplicateLineDown, context),
-        KeyBinding::new(&format!("{m}-shift-d"), DuplicateLineDown, context),
-        KeyBinding::new(&format!("{m}-shift-k"), DeleteLine, context),
-        KeyBinding::new(&format!("{m}-/"), ToggleComment, context),
+        os_binding("secondary-shift-d", DuplicateLineDown, context, cx),
+        os_binding("secondary-shift-k", DeleteLine, context, cx),
+        os_binding("secondary-/", ToggleComment, context, cx),
         KeyBinding::new("f12", GoToDefinition, context),
         // Control on macOS too, as in VS Code, since Cmd+G finds the next match there.
         KeyBinding::new("ctrl-g", GoToLine, context),

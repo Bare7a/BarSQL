@@ -149,7 +149,6 @@ pub struct ImportDialog {
     error: Option<SharedString>,
     preview_task: Option<Task<()>>,
     on_imported: Rc<dyn Fn(&mut App)>,
-    scroll: ScrollHandle,
     errors_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -208,7 +207,6 @@ impl ImportDialog {
             error: None,
             preview_task: None,
             on_imported,
-            scroll: ScrollHandle::new(),
             errors_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
@@ -1004,7 +1002,7 @@ impl Render for ImportDialog {
             .when(running, |el| el.child(self.progress_view(cx)))
             .when_some(self.error.clone(), |el, error| el.child(form::error(error, cx)))
             .when_some(self.result.clone(), |el, result| el.child(self.result_view(&result, cx)));
-        modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(self.footer(cx))
+        modal::scroll_content().child(modal::scroll_body(body)).child(self.footer(cx))
     }
 }
 

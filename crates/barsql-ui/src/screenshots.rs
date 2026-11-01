@@ -2,6 +2,8 @@
 // forum database, saves each as `<n>.png` and quits.
 use std::path::PathBuf;
 
+#[cfg(feature = "snapshot")]
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Root;
 use gpui_kit::*;
 
@@ -22,7 +24,7 @@ pub fn probe(element: impl IntoElement, name: &'static str) -> AnyElement {
     let record = move |bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App| {
         cx.default_global::<script::Probes>().0.insert(name, bounds);
     };
-    div().relative().child(element).child(canvas(record, |_, _, _, _| {}).absolute().inset_0()).into_any_element()
+    div().relative().child(element).on_prepaint(record).into_any_element()
 }
 
 #[cfg(not(feature = "snapshot"))]
@@ -211,9 +213,10 @@ ORDER BY 1;";
 
         // Space-separated keystrokes, with `mod` as the platform's command key.
         async fn keys(&self, cx: &mut AsyncApp, keys: &str) -> Res<()> {
+            let os = cx.update(|cx| cx.platform_info().os);
             for key in keys.split_whitespace() {
-                let key = key.replace("mod-", if cfg!(target_os = "macos") { "cmd-" } else { "ctrl-" });
-                let keystroke = Keystroke::parse(&key).map_err(|error| error.to_string())?;
+                let key = key.replace("mod-", "secondary-");
+                let keystroke = Keystroke::parse_with_os(&key, os).map_err(|error| error.to_string())?;
                 self.draw(cx).await;
                 let _ = self.window.update(cx, |_, window, cx| window.dispatch_keystroke(keystroke, cx));
             }

@@ -1,7 +1,6 @@
 use std::ops::Range;
 
 use gpui_kit::component::input::{Enter, GoToDefinition, InputEvent, InputState, MoveDown, MoveUp};
-use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -78,9 +77,9 @@ pub fn commands(focus: &FocusHandle, window: &Window, cx: &App) -> Vec<Command> 
         .into_iter()
         .filter(|(_, action)| window.is_action_available_in(action.as_ref(), focus))
         .map(|(label, action)| {
-            let shortcut = window.highest_precedence_binding_for_action_in(action.as_ref(), focus).map(|binding| {
-                binding.keystrokes().iter().map(|key| Kbd::format(key.as_keystroke())).collect::<Vec<_>>().join(" ")
-            });
+            let shortcut = window
+                .highest_precedence_binding_for_action_in(action.as_ref(), focus)
+                .map(|binding| binding.keystrokes().iter().map(keystroke_label).collect::<Vec<_>>().join(" "));
             Command { label, action, shortcut }
         })
         .collect()

@@ -4,6 +4,7 @@ use std::rc::Rc;
 use barsql_app::ConnectionFolder;
 use barsql_core::{ConnectionConfig, DriverType, SavedQuery};
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonRounded, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -502,15 +503,7 @@ impl Render for Sidebar {
                     .border_b_1()
                     .border_color(theme.border)
                     .child(self.switcher(cx))
-                    // Not GPUI Kit's on_prepaint: its canvas has no insets, so after the button it lands one row
-                    // lower, and a click on the button counts as outside the menu and reopens it.
-                    .child(
-                        canvas(move |rect, _, _| bounds.set(rect), |_, _, _, _| {})
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full(),
-                    ),
+                    .on_prepaint(move |rect, _, _| bounds.set(rect)),
             )
             .when(!self.connections.is_empty(), |el| el.child(self.tabs(cx)))
             .child(div().flex_1().min_h_0().child(body))

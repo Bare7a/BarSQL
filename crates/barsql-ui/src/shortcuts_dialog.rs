@@ -13,12 +13,11 @@ pub struct ShortcutsDialog {
     recording: Option<&'static str>,
     error: Option<SharedString>,
     interceptor: Option<Subscription>,
-    scroll: ScrollHandle,
 }
 
 impl ShortcutsDialog {
     fn new() -> Self {
-        Self { recording: None, error: None, interceptor: None, scroll: ScrollHandle::new() }
+        Self { recording: None, error: None, interceptor: None }
     }
 
     // Every keystroke goes to the recorder first, so no shortcut fires while it listens.
@@ -159,7 +158,7 @@ impl Render for ShortcutsDialog {
             .when_some(self.error.clone(), |el, error| el.child(form::error(error, cx)))
             .children(sections)
             .child(div().text_size(TEXT_SM).text_color(muted).child(t(cx, "shortcuts.note")));
-        modal::scroll_body(&self.scroll, body)
+        modal::scroll_body(body)
     }
 }
 

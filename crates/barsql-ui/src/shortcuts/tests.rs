@@ -13,7 +13,7 @@ fn binding(key: &str, ctrl: bool, shift: bool, alt: bool) -> Binding {
     Binding { key: key.into(), ctrl, shift, alt }
 }
 
-fn recorded(keystroke: &str) -> Option<Binding> {
+fn recorded(keystroke: &'static str) -> Option<Binding> {
     binding_from_keystroke(&Keystroke::parse(keystroke).unwrap())
 }
 
@@ -85,9 +85,9 @@ fn overrides_rebuild_the_keymap_and_resets_restore_the_defaults(cx: &mut TestApp
     let quick = find("quickSearch").unwrap();
     let bound = |cx: &mut TestAppContext| -> Vec<String> {
         cx.update(|cx| {
-            let keymap = cx.key_bindings();
+            let (keymap, os) = (cx.key_bindings(), cx.platform_info().os);
             let keymap = keymap.borrow();
-            keymap.bindings_for_action(&QuickSearch).map(|b| b.keystrokes()[0].inner().unparse()).collect()
+            keymap.bindings_for_action(&QuickSearch).map(|b| b.keystrokes()[0].inner().unparse(os)).collect()
         })
     };
     assert!(bound(cx).iter().any(|k| k.ends_with("-p")));

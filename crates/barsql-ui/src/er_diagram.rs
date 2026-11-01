@@ -707,7 +707,7 @@ impl Render for ErDiagram {
             |_, _, _| {},
             move |bounds, _, window, _| {
                 let this = this.clone();
-                window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                     let zooming = event.modifiers.platform || event.modifiers.control;
                     if phase != DispatchPhase::Capture || !zooming || !bounds.contains(&event.position) {
                         return;

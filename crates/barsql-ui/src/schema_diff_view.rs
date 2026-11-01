@@ -37,7 +37,6 @@ pub struct SchemaDiffView {
     target: usize,
     target_schema: Option<String>,
     state: Compare,
-    scroll: ScrollHandle,
     on_script: OnScript,
     _schemas: Subscription,
     _task: Task<()>,
@@ -59,7 +58,6 @@ impl SchemaDiffView {
             target: 0,
             target_schema: None,
             state: Compare::Idle,
-            scroll: ScrollHandle::new(),
             on_script,
             _schemas: cx.observe_global::<Schemas>(|this, cx| {
                 this.pick_default_schema(cx);
@@ -318,7 +316,7 @@ impl Render for SchemaDiffView {
         let script = self.script();
         let body = v_flex().child(self.results(cx));
         let (copy, open) = (script.clone(), script.is_some());
-        modal::scroll_content().child(self.pickers(cx)).child(modal::scroll_body(&self.scroll, body)).child(
+        modal::scroll_content().child(self.pickers(cx)).child(modal::scroll_body(body)).child(
             modal::footer(cx)
                 .child(
                     Button::new("diff-copy-script")

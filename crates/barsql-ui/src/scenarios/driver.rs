@@ -6,7 +6,7 @@ use gpui_kit::component::scroll::ScrollbarMode;
 use gpui_kit::component::{Root, Theme};
 use gpui_kit::{
     Action, AppContext as _, Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px,
+    ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point, px,
 };
 
 use crate::dialogs::{Alerted, Asked};
@@ -394,7 +394,7 @@ impl Driver<'_> {
     // A mouse wheel or trackpad over `at`. Negative `dy` scrolls down.
     pub fn wheel(&mut self, at: Point<Pixels>, dy: Pixels) {
         self.draw();
-        self.cx.simulate_event(ScrollWheelEvent {
+        self.cx.simulate_event(ScrollEvent {
             position: at,
             delta: ScrollDelta::Pixels(point(px(0.), dy)),
             ..Default::default()

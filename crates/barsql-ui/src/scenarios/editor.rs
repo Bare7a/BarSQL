@@ -6,7 +6,7 @@ use std::time::Duration;
 use barsql_app::update::{Asset, Release, Staged};
 use barsql_core::{ConnectionConfig, Value};
 use barsql_io::ExportFormat;
-use gpui_kit::{Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point, px};
+use gpui_kit::{Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, point, px};
 
 use super::driver::{Driver, open, open_with};
 use crate::actions::{PrevTab, Quit};
@@ -489,11 +489,11 @@ fn the_tab_strip_follows_the_active_tab_and_the_wheel(cx: &mut TestAppContext) {
     app.keys("ctrl-tab");
     let first = app.bounds("editor-tab-0").unwrap();
     assert!(first.left() >= strip.left(), "cycling round brings the first tab back");
-    app.cx.simulate_event(ScrollWheelEvent {
+    app.cx.simulate_event(ScrollEvent {
         position: strip.center(),
         delta: ScrollDelta::Pixels(point(px(0.), px(-200.))),
         modifiers: Modifiers::none(),
-        touch_phase: TouchPhase::Moved,
+        ..Default::default()
     });
     assert!(app.bounds("editor-tab-0").unwrap().left() < first.left(), "the wheel scrolled the strip");
 }

@@ -5,6 +5,7 @@ use barsql_core::ConnectionConfig;
 use barsql_core::capabilities::Location;
 use barsql_sql::system_views::{ViewScope, views};
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
@@ -686,7 +687,7 @@ impl Render for ConnectionsPanel {
                 .relative()
                 .min_h_0()
                 .child(list)
-                .child(self.nav.clearance.watch(self.nav.scroll.clone()))
+                .on_prepaint(self.nav.clearance.watch(self.nav.scroll.clone()))
                 .hover_scrollbar(&self.nav.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };

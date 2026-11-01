@@ -24,7 +24,6 @@ fn section(title: SharedString, tips: Vec<AnyElement>, cx: &App) -> impl IntoEle
 
 // Covers what the shortcuts dialog doesn't list, with the current bindings.
 pub fn open(window: &mut Window, cx: &mut App) {
-    let scroll = ScrollHandle::new();
     window.open_dialog(cx, move |dialog, window, cx| {
         let tip = |keys: Option<String>, key: &str, cx: &App| tip(keys, t(cx, key), cx).into_any_element();
         let copy = shortcuts::format(&Binding { key: "c".into(), ctrl: true, ..Default::default() });
@@ -87,10 +86,7 @@ pub fn open(window: &mut Window, cx: &mut App) {
                 cx,
             ));
         let content = modal::scroll_content()
-            .child(modal::scroll_body(
-                &scroll,
-                modal::body().child(modal::description(t(cx, "tips.intro"), cx)).child(sections),
-            ))
+            .child(modal::scroll_body(modal::body().child(modal::description(t(cx, "tips.intro"), cx)).child(sections)))
             .child(
                 modal::footer(cx).child(
                     Button::new("tips-close")

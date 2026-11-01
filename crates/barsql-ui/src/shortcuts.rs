@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui_kit::{Action, App, DummyKeyboardMapper, Global, KeyBinding, KeyBindingContextPredicate, Keystroke};
+use gpui_kit::{Action, App, Global, KeyBinding, KeyBindingContextPredicate, Keystroke};
 use serde::{Deserialize, Serialize};
 
 use crate::actions::*;
@@ -382,16 +382,14 @@ pub fn keystrokes(binding: &Binding) -> Vec<String> {
     out
 }
 
-fn key_bindings(def: &ShortcutDef, binding: &Binding) -> Vec<KeyBinding> {
+fn key_bindings(def: &ShortcutDef, binding: &Binding, cx: &App) -> Vec<KeyBinding> {
     let context = match def.scope {
         Scope::Global => None,
         Scope::Editor => KeyBindingContextPredicate::parse(EDITOR_CONTEXT).ok().map(Rc::new),
     };
     keystrokes(binding)
         .iter()
-        .filter_map(|keys| {
-            KeyBinding::load(keys, def.action(), context.clone(), false, None, &DummyKeyboardMapper).ok()
-        })
+        .filter_map(|keys| KeyBinding::load(keys, def.action(), context.clone(), false, None, cx).ok())
         .collect()
 }
 
@@ -410,7 +408,7 @@ pub fn apply(cx: &mut App) {
     let base = cx.try_global::<BaseKeymap>().map(|base| base.0.clone()).unwrap_or_default();
     let overrides = read_overrides(cx);
     let shortcuts: Vec<KeyBinding> =
-        SHORTCUTS.iter().flat_map(|def| key_bindings(def, &effective_in(def, &overrides))).collect();
+        SHORTCUTS.iter().flat_map(|def| key_bindings(def, &effective_in(def, &overrides), cx)).collect();
     cx.clear_key_bindings();
     cx.bind_keys(base);
     cx.bind_keys(shortcuts);

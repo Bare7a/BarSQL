@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use barsql_core::{ConnectionConfig, SavedQuery};
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
@@ -472,7 +473,7 @@ impl Render for SavedPanel {
                     .px(LIST_INSET)
                     .pb(LIST_INSET),
                 )
-                .child(self.nav.clearance.watch(self.nav.scroll.clone()))
+                .on_prepaint(self.nav.clearance.watch(self.nav.scroll.clone()))
                 .hover_scrollbar(&self.nav.scroll, ScrollbarAxis::Vertical)
                 .into_any_element()
         };

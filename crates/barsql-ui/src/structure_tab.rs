@@ -24,6 +24,7 @@ use gpui_kit::*;
 
 use self::preview::PreviewDrag;
 use self::sheet::Sheet;
+use crate::actions::os_binding;
 use crate::cell_viewer;
 use crate::connections_panel::parse_color;
 use crate::form::{self, ToolButton as _};
@@ -40,13 +41,8 @@ const CONTEXT: &str = "StructureTab";
 
 actions!(structure_tab, [ApplyStructure]);
 
-#[cfg(target_os = "macos")]
-const MOD: &str = "cmd";
-#[cfg(not(target_os = "macos"))]
-const MOD: &str = "ctrl";
-
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new(&format!("{MOD}-s"), ApplyStructure, Some(CONTEXT))]);
+    cx.bind_keys([os_binding("secondary-s", ApplyStructure, Some(CONTEXT), cx)]);
 }
 
 pub enum StructureTabEvent {

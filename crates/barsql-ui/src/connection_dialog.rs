@@ -241,7 +241,6 @@ pub struct ConnectionForm {
     // Last listed databases and the server they came from.
     databases: Option<(String, Vec<String>)>,
     on_saved: OnSaved,
-    scroll: ScrollHandle,
 }
 
 impl ConnectionForm {
@@ -315,7 +314,6 @@ impl ConnectionForm {
             saving: false,
             databases: None,
             on_saved,
-            scroll: ScrollHandle::new(),
         }
     }
 
@@ -813,7 +811,7 @@ impl Render for ConnectionForm {
         }
         let body = body.child(self.mcp_section(cx)).children(self.error.clone().map(|error| form::error(error, cx)));
         let (testing, busy) = (self.testing, self.busy());
-        modal::scroll_content().child(modal::scroll_body(&self.scroll, body)).child(
+        modal::scroll_content().child(modal::scroll_body(body)).child(
             modal::footer(cx)
                 .child(
                     Button::new("connection-cancel")
