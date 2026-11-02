@@ -157,6 +157,8 @@ jobs:
           BARSQL_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
+          # makepkg leaves zstd at level 3; Arch's own packages use --ultra -20.
+          echo 'COMPRESSZST=(zstd -c -T0 --ultra -20 -)' >> /etc/makepkg.conf
           stage="$(mktemp -d)"
           cp packaging/linux/PKGBUILD packaging/linux/BarSQL.desktop packaging/linux/barsql-*.png "$stage/"
           install -m 755 dist-linux/BarSQL "$stage/BarSQL"

@@ -22,7 +22,7 @@ Grab the latest build for **Windows**, **macOS**, or **Linux** from the [**Relea
 
 - **Windows**: `BarSQL-windows-amd64.zip` (portable) **or** `BarSQL-amd64-installer.exe` (installer)
 - **Linux**: `BarSQL-linux-amd64.tar.gz` (portable)
-- **macOS**: `BarSQL-darwin-arm64.zip` **or** `BarSQL-darwin-amd64.zip` (the same universal `.app`)
+- **macOS**: `BarSQL-darwin-arm64.zip` (Apple Silicon) **or** `BarSQL-darwin-amd64.zip` (Intel)
 
 ### Additional options:
 

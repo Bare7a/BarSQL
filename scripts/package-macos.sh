@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds a universal BarSQL.app, the updater zips and the dmg in target/package/dist.
-# BARSQL_NATIVE_ONLY=1 builds only this Mac's architecture and skips the amd64 zip.
+# Builds the updater zips, each with BarSQL.app for one architecture, and the universal dmg in target/package/dist.
+# BARSQL_NATIVE_ONLY=1 builds only this Mac's architecture and its zip.
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,22 +25,31 @@ for target in "${targets[@]}"; do
   binaries+=("$root_dir/target/$target/release/BarSQL")
 done
 
-rm -rf "$out"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$dist"
-lipo -create -output "$app/Contents/MacOS/BarSQL" "${binaries[@]}"
-cp "$root_dir/packaging/macos/icons.icns" "$app/Contents/Resources/icons.icns"
-cp "$root_dir/packaging/macos/Info.plist" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy \
-  -c "Set :CFBundleShortVersionString $version" \
-  -c "Set :CFBundleVersion $version" \
-  "$app/Contents/Info.plist"
-codesign --force --deep --sign - "$app"
+make_app() {
+  local dest="$1"
+  shift
+  mkdir -p "$dest/Contents/MacOS" "$dest/Contents/Resources"
+  lipo -create -output "$dest/Contents/MacOS/BarSQL" "$@"
+  cp "$root_dir/packaging/macos/icons.icns" "$dest/Contents/Resources/icons.icns"
+  cp "$root_dir/packaging/macos/Info.plist" "$dest/Contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleShortVersionString $version" \
+    -c "Set :CFBundleVersion $version" \
+    "$dest/Contents/Info.plist"
+  codesign --force --deep --sign - "$dest"
+}
 
+rm -rf "$out"
+mkdir -p "$dist"
+make_app "$app" "${binaries[@]}"
+
+# The updater downloads the zip for its own architecture, so each zip carries that one alone.
 rm -f "$dist"/BarSQL-darwin-*.zip "$dist/BarSQL-macos-universal.dmg"
-(cd "$out" && zip -r -y -X "$dist/BarSQL-darwin-arm64.zip" "BarSQL.app" >/dev/null)
-if [ "${#targets[@]}" -gt 1 ]; then
-  cp "$dist/BarSQL-darwin-arm64.zip" "$dist/BarSQL-darwin-amd64.zip"
-fi
+for binary in "${binaries[@]}"; do
+  arch="$(lipo -archs "$binary" | sed 's/x86_64/amd64/')"
+  make_app "$out/$arch/BarSQL.app" "$binary"
+  (cd "$out/$arch" && zip -r -y -X "$dist/BarSQL-darwin-$arch.zip" "BarSQL.app" >/dev/null)
+done
 
 # No platform or arch in the dmg name, so the updater never picks it.
 staging="$out/dmg"
@@ -49,7 +58,7 @@ ditto "$app" "$staging/BarSQL.app"
 ln -s /Applications "$staging/Applications"
 size_mb=$(($(du -sAm "$staging" | cut -f1) * 2))
 for attempt in 1 2 3; do
-  hdiutil create -size "${size_mb}m" -volname "BarSQL" -srcfolder "$staging" -ov -format UDZO \
+  hdiutil create -size "${size_mb}m" -volname "BarSQL" -srcfolder "$staging" -ov -format ULMO \
     "$dist/BarSQL-macos-universal.dmg" >/dev/null && break
   [ "$attempt" = 3 ] && { df -h "$dist" >&2; exit 1; }
   sleep 10

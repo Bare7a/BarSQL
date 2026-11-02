@@ -26,7 +26,7 @@ cp "$out/BarSQL" "$dist/BarSQL"
 
 cd "$root_dir"
 cargo deb -p barsql --no-build --no-strip --output "$dist/BarSQL.deb"
-cargo generate-rpm -p crates/barsql --output "$dist/BarSQL.rpm"
+cargo generate-rpm -p crates/barsql --payload-compress xz --output "$dist/BarSQL.rpm"
 
 if [ -n "${LINUXDEPLOY:-}" ]; then
   appdir="$out/BarSQL.AppDir"

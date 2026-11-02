@@ -162,11 +162,34 @@ pub fn platform() -> &'static str {
 
 pub fn arch() -> &'static str {
     match std::env::consts::ARCH {
+        "x86_64" if under_rosetta() => "arm64",
         "x86_64" => "amd64",
         "aarch64" => "arm64",
         "x86" => "386",
         other => other,
     }
+}
+
+// An Intel build under Rosetta asks for the Apple Silicon one, which runs natively.
+#[cfg(target_os = "macos")]
+fn under_rosetta() -> bool {
+    let (mut translated, mut size): (libc::c_int, libc::size_t) = (0, size_of::<libc::c_int>());
+    // SAFETY: a NUL-terminated name, and an int buffer with its size.
+    let result = unsafe {
+        libc::sysctlbyname(
+            c"sysctl.proc_translated".as_ptr(),
+            (&raw mut translated).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    result == 0 && translated == 1
+}
+
+#[cfg(not(target_os = "macos"))]
+fn under_rosetta() -> bool {
+    false
 }
 
 pub fn check(base: &str, current: &str, kind: Kind, platform: &str, arch: &str) -> Result<Option<Release>, String> {
