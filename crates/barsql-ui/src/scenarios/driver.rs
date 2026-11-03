@@ -471,12 +471,12 @@ impl Driver<'_> {
         self.pause();
     }
 
-    // As `context_submenu`, for a button's menu.
+    // As `context_submenu`, for a button's menu ending in the submenu. Up reaches it past items that may be disabled.
     #[cfg(feature = "e2e")]
-    pub fn menu_submenu(&mut self, selector: &'static str, downs: usize, pick: usize) {
+    pub fn menu_last_submenu(&mut self, selector: &'static str, pick: usize) {
         self.click(selector);
         self.cx.update(|window, cx| window.draw(cx).clear(cx));
-        self.keys(&"down ".repeat(downs + 1));
+        self.keys("up");
         self.keys("right");
         self.keys(&format!("{}enter", "down ".repeat(pick)));
         self.pause();

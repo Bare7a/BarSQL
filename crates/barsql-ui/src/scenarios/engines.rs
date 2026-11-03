@@ -323,7 +323,7 @@ fn server_views(cx: &mut TestAppContext, engine: Engine) {
     let mut app = open_on(cx, engine);
     app.connect();
     let (tabs, title) = (app.titles().len(), label(&mut app, first));
-    app.menu_submenu("schema-options", 2, 0);
+    app.menu_last_submenu("schema-options", 0);
     ran_in_new_tab(&mut app, tabs, &title);
 }
 

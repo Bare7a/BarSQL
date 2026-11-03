@@ -36,7 +36,7 @@ make_app() {
     -c "Set :CFBundleShortVersionString $version" \
     -c "Set :CFBundleVersion $version" \
     "$dest/Contents/Info.plist"
-  codesign --force --deep --sign - "$dest"
+  codesign --deep --sign - "$dest"
 }
 
 rm -rf "$out"
@@ -52,15 +52,22 @@ for binary in "${binaries[@]}"; do
 done
 
 # No platform or arch in the dmg name, so the updater never picks it.
+dmg="$dist/BarSQL-macos-universal.dmg"
 staging="$out/dmg"
 mkdir -p "$staging"
 ditto "$app" "$staging/BarSQL.app"
 ln -s /Applications "$staging/Applications"
-size_mb=$(($(du -sAm "$staging" | cut -f1) * 2))
+
+if [ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 ]; then
+  make_dmg=(diskutil image create from --format ULMO --volumeName "BarSQL" "$staging" "$dmg")
+else
+  size_mb=$(($(du -sAm "$staging" | cut -f1) * 2))
+  make_dmg=(hdiutil create -size "${size_mb}m" -volname "BarSQL" -srcfolder "$staging" -ov -format ULMO "$dmg")
+fi
 for attempt in 1 2 3; do
-  hdiutil create -size "${size_mb}m" -volname "BarSQL" -srcfolder "$staging" -ov -format ULMO \
-    "$dist/BarSQL-macos-universal.dmg" >/dev/null && break
+  "${make_dmg[@]}" >/dev/null && break
   [ "$attempt" = 3 ] && { df -h "$dist" >&2; exit 1; }
+  rm -f "$dmg"
   sleep 10
 done
 rm -rf "$staging"

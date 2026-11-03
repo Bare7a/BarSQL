@@ -157,11 +157,10 @@ fn a_plan_rows_menu_collapses_and_expands_the_whole_tree(cx: &mut TestAppContext
     app.connect();
     explain(&mut app, "SELECT * FROM plan_t WHERE id IN (SELECT id FROM plan_t WHERE name = 'Bob');");
     let before = rows(&mut app).len();
-    // Collapse node, Expand all, then Collapse all.
-    app.context_menu("plan-row-0", 2);
+    // Row 0 has no children, so Down skips its disabled Collapse node: Expand all, then Collapse all.
+    app.context_menu("plan-row-0", 1);
     let collapsed = rows(&mut app);
     assert!(collapsed.len() < before && collapsed.iter().all(|(key, ..)| !key.contains('.')), "only the top nodes");
-    // Expand node, then Expand all.
-    app.context_menu("plan-row-0", 1);
+    app.context_menu("plan-row-0", 0);
     assert_eq!(rows(&mut app).len(), before);
 }
