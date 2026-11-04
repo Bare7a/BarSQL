@@ -367,6 +367,41 @@ fn window_moves_and_resizes_are_saved_after_a_pause(cx: &mut TestAppContext) {
     assert_eq!((saved.mode.as_str(), saved.width, saved.height), ("normal", 1000, 700));
 }
 
+#[gpui_kit::test]
+fn closing_the_window_saves_what_waits_on_a_pause(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let session = EditorSession { tabs: vec![tab("a", &env.connection.id, "SELECT 1")], active_tab: "a".into() };
+    env.bar.save_editor_session(session).unwrap();
+    let (workspace, cx) = open(cx);
+    workspace.update_in(cx, |workspace, window, cx| workspace.track_window(None, window, cx));
+    cx.simulate_keystrokes(end_of_text());
+    cx.simulate_input(" + 1");
+    cx.simulate_resize(size(px(1000.), px(700.)));
+    cx.run_until_parked();
+    assert_eq!(env.bar.editor_session().tabs[0].sql, "SELECT 1", "not before the pause");
+
+    cx.simulate_close();
+    assert_eq!(env.bar.editor_session().tabs[0].sql, "SELECT 1 + 1");
+    let saved = env.bar.settings().get(window_state::KEY).and_then(|raw| window_state::parse(raw)).unwrap();
+    assert_eq!((saved.width, saved.height), (1000, 700));
+}
+
+// The deactivation that follows a close reaches the window state as a bounds change. On macOS closing quits instead.
+#[cfg(not(target_os = "macos"))]
+#[gpui_kit::test]
+fn a_closed_window_keeps_the_state_it_closed_in(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (workspace, cx) = open(cx);
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+    let maximised = window_state::WindowState { mode: "maximised".into(), width: 1200, height: 800, x: 10, y: 20 };
+    workspace.update_in(cx, |workspace, window, cx| workspace.track_window(Some(maximised.clone()), window, cx));
+    assert!(cx.simulate_close());
+    cx.deactivate_window();
+    let saved = env.bar.settings().get(window_state::KEY).and_then(|raw| window_state::parse(raw));
+    assert_eq!(saved, Some(maximised));
+}
+
 fn dialog_open(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| window.has_active_dialog(cx))
 }

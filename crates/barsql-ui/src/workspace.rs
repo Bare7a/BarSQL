@@ -428,6 +428,13 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
             }
             cx.new(|cx| Root::new(view, window, cx))
         });
+        // On Windows GPUI maximises the window inside open_window, before it listens for resizes, so its layout would
+        // stay at the restore size.
+        if cfg!(target_os = "windows")
+            && let Ok(window) = window
+        {
+            let _ = window.update(cx, |_, window, cx| window.bounds_changed(cx));
+        }
         if track && let Ok(window) = window {
             let _ = window.update(cx, |root, window, cx| {
                 if let Some((file_path, name)) = state::bar(cx).take_pending_file()
@@ -703,7 +710,9 @@ impl Workspace {
     fn track_window(&mut self, saved: Option<WindowState>, window: &mut Window, cx: &mut Context<Self>) {
         self.window_state = Some(saved.unwrap_or_default());
         let subscription = cx.observe_window_bounds(window, |this, window, cx| {
-            let last = this.window_state.clone().unwrap_or_default();
+            let Some(last) = this.window_state.clone() else {
+                return;
+            };
             let next = window_state::capture(&last, window, cx);
             if next == last {
                 return;
@@ -1542,11 +1551,17 @@ impl Workspace {
     // AccessKit adapter, which resets the class of the content view while the Touch Bar observes it through KVO, and
     // AppKit aborts on the Touch Bar's next update.
     fn close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // On Windows and Linux the closed window takes this view with it before on_app_quit runs.
+        self.save_session(cx);
+        self.save_window_state(cx);
         let drafts = self.tabs.iter().any(|tab| tab.view.holds_draft(cx));
         if cfg!(target_os = "macos") || drafts || state::bar(cx).any_transaction_open() {
             self.quit(window, cx);
             return false;
         }
+        // GPUI reports the deactivation as a bounds change, and on Windows that comes after the window is destroyed,
+        // which then reads as not maximised.
+        self.window_state = None;
         true
     }
 
@@ -2403,6 +2418,7 @@ impl Render for Workspace {
                         window.remove_window();
                     }
                 }),
+                window,
                 cx,
             ))
             .child(
