@@ -1,149 +1,154 @@
 // A saved theme wins. Otherwise follow the system setting until the visitor picks one.
-(function () {
-  var root = document.documentElement;
-  var KEY = "barsql-theme";
+function setUpTheme() {
+  const root = document.documentElement;
+  const KEY = "barsql-theme";
 
-  function chosen() {
+  const chosen = () => {
     try {
-      var theme = localStorage.getItem(KEY);
+      const theme = localStorage.getItem(KEY);
       return theme === "light" || theme === "dark" ? theme : null;
-    } catch (e) {
+    } catch {
       return null;
     }
-  }
+  };
 
-  document.getElementById("theme-toggle").addEventListener("click", function () {
-    var next = root.dataset.theme === "dark" ? "light" : "dark";
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    const next = root.dataset.theme === "dark" ? "light" : "dark";
     root.dataset.theme = next;
     try {
       localStorage.setItem(KEY, next);
-    } catch (e) {}
+    } catch {}
   });
 
-  if (window.matchMedia) {
-    window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", function (event) {
-      if (!chosen()) root.dataset.theme = event.matches ? "light" : "dark";
-    });
-  }
-})();
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", (event) => {
+    if (!chosen()) root.dataset.theme = event.matches ? "light" : "dark";
+  });
+}
 
-// Label the download button, highlight the download card and pick the modifier key for the visitor's OS.
-// Phones and tablets keep the generic button.
-(function () {
-  var ua = navigator.userAgent;
-  var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
-  var mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(platform) && navigator.maxTouchPoints > 1);
-  var os = null;
-  if (!mobile) {
-    if (/Mac/i.test(platform) || /Macintosh/.test(ua)) os = "macos";
-    else if (/Win/i.test(platform) || /Windows/.test(ua)) os = "windows";
-    else if (/Linux|X11/i.test(platform + " " + ua)) os = "linux";
-  }
+function detectOS() {
+  const ua = navigator.userAgent;
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  const mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(platform) && navigator.maxTouchPoints > 1);
+  if (mobile) return null;
+  if (/Mac/i.test(platform) || /Macintosh/.test(ua)) return "macos";
+  if (/Win/i.test(platform) || /Windows/.test(ua)) return "windows";
+  if (/Linux|X11/i.test(`${platform} ${ua}`)) return "linux";
+  return null;
+}
+
+// Point the hero button at the visitor's own build, highlight its card and pick the modifier key.
+// Phones and tablets keep the generic button, which leads to every download.
+function pointDownloadAtVisitor() {
+  const os = detectOS();
   if (!os) return;
 
-  var names = { windows: "Windows", macos: "macOS", linux: "Linux" };
-  document.getElementById("hero-download-label").textContent = "Download for " + names[os];
-  var card = document.getElementById("dl-" + os);
-  if (card) card.classList.add("dl-detected");
+  const names = { windows: "Windows", macos: "macOS", linux: "Linux" };
+  const card = document.getElementById(`dl-${os}`);
+  const main = card.querySelector(".dl-main");
+  const hero = document.getElementById("hero-download");
+  const icon = hero.querySelector("svg");
+  hero.href = main.href;
+  icon.setAttribute("class", "logo");
+  icon.querySelector("use").setAttribute("href", `logos.svg#l-${os === "macos" ? "apple" : os}`);
+  document.getElementById("hero-download-label").textContent = `Download for ${names[os]}`;
+  document.getElementById("hero-download-meta").textContent = main.dataset.meta;
+  card.classList.add("dl-detected");
 
   if (os === "macos") {
-    document.querySelectorAll("kbd[data-mod]").forEach(function (key) {
+    for (const key of document.querySelectorAll("kbd[data-mod]")) {
       key.textContent = "⌘";
       key.title = "Command";
-    });
+    }
   }
-})();
+}
 
-// Lightbox with the full-size WebP screenshots. Arrow keys, swipes and the buttons move between them.
-(function () {
-  var box = document.getElementById("lightbox");
-  var img = box.querySelector("img");
-  var caption = box.querySelector(".lightbox-caption");
-  var count = box.querySelector(".lightbox-count");
-  var buttons = {
-    close: box.querySelector(".lightbox-close"),
-    prev: box.querySelector(".lightbox-prev"),
-    next: box.querySelector(".lightbox-next"),
-  };
-  var focusable = [buttons.close, buttons.prev, buttons.next];
-  var items = Array.prototype.map.call(document.querySelectorAll(".gallery .shot"), function (shot) {
-    return { id: shot.dataset.shot, caption: shot.dataset.caption, alt: shot.querySelector("img").alt };
-  });
-  var index = 0;
-  var opener = null;
-  var touchX = null;
+// Lightbox with every screenshot on the page, full size and in order. Arrow keys, swipes and the buttons move between them.
+function setUpLightbox() {
+  const box = document.getElementById("lightbox");
+  const img = box.querySelector("img");
+  const caption = box.querySelector(".lightbox-caption");
+  const count = box.querySelector(".lightbox-count");
+  const closeButton = box.querySelector(".lightbox-close");
+  const prevButton = box.querySelector(".lightbox-prev");
+  const nextButton = box.querySelector(".lightbox-next");
+  const focusable = [closeButton, prevButton, nextButton];
+  const shots = [...document.querySelectorAll(".shot[data-shot]")];
 
-  function source(item) {
-    return "screenshots/" + item.id + ".webp";
-  }
+  const seen = new Set();
+  const items = shots
+    .filter((shot) => !seen.has(shot.dataset.shot) && seen.add(shot.dataset.shot))
+    .map((shot) => ({ id: shot.dataset.shot, caption: shot.dataset.caption, alt: shot.querySelector("img").alt }))
+    .sort((a, b) => a.id - b.id);
 
-  function show(at) {
+  let index = 0;
+  let opener = null;
+  let touchX = null;
+
+  const source = (item) => `screenshots/${item.id}.webp`;
+
+  const show = (at) => {
     index = (at + items.length) % items.length;
-    var item = items[index];
+    const item = items[index];
     img.src = source(item);
     img.alt = item.alt;
     caption.textContent = item.caption;
-    count.textContent = index + 1 + " / " + items.length;
+    count.textContent = `${index + 1} / ${items.length}`;
     new Image().src = source(items[(index + 1) % items.length]);
-  }
+  };
 
-  function open(id, trigger) {
-    var at = 0;
-    for (var i = 0; i < items.length; i++) {
-      if (items[i].id === id) at = i;
-    }
+  const open = (id, trigger) => {
     opener = trigger;
-    show(at);
+    show(Math.max(0, items.findIndex((item) => item.id === id)));
     box.hidden = false;
     document.body.style.overflow = "hidden";
-    buttons.close.focus();
-  }
+    closeButton.focus();
+  };
 
-  function close() {
+  const close = () => {
     box.hidden = true;
     document.body.style.overflow = "";
-    if (opener) opener.focus();
+    opener?.focus();
+  };
+
+  for (const shot of shots) {
+    shot.addEventListener("click", () => open(shot.dataset.shot, shot));
   }
 
-  document.querySelectorAll(".shot").forEach(function (shot) {
-    shot.addEventListener("click", function () {
-      open(shot.dataset.shot, shot);
-    });
-  });
-
-  buttons.close.addEventListener("click", close);
-  buttons.prev.addEventListener("click", function (event) {
+  closeButton.addEventListener("click", close);
+  prevButton.addEventListener("click", (event) => {
     event.stopPropagation();
     show(index - 1);
   });
-  buttons.next.addEventListener("click", function (event) {
+  nextButton.addEventListener("click", (event) => {
     event.stopPropagation();
     show(index + 1);
   });
-  img.addEventListener("click", function (event) {
-    event.stopPropagation();
-  });
+  img.addEventListener("click", (event) => event.stopPropagation());
   box.addEventListener("click", close);
 
-  document.addEventListener("keydown", function (event) {
+  document.addEventListener("keydown", (event) => {
     if (box.hidden) return;
     if (event.key === "Escape") close();
     else if (event.key === "ArrowRight") show(index + 1);
     else if (event.key === "ArrowLeft") show(index - 1);
     else if (event.key === "Tab") {
-      var at = focusable.indexOf(document.activeElement);
+      const at = focusable.indexOf(document.activeElement);
       focusable[(at + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
       event.preventDefault();
     }
   });
 
-  box.addEventListener("touchstart", function (event) {
+  box.addEventListener("touchstart", (event) => {
     touchX = event.touches[0].clientX;
   }, { passive: true });
-  box.addEventListener("touchend", function (event) {
+  box.addEventListener("touchend", (event) => {
     if (touchX === null) return;
-    var dx = event.changedTouches[0].clientX - touchX;
+    const dx = event.changedTouches[0].clientX - touchX;
     touchX = null;
     if (Math.abs(dx) > 50) show(index + (dx < 0 ? 1 : -1));
   });
-})();
+}
+
+setUpTheme();
+pointDownloadAtVisitor();
+setUpLightbox();
