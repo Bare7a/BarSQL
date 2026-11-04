@@ -10,8 +10,8 @@ use crate::tokens::TEXT_SM;
 
 // macOS has traffic lights and the system menu bar, so its bar only shows the title.
 // README screenshots draw the Windows bar on macOS too, where GPUI Kit leaves out the window controls.
-// On Linux, and in fullscreen, the close button calls `on_close` instead of removing the window. Elsewhere closing
-// goes through on_window_should_close.
+// On Linux, and in fullscreen, the close button calls `on_close` instead of removing the window. 
+// Elsewhere closing goes through on_window_should_close.
 // With the menu bar, 9px instead of GPUI Kit's 12px centres the mark over the connection switcher's icon below it. In
 // fullscreen GPUI Kit pads the bar's content by another 0.75rem, which the menu bar's row takes back.
 pub fn render(
