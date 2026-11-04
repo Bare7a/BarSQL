@@ -22,15 +22,11 @@
   <link rel="apple-touch-icon" href="icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <script>
-    // The saved theme, else the system's, before the first paint.
-    (function () {
-      var theme = null;
-      try { theme = localStorage.getItem("barsql-theme"); } catch (e) {}
-      if (theme !== "light" && theme !== "dark") {
-        theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-      }
-      document.documentElement.dataset.theme = theme;
-    })();
+    // The saved theme, else the system's, before the first paint. script.js saves it under the same key.
+    let savedTheme = null;
+    try { savedTheme = localStorage.getItem("barsql-theme"); } catch {}
+    const systemTheme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = savedTheme === "light" || savedTheme === "dark" ? savedTheme : systemTheme;
   </script>
   <script type="application/ld+json">
     {
@@ -656,6 +652,8 @@ BarSQL-data/
       <p class="dl-all">
               Every build updates itself from inside the app. All of them, with their checksums, are on the
               <a href="https://github.com/Bare7a/BarSQL/releases/latest" target="_blank" rel="noopener">latest release</a>.
+              The Windows build isn't signed yet, so Windows asks once before the first launch:
+              <a href="https://github.com/Bare7a/BarSQL#first-launch" target="_blank" rel="noopener">here's how</a>.
               Prefer to build it? <code>cargo run -p barsql --release</code>, as the
               <a href="https://github.com/Bare7a/BarSQL/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">contributing guide</a> explains.
             </p>
@@ -694,6 +692,7 @@ BarSQL-data/
         <a href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/Bare7a/BarSQL/issues" target="_blank" rel="noopener">Issues</a>
         <a href="https://github.com/Bare7a/BarSQL/blob/master/LICENSE" target="_blank" rel="noopener">GPL-3.0 License</a>
+        <a href="privacy.html">Privacy</a>
       </div>
     </nav>
   </div>

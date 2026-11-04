@@ -1,16 +1,18 @@
 # ⚡ BarSQL
 
 ![Rust](https://img.shields.io/badge/Rust-1.99+-B7410E?style=for-the-badge&logo=rust)
-![GPUI](https://img.shields.io/badge/GPUI_Kit-0.8-4B275F?style=for-the-badge)
+![GPUI](https://img.shields.io/badge/GPUI_Kit-0.9-4B275F?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)
-![Status](https://img.shields.io/badge/status-active-success?style=for-the-badge)
+[![Release](https://img.shields.io/github/v/release/Bare7a/BarSQL?style=for-the-badge&color=success)](../../releases/latest)
 
 > **A fast, local-first SQL workbench built with Rust and GPUI.**
 
 No cloud. No accounts. No telemetry.  
-Just a focused, native desktop tool for working with databases.
+Just a focused, native desktop tool for **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **ClickHouse**, **Turso / libSQL** and **SQLite**, on Windows, macOS and Linux.
 
 🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)** · 📖 **[User Guide](guide/README.md)**
+
+![BarSQL's editor with schema-aware suggestions, a saved query's results in the grid and the focused row as JSON](.github/screenshots/1.png?raw=true)
 
 ---
 
@@ -33,6 +35,14 @@ Grab the latest build for **Windows**, **macOS**, or **Linux** from the [**Relea
 No account required - just download and run.
 
 Every build above updates itself. The installer, the Linux packages and copies in protected folders ask for admin rights first.
+
+### First launch
+
+The macOS app is signed with a Developer ID and notarized by Apple, so it opens like any other app.
+
+The Windows build isn't code-signed yet, so Windows asks once before BarSQL first opens: when SmartScreen says *Windows protected your PC*, click **More info → Run anyway**. Smart App Control, where it's turned on, blocks unsigned apps without an exception, so BarSQL can't run there until it's signed.
+
+Every release lists each file's SHA-256 in `SHA256SUMS`, which the updater checks its downloads against, and every file carries a signed [build provenance attestation](../../attestations) from the GitHub Actions run that built it.
 
 Prefer to build it yourself? See **Build from source** below.
 
@@ -181,6 +191,17 @@ cargo run -p barsql --release
 ```
 
 Requirements, tests and the project layout are in **[CONTRIBUTING.md](CONTRIBUTING.md)**, packaging and releases in **[RELEASING.md](RELEASING.md)**.
+
+---
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. Good places to start:
+
+- **[Report a bug or ask for a feature](../../issues/new/choose)** - especially anything that misbehaves on your engine or server version
+- **[Add a language](CONTRIBUTING.md#translations)** - mostly JSON, plus a few lines of Rust to register it
+
+If BarSQL is useful to you, a ⭐ helps other people find it.
 
 ---
 

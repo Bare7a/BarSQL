@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy - BarSQL</title>
+  <meta name="description" content="What BarSQL stores on your computer, what it connects to, and what this website does. No accounts, no analytics, no telemetry." />
+  <link rel="canonical" href="https://barsql.bare7a.eu/privacy.html" />
+  <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="icon" type="image/png" href="icon.png" />
+  <link rel="apple-touch-icon" href="icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    // The saved theme, else the system's, before the first paint. script.js saves it under the same key.
+    let savedTheme = null;
+    try { savedTheme = localStorage.getItem("barsql-theme"); } catch {}
+    const systemTheme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = savedTheme === "light" || savedTheme === "dark" ? savedTheme : systemTheme;
+  </script>
+  <script type="module" src="script.js"></script>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="container">
+    <nav class="nav" aria-label="Main">
+      <a class="brand" href="./" aria-label="BarSQL home">
+        <img src="icon.svg" alt="" width="28" height="28" />
+        <span><span class="accent">Bar</span>SQL</span>
+      </a>
+      <div class="nav-links">
+        <a href="./#tour">Tour</a>
+        <a href="./#databases">Engines</a>
+        <a href="./#features">Features</a>
+        <a href="./#screenshots">Screenshots</a>
+        <a class="nav-docs" href="https://github.com/Bare7a/BarSQL/blob/master/guide/README.md" target="_blank" rel="noopener">Docs<svg class="icon" aria-hidden="true"><use href="icons.svg#i-arrow-up-right"/></svg></a>
+      </div>
+      <div class="nav-actions">
+        <a class="nav-icon nav-github" href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener" aria-label="BarSQL on GitHub" title="BarSQL on GitHub"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-github"/></svg></a>
+        <button id="theme-toggle" class="nav-icon" type="button" aria-label="Switch between dark and light" title="Switch between dark and light">
+          <svg class="icon icon-sun" aria-hidden="true"><use href="icons.svg#i-sun"/></svg>
+          <svg class="icon icon-moon" aria-hidden="true"><use href="icons.svg#i-moon"/></svg>
+        </button>
+        <a class="btn btn-primary btn-sm" href="./#download"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-download"/></svg>Download</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <article class="container doc">
+    <span class="eyebrow">Privacy</span>
+    <h1>Privacy policy</h1>
+    <p class="doc-meta">Last updated November 4, 2026</p>
+    <p class="doc-lead">BarSQL is a desktop app that runs on your computer. It has no accounts, no analytics and no telemetry, and its developer never receives your connections, queries or data.</p>
+
+    <h2>What BarSQL stores</h2>
+    <p>Everything BarSQL keeps is in one <code>BarSQL-data</code> folder on your computer, next to the app or in your user folder. The <a href="https://github.com/Bare7a/BarSQL/blob/master/guide/app.md#-portable-by-design" target="_blank" rel="noopener">guide</a> says where.</p>
+    <ul>
+      <li><code>connections.json</code> holds your connections, with their database passwords, Turso auth tokens, SSH passwords and key passphrases in plain text. Keep the folder as private as the credentials in it.</li>
+      <li><code>query_history.json</code> has the last 500 statements you ran, <code>saved_queries.json</code> your saved queries, <code>editor_session.json</code> your open tabs and their SQL, and <code>settings.json</code> your preferences.</li>
+      <li><code>crash.log</code> appears if BarSQL hits a bug, <code>mcp.log</code> once an AI assistant uses it, and <code>update.log</code> when it updates itself.</li>
+    </ul>
+    <p>None of it is sent anywhere. A crash report stays in <code>crash.log</code> unless you share it, for example in a GitHub issue.</p>
+
+    <h2>What BarSQL connects to</h2>
+    <ul>
+      <li><strong>Your databases and SSH hosts.</strong> BarSQL connects to the servers you set up, and to nothing else on your behalf.</li>
+      <li><strong>GitHub, for updates.</strong> Release builds ask GitHub's API for the latest release at launch, and download it only when you choose to install it. GitHub sees your IP address and BarSQL's version, as the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub Privacy Statement</a> describes.</li>
+      <li><strong>Links.</strong> The website, GitHub and release notes links in the app open in your browser only when you click them.</li>
+    </ul>
+
+    <h2>AI assistants</h2>
+    <p>AI apps such as Claude, Cursor or VS Code can use BarSQL as an MCP server, but only for connections where you tick <strong>Allow AI assistants (MCP)</strong>. The AI app starts BarSQL on your computer and talks to it directly; BarSQL itself sends nothing to the AI's provider. The assistant sees the shared connections' names, tables and query results, never their passwords, and changes data only where you allow it. What it reads goes to its AI service, under that app's privacy policy, so share only what you'd show it. Every call is logged in <code>mcp.log</code>.</p>
+
+    <h2>Downloads</h2>
+    <p>BarSQL is downloaded from GitHub, under the GitHub Privacy Statement. The developer sees how many times each file was downloaded, not who downloaded it.</p>
+
+    <h2>This website</h2>
+    <p>barsql.bare7a.eu is a static site on GitHub Pages. It sets no cookies, runs no analytics and loads nothing from other sites. Your choice of light or dark stays in your browser's local storage. GitHub logs visitors' IP addresses to keep its service secure, as the GitHub Privacy Statement explains.</p>
+
+    <h2>Your control</h2>
+    <p>Your BarSQL data is all in the <code>BarSQL-data</code> folder: open it to see it, copy it to keep it, or delete it to remove it. Uninstalling BarSQL may leave the folder behind, so delete it yourself if you want everything gone. The developer holds none of your data, so there's nothing to request, correct or delete on that side.</p>
+
+    <h2>Changes and contact</h2>
+    <p>If BarSQL starts handling data differently, this page changes with it and gets a new date, and its <a href="https://github.com/Bare7a/BarSQL/commits/master/docs/privacy.html" target="_blank" rel="noopener">history</a> stays on GitHub. Ask questions in <a href="https://github.com/Bare7a/BarSQL/issues" target="_blank" rel="noopener">GitHub issues</a>, or email <a href="mailto:bare7a@gmail.com">bare7a@gmail.com</a> about anything you'd rather not post publicly.</p>
+  </article>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <a class="brand" href="./" aria-label="BarSQL home">
+        <img src="icon.svg" alt="" width="24" height="24" loading="lazy" />
+        <span><span class="accent">Bar</span>SQL</span>
+      </a>
+      <p>A fast, local-first SQL workbench. Free and open source under the GPL-3.0.</p>
+    </div>
+    <nav class="footer-cols" aria-label="Footer">
+      <div>
+        <span class="footer-title">Product</span>
+        <a href="./#tour">Tour</a>
+        <a href="./#databases">Engines</a>
+        <a href="./#features">Features</a>
+        <a href="./#download">Download</a>
+      </div>
+      <div>
+        <span class="footer-title">Resources</span>
+        <a href="https://github.com/Bare7a/BarSQL/blob/master/guide/README.md" target="_blank" rel="noopener">Docs</a>
+        <a href="https://github.com/Bare7a/BarSQL/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/Bare7a/BarSQL/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+      </div>
+      <div>
+        <span class="footer-title">Project</span>
+        <a href="https://github.com/Bare7a/BarSQL" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Bare7a/BarSQL/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/Bare7a/BarSQL/blob/master/LICENSE" target="_blank" rel="noopener">GPL-3.0 License</a>
+        <a href="privacy.html" aria-current="page">Privacy</a>
+      </div>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

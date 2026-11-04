@@ -676,6 +676,21 @@ kbd {
 .dl-all { max-width: 760px; margin: 40px auto 0; text-align: center; color: var(--faint); font-size: 0.92rem; text-wrap: balance; }
 .dl-star { display: flex; justify-content: center; margin-top: 24px; }
 
+/* Text pages, like the privacy policy: one column at a comfortable line length */
+
+.doc { max-width: calc(720px + 2 * var(--gutter)); padding-top: 56px; padding-bottom: 112px; }
+.doc h1 { margin-top: 14px; font-size: clamp(2.25rem, 5vw, 3.25rem); font-weight: 650; letter-spacing: -0.035em; line-height: 1.08; }
+.doc-meta { margin: 14px 0 0; color: var(--faint); font-size: 0.92rem; }
+.doc-lead { margin: 28px 0 0; font-size: 1.15rem; }
+.doc h2 { margin-top: 52px; font-size: 1.4rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; }
+.doc p:not(.doc-lead, .doc-meta), .doc ul { margin: 14px 0 0; color: var(--muted); }
+.doc ul { padding-left: 1.2em; }
+.doc li + li { margin-top: 10px; }
+.doc li::marker { color: var(--faint); }
+.doc strong { color: var(--text); font-weight: 600; }
+.doc li a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.doc li a:hover { text-decoration-thickness: 2px; }
+
 /* Footer */
 
 .site-footer { padding: 64px 0 48px; border-top: 1px solid var(--line); }
@@ -686,7 +701,8 @@ kbd {
 .footer-cols div { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .footer-title { margin-bottom: 4px; color: var(--text); font-size: 0.85rem; font-weight: 600; }
 .footer-cols a { color: var(--muted); font-size: 0.9rem; }
-.footer-cols a:hover { color: var(--text); text-decoration: none; }
+.footer-cols a:hover,
+.footer-cols a[aria-current="page"] { color: var(--text); text-decoration: none; }
 
 /* Lightbox */
 
@@ -766,6 +782,7 @@ kbd {
   :root { --gutter: 16px; }
   .section { padding: 80px 0; }
   .hero { padding: 40px 0 48px; }
+  .doc { padding-top: 32px; padding-bottom: 80px; }
   .engines { display: grid; grid-template-columns: repeat(2, auto); justify-content: start; }
   .hero-actions .btn { flex: 1 1 auto; }
   .hero-shot { margin-top: 48px; }

@@ -53,6 +53,23 @@ For a single screenshot, build with `cargo build -p barsql --features snapshot`,
 - the update dialog: `update`, `update-current`, `update-downloading`, `update-ready`, `update-failed`
 - other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`, `palette` (the command palette), `chart` (the first result as a chart, with `BARSQL_SNAPSHOT_RUN=1`), `er` (the `main` schema's ER diagram), `structure` (a table's Structure tab: the first in `main`, or `structure=<table>`)
 
+## Translations
+
+BarSQL speaks English, Deutsch, Български and Español. A new language is mostly JSON and needs little of the rest of the code; [#25](https://github.com/Bare7a/BarSQL/pull/25) added Spanish and touches every step below.
+
+1. Copy `crates/barsql-ui/locales/base/en.json` and `crates/barsql-ui/locales/en.json` to the language's code, such as `fr.json`, and translate the values. Keep the keys and placeholders like `{count}` as they are. Terms developers know in English, such as Commit or Rollback, can stay in English.
+2. Add the language's own name under `language` in every `locales/base/*.json`.
+3. Register it in `crates/barsql-ui/src`:
+   - `i18n.rs`: `LANGUAGES`, its two `include_str!` constants and `source`, plus its digit grouping in `format_number`
+   - `actions.rs`: a `Language…` action and its item in View → Language
+   - `command_palette.rs` and `workspace.rs`: the same action
+   - `relative_time.rs`: phrases such as "yesterday" and "in 3 days"
+4. Add the language to `locales` in `fixtures/golden/ui/relative_time.json`, with a column for it in each row.
+5. Run `cargo test -p barsql-ui`. It names any key the new files miss.
+6. List the language in `guide/app.md` and on the landing page's "Instant and polished" card.
+
+Plurals have only two forms, `key_one` and `key_other`. A language that needs more, such as Polish or Russian, needs a change to `t_count` first, so open an issue before translating it.
+
 ## Docs
 
 - `README.md` - the front page on GitHub: the pitch, downloads, screenshots and the engines table

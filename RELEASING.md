@@ -2,7 +2,7 @@
 
 1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`, `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current version.
 2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
-3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds on Ubuntu 22.04, Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`.
+3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds on Ubuntu 22.04, Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks.
 
 Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
 
@@ -19,11 +19,29 @@ Run the workflow by hand with the version left empty to build the packages witho
 
 - Only the portable updater assets name both a platform and an architecture, so portable copies never pick another download. The AppImage and the packages update from their own asset, and the installer and the dmg from the `.zip`.
 - Release builds turn on the `production` feature, which enables the update check at launch. The release profile uses thin LTO and strips symbols.
-- **macOS:** an `.app` for macOS 12 and later with an ad-hoc signature. Each zip holds its own architecture alone, half the size of a universal app, since the updater downloads the zip for the Mac's own chip, even from an Intel build running under Rosetta. The dmg holds a `lipo` universal app and an `Applications` link, so a copy installed from it keeps only its own architecture after its first update. `BARSQL_NATIVE_ONLY=1` builds this Mac's architecture alone.
-- **Windows:** `crates/barsql/build.rs` embeds the icon and the version block. `packaging/windows/installer.nsi` installs the app with the `SQLite Database` file class for `.db`, `.sqlite`, `.sqlite3`, `.s3db` and `.sl3`.
+- **macOS:** an `.app` for macOS 12 and later, signed with the Developer ID and notarized through the [signing secrets](#macos-signing-and-notarization), which a release requires. A fork or a build-only run without them signs it ad-hoc. Each zip holds its own architecture alone, half the size of a universal app, since the updater downloads the zip for the Mac's own chip, even from an Intel build running under Rosetta. The dmg holds a `lipo` universal app and an `Applications` link, so a copy installed from it keeps only its own architecture after its first update. `BARSQL_NATIVE_ONLY=1` builds this Mac's architecture alone.
+- **Windows:** `crates/barsql/build.rs` embeds the icon and the version block. Neither the `.exe` nor the installer is code-signed, so SmartScreen asks once before the first launch. `packaging/windows/installer.nsi` installs the app with the `SQLite Database` file class for `.db`, `.sqlite`, `.sqlite3`, `.s3db` and `.sl3`.
 - **Linux:** [`cargo-deb`](https://crates.io/crates/cargo-deb) and [`cargo-generate-rpm`](https://crates.io/crates/cargo-generate-rpm) build the deb and rpm from `crates/barsql/Cargo.toml`, and `makepkg` builds the Arch package from `packaging/linux/PKGBUILD`. Each installs `/usr/bin/BarSQL` and a desktop entry that opens SQLite files; the deb and rpm work out their library dependencies from the binary. The window's app id is `BarSQL`, so Wayland docks match it to `BarSQL.desktop`.
 - **Compression:** the dmg is LZMA (`ULMO`, which macOS 10.15 and later open), the installer uses a 64 MB LZMA dictionary, the rpm an xz payload and the Arch package `zstd --ultra -20`. The deb keeps cargo-deb's xz and the AppImage appimagetool's zstd. The updater assets stay deflate `.zip` and gzip `.tar.gz`, the only formats released versions unpack.
 - The icon's source is `packaging/icon.svg`. The macOS `.icns` sets it on Apple's icon grid (an 824px body on a 1024px canvas, with a shadow). Windows and Linux show the stack without its tile, since their taskbars and docks are mostly dark and the dark tile would disappear there, leaving the stack looking small. The title bar shows the stack too, in a dark and a light version (`crates/barsql-ui/images/barsql-mark-*.svg`). `cargo xtask icons` regenerates the set from it: the Linux PNGs, `icon.ico`, `icons.icns` and `docs/icon.png`, each size rendered from the vector, and the SVG copies for the app (the marks and its icon) and `docs/`.
+
+## macOS Signing and Notarization
+
+With these repository secrets, the release workflow signs the apps and the dmg with the Developer ID and the hardened runtime, has Apple notarize them, and staples the tickets, so Gatekeeper opens BarSQL without asking. The README promises a notarized Mac app, so a release of Bare7a/BarSQL fails without them. A fork or a build-only run without them signs the apps ad-hoc and skips notarization.
+
+| Secret                       | Value                                                                                                                                  |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `MACOS_CERTIFICATE`          | The Developer ID Application certificate with its private key, exported from Keychain Access as a `.p12`, in base64: `base64 -i DeveloperID.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE_PASSWORD` | The password the `.p12` was exported with                                                                                              |
+| `APPLE_API_KEY`              | The text of an App Store Connect API key's `.p8` file: a team key with the Developer role, from Users and Access → Integrations → App Store Connect API |
+| `APPLE_API_KEY_ID`           | That key's Key ID                                                                                                                      |
+| `APPLE_API_ISSUER`           | The Issuer ID shown above the keys                                                                                                     |
+
+- Only the account holder can create a Developer ID Application certificate: Xcode → Settings → Accounts → Manage Certificates → + → Developer ID Application.
+- `packaging/macos/BarSQL.entitlements` turns off library validation, which the hardened runtime would otherwise use to refuse SQLite extensions signed by other developers or ad-hoc.
+- `packaging/macos/DeveloperIDG2CA.cer` is Apple's Developer ID intermediate certificate, which a `.p12` export leaves out and the workflow adds to its keychain. It expires in September 2031; replace it from [apple.com/certificateauthority](https://www.apple.com/certificateauthority/) before then.
+- To try the secrets without publishing, run the workflow by hand with the version left empty. Unzip `BarSQL-darwin-arm64.zip` from the run's `dist-macos` artifact: `spctl -a -vv BarSQL.app` should report `source=Notarized Developer ID`, and `xcrun stapler validate` should pass for the app and the dmg.
+- Locally, `BARSQL_MACOS_IDENTITY` signs with a certificate in the login keychain, named as `"Developer ID Application: …"` or, when two share that name, by the SHA-1 hash `security find-identity -v -p codesigning` lists. `BARSQL_NOTARY_KEY` (the `.p8` file's path), `BARSQL_NOTARY_KEY_ID` and `BARSQL_NOTARY_ISSUER` notarize too.
 
 ## How Updates Work
 

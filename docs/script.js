@@ -1,6 +1,7 @@
 // A saved theme wins. Otherwise follow the system setting until the visitor picks one.
 function setUpTheme() {
   const root = document.documentElement;
+  // Each page's inline head script reads it before the first paint.
   const KEY = "barsql-theme";
 
   const chosen = () => {
@@ -37,15 +38,15 @@ function detectOS() {
 }
 
 // Point the hero button at the visitor's own build, highlight its card and pick the modifier key.
-// Phones and tablets keep the generic button, which leads to every download.
+// Phones and tablets keep the generic button, which leads to every download, and pages without downloads skip this.
 function pointDownloadAtVisitor() {
   const os = detectOS();
-  if (!os) return;
+  const hero = document.getElementById("hero-download");
+  const card = os && document.getElementById(`dl-${os}`);
+  if (!hero || !card) return;
 
   const names = { windows: "Windows", macos: "macOS", linux: "Linux" };
-  const card = document.getElementById(`dl-${os}`);
   const main = card.querySelector(".dl-main");
-  const hero = document.getElementById("hero-download");
   const icon = hero.querySelector("svg");
   hero.href = main.href;
   icon.setAttribute("class", "logo");
@@ -65,6 +66,7 @@ function pointDownloadAtVisitor() {
 // Lightbox with every screenshot on the page, full size and in order. Arrow keys, swipes and the buttons move between them.
 function setUpLightbox() {
   const box = document.getElementById("lightbox");
+  if (!box) return;
   const img = box.querySelector("img");
   const caption = box.querySelector(".lightbox-caption");
   const count = box.querySelector(".lightbox-count");
