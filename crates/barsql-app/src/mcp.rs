@@ -157,15 +157,24 @@ impl Server {
         }
     }
 
-    async fn call(self: Arc<Self>, id: Value, params: Value, tab: String, cancelled: watch::Receiver<bool>) {
+    async fn call(self: Arc<Self>, id: Value, params: Value, tab: String, mut cancelled: watch::Receiver<bool>) {
         let tool = params["name"].as_str().unwrap_or_default();
         let args = &params["arguments"];
         let started = Instant::now();
         let result = if *cancelled.borrow() {
             Err(CANCELLED.into())
         } else {
-            let run = AssertUnwindSafe(self.run(tool, args, &tab, cancelled.clone()));
-            run.catch_unwind().await.unwrap_or_else(|panic| Err(failed(QueryError::from_panic(panic))))
+            let run = AssertUnwindSafe(self.run(tool, args, &tab, cancelled.clone()))
+                .catch_unwind()
+                .map(|result| result.unwrap_or_else(|panic| Err(failed(QueryError::from_panic(panic)))));
+            // Anything but a change, which rolls back by itself, stops at once, even before its query starts.
+            // Err is a newer call taking the id, not a cancel.
+            tokio::select! {
+                result = run => result,
+                Ok(_) = cancelled.wait_for(|stop| *stop), if tool != "run_change" => {
+                    Err(failed(QueryError::cancelled()))
+                }
+            }
         };
         // Gives the connection back at once: SQLite has only one.
         self.bar.cleanup_tab(&tab).await;

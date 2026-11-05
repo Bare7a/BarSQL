@@ -271,6 +271,19 @@ fn a_reused_request_id_leaves_the_newer_call_cancellable() {
     assert!(s.settled(), "the cancel reached it");
 }
 
+// Holding the engines lock parks the call in reload_connections, before its query registers.
+#[test]
+fn a_cancel_before_the_query_registers_still_stops_it() {
+    let s = setup();
+    let engines = lock(&s.server.bar.inner.engines);
+    s.query(4, ENDLESS);
+    std::thread::sleep(Duration::from_millis(200));
+    s.cancel(4);
+    drop(engines);
+    assert!(s.settled(), "the cancel was lost");
+    assert!(s.replies.try_recv().is_err(), "a cancelled call answered");
+}
+
 #[test]
 fn cancelling_a_change_takes_its_question_down_and_runs_nothing() {
     let s = setup();
