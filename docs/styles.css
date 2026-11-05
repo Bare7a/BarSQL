@@ -644,6 +644,8 @@ kbd {
 
 .dl-desc { margin: 12px 0 20px; color: var(--muted); font-size: 0.92rem; }
 .dl-main { width: 100%; }
+.dl-alt { margin: 10px 0 0; color: var(--faint); font-size: 0.82rem; text-align: center; }
+.dl-alt a { font-family: var(--font-mono); }
 
 /* Every card gives its other formats two rows at the bottom, so the cards line up */
 .dl-more { display: grid; justify-items: start; gap: 8px; margin-top: auto; padding-top: 20px; }

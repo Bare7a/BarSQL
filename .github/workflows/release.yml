@@ -77,23 +77,39 @@ jobs:
     strategy:
       matrix:
         include:
-          # Built on 22.04 so the binary also runs on distros with an older glibc.
-          - os: ubuntu-22.04
+          # Built in an Ubuntu 22.04 container so the binaries also run on distros with an older glibc.
+          - os: ubuntu-24.04
             target: linux
+            container: ubuntu:22.04
+            artifact: dist-linux
+          - os: ubuntu-24.04-arm
+            target: linux
+            container: ubuntu:22.04
+            artifact: dist-linux-arm64
           - os: windows-latest
             target: windows
+            artifact: dist-windows
           - os: macos-latest
             target: macos
+            artifact: dist-macos
     runs-on: ${{ matrix.os }}
+    # Windows and macOS have none, so they build on the runner itself.
+    container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install GPUI build dependencies
+      # The bare image has no compilers, pkg-config, certificates, Rust or the file command appimagetool runs.
+      - name: Install the build tools, GPUI's libraries and rustup
         if: matrix.target == 'linux'
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang libfontconfig-dev libfreetype-dev libwayland-dev \
-            libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libfuse2
+          set -euo pipefail
+          apt-get update
+          apt-get install -y build-essential clang pkg-config curl ca-certificates file libfontconfig-dev libfreetype-dev \
+            libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Install the pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -108,13 +124,17 @@ jobs:
           key: release
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - name: Install cargo-deb, cargo-generate-rpm and linuxdeploy
+      # package-linux.sh makes the deb and the rpm on x86-64 only.
+      - name: Install cargo-deb and cargo-generate-rpm
+        if: matrix.target == 'linux' && runner.arch == 'X64'
+        run: cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
+
+      - name: Install linuxdeploy
         if: matrix.target == 'linux'
         run: |
           set -euo pipefail
-          cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
           curl -fsSL -o "$RUNNER_TEMP/linuxdeploy" \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$(uname -m).AppImage"
           chmod +x "$RUNNER_TEMP/linuxdeploy"
           echo "LINUXDEPLOY=$RUNNER_TEMP/linuxdeploy" >> "$GITHUB_ENV"
 
@@ -186,13 +206,22 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: scripts/package-${{ matrix.target }}.sh
 
-      - name: Show the libraries the Linux binary links
+      # A newer container image would raise the glibc it needs and drop the distros still on 2.35, like Ubuntu 22.04.
+      - name: Check the libraries the Linux binary needs
         if: matrix.target == 'linux'
-        run: readelf -d target/package/linux/BarSQL | grep NEEDED
+        run: |
+          set -euo pipefail
+          readelf -d target/package/linux/BarSQL | grep NEEDED
+          glibc="$(objdump -T target/package/linux/BarSQL | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)"
+          echo "Needs $glibc"
+          if [ "$(printf '%s\n' "$glibc" GLIBC_2.35 | sort -V | tail -n1)" != GLIBC_2.35 ]; then
+            echo "::error::The binary needs $glibc, newer than Ubuntu 22.04's GLIBC_2.35."
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: dist-${{ matrix.target }}
+          name: ${{ matrix.artifact }}
           path: target/package/dist/*
           if-no-files-found: error
           retention-days: 7

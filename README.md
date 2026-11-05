@@ -23,13 +23,13 @@ Grab the latest build for **Windows**, **macOS**, or **Linux** from the [**Relea
 ### Recommended assets:
 
 - **Windows**: `BarSQL-windows-amd64.zip` (portable) **or** `BarSQL-amd64-installer.exe` (installer)
-- **Linux**: `BarSQL-linux-amd64.tar.gz` (portable)
+- **Linux**: `BarSQL-linux-amd64.tar.gz` (x86-64) **or** `BarSQL-linux-arm64.tar.gz` (ARM64), both portable
 - **macOS**: `BarSQL-darwin-arm64.zip` (Apple Silicon) **or** `BarSQL-darwin-amd64.zip` (Intel)
 
 ### Additional options:
 
 - **Windows**: `BarSQL.exe` (standalone)
-- **Linux**: `BarSQL-x86_64.AppImage`, `BarSQL.deb`, `BarSQL.rpm`, `BarSQL.pkg.tar.zst`, `BarSQL` (standalone)
+- **Linux**: `BarSQL-x86_64.AppImage` and `BarSQL-aarch64.AppImage` (ARM64), plus `BarSQL.deb`, `BarSQL.rpm`, `BarSQL.pkg.tar.zst` and `BarSQL` (standalone) for x86-64
 - **macOS**: `BarSQL-macos-universal.dmg`
 
 No account required - just download and run.

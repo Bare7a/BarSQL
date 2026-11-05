@@ -37,9 +37,18 @@ function detectOS() {
   return null;
 }
 
+// Chromium's user agent says x86_64 on every Linux, so its client hints come first.
+async function onArm() {
+  try {
+    const hints = await navigator.userAgentData?.getHighEntropyValues(["architecture"]);
+    if (hints) return hints.architecture === "arm";
+  } catch {}
+  return /aarch64|arm64/i.test(navigator.userAgent);
+}
+
 // Point the hero button at the visitor's own build, highlight its card and pick the modifier key.
 // Phones and tablets keep the generic button, which leads to every download, and pages without downloads skip this.
-function pointDownloadAtVisitor() {
+async function pointDownloadAtVisitor() {
   const os = detectOS();
   const hero = document.getElementById("hero-download");
   const card = os && document.getElementById(`dl-${os}`);
@@ -47,12 +56,13 @@ function pointDownloadAtVisitor() {
 
   const names = { windows: "Windows", macos: "macOS", linux: "Linux" };
   const main = card.querySelector(".dl-main");
+  const meta = document.getElementById("hero-download-meta");
   const icon = hero.querySelector("svg");
   hero.href = main.href;
   icon.setAttribute("class", "logo");
   icon.querySelector("use").setAttribute("href", `logos.svg#l-${os === "macos" ? "apple" : os}`);
   document.getElementById("hero-download-label").textContent = `Download for ${names[os]}`;
-  document.getElementById("hero-download-meta").textContent = main.dataset.meta;
+  meta.textContent = main.dataset.meta;
   card.classList.add("dl-detected");
 
   if (os === "macos") {
@@ -60,6 +70,12 @@ function pointDownloadAtVisitor() {
       key.textContent = "⌘";
       key.title = "Command";
     }
+  }
+
+  const arm = card.querySelector(".dl-arm");
+  if (arm && (await onArm())) {
+    hero.href = arm.href;
+    meta.textContent = arm.dataset.meta;
   }
 }
 

@@ -58,13 +58,15 @@ fn serve(mut stream: TcpStream, routes: &Routes) {
 }
 
 // Keep in sync with the assets release.yml publishes.
-const RELEASE_ASSETS: [&str; 13] = [
+const RELEASE_ASSETS: [&str; 15] = [
     "SHA256SUMS",
     "BarSQL",
+    "BarSQL-aarch64.AppImage",
     "BarSQL-amd64-installer.exe",
     "BarSQL-darwin-amd64.zip",
     "BarSQL-darwin-arm64.zip",
     "BarSQL-linux-amd64.tar.gz",
+    "BarSQL-linux-arm64.tar.gz",
     "BarSQL-macos-universal.dmg",
     "BarSQL-windows-amd64.zip",
     "BarSQL-x86_64.AppImage",
@@ -122,7 +124,8 @@ fn each_platform_gets_its_updater_archive() {
     assert_eq!(picked("darwin", "amd64", &RELEASE_ASSETS).as_deref(), Some("BarSQL-darwin-amd64.zip"));
     assert_eq!(picked("linux", "amd64", &RELEASE_ASSETS).as_deref(), Some("BarSQL-linux-amd64.tar.gz"));
     assert_eq!(picked("windows", "amd64", &RELEASE_ASSETS).as_deref(), Some("BarSQL-windows-amd64.zip"));
-    assert_eq!(picked("linux", "arm64", &RELEASE_ASSETS), None);
+    assert_eq!(picked("linux", "arm64", &RELEASE_ASSETS).as_deref(), Some("BarSQL-linux-arm64.tar.gz"));
+    assert_eq!(picked("windows", "arm64", &RELEASE_ASSETS), None);
     assert_eq!(picked("windows", "386", &RELEASE_ASSETS), None);
 }
 
@@ -130,10 +133,27 @@ fn each_platform_gets_its_updater_archive() {
 fn appimages_and_packages_get_their_own_asset() {
     let pick = |kind, arch| pick_asset(kind, "linux", arch, &assets(&RELEASE_ASSETS)).map(|ix| RELEASE_ASSETS[ix]);
     assert_eq!(pick(Kind::AppImage, "amd64"), Some("BarSQL-x86_64.AppImage"));
-    assert_eq!(pick(Kind::AppImage, "arm64"), None);
+    assert_eq!(pick(Kind::AppImage, "arm64"), Some("BarSQL-aarch64.AppImage"));
     assert_eq!(pick(Kind::Deb, "amd64"), Some("BarSQL.deb"));
     assert_eq!(pick(Kind::Rpm, "amd64"), Some("BarSQL.rpm"));
     assert_eq!(pick(Kind::Pacman, "amd64"), Some("BarSQL.pkg.tar.zst"));
+}
+
+// pick_asset takes the first match and GitHub promises no order, so no copy may match two assets. Every release
+// so far picks the same way, so this covers the copies already out there too.
+#[test]
+fn every_copy_matches_one_asset_at_most() {
+    for kind in [Kind::Archive, Kind::AppImage, Kind::Deb, Kind::Rpm, Kind::Pacman] {
+        for platform in ["darwin", "windows", "linux"] {
+            for arch in ["amd64", "arm64"] {
+                let matches: Vec<_> = RELEASE_ASSETS
+                    .into_iter()
+                    .filter(|name| pick_asset(kind, platform, arch, &assets(&[*name])).is_some())
+                    .collect();
+                assert!(matches.len() <= 1, "{kind:?} on {platform}/{arch} matches {matches:?}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -227,14 +247,14 @@ fn a_newer_release_comes_with_its_asset_and_digest() {
 
     assert_eq!(check(&base, "v1.6.0", Kind::Archive, "darwin", "arm64"), Ok(None), "up to date");
     assert_eq!(
-        check(&base, "1.5.3", Kind::Archive, "linux", "arm64"),
-        Err("github: release v1.6.0 has no asset for linux/arm64".into())
+        check(&base, "1.5.3", Kind::Archive, "linux", "riscv64"),
+        Err("github: release v1.6.0 has no asset for linux/riscv64".into())
     );
     let image = check(&base, "1.5.3", Kind::AppImage, "linux", "amd64").unwrap().unwrap();
     assert_eq!((image.asset.name.as_str(), image.digest), ("BarSQL-x86_64.AppImage", Some(vec![0xf0, 0x0d])));
     assert_eq!(
-        check(&base, "1.5.3", Kind::AppImage, "linux", "arm64"),
-        Err("github: release v1.6.0 has no AppImage for linux/arm64".into())
+        check(&base, "1.5.3", Kind::AppImage, "linux", "riscv64"),
+        Err("github: release v1.6.0 has no AppImage for linux/riscv64".into())
     );
 }
 

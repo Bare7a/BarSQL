@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the Linux release files in target/package/dist. Needs cargo-deb and cargo-generate-rpm, and LINUXDEPLOY
-# for the AppImage. release.yml builds the Arch package separately.
+# Builds the Linux release files for this machine's architecture in target/package/dist. Needs cargo-deb and
+# cargo-generate-rpm on x86-64, and LINUXDEPLOY for the AppImage. release.yml builds the Arch package separately.
 # Only the tarball has "linux" in its name, so portable copies never update from the other files.
 set -euo pipefail
 
@@ -22,11 +22,15 @@ mkdir -p "$out" "$dist"
 install -m 0755 "$root_dir/target/release/BarSQL" "$out/BarSQL"
 rm -f "$dist/BarSQL-linux-$arch.tar.gz" "$dist/BarSQL" "$dist"/BarSQL.{deb,rpm} "$dist/BarSQL-$appimage_arch.AppImage"
 tar -C "$out" -czf "$dist/BarSQL-linux-$arch.tar.gz" BarSQL
-cp "$out/BarSQL" "$dist/BarSQL"
 
 cd "$root_dir"
-cargo deb -p barsql --no-build --no-strip --output "$dist/BarSQL.deb"
-cargo generate-rpm -p crates/barsql --payload-compress xz --output "$dist/BarSQL.rpm"
+# These names leave out the architecture, and the updater picks a .deb or .rpm by its extension alone, so only
+# x86-64 makes them.
+if [ "$arch" = amd64 ]; then
+  cp "$out/BarSQL" "$dist/BarSQL"
+  cargo deb -p barsql --no-build --no-strip --output "$dist/BarSQL.deb"
+  cargo generate-rpm -p crates/barsql --payload-compress xz --output "$dist/BarSQL.rpm"
+fi
 
 if [ -n "${LINUXDEPLOY:-}" ]; then
   appdir="$out/BarSQL.AppDir"
