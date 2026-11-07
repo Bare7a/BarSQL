@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::imageops::{self, FilterType};
-use image::{DynamicImage, ExtendedColorType, Rgb, RgbImage};
+use image::{DynamicImage, ExtendedColorType, RgbImage};
 
 use crate::report;
 
@@ -15,8 +15,6 @@ use crate::report;
 const WIDTHS: [u32; 3] = [640, 800, 1280];
 // Link preview, cropped from the top of the first screenshot.
 const PREVIEW: (u32, u32) = (1200, 630);
-// The play button's radius, as a share of the poster's width.
-const PLAY: f32 = 0.045;
 
 // The app's PNGs in `shots` replace the kept screenshots, losslessly.
 pub fn keep(shots: &Path, root: &Path) -> Result<(), String> {
@@ -62,9 +60,6 @@ pub fn run(root: &Path) -> Result<(), String> {
                 .encode_image(&preview)
                 .map_err(|e| format!("{}: {e}", out.display()))?;
             report(&out);
-            let out = docs.join("demo.webp");
-            write_webp(&out, &poster(&shot))?;
-            report(&out);
         }
     }
     Ok(())
@@ -84,46 +79,6 @@ fn write_webp(path: &Path, image: &RgbImage) -> Result<(), String> {
     WebPEncoder::new_lossless(create(path)?)
         .encode(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgb8)
         .map_err(|e| format!("{}: {e}", path.display()))
-}
-
-// For the README's link to the demo video, which GitHub can't play from the repository.
-fn poster(shot: &DynamicImage) -> RgbImage {
-    let mut poster = shot.to_rgb8();
-    let (cx, cy) = (poster.width() as f32 / 2., poster.height() as f32 / 2.);
-    let radius = poster.width() as f32 * PLAY;
-    let rim = radius * 0.06;
-    // A little right of the middle, where it looks centred.
-    let arrow =
-        [(cx - radius * 0.22, cy - radius * 0.42), (cx + radius * 0.51, cy), (cx - radius * 0.22, cy + radius * 0.42)];
-    let span = |middle: f32| (middle - radius - 1.).max(0.) as u32..(middle + radius + 2.) as u32;
-    for y in span(cy) {
-        for x in span(cx) {
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            let off = (px - cx).hypot(py - cy);
-            let disc = (radius + 0.5 - off).clamp(0., 1.);
-            if disc == 0. {
-                continue;
-            }
-            let ring = (off - (radius - rim) + 0.5).clamp(0., 1.) * disc;
-            let white = ring.max(inside(arrow, px, py)) * 0.95;
-            let pixel = poster.get_pixel_mut(x, y);
-            *pixel = Rgb(pixel.0.map(|channel| {
-                let dark = f32::from(channel) * (1. - 0.6 * disc);
-                (dark + (255. - dark) * white).round() as u8
-            }));
-        }
-    }
-    poster
-}
-
-// How much of the pixel at (x, y) the triangle covers, its corners clockwise on screen.
-fn inside(corners: [(f32, f32); 3], x: f32, y: f32) -> f32 {
-    let edge = |(ax, ay): (f32, f32), (bx, by): (f32, f32)| {
-        ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay)
-    };
-    let [a, b, c] = corners;
-    let nearest = edge(a, b).min(edge(b, c)).min(edge(c, a));
-    (nearest + 0.5).clamp(0., 1.)
 }
 
 // Catmull-Rom, which the image crate widens by the scale, so every source pixel counts.

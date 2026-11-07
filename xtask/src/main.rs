@@ -30,8 +30,8 @@ demo-video The demo video, as a 1920 × 1080 MP4 in target/demo-video/BarSQL-dem
            frames with ffmpeg (FFMPEG swaps the binary). The stack stays up; BARSQL_E2E_MSSQL=1 cargo xtask e2e down
            stops it.
 docs-images
-           From the screenshots in docs/screenshots: 640, 800 and 1280px copies of each, a 1200 × 630 link
-           preview, and the README's poster for the demo video, docs/demo.webp.
+           From the screenshots in docs/screenshots: 640, 800 and 1280px copies of each and a 1200 × 630 link
+           preview.
 icons      Every icon file from packaging/icon.svg: the macOS .icns on Apple's grid, the Windows .ico and the Linux
            PNGs from the stack without its tile, the About dialog's and the landing page's copies, and the title
            bar's dark and light marks.

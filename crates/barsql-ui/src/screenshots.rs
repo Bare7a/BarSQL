@@ -51,12 +51,12 @@ pub fn record(_: WindowHandle<Root>, _: PathBuf, cx: &mut AsyncApp) {
 
 // The demo video's pointer, captions and cards, over everything else.
 #[cfg(feature = "snapshot")]
-pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
+pub fn overlay(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     video::overlay(window, cx)
 }
 
 #[cfg(not(feature = "snapshot"))]
-pub fn overlay(_: &Window, _: &App) -> Option<AnyElement> {
+pub fn overlay(_: &mut Window, _: &mut App) -> Option<AnyElement> {
     None
 }
 

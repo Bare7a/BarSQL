@@ -30,7 +30,7 @@ cargo xtask e2e          # the suites that need them
 cargo xtask e2e down
 cargo xtask screenshots  # the README's and landing page's screenshots, against the PostgreSQL above
 cargo xtask demo-video   # the demo video, against every engine above
-cargo xtask docs-images  # their smaller copies, link preview and video poster
+cargo xtask docs-images  # their smaller copies and link preview
 ```
 
 `cargo xtask` is this repository's task runner (the `xtask/` crate); run it alone to list its commands. `COMPOSE="podman compose"` makes it use Podman.
@@ -58,9 +58,9 @@ For a single screenshot, build with `cargo build -p barsql --features snapshot`,
 
 `cargo xtask demo-video` records the two-minute demo into `target/demo-video/BarSQL-demo.mp4` (1080p, 30 fps, H.264) and copies it to `docs/demo.mp4`, which the landing page plays. It needs [ffmpeg](https://ffmpeg.org) (`brew install ffmpeg`, `winget install ffmpeg`, or `FFMPEG` pointing at one) and starts PostgreSQL, MySQL, ClickHouse, libSQL and SQL Server from `docker-compose.yml`, which stay up afterwards. The forum database gets a `staging` schema to compare against and a trigger for the schema tree to show, both from `fixtures/demo-video/staging.sql`, and the other engines get a sample table each, created off camera.
 
-The tour itself is `crates/barsql-ui/src/screenshots/video.rs`, in the screenshots' hidden 1920 × 1080 point window at zoom 15, with a drawn pointer, typing at a human pace and captions taken from the landing page. It opens on the editor of a forum connection saved off camera, and adds the MySQL connection on camera before the six engines. The camera skips loads and crossfades over changes made off camera. Every frame is rendered offscreen; only the frames that changed are saved, as PNGs in `target/demo-video/frames` with an ffconcat list of how long each shows, which ffmpeg turns into the video. Change a caption or a step there and run it again; a run takes about 20 minutes, mostly recording.
+The tour itself is `crates/barsql-ui/src/screenshots/video.rs`, in the screenshots' hidden 1920 × 1080 point window at zoom 15, with a drawn pointer, typing at a human pace and a caption for each step. It opens on the editor of a forum connection saved off camera, and adds the MySQL connection on camera before the six engines. The camera skips loads and crossfades over changes made off camera. Every frame is rendered offscreen; only the frames that changed are saved, as PNGs in `target/demo-video/frames` with an ffconcat list of how long each shows, which ffmpeg turns into the video. Change a caption or a step there and run it again; a run takes about 20 minutes, mostly recording.
 
-The README's poster, `docs/demo.webp` from `cargo xtask docs-images`, links to the video on the landing page, so a new recording needs no README change. GitHub plays only its own uploads in a README; for a player there, drag `docs/demo.mp4` onto the poster's line in GitHub's editor after each recording.
+The README plays a GitHub upload of the video, as GitHub plays only its own uploads there. After a new recording, drag `docs/demo.mp4` into the README in GitHub's editor and replace the old upload's link with the new one.
 
 ## Translations
 

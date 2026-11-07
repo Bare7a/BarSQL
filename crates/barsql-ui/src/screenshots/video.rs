@@ -41,6 +41,8 @@ const POINTER_SIZE: f32 = 34.;
 const POINTER_TIP: (f32, f32) = (8. * POINTER_SIZE / 32., 4. * POINTER_SIZE / 32.);
 // Above dialogs and menus.
 const OVERLAY_PRIORITY: usize = 1 << 20;
+// A dialog's caret: over GPUI Kit's dialogs, which draw at 10 and up, and under its popups at 100.
+const DIALOG_MARKS_PRIORITY: usize = 99;
 // Each half of the drawn caret's blink.
 const BLINK: Duration = Duration::from_millis(530);
 const FADE_OUT: Duration = Duration::from_millis(150);
@@ -151,7 +153,8 @@ fn marks<M: InputModeKind>(input: &Entity<InputBaseState<M>>, window: &mut Windo
     Some(Marks { caret, selection: selection.unwrap_or_default() })
 }
 
-pub fn overlay(_: &Window, cx: &App) -> Option<AnyElement> {
+pub fn overlay(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+    let marks_priority = if window.has_active_dialog(cx) { DIALOG_MARKS_PRIORITY } else { 0 };
     let stage = cx.try_global::<Stage>()?;
     let blink_on = stage
         .caret_moved
@@ -187,12 +190,17 @@ pub fn overlay(_: &Window, cx: &App) -> Option<AnyElement> {
     let layer = div()
         .absolute()
         .inset_0()
-        .child(marks)
         .when(stage.end_card, |el| el.child(end_card(cx)))
         .children(leaving)
         .children(showing)
         .when_some(stage.ring, |el, (at, faded)| el.child(ring(at, faded, cx.theme().primary)));
-    Some(deferred(layer).with_priority(OVERLAY_PRIORITY).into_any_element())
+    // Where an input's own marks would be: over its dialog, and under the hover cards and popups drawn over it.
+    let overlay = div()
+        .absolute()
+        .inset_0()
+        .child(deferred(marks).with_priority(marks_priority))
+        .child(deferred(layer).with_priority(OVERLAY_PRIORITY));
+    Some(overlay.into_any_element())
 }
 
 // Laid out in prepaint, once this frame has placed `above`. Moves beside a dialog it would cover.
