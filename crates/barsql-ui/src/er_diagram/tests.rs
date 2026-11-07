@@ -132,8 +132,7 @@ fn the_toolbar_keeps_its_hint_behind_a_help_button(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("er-note").is_none(), "nothing to say while every table shows");
 }
 
-// As wide as the tab gets in the smallest window. Every button stays in the bar, and the field shares the rest with a
-// cut diagram's note.
+// As wide as the tab gets in the smallest window.
 #[gpui_kit::test]
 fn a_narrow_toolbar_keeps_its_buttons_and_room_to_search(cx: &mut TestAppContext) {
     let (view, _, cx) = diagram(cx, small());

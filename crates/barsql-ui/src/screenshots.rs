@@ -1,5 +1,4 @@
-// The screenshots for `cargo xtask screenshots`: plays the scenes against the forum database, saves each as
-// `<n>.png` and quits. The demo video in video.rs drives the window with the same robot.
+// The screenshots for `cargo xtask screenshots`: plays the scenes against the forum database, saves each as `<n>.png`.
 use std::path::PathBuf;
 
 use gpui_kit::component::Root;
@@ -49,7 +48,6 @@ pub fn record(_: WindowHandle<Root>, _: PathBuf, cx: &mut AsyncApp) {
     cx.update(|cx| cx.quit());
 }
 
-// The demo video's pointer, captions and cards, over everything else.
 #[cfg(feature = "snapshot")]
 pub fn overlay(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     video::overlay(window, cx)
@@ -318,13 +316,11 @@ ORDER BY 1;";
             Ok(cx.update(|cx| grid.read(cx).cell_point(row, col)))
         }
 
-        // Clicked, it selects the column.
         pub(super) fn header(&self, cx: &mut AsyncApp, col: usize) -> Res<Point<Pixels>> {
             let grid = self.grid(cx)?;
             Ok(cx.update(|cx| grid.read(cx).header_point(col)))
         }
 
-        // The row's number, which selects the row.
         pub(super) fn gutter(&self, cx: &mut AsyncApp, row: usize) -> Res<Point<Pixels>> {
             let grid = self.grid(cx)?;
             Ok(cx.update(|cx| grid.read(cx).gutter_point(row)))

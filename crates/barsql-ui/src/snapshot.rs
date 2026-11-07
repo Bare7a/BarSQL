@@ -20,7 +20,7 @@ pub fn schedule(window: AnyWindowHandle, path: PathBuf, run: bool, after: Option
                 modifiers: Modifiers::none(),
             };
             window.dispatch_event(PlatformInput::MouseMove(away), cx);
-            // Actions go to what the last drawn frame focused, and Windows draws a hidden window only when asked.
+            // Actions go to what the last drawn frame focused.
             draw(window, cx);
         });
         if run {

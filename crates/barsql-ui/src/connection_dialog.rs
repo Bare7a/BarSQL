@@ -671,7 +671,7 @@ enum Browse {
     KnownHosts,
 }
 
-// A selector for scenario tests and a scope for test lookups to find the input in.
+// A selector for scenario tests and a scope for test lookups.
 fn labelled(selector: &'static str, input: Input) -> Stateful<Div> {
     div().id(selector).debug_selector(move || selector.into()).child(input)
 }

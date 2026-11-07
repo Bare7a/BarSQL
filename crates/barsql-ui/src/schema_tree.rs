@@ -1811,7 +1811,6 @@ fn scenario_id(id: &str, connection: Option<&ConnectionConfig>) -> String {
 
 #[cfg(any(test, feature = "snapshot"))]
 impl SchemaTree {
-    // A spinner row is up while tables, columns or a group's objects load.
     #[cfg(feature = "snapshot")]
     pub(crate) fn loading(&self) -> bool {
         self.rows.iter().any(|row| matches!(row.kind, RowKind::Note { spinner: true, .. }))

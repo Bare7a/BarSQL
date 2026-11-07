@@ -277,7 +277,7 @@ fn an_edited_cell_persists_after_apply(cx: &mut TestAppContext) {
     assert_eq!(app.query("SELECT name FROM e2e_edit")[0][0], Value::Text("Updated".into()));
 }
 
-// Opens the JSON viewer on row 1. What it then shows comes from the returned reader, None for no row.
+// The returned reader gives what the viewer shows, None for no row.
 fn json_of_first_row(app: &mut Driver) -> impl FnMut(&mut Driver) -> Option<String> + use<> {
     app.dispatch(ToggleJsonPanel);
     click_cell(app, 0, 1);

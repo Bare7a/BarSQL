@@ -184,7 +184,7 @@ fn run_snapshot(envs: &[(&str, &Path)]) -> Result<(), String> {
     run_with(&cargo, &args, None, envs)
 }
 
-// Encodes at 1080p30 for the landing page, X and Product Hunt, from frames at the display's scale.
+// Encodes at 1080p30, from frames at the display's scale.
 fn demo_video() -> Result<(), String> {
     let ffmpeg = env::var("FFMPEG").unwrap_or_else(|_| "ffmpeg".into());
     if Command::new(&ffmpeg).arg("-version").output().is_err() {

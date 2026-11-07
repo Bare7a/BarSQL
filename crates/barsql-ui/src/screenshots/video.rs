@@ -1,5 +1,4 @@
-// The demo video for `cargo xtask demo-video`: tours the app offscreen and writes the frames that changed as PNGs,
-// with an ffconcat list of how long each shows, for the xtask to encode.
+// The demo video for `cargo xtask demo-video`: tours the app offscreen and saves the changed frames for ffmpeg.
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::{BufWriter, Write as _};
@@ -194,7 +193,6 @@ pub fn overlay(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         .children(leaving)
         .children(showing)
         .when_some(stage.ring, |el, (at, faded)| el.child(ring(at, faded, cx.theme().primary)));
-    // Where an input's own marks would be: over its dialog, and under the hover cards and popups drawn over it.
     let overlay = div()
         .absolute()
         .inset_0()
@@ -508,7 +506,6 @@ async fn chart(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
     cam.hold(cx, 2000).await
 }
 
-// Into the posts table, which the next scene edits.
 async fn search(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
     cam.caption(cx, Some("Jump to any table with Quick Search"));
     cam.hold(cx, 400).await?;
@@ -826,13 +823,12 @@ async fn add_shop(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
     })
     .await?;
     cam.hold(cx, 600).await?;
-    // Down to the MCP section, the dialog's last.
     cam.wheel_to_end(cx, "conn-mcp").await?;
     cam.caption(cx, Some("Let AI assistants query this database"));
     cam.hold(cx, 300).await?;
     cam.click_on(cx, "conn-mcp").await?;
     cam.hold(cx, 400).await?;
-    // Down to what the tick adds: changes as an opt-in of their own, and the setup to copy.
+    // Down to what the tick adds.
     cam.wheel_to_end(cx, "conn-mcp").await?;
     cam.hold(cx, 1800).await?;
     cam.caption(cx, None);
@@ -1042,7 +1038,6 @@ fn active_plan(workspace: &Entity<Workspace>, cx: &App) -> Option<Entity<PlanVie
     workspace.read(cx).query_tab()?.read(cx).results().read(cx).active_plan()
 }
 
-// A menu item's label in the app's language.
 fn label(cx: &mut AsyncApp, key: &str) -> SharedString {
     cx.update(|cx| t(cx, key))
 }
@@ -1051,7 +1046,6 @@ fn suggesting(workspace: &Entity<Workspace>, _: &mut Window, cx: &mut App) -> bo
     workspace.read(cx).query_tab().is_some_and(|tab| tab.read(cx).completion().read(cx).is_open(cx))
 }
 
-// The table tab's WHERE suggestions.
 fn filtering(workspace: &Entity<Workspace>, _: &mut Window, cx: &mut App) -> bool {
     workspace.read(cx).table_tab().is_some_and(|tab| tab.read(cx).completion().read(cx).is_open(cx))
 }
@@ -1141,7 +1135,6 @@ impl<'a> Camera<'a> {
                 cx.default_global::<Stage>().now = now;
                 window.refresh();
                 window.draw(cx).clear(cx);
-                // Windows sends a hidden window no frames, so its next-frame callbacks wait on these.
                 window.simulate_next_frame(cx);
                 let mut image = window.render_to_image().map_err(|error| error.to_string())?;
                 // Over GPUI's tooltips too, as a system pointer is.
@@ -1159,7 +1152,7 @@ impl<'a> Camera<'a> {
             .map_err(|error| error.to_string())?
     }
 
-    // Waits out loads unfilmed, cutting from a click to its result. Still draws, which some views wait on.
+    // Waits out loads unfilmed. Still draws, which some views wait on.
     async fn loaded(&self, cx: &mut AsyncApp) -> Res<()> {
         let deadline = Instant::now() + WAIT;
         while self.robot.act(cx, loading)? {
@@ -1286,8 +1279,7 @@ impl<'a> Camera<'a> {
         self.ring(cx, at).await
     }
 
-    // Down to the end of the scroll under the pointer, which `inside` moves with. The distance is measured off camera
-    // first, so the ease runs its whole course instead of stopping dead at the end.
+    // The distance is measured off camera by how far `inside` moves, so the ease runs its whole course.
     async fn wheel_to_end(&self, cx: &mut AsyncApp, inside: &'static str) -> Res<()> {
         let at = self.pointer.get().ok_or("no pointer to scroll under")?;
         let start = self.robot.bounds(cx, inside)?.top();
@@ -1336,7 +1328,6 @@ impl<'a> Camera<'a> {
         Ok(())
     }
 
-    // Keys and clicks move the caret, which restarts its blink.
     fn caret_moved(&self, cx: &mut AsyncApp) {
         let now = self.recorder.borrow().elapsed;
         self.stage(cx, |stage| stage.caret_moved = Some(now));
@@ -1434,7 +1425,6 @@ impl<'a> Camera<'a> {
 struct Recorder {
     dir: PathBuf,
     shown: Vec<Duration>,
-    // The video's length so far.
     elapsed: Duration,
     last: Option<Arc<RgbaImage>>,
     jobs: Option<SyncSender<(PathBuf, Arc<RgbaImage>)>>,
@@ -1484,8 +1474,7 @@ impl Recorder {
         Ok(())
     }
 
-    // ffmpeg reads PNGs at 25 fps unless told, dropping one 33 ms frame in six. The last entry plays as long as the
-    // one before it, so the last frame goes in twice at half its time.
+    // ffmpeg reads PNGs at 25 fps unless told, and plays the last entry as long as the one before it.
     fn finish(mut self) -> Res<Duration> {
         self.stop()?;
         let file = |n: usize| format!("file {}\noption framerate 1000000\n", frame_name(n));

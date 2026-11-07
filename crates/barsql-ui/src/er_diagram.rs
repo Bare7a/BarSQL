@@ -300,9 +300,6 @@ impl ErDiagram {
         cx.notify();
     }
 
-    // Laid out like the Table tab's filter row, every control as tall as the field. The hit count sits inside the
-    // field, so typing moves nothing. Only a cut diagram has something to say along the toolbar; how to get around
-    // waits behind the "?".
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let ready = matches!(self.state, State::Ready(_));
@@ -314,12 +311,14 @@ impl ErDiagram {
                 Some(t_with(cx, "erDiagram.matches", &[("index", &index), ("count", &count)]))
             }
         };
+        // Only a cut diagram has something to say along the toolbar. How to get around waits behind the "?".
         let note = (self.total > MAX_TABLES).then(|| {
             let (shown, total) = (MAX_TABLES.to_string(), self.total.to_string());
             t_with(cx, "erDiagram.truncated", &[("shown", &shown), ("total", &total)])
         });
         let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
         let hint = t_with(cx, "erDiagram.hint", &[("modifier", modifier)]);
+        // The hit count sits inside the field, so typing moves nothing.
         let search = form::filter_input(&self.search, window, cx).when_some(found, |input, found| {
             input.suffix(
                 div()
@@ -381,8 +380,7 @@ impl ErDiagram {
             )
     }
 
-    // Out, the zoom (back to 100%) and in, joined as Explain and its menu are. The zoom keeps one width, so nothing
-    // shifts as it changes.
+    // Joined as Explain and its menu are. The zoom keeps one width, so nothing shifts as it changes.
     fn zoom_buttons(&self, ready: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let percent = format!("{}%", (self.zoom * 100.).round());
         h_flex()

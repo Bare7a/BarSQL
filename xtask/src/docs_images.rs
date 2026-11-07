@@ -1,5 +1,4 @@
-// The README's and landing page's images, from the screenshots kept in docs/screenshots. The icons command writes
-// the app icon's copies.
+// The README's and landing page's images, from docs/screenshots. The icons command writes the app icon's copies.
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};

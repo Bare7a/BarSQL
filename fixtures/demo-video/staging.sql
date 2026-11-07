@@ -1,5 +1,4 @@
--- The demo video compares public with this: the same forum a release behind, with no reactions table yet, fewer
--- user columns and a shorter post title.
+-- The demo video compares public with this: the same forum a release behind.
 CREATE SCHEMA staging;
 CREATE TABLE staging.categories (LIKE public.categories INCLUDING ALL);
 CREATE TABLE staging.users (LIKE public.users INCLUDING ALL);
