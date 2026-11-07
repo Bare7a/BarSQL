@@ -187,7 +187,7 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn reload_connections(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn reload_connections(&mut self, cx: &mut Context<Self>) {
         let bar = state::bar(cx);
         self.connections = bar.list_connections();
         self.folders = bar.list_folders();

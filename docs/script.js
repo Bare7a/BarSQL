@@ -79,7 +79,28 @@ async function pointDownloadAtVisitor() {
   }
 }
 
+// The hero's screenshot swaps in the demo video on click, so none of it loads before.
+function setUpDemo() {
+  const button = document.getElementById("demo");
+  if (!button) return;
+  button.addEventListener("click", () => {
+    const video = document.createElement("video");
+    video.className = "demo-video";
+    video.src = button.dataset.video;
+    video.poster = button.querySelector("img").currentSrc;
+    video.width = 1920;
+    video.height = 1080;
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute("aria-label", "BarSQL demo video");
+    button.replaceWith(video);
+    video.focus();
+  });
+}
+
 // Lightbox with every screenshot on the page, full size and in order. Arrow keys, swipes and the buttons move between them.
+// The hero's screenshot too, though its click plays the demo.
 function setUpLightbox() {
   const box = document.getElementById("lightbox");
   if (!box) return;
@@ -90,7 +111,7 @@ function setUpLightbox() {
   const prevButton = box.querySelector(".lightbox-prev");
   const nextButton = box.querySelector(".lightbox-next");
   const focusable = [closeButton, prevButton, nextButton];
-  const shots = [...document.querySelectorAll(".shot[data-shot]")];
+  const shots = [...document.querySelectorAll("[data-shot]")];
 
   const seen = new Set();
   const items = shots
@@ -128,7 +149,7 @@ function setUpLightbox() {
     opener?.focus();
   };
 
-  for (const shot of shots) {
+  for (const shot of document.querySelectorAll(".shot[data-shot]")) {
     shot.addEventListener("click", () => open(shot.dataset.shot, shot));
   }
 
@@ -169,4 +190,5 @@ function setUpLightbox() {
 
 setUpTheme();
 pointDownloadAtVisitor();
+setUpDemo();
 setUpLightbox();

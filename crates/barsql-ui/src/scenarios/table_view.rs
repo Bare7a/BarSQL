@@ -2,6 +2,7 @@ use barsql_core::Value;
 use gpui_kit::{Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, point, px};
 
 use super::driver::{Driver, open, selector};
+use crate::actions::ToggleJsonPanel;
 use crate::cell_viewer::{CellViewer, Opened};
 use crate::export_dialog::Opened as ExportOpened;
 use crate::grid::Grid;
@@ -274,6 +275,45 @@ fn an_edited_cell_persists_after_apply(cx: &mut TestAppContext) {
     apply_and_refresh(&mut app);
     assert_eq!(cell(&mut app, 0, 1).as_deref(), Some("Updated"));
     assert_eq!(app.query("SELECT name FROM e2e_edit")[0][0], Value::Text("Updated".into()));
+}
+
+// Opens the JSON viewer on row 1. What it then shows comes from the returned reader, None for no row.
+fn json_of_first_row(app: &mut Driver) -> impl FnMut(&mut Driver) -> Option<String> + use<> {
+    app.dispatch(ToggleJsonPanel);
+    click_cell(app, 0, 1);
+    let panel = app.cx.update(|_, cx| app.workspace.read(cx).json_panel()).expect("the JSON viewer is open");
+    move |app| app.cx.update(|_, cx| panel.read(cx).text().map(str::to_string))
+}
+
+// Apply reloads the page with the focus still on the edited row.
+#[gpui_kit::test]
+fn the_json_viewer_shows_an_applied_edit(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, &format!("CREATE TABLE e2e_jsonapply {PEOPLE}; INSERT INTO e2e_jsonapply VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_jsonapply");
+    let mut json = json_of_first_row(&mut app);
+    assert!(json(&mut app).is_some_and(|shown| shown.contains("Alice")));
+    edit_cell(&mut app, 0, 1, "Updated");
+    app.click("table-apply");
+    wait(&mut app);
+    let shown = json(&mut app).unwrap_or_default();
+    assert!(shown.contains("Updated") && !shown.contains("Alice"), "{shown}");
+}
+
+#[gpui_kit::test]
+fn the_json_viewer_empties_once_apply_deletes_the_last_row(cx: &mut TestAppContext) {
+    let mut app =
+        prepared(cx, &format!("CREATE TABLE e2e_jsondel {PEOPLE}; INSERT INTO e2e_jsondel VALUES (1, 'Alice')"));
+    browse(&mut app, "e2e_jsondel");
+    let mut json = json_of_first_row(&mut app);
+    assert!(json(&mut app).is_some());
+    let grid = grid(&mut app);
+    let at = app.grid_point(&grid, |grid| grid.gutter_point(0));
+    app.double_click_at(at);
+    assert_eq!(pending(&mut app), (0, 1));
+    app.click("table-apply");
+    wait(&mut app);
+    assert_eq!((rows(&mut app), json(&mut app)), (0, None));
 }
 
 #[gpui_kit::test]

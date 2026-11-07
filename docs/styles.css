@@ -349,6 +349,49 @@ p, li, figcaption, dd { text-wrap: pretty; }
   overflow: hidden;
 }
 
+/* The hero screenshot, which plays the demo video when clicked */
+
+.demo {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.demo img,
+.demo-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-2);
+}
+
+.demo-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px 14px 20px;
+  border-radius: 999px;
+  background: rgba(8, 10, 14, 0.82);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.demo-play .icon { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+.demo:hover .demo-play,
+.demo:focus-visible .demo-play { background: var(--accent); transform: translate(-50%, -50%) scale(1.04); }
+
 /* Screenshot buttons */
 
 .shot {
@@ -726,7 +769,7 @@ kbd {
 
 .lightbox img {
   width: auto;
-  max-width: min(92vw, 2048px);
+  max-width: 92vw;
   max-height: calc(100vh - 150px);
   border-radius: 10px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
@@ -788,6 +831,7 @@ kbd {
   .engines { display: grid; grid-template-columns: repeat(2, auto); justify-content: start; }
   .hero-actions .btn { flex: 1 1 auto; }
   .hero-shot { margin-top: 48px; }
+  .demo-play { gap: 8px; padding: 10px 16px 10px 14px; font-size: 0.92rem; }
   .pillars, .features, .engine-grid { grid-template-columns: minmax(0, 1fr); }
   .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; }
   .pillars { margin-top: 56px; }

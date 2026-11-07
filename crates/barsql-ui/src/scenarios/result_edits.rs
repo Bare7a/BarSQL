@@ -4,7 +4,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::{Entity, Modifiers, TestAppContext};
 
 use super::driver::{Driver, open};
-use crate::actions::CloseTab;
+use crate::actions::{CloseTab, ToggleJsonPanel};
 use crate::grid::Grid;
 use crate::query_tab::TxnState;
 
@@ -67,6 +67,21 @@ fn an_edited_query_result_saves_to_its_table(cx: &mut TestAppContext) {
     assert_eq!(app.cell(0, 1).as_deref(), Some("Alicia"), "the grid keeps what was written");
     assert_eq!(app.cell(0, 2).as_deref(), Some("ALICE"), "until the query runs again");
     assert_eq!(app.query("SELECT name FROM e2e_qe WHERE id = 1")[0][0], Value::Text("Alicia".into()));
+}
+
+// Apply swaps in the saved rows without moving the focus.
+#[gpui_kit::test]
+fn the_json_viewer_shows_an_applied_result_edit(cx: &mut TestAppContext) {
+    let mut app = editable(cx, "SELECT * FROM e2e_qe ORDER BY id");
+    app.dispatch(ToggleJsonPanel);
+    click_cell(&mut app, 0, 1);
+    let panel = app.cx.update(|_, cx| app.workspace.read(cx).json_panel()).expect("the JSON viewer is open");
+    let json = |app: &mut Driver| app.cx.update(|_, cx| panel.read(cx).text().unwrap_or_default().to_string());
+    assert!(json(&mut app).contains("Alice"));
+    edit_cell(&mut app, 0, 1, "Alicia");
+    apply(&mut app);
+    let shown = json(&mut app);
+    assert!(shown.contains("Alicia") && !shown.contains("Alice\""), "{shown}");
 }
 
 #[gpui_kit::test]

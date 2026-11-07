@@ -9,7 +9,7 @@ use gpui_kit::{
     TestAppContext, TouchPhase, VisualTestContext, point, px, size,
 };
 
-use super::{ErDiagram, zoom};
+use super::{ErDiagram, MAX_TABLES, zoom};
 use crate::test_support::Env;
 
 type Tables = Vec<(String, Vec<ColumnInfo>)>;
@@ -130,6 +130,21 @@ fn the_toolbar_keeps_its_hint_behind_a_help_button(cx: &mut TestAppContext) {
     let (_, _, cx) = diagram(cx, small());
     bounds(cx, "er-help");
     assert!(cx.debug_bounds("er-note").is_none(), "nothing to say while every table shows");
+}
+
+// As wide as the tab gets in the smallest window. Every button stays in the bar, and the field shares the rest with a
+// cut diagram's note.
+#[gpui_kit::test]
+fn a_narrow_toolbar_keeps_its_buttons_and_room_to_search(cx: &mut TestAppContext) {
+    let (view, _, cx) = diagram(cx, small());
+    view.update(cx, |view, _| view.set_tables(MAX_TABLES + 140, small()));
+    cx.simulate_resize(size(px(500.), px(600.)));
+    let bar = bounds(cx, "er-toolbar");
+    for button in ["er-keys-only", "er-zoom-out", "er-zoom-reset", "er-zoom-in", "er-fit", "er-help"] {
+        assert!(bounds(cx, button).right() <= bar.right(), "{button} sticks out of {bar:?}");
+    }
+    let (search, note) = (bounds(cx, "er-search"), bounds(cx, "er-note"));
+    assert!(search.size.width >= px(65.) && note.size.width > px(0.), "{search:?} beside {note:?}");
 }
 
 // It opens fitted, unless that would be too small to read. Fit then shows it all.

@@ -437,12 +437,10 @@
     "search": "Find a table",
     "matches": "{{index}} of {{count}}",
     "noMatches": "No table matches",
-    "keysOnly": "Keys only",
     "keysOnlyTooltip": "Show only the key columns",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "zoomReset": "Back to 100%",
-    "fit": "Fit",
     "fitTooltip": "Show the whole diagram",
     "open": "Open table"
   },

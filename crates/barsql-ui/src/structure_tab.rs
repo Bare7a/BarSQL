@@ -259,7 +259,7 @@ impl StructureTab {
         self.count(section)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "snapshot"))]
     pub fn grid(&self) -> Entity<Grid> {
         self.sheet(self.section).grid.clone()
     }

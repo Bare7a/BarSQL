@@ -116,7 +116,7 @@ fn copy_button(grid: &Entity<Grid>, cx: &mut App) -> AnyElement {
                 .rounded_br(px(0.))
                 .on_click(move |_, window, cx| copy.update(cx, |grid, cx| grid.copy(false, window, cx))),
         )
-        .child(crate::screenshots::probe(
+        .child(
             Button::new("copy-format")
                 .debug_selector(|| "copy-format".into())
                 .tool_icon(Icon::new(IconName::ChevronDown), ICON_XS)
@@ -138,8 +138,7 @@ fn copy_button(grid: &Entity<Grid>, cx: &mut App) -> AnyElement {
                     }
                     menu
                 }),
-            "copy-format",
-        ))
+        )
         .into_any_element()
 }
 

@@ -447,12 +447,10 @@
     "search": "Buscar una tabla",
     "matches": "{{index}} de {{count}}",
     "noMatches": "Ninguna tabla coincide",
-    "keysOnly": "Solo claves",
     "keysOnlyTooltip": "Mostrar solo las columnas clave",
     "zoomIn": "Acercar",
     "zoomOut": "Alejar",
     "zoomReset": "Volver al 100 %",
-    "fit": "Ajustar",
     "fitTooltip": "Mostrar todo el diagrama",
     "open": "Abrir la tabla"
   },

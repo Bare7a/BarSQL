@@ -28,8 +28,9 @@ cargo xtask lint         # rustfmt and clippy, as CI runs them
 cargo xtask e2e up       # PostgreSQL, MySQL, MariaDB, ClickHouse and libSQL from docker-compose.yml
 cargo xtask e2e          # the suites that need them
 cargo xtask e2e down
-cargo xtask screenshots  # the README screenshots, against the PostgreSQL above
-cargo xtask docs-images  # the landing page's images, from those screenshots
+cargo xtask screenshots  # the README's and landing page's screenshots, against the PostgreSQL above
+cargo xtask demo-video   # the demo video, against every engine above
+cargo xtask docs-images  # their smaller copies, link preview and video poster
 ```
 
 `cargo xtask` is this repository's task runner (the `xtask/` crate); run it alone to list its commands. `COMPOSE="podman compose"` makes it use Podman.
@@ -43,15 +44,23 @@ CI (`.github/workflows/test.yml`) runs the Linux checks and the E2E suites, SQL 
 
 ## Screenshots
 
-`cargo xtask screenshots` takes the README's screenshots again, at 2048 × 1152 points (4096 × 2304 pixels on a Retina display). It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in `crates/barsql-ui/src/screenshots.rs` in a snapshot build. A BarSQL window stays open while they run. It finishes with `cargo xtask docs-images`, which writes each screenshot into `docs/screenshots` as a full-size lossless WebP plus 640, 800 and 1280px copies, which the landing page picks from to fit the screen.
+`cargo xtask screenshots` takes the screenshots again. It restores `fixtures/screenshots/forum.sql` into the PostgreSQL from `docker-compose.yml`, starts from the connections, tabs and settings in `fixtures/screenshots/data`, and plays the scenes in `crates/barsql-ui/src/screenshots.rs` in a snapshot build. The window is 1920 × 1080 points and stays hidden: each shot renders offscreen at the display's scale and is scaled to 1920 × 1080 pixels, so a Retina Mac and a 125% Windows display give the same size. Windows still needs a display at least that many points across, since it keeps even a hidden window within it. Each is kept as a lossless WebP in `docs/screenshots`, which the README and the landing page share. It finishes with `cargo xtask docs-images`, which makes the 640, 800 and 1280px copies, the link preview and the README's video poster.
 
-For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png` at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE` sets the window's size in points (`2048x1152`), `BARSQL_SNAPSHOT_RUN=1` runs the active tab first, and `BARSQL_SNAPSHOT_PANEL` chooses what the screenshot shows:
+For a single screenshot, build with `cargo build -p barsql --features snapshot`, then point `BARSQL_SNAPSHOT=out.png` at a data folder in `BARSQL_DATA_DIR`. The app draws its window headless, saves it and quits. `BARSQL_SNAPSHOT_SIZE` sets the window's size in points (`1920x1080`), `BARSQL_SNAPSHOT_RUN=1` runs the active tab first, and `BARSQL_SNAPSHOT_PANEL` chooses what the screenshot shows:
 
 - the sidebar panels: `saved`, `recent`, `connections`
 - the grid: `cell`, `export`, `json`
 - dialogs: `connection-dialog`, `import`, `about`, `shortcuts`, `tips`
 - the update dialog: `update`, `update-current`, `update-downloading`, `update-ready`, `update-failed`
 - other screens: `plan`, `quick`, `quick=<query>`, `suggest=<text>`, `toasts`, `palette` (the command palette), `chart` (the first result as a chart, with `BARSQL_SNAPSHOT_RUN=1`), `er` (the `main` schema's ER diagram), `structure` (a table's Structure tab: the first in `main`, or `structure=<table>`)
+
+## Demo video
+
+`cargo xtask demo-video` records the two-minute demo into `target/demo-video/BarSQL-demo.mp4` (1080p, 30 fps, H.264) and copies it to `docs/demo.mp4`, which the landing page plays. It needs [ffmpeg](https://ffmpeg.org) (`brew install ffmpeg`, `winget install ffmpeg`, or `FFMPEG` pointing at one) and starts PostgreSQL, MySQL, ClickHouse, libSQL and SQL Server from `docker-compose.yml`, which stay up afterwards. The forum database gets a `staging` schema to compare against and a trigger for the schema tree to show, both from `fixtures/demo-video/staging.sql`, and the other engines get a sample table each, created off camera.
+
+The tour itself is `crates/barsql-ui/src/screenshots/video.rs`, in the screenshots' hidden 1920 × 1080 point window at zoom 15, with a drawn pointer, typing at a human pace and captions taken from the landing page. It opens on the editor of a forum connection saved off camera, and adds the MySQL connection on camera before the six engines. The camera skips loads and crossfades over changes made off camera. Every frame is rendered offscreen; only the frames that changed are saved, as PNGs in `target/demo-video/frames` with an ffconcat list of how long each shows, which ffmpeg turns into the video. Change a caption or a step there and run it again; a run takes about 20 minutes, mostly recording.
+
+The README's poster, `docs/demo.webp` from `cargo xtask docs-images`, links to the video on the landing page, so a new recording needs no README change. GitHub plays only its own uploads in a README; for a player there, drag `docs/demo.mp4` onto the poster's line in GitHub's editor after each recording.
 
 ## Translations
 
@@ -85,7 +94,7 @@ python3 -m http.server 8765 --directory docs   # then open http://localhost:8765
 ## Project Structure
 
 ```text
-├── .github/               # test and release workflows, PR and issue templates, the README screenshots
+├── .github/               # test and release workflows, PR and issue templates
 ├── Cargo.toml             # the workspace; GPUI Kit pinned to an exact version
 ├── rust-toolchain.toml    # the Rust version rustup installs
 ├── docker-compose.yml     # PostgreSQL / MySQL / MariaDB / ClickHouse / libSQL / SQL Server for the E2E suites
@@ -99,7 +108,7 @@ python3 -m http.server 8765 --directory docs   # then open http://localhost:8765
 │   ├── barsql-storage/    # the JSON files in BarSQL-data
 │   └── barsql-ui/         # the GPUI views, locales and whole-window scenarios
 ├── xtask/                 # cargo xtask: lint, e2e, screenshots, docs-images, icons, package, bump-version
-├── docs/                  # the landing page at barsql.bare7a.eu (GitHub Pages)
+├── docs/                  # the landing page at barsql.bare7a.eu (GitHub Pages) and the README's images
 ├── guide/                 # the user guide, one page per area
 ├── fixtures/
 │   ├── golden/            # per-engine expectations for the E2E suites

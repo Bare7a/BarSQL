@@ -18,11 +18,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use self::layout::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, arrange, find};
-use crate::form::{self, ToolButton};
+use crate::form;
 use crate::i18n::{I18n, t, t_with};
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
-use crate::tokens::{ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
+use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
 
 // Tables a diagram loads.
 pub const MAX_TABLES: usize = 200;
@@ -300,6 +300,9 @@ impl ErDiagram {
         cx.notify();
     }
 
+    // Laid out like the Table tab's filter row, every control as tall as the field. The hit count sits inside the
+    // field, so typing moves nothing. Only a cut diagram has something to say along the toolbar; how to get around
+    // waits behind the "?".
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let ready = matches!(self.state, State::Ready(_));
@@ -311,66 +314,83 @@ impl ErDiagram {
                 Some(t_with(cx, "erDiagram.matches", &[("index", &index), ("count", &count)]))
             }
         };
-        let percent = format!("{}%", (self.zoom * 100.).round());
-        // Only a cut diagram has something to say along the toolbar. How to get around waits behind the "?".
         let note = (self.total > MAX_TABLES).then(|| {
             let (shown, total) = (MAX_TABLES.to_string(), self.total.to_string());
             t_with(cx, "erDiagram.truncated", &[("shown", &shown), ("total", &total)])
         });
         let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
         let hint = t_with(cx, "erDiagram.hint", &[("modifier", modifier)]);
+        let search = form::filter_input(&self.search, window, cx).when_some(found, |input, found| {
+            input.suffix(
+                div()
+                    .debug_selector(|| "er-matches".into())
+                    .text_size(TEXT_XS)
+                    .text_color(theme.muted_foreground)
+                    .child(found),
+            )
+        });
         h_flex()
             .debug_selector(|| "er-toolbar".into())
             .flex_none()
             .h(rems(3.077))
-            .gap(rems(0.462))
+            .gap(rems(0.615))
             .px(rems(0.769))
             .bg(theme.sidebar)
             .border_b_1()
             .border_color(theme.border)
-            .child(div().flex_none().w(rems(15.385)).debug_selector(|| "er-search".into()).child(form::filter_input(
-                &self.search,
-                window,
-                cx,
-            )))
-            .children(found.map(|text| {
+            .child(Icon::new(IconName::Search).size(ICON_SM).text_color(theme.muted_foreground))
+            // Fills the bar, and shrinks alongside the note when the bar runs short.
+            .child(
                 div()
-                    .flex_none()
-                    .text_size(TEXT_XS)
-                    .text_color(theme.muted_foreground)
-                    .debug_selector(|| "er-matches".into())
-                    .child(text)
-            }))
-            .child(div().flex_1().min_w_0().children(note.map(|note| {
+                    .flex_grow_1()
+                    .flex_basis(rems(15.385))
+                    .min_w_0()
+                    .debug_selector(|| "er-search".into())
+                    .child(search),
+            )
+            .children(note.map(|note| {
                 div()
                     .debug_selector(|| "er-note".into())
+                    .min_w_0()
                     .truncate()
-                    .text_right()
                     .text_size(TEXT_XS)
                     .text_color(theme.muted_foreground)
                     .child(note)
-            })))
+            }))
             .child(
-                Button::new("er-help")
-                    .debug_selector(|| "er-help".into())
-                    .ghost()
-                    .tool_icon(Icon::new(Lucide::CircleQuestionMark), ICON_XS)
-                    .tooltip(hint),
-            )
-            .child(
-                Button::new("er-keys-only")
+                form::filter_button("er-keys-only", Icon::new(Lucide::KeyRound))
                     .debug_selector(|| "er-keys-only".into())
-                    .tool(Icon::new(Lucide::KeyRound), ICON_XS, t(cx, "erDiagram.keysOnly"))
                     .selected(self.keys_only)
                     .disabled(!ready)
                     .tooltip(t(cx, "erDiagram.keysOnlyTooltip"))
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_keys(window, cx))),
             )
-            .child(div().flex_none().w(px(1.)).h(rems(1.231)).mx(rems(0.154)).bg(theme.border))
+            .child(self.zoom_buttons(ready, cx))
             .child(
-                Button::new("er-zoom-out")
+                form::filter_button("er-fit", Icon::new(Lucide::Scan))
+                    .debug_selector(|| "er-fit".into())
+                    .disabled(!ready)
+                    .tooltip(t(cx, "erDiagram.fitTooltip"))
+                    .on_click(cx.listener(|this, _, window, cx| this.fit(window, cx))),
+            )
+            .child(
+                form::filter_button("er-help", Icon::new(Lucide::CircleQuestionMark))
+                    .debug_selector(|| "er-help".into())
+                    .ghost()
+                    .tooltip(hint),
+            )
+    }
+
+    // Out, the zoom (back to 100%) and in, joined as Explain and its menu are. The zoom keeps one width, so nothing
+    // shifts as it changes.
+    fn zoom_buttons(&self, ready: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let percent = format!("{}%", (self.zoom * 100.).round());
+        h_flex()
+            .child(
+                form::filter_button("er-zoom-out", Icon::new(IconName::Minus))
                     .debug_selector(|| "er-zoom-out".into())
-                    .tool_icon(Icon::new(IconName::Minus), ICON_XS)
+                    .rounded_tr(px(0.))
+                    .rounded_br(px(0.))
                     .disabled(!ready || self.zoom <= zoom::MIN)
                     .tooltip(t(cx, "erDiagram.zoomOut"))
                     .on_click(
@@ -380,28 +400,28 @@ impl ErDiagram {
             .child(
                 Button::new("er-zoom-reset")
                     .debug_selector(|| "er-zoom-reset".into())
-                    .tool_label(percent)
+                    .small()
+                    .h(rems(2.308))
+                    .w(rems(3.692))
+                    .p_0()
+                    .rounded(px(0.))
+                    .border_l_0()
+                    .child(div().text_size(TEXT_XS).child(percent))
                     .disabled(!ready)
                     .tooltip(t(cx, "erDiagram.zoomReset"))
                     .on_click(cx.listener(|this, _, window, cx| this.zoom_to(1., None, window, cx))),
             )
             .child(
-                Button::new("er-zoom-in")
+                form::filter_button("er-zoom-in", Icon::new(IconName::Plus))
                     .debug_selector(|| "er-zoom-in".into())
-                    .tool_icon(Icon::new(IconName::Plus), ICON_XS)
+                    .rounded_tl(px(0.))
+                    .rounded_bl(px(0.))
+                    .border_l_0()
                     .disabled(!ready || self.zoom >= zoom::MAX)
                     .tooltip(t(cx, "erDiagram.zoomIn"))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.zoom_to(zoom::step(this.zoom, true), None, window, cx)),
                     ),
-            )
-            .child(
-                Button::new("er-fit")
-                    .debug_selector(|| "er-fit".into())
-                    .tool(Icon::new(Lucide::Scan), ICON_XS, t(cx, "erDiagram.fit"))
-                    .disabled(!ready)
-                    .tooltip(t(cx, "erDiagram.fitTooltip"))
-                    .on_click(cx.listener(|this, _, window, cx| this.fit(window, cx))),
             )
     }
 
@@ -554,6 +574,7 @@ impl ErDiagram {
             }))
             .child(header)
             .children(rows)
+            .test_support()
             .into_any_element()
     }
 }
@@ -641,6 +662,14 @@ impl ErDiagram {
         if let State::Ready(tables) = &self.state {
             self.selected = tables.iter().position(|table| table.name == name);
             cx.notify();
+        }
+    }
+
+    // Its box registers as `("er-table", ix)`.
+    pub(crate) fn table_index(&self, name: &str) -> Option<usize> {
+        match &self.state {
+            State::Ready(tables) => tables.iter().position(|table| table.name == name),
+            _ => None,
         }
     }
 

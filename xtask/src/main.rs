@@ -9,6 +9,7 @@ const USAGE: &str = "\
 usage: cargo xtask lint
        cargo xtask e2e [up | down | logs | all]
        cargo xtask screenshots
+       cargo xtask demo-video
        cargo xtask docs-images
        cargo xtask icons
        cargo xtask package
@@ -20,12 +21,17 @@ e2e        The PostgreSQL, MySQL, MariaDB, libSQL and ClickHouse suites, against
            down and logs manage the stack (COMPOSE=\"podman compose\" swaps the tool); all brings it up, runs the
            suites and tears it down. BARSQL_E2E_MSSQL=1 adds SQL Server, as Azure SQL Edge on arm64.
 screenshots
-           The README screenshots, in .github/screenshots. Restores fixtures/screenshots/forum.sql into the
-           stack's PostgreSQL, then plays the scenes in a snapshot build on a copy of
-           fixtures/screenshots/data, and makes the landing page's images from them (docs-images).
+           The README's and landing page's screenshots, as 1920 × 1080 lossless WebPs in docs/screenshots.
+           Restores fixtures/screenshots/forum.sql into the stack's PostgreSQL, plays the scenes in a hidden window
+           of a snapshot build on a copy of fixtures/screenshots/data, and runs docs-images.
+demo-video The demo video, as a 1920 × 1080 MP4 in target/demo-video/BarSQL-demo.mp4. Starts the stack's PostgreSQL,
+           MySQL, ClickHouse, libSQL and SQL Server, restores the forum database with fixtures/demo-video/staging.sql,
+           tours the app in a hidden window of a snapshot build on a copy of fixtures/demo-video/data, and encodes the
+           frames with ffmpeg (FFMPEG swaps the binary). The stack stays up; BARSQL_E2E_MSSQL=1 cargo xtask e2e down
+           stops it.
 docs-images
-           The landing page's images in docs/: each README screenshot as a full-size lossless WebP plus 640, 800
-           and 1280px copies, and a 1200 × 630 link preview.
+           From the screenshots in docs/screenshots: 640, 800 and 1280px copies of each, a 1200 × 630 link
+           preview, and the README's poster for the demo video, docs/demo.webp.
 icons      Every icon file from packaging/icon.svg: the macOS .icns on Apple's grid, the Windows .ico and the Linux
            PNGs from the stack without its tile, the About dialog's and the landing page's copies, and the title
            bar's dark and light marks.
@@ -40,6 +46,11 @@ crate, and the package scripts read it from there.
   <version>   an explicit version, e.g. 1.6.0";
 
 const LINT_FEATURES: &str = "barsql-db/e2e,barsql-app/e2e,barsql-ui/e2e,barsql/snapshot";
+// The screenshots' and the demo video's window, in points. Both come out at 1920 × 1080 pixels.
+const SNAPSHOT_SIZE: &str = "1920x1080";
+// Optimized in snapshot runs only, whose GPU readback and PNG encoding go pixel by pixel: 50 ms a frame, not 450.
+const SNAPSHOT_OPTIMIZED: [&str; 7] =
+    ["gpui-pre-apple", "gpui-pre-windows", "image", "png", "fdeflate", "crc32fast", "simd-adler32"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -47,6 +58,7 @@ fn main() -> ExitCode {
         Some("lint") => lint(),
         Some("e2e") => e2e(args.get(1).map(String::as_str)),
         Some("screenshots") => screenshots(),
+        Some("demo-video") => demo_video(),
         Some("docs-images") => docs_images::run(&workspace()),
         Some("icons") => icons::run(&workspace()),
         Some("package") => package(),
@@ -114,22 +126,26 @@ fn e2e_suites() -> Result<(), String> {
 }
 
 fn compose(args: &[&str]) -> Result<(), String> {
-    compose_with(args, None)
+    compose_with(args, None, &mssql_env())
 }
 
-fn compose_with(args: &[&str], stdin: Option<&Path>) -> Result<(), String> {
+fn compose_with(args: &[&str], stdin: Option<&Path>, envs: &[(&str, &Path)]) -> Result<(), String> {
     let tool = env::var("COMPOSE").unwrap_or_else(|_| "docker compose".into());
     let mut words = tool.split_whitespace();
     let program = words.next().ok_or("COMPOSE is empty")?;
     let args: Vec<&str> = words.chain(args.iter().copied()).collect();
-    run_with(program, &args, stdin, &mssql_env())
+    run_with(program, &args, stdin, envs)
+}
+
+fn mssql_env() -> Vec<(&'static str, &'static Path)> {
+    match env::var("BARSQL_E2E_MSSQL").as_deref() {
+        Ok("1") => mssql_profile(),
+        _ => Vec::new(),
+    }
 }
 
 // SQL Server's image is amd64 only. Azure SQL Edge runs the same engine on arm64, so it stands in there.
-fn mssql_env() -> Vec<(&'static str, &'static Path)> {
-    if env::var("BARSQL_E2E_MSSQL").as_deref() != Ok("1") {
-        return Vec::new();
-    }
+fn mssql_profile() -> Vec<(&'static str, &'static Path)> {
     let mut envs = vec![("COMPOSE_PROFILES", Path::new("mssql"))];
     if env::consts::ARCH == "aarch64" && env::var_os("MSSQL_IMAGE").is_none() {
         envs.push(("MSSQL_IMAGE", Path::new("mcr.microsoft.com/azure-sql-edge:latest")));
@@ -138,28 +154,94 @@ fn mssql_env() -> Vec<(&'static str, &'static Path)> {
     envs
 }
 
-// Recreate the forum database every run. The scenes insert and roll back, which still moves its sequences.
 fn screenshots() -> Result<(), String> {
     let root = workspace();
     let fixtures = root.join("fixtures/screenshots");
     compose(&["up", "-d", "--wait", "postgres"])?;
+    restore_forum(&[])?;
+    let (data, shots) = (root.join("target/screenshots/BarSQL-data"), root.join("target/screenshots/png"));
+    fresh_dir(&data)?;
+    fresh_dir(&shots)?;
+    copy_dir(&fixtures.join("data"), &data)?;
+    let envs = [
+        ("BARSQL_DATA_DIR", data.as_path()),
+        ("BARSQL_SCREENSHOTS", shots.as_path()),
+        ("BARSQL_SNAPSHOT_SIZE", Path::new(SNAPSHOT_SIZE)),
+    ];
+    run_snapshot(&envs)?;
+    docs_images::keep(&shots, &root)?;
+    docs_images::run(&root)
+}
+
+fn run_snapshot(envs: &[(&str, &Path)]) -> Result<(), String> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let optimized: Vec<String> =
+        SNAPSHOT_OPTIMIZED.iter().map(|name| format!("profile.dev.package.{name}.opt-level=3")).collect();
+    let mut args = vec!["run", "-p", "barsql", "--features", "snapshot"];
+    for config in &optimized {
+        args.extend(["--config", config]);
+    }
+    run_with(&cargo, &args, None, envs)
+}
+
+// Encodes at 1080p30 for the landing page, X and Product Hunt, from frames at the display's scale.
+fn demo_video() -> Result<(), String> {
+    let ffmpeg = env::var("FFMPEG").unwrap_or_else(|_| "ffmpeg".into());
+    if Command::new(&ffmpeg).arg("-version").output().is_err() {
+        return Err(format!(
+            "{ffmpeg} not found. Install ffmpeg (brew install ffmpeg, winget install ffmpeg) or set FFMPEG"
+        ));
+    }
+    let root = workspace();
+    let services = ["up", "-d", "--wait", "postgres", "mysql", "clickhouse", "turso", "mssql"];
+    compose_with(&services, None, &mssql_profile())?;
+    restore_forum(&[root.join("fixtures/demo-video/staging.sql")])?;
+    let out = root.join("target/demo-video");
+    let (data, frames) = (out.join("BarSQL-data"), out.join("frames"));
+    fresh_dir(&data)?;
+    fresh_dir(&frames)?;
+    copy_dir(&root.join("fixtures/demo-video/data"), &data)?;
+    let envs = [
+        ("BARSQL_DATA_DIR", data.as_path()),
+        ("BARSQL_DEMO_VIDEO", frames.as_path()),
+        ("BARSQL_SNAPSHOT_SIZE", Path::new(SNAPSHOT_SIZE)),
+    ];
+    run_snapshot(&envs)?;
+    let list = frames.join("frames.ffconcat");
+    let video = out.join("BarSQL-demo.mp4");
+    // BT.709, as players assume for HD, tagged on the frames for x264; scaled once, before fps repeats frames.
+    let filters = "scale=1920:1080:flags=lanczos:out_color_matrix=bt709,format=yuv420p,\
+                   setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709,fps=30";
+    let encoded = video.to_string_lossy();
+    let input =
+        ["-y", "-hide_banner", "-loglevel", "warning", "-f", "concat", "-safe", "0", "-i", &list.to_string_lossy()];
+    let output = ["-vf", filters, "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-movflags", "+faststart"];
+    run(&ffmpeg, &[&input[..], &output[..], &[&*encoded]].concat())?;
+    println!("saved {encoded}");
+    // The landing page plays this copy.
+    let page = root.join("docs/demo.mp4");
+    fs::copy(&video, &page).map_err(|e| format!("{}: {e}", page.display()))?;
+    report(&page);
+    Ok(())
+}
+
+// A fresh forum database, then `extra` in it, as rolled-back inserts still move its sequences.
+fn restore_forum(extra: &[PathBuf]) -> Result<(), String> {
     let psql = ["exec", "-T", "postgres", "psql", "-U", "postgres", "-q", "-v", "ON_ERROR_STOP=1"];
     compose(&[&psql[..], &["-c", "DROP DATABASE IF EXISTS forum WITH (FORCE)"]].concat())?;
     compose(&[&psql[..], &["-c", "CREATE DATABASE forum"]].concat())?;
-    compose_with(&[&psql[..], &["-d", "forum"]].concat(), Some(&fixtures.join("forum.sql")))?;
-    let data = root.join("target/screenshots/BarSQL-data");
-    if data.exists() {
-        fs::remove_dir_all(&data).map_err(|e| format!("{}: {e}", data.display()))?;
+    let forum = workspace().join("fixtures/screenshots/forum.sql");
+    for script in std::iter::once(&forum).chain(extra) {
+        compose_with(&[&psql[..], &["-d", "forum"]].concat(), Some(script), &mssql_env())?;
     }
-    copy_dir(&fixtures.join("data"), &data)?;
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let envs = [
-        ("BARSQL_DATA_DIR", data.as_path()),
-        ("BARSQL_SCREENSHOTS", Path::new(".github/screenshots")),
-        ("BARSQL_SNAPSHOT_SIZE", Path::new("2048x1152")),
-    ];
-    run_with(&cargo, &["run", "-p", "barsql", "--features", "snapshot"], None, &envs)?;
-    docs_images::run(&root)
+    Ok(())
+}
+
+fn fresh_dir(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_dir_all(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {

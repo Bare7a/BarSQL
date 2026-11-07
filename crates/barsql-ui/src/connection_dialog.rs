@@ -602,12 +602,15 @@ impl ConnectionForm {
         cx: &mut Context<Self>,
     ) -> Div {
         v_flex()
-            .child(form::checkbox(id, checked, t(cx, label), false, cx).debug_selector(move || id.into()).on_click(
-                cx.listener(move |form, _, _, cx| {
-                    flip(form);
-                    cx.notify();
-                }),
-            ))
+            .child(
+                form::checkbox(id, checked, t(cx, label), false, cx)
+                    .debug_selector(move || id.into())
+                    .on_click(cx.listener(move |form, _, _, cx| {
+                        flip(form);
+                        cx.notify();
+                    }))
+                    .test_support(),
+            )
             .child(form::hint(t(cx, hint), cx).pl(rems(2.)))
     }
 
@@ -643,14 +646,14 @@ fn database_items(mut menu: PopupMenu, databases: &[String], form: &Entity<Conne
     menu.scrollable(true)
 }
 
-// Last opened dialog, for the scenario tests.
-#[cfg(all(test, feature = "e2e"))]
+// Last opened dialog, for the scenario tests and the demo video.
+#[cfg(any(all(test, feature = "e2e"), feature = "snapshot"))]
 pub(crate) struct Opened(pub WeakEntity<ConnectionForm>);
 
-#[cfg(all(test, feature = "e2e"))]
+#[cfg(any(all(test, feature = "e2e"), feature = "snapshot"))]
 impl Global for Opened {}
 
-#[cfg(all(test, feature = "e2e"))]
+#[cfg(any(all(test, feature = "e2e"), feature = "snapshot"))]
 impl ConnectionForm {
     pub(crate) fn databases(&self) -> Option<&[String]> {
         self.databases.as_ref().map(|(_, databases)| databases.as_slice())
@@ -668,9 +671,9 @@ enum Browse {
     KnownHosts,
 }
 
-// Gives scenario tests a selector to click into.
-fn labelled(selector: &'static str, input: Input) -> Div {
-    div().debug_selector(move || selector.into()).child(input)
+// A selector for scenario tests and a scope for test lookups to find the input in.
+fn labelled(selector: &'static str, input: Input) -> Stateful<Div> {
+    div().id(selector).debug_selector(move || selector.into()).child(input)
 }
 
 impl Render for ConnectionForm {
@@ -1147,7 +1150,7 @@ pub fn open(
     let editing = !config.id.is_empty();
     let on_saved: OnSaved = Rc::new(on_saved);
     let form = cx.new(|cx| ConnectionForm::new(config, on_saved, window, cx));
-    #[cfg(all(test, feature = "e2e"))]
+    #[cfg(any(all(test, feature = "e2e"), feature = "snapshot"))]
     cx.set_global(Opened(form.downgrade()));
     let handle = form.clone();
     let name = form.read(cx).fields.name.clone();

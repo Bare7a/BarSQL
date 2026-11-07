@@ -386,7 +386,9 @@ pub struct Grid {
     // What the last right-click landed on, which picks the menu.
     menu_target: Option<Target>,
     // What `publish` last announced.
-    published: (Option<usize>, Vec<usize>, Option<usize>),
+    published: (Option<usize>, Vec<usize>, Option<usize>, u64),
+    // Counts the times the rows were swapped out, since new values under a focus that stayed are news too.
+    replaced: u64,
     pub(super) picker_open: bool,
     // Kept across renders so the column picker's list doesn't jump back to the top.
     pub(super) picker_scroll: ScrollHandle,
@@ -433,7 +435,8 @@ impl Grid {
             press: None,
             hover: None,
             menu_target: None,
-            published: (None, Vec::new(), None),
+            published: (None, Vec::new(), None, 0),
+            replaced: 0,
             picker_open: false,
             picker_scroll: ScrollHandle::new(),
             overlay: None,
@@ -460,7 +463,7 @@ impl Grid {
     // A sort renumbers the focused row without moving it, so that counts as a change.
     fn publish(&mut self, cx: &mut Context<Self>) {
         let display = self.selection.focus_row.and_then(|row| self.order.display_of(row));
-        let published = (self.selection.focus_row, self.columns.clone(), display);
+        let published = (self.selection.focus_row, self.columns.clone(), display, self.replaced);
         if self.published != published {
             self.published = published;
             cx.emit(GridEvent::FocusedRowChanged);
@@ -1953,6 +1956,22 @@ impl Grid {
             self.row_top(row) + m.row_height / 2.,
         )
     }
+
+    pub(crate) fn gutter_point(&self, row: usize) -> Point<Pixels> {
+        point(
+            self.scroll.grid().left() + self.metrics.gutter_width / 2.,
+            self.row_top(row) + self.metrics.row_height / 2.,
+        )
+    }
+
+    // On the column's name, clear of its sort button and resize edge.
+    pub(crate) fn header_point(&self, col: usize) -> Point<Pixels> {
+        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
+        point(
+            bounds.left() + m.gutter_width + self.col_x[col] + m.cell_pad_x + px(2.) - scroll.x,
+            bounds.top() + m.header_height / 2.,
+        )
+    }
 }
 
 // For README screenshots. row and col are display positions, and the scroll stops at the edges.
@@ -1978,22 +1997,6 @@ impl Grid {
 
     pub(crate) fn sorted_by(&self) -> Option<(String, bool)> {
         self.sort.column.map(|c| (self.set.columns[c].name.clone(), self.sort.desc))
-    }
-
-    pub(crate) fn gutter_point(&self, row: usize) -> Point<Pixels> {
-        point(
-            self.scroll.grid().left() + self.metrics.gutter_width / 2.,
-            self.row_top(row) + self.metrics.row_height / 2.,
-        )
-    }
-
-    // On the column's name, clear of its sort button and resize edge.
-    pub(crate) fn header_point(&self, col: usize) -> Point<Pixels> {
-        let (bounds, m, scroll) = (self.scroll.grid(), &self.metrics, self.scroll.position());
-        point(
-            bounds.left() + m.gutter_width + self.col_x[col] + m.cell_pad_x + px(2.) - scroll.x,
-            bounds.top() + m.header_height / 2.,
-        )
     }
 
     pub(crate) fn is_editing(&self) -> bool {

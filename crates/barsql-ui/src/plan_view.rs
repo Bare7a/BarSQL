@@ -130,11 +130,16 @@ impl PlanView {
         }
     }
 
-    // README screenshots. Several nodes can tie for hottest, and the deepest one has the richest details.
+    // Ties go to the deepest node, which has the richest details. Its label registers as `plan-node-{key}`.
+    #[cfg(feature = "snapshot")]
+    pub(crate) fn hottest(&self) -> Option<String> {
+        let rows = flatten(&self.plan, self.metric, &self.collapsed);
+        rows.iter().rev().find(|row| row.hottest).map(|row| row.key.clone())
+    }
+
     #[cfg(feature = "snapshot")]
     pub(crate) fn select_hottest(&mut self, cx: &mut Context<Self>) {
-        let rows = flatten(&self.plan, self.metric, &self.collapsed);
-        if let Some(key) = rows.iter().rev().find(|row| row.hottest).map(|row| row.key.clone()) {
+        if let Some(key) = self.hottest() {
             self.select(key, cx);
         }
     }
@@ -273,6 +278,7 @@ impl PlanView {
         };
         let label_color = if node.never_run { theme.muted_foreground } else { theme.foreground };
         let main = h_flex()
+            .id(SharedString::from(format!("plan-node-{key}")))
             .flex_1()
             .min_w(rems(18.))
             .gap(rems(0.462))
@@ -315,7 +321,9 @@ impl PlanView {
                         .font_family(theme.mono_font_family.clone())
                         .child(node.detail.clone()),
                 )
-            });
+            })
+            // The row has a context menu, which takes no test support after it.
+            .test_support();
         let cell =
             |main: String, sub: Option<String>| {
                 h_flex()

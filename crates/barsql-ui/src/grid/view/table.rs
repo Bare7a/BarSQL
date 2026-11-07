@@ -128,6 +128,7 @@ impl Grid {
             && columns.iter().zip(self.set.columns.iter()).all(|(a, b)| a.name == b.name);
         let count = columns.len();
         self.set = ResultSet::new(columns);
+        self.replaced += 1;
         self.order = RowOrder::identity(0);
         self.ordered_for = (SortState::default(), 0);
         self.sorting = None;
@@ -143,6 +144,8 @@ impl Grid {
             self.sampled = None;
             self.selection = Default::default();
         }
+        // The old focus is gone, even if no rows come to take its place.
+        self.publish(cx);
         cx.notify();
     }
 
@@ -157,6 +160,7 @@ impl Grid {
         }
         let (focus, col) = (self.selection.focus_row.and_then(moved), self.selection.focus_col);
         self.set = set;
+        self.replaced += 1;
         // No row count matches it, so the order is worked out again for the new values.
         self.ordered_for = (SortState::default(), usize::MAX);
         self.sorting = None;

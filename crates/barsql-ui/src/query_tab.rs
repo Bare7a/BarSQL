@@ -1296,6 +1296,7 @@ impl Render for QueryTab {
             )
             .child(
                 div()
+                    .id("results-pane")
                     .debug_selector(|| "results-pane".into())
                     .relative()
                     .flex_none()
@@ -1313,7 +1314,8 @@ impl Render for QueryTab {
                                 cx.notify();
                             })),
                     )
-                    .when(self.running.is_some(), |el| el.child(ProgressLine)),
+                    .when(self.running.is_some(), |el| el.child(ProgressLine))
+                    .test_support(),
             )
     }
 }
@@ -1360,14 +1362,14 @@ impl QueryTab {
     pub(crate) fn in_transaction(&self) -> bool {
         self.txn != TxnState::Idle
     }
+
+    pub(crate) fn editor(&self) -> Entity<EditorState> {
+        self.editor.clone()
+    }
 }
 
 #[cfg(test)]
 impl QueryTab {
-    pub(crate) fn editor(&self) -> Entity<EditorState> {
-        self.editor.clone()
-    }
-
     pub(crate) fn occurrence_marks(&self, cx: &App) -> Vec<Range<usize>> {
         self._occurrences.read(cx).ranges(cx)
     }

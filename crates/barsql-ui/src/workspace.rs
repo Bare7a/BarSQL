@@ -275,15 +275,19 @@ pub struct Workspace {
 }
 
 pub fn open(options: LaunchOptions, cx: &mut App) {
-    // Screenshot runs start at 80% of the screen and leave the saved window state alone.
-    let track = options.snapshot.is_none() && options.screenshots.is_none();
+    // Screenshot runs start at 80% of the screen, hidden, and leave the saved window state alone.
+    let track = !options.unattended();
     let saved = if track { window_state::load(cx) } else { Some(WindowState::default()) };
+    let bounds = window_state::initial_bounds(saved.as_ref(), cx);
     let window_options = WindowOptions {
         titlebar: Some(TitlebarOptions { title: Some("BarSQL".into()), ..TitleBar::title_bar_options() }),
-        window_bounds: Some(window_state::initial_bounds(saved.as_ref(), cx)),
+        window_bounds: Some(bounds),
         window_min_size: Some(size(px(window_state::MIN_WIDTH as f32), px(window_state::MIN_HEIGHT as f32))),
         display_id: cx.primary_display().map(|display| display.id()),
         app_id: Some("BarSQL".into()),
+        // Unattended runs render offscreen, so their window never shows and nothing on screen reaches it.
+        show: track,
+        focus: track,
         ..TitleBar::window_options()
     };
     cx.spawn(async move |cx| {
@@ -452,19 +456,21 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
             let _ = window.update(cx, |_, _, cx| update_dialog::check_on_startup(cx));
         }
         if let Ok(window) = window {
-            // macOS keeps a titled window inside the screen, so a screenshot larger than the screen goes
-            // borderless first.
-            if let Some((width, height)) = options.snapshot_size.filter(|_| !track) {
-                let _ = window.update(cx, |_, window, _| {
-                    window.toggle_simple_fullscreen();
-                    window.resize(size(px(width), px(height)));
-                });
+            // Windows applies a hidden window's initial bounds only once it shows, so unattended runs size it here.
+            if !track {
+                let target = options
+                    .snapshot_size
+                    .map_or(bounds.get_bounds().size, |(width, height)| size(px(width), px(height)));
+                let _ = window.update(cx, |_, window, _| window.resize(target));
             }
             if let Some(path) = options.snapshot {
                 crate::snapshot::schedule(window.into(), path, options.snapshot_run, after, cx);
             }
             if let Some(path) = options.screenshots {
                 screenshots::run(window, path, cx);
+            }
+            if let Some(path) = options.demo_video {
+                screenshots::record(window, path, cx);
             }
         }
     })
@@ -1843,7 +1849,15 @@ impl Workspace {
                         let lock = if active { theme.foreground.opacity(0.7) } else { theme.muted_foreground };
                         el.child(Icon::new(Lucide::Lock).size(ICON_2XS).text_color(lock))
                     })
-                    .child(div().max_w(rems(15.385)).truncate().child(open.view.title(cx)))
+                    // The title, as the tab's context menu hides the tab from test lookups.
+                    .child(
+                        div()
+                            .id(("editor-tab-title", ix))
+                            .max_w(rems(15.385))
+                            .truncate()
+                            .child(open.view.title(cx))
+                            .test_support(),
+                    )
                     .child(
                         match open.pinned {
                             // A pinned tab shows its pin, which unpins it, in place of the close button.
@@ -1932,7 +1946,8 @@ impl Workspace {
             .cursor_pointer()
             .hover(|style| style.bg(theme.secondary_hover).text_color(theme.foreground))
             .child(Icon::new(IconName::Plus).size(ICON_XS))
-            .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx)));
+            .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx)))
+            .test_support();
         div()
             .debug_selector(|| "tab-bar".into())
             .relative()
@@ -2460,6 +2475,7 @@ impl Render for Workspace {
             .children(toast::render(window, cx))
             .child(self.drop_overlay(cx))
             .child(self.context_menu.clone())
+            .children(screenshots::overlay(window, cx))
     }
 }
 

@@ -88,8 +88,16 @@ pub struct LaunchOptions {
     pub snapshot_size: Option<(f32, f32)>,
     // Play the README scenes against the forum database, save 1.png to 12.png here and quit.
     pub screenshots: Option<PathBuf>,
+    // Play the demo video's tour, write its frames here and quit.
+    pub demo_video: Option<PathBuf>,
     // Look for a newer release 5 s after launch. Production builds only.
     pub check_updates: bool,
+}
+
+impl LaunchOptions {
+    fn unattended(&self) -> bool {
+        self.snapshot.is_some() || self.screenshots.is_some() || self.demo_video.is_some()
+    }
 }
 
 // Open transactions roll back on quit, best effort within GPUI's quit budget. Servers roll back abandoned
@@ -105,15 +113,15 @@ pub fn run(bar: BarApp, options: LaunchOptions) {
             opener.open_sqlite(&path);
         }
     });
-    // Snapshots and screenshots quit unattended, with nobody to ask.
+    // Snapshots, screenshots and the demo video quit unattended, with nobody to ask.
     #[cfg(target_os = "macos")]
-    if options.snapshot.is_none() && options.screenshots.is_none() {
+    if !options.unattended() {
         system_quit::install();
     }
     app.run(move |cx| {
         gpui_kit::init(cx);
-        if options.screenshots.is_some() {
-            screenshots::begin(cx);
+        if options.screenshots.is_some() || options.demo_video.is_some() {
+            screenshots::begin(options.demo_video.is_some(), cx);
         }
         // No animations, so dialogs, menus, tooltips and toasts open and close at once.
         cx.set_reduce_motion(true);

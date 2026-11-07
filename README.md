@@ -10,9 +10,9 @@
 No cloud. No accounts. No telemetry.  
 Just a focused, native desktop tool for **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **ClickHouse**, **Turso / libSQL** and **SQLite**, on Windows, macOS and Linux.
 
-🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)** · 📖 **[User Guide](guide/README.md)**
+🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)** · 🎬 **[Demo video](https://barsql.bare7a.eu/demo.mp4)** · 📖 **[User Guide](guide/README.md)**
 
-![BarSQL's editor with schema-aware suggestions, a saved query's results in the grid and the focused row as JSON](.github/screenshots/1.png?raw=true)
+[![Play the two-minute demo of BarSQL](docs/demo.webp)](https://barsql.bare7a.eu/demo.mp4)
 
 ---
 
@@ -88,29 +88,29 @@ Work with **SQLite**, **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **Cli
 
 <table>
   <tr>
-    <td align="center"><img src=".github/screenshots/1.png?raw=true" width="100%"><br><sub><b>Editor</b></sub></td>
-    <td align="center"><img src=".github/screenshots/2.png?raw=true" width="100%"><br><sub><b>Transactions & multiple results</b></sub></td>
-    <td align="center"><img src=".github/screenshots/3.png?raw=true" width="100%"><br><sub><b>Table data</b></sub></td>
+    <td align="center"><a href="docs/screenshots/1.webp"><img src="docs/screenshots/1-800.webp" width="100%"></a><br><sub><b>Editor</b></sub></td>
+    <td align="center"><a href="docs/screenshots/2.webp"><img src="docs/screenshots/2-800.webp" width="100%"></a><br><sub><b>Transactions & multiple results</b></sub></td>
+    <td align="center"><a href="docs/screenshots/3.webp"><img src="docs/screenshots/3-800.webp" width="100%"></a><br><sub><b>Table data</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src=".github/screenshots/4.png?raw=true" width="100%"><br><sub><b>Cell editor</b></sub></td>
-    <td align="center"><img src=".github/screenshots/5.png?raw=true" width="100%"><br><sub><b>Grid</b></sub></td>
-    <td align="center"><img src=".github/screenshots/6.png?raw=true" width="100%"><br><sub><b>Export</b></sub></td>
+    <td align="center"><a href="docs/screenshots/4.webp"><img src="docs/screenshots/4-800.webp" width="100%"></a><br><sub><b>Cell editor</b></sub></td>
+    <td align="center"><a href="docs/screenshots/5.webp"><img src="docs/screenshots/5-800.webp" width="100%"></a><br><sub><b>Grid</b></sub></td>
+    <td align="center"><a href="docs/screenshots/6.webp"><img src="docs/screenshots/6-800.webp" width="100%"></a><br><sub><b>Export</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src=".github/screenshots/7.png?raw=true" width="100%"><br><sub><b>Connections</b></sub></td>
-    <td align="center"><img src=".github/screenshots/8.png?raw=true" width="100%"><br><sub><b>Quick Search</b></sub></td>
-    <td align="center"><img src=".github/screenshots/9.png?raw=true" width="100%"><br><sub><b>DDL viewer</b></sub></td>
+    <td align="center"><a href="docs/screenshots/7.webp"><img src="docs/screenshots/7-800.webp" width="100%"></a><br><sub><b>Connections</b></sub></td>
+    <td align="center"><a href="docs/screenshots/8.webp"><img src="docs/screenshots/8-800.webp" width="100%"></a><br><sub><b>Quick Search</b></sub></td>
+    <td align="center"><a href="docs/screenshots/9.webp"><img src="docs/screenshots/9-800.webp" width="100%"></a><br><sub><b>DDL viewer</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src=".github/screenshots/10.png?raw=true" width="100%"><br><sub><b>Plan viewer</b></sub></td>
-    <td align="center"><img src=".github/screenshots/11.png?raw=true" width="100%"><br><sub><b>CSV & SQL import</b></sub></td>
-    <td align="center"><img src=".github/screenshots/12.png?raw=true" width="100%"><br><sub><b>Structure editor</b></sub></td>
+    <td align="center"><a href="docs/screenshots/10.webp"><img src="docs/screenshots/10-800.webp" width="100%"></a><br><sub><b>Plan viewer</b></sub></td>
+    <td align="center"><a href="docs/screenshots/11.webp"><img src="docs/screenshots/11-800.webp" width="100%"></a><br><sub><b>CSV & SQL import</b></sub></td>
+    <td align="center"><a href="docs/screenshots/12.webp"><img src="docs/screenshots/12-800.webp" width="100%"></a><br><sub><b>Structure editor</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src=".github/screenshots/13.png?raw=true" width="100%"><br><sub><b>ER diagram</b></sub></td>
-    <td align="center"><img src=".github/screenshots/14.png?raw=true" width="100%"><br><sub><b>Quick charts</b></sub></td>
-    <td align="center"><img src=".github/screenshots/15.png?raw=true" width="100%"><br><sub><b>Appearance</b></sub></td>
+    <td align="center"><a href="docs/screenshots/13.webp"><img src="docs/screenshots/13-800.webp" width="100%"></a><br><sub><b>ER diagram</b></sub></td>
+    <td align="center"><a href="docs/screenshots/14.webp"><img src="docs/screenshots/14-800.webp" width="100%"></a><br><sub><b>Quick charts</b></sub></td>
+    <td align="center"><a href="docs/screenshots/15.webp"><img src="docs/screenshots/15-800.webp" width="100%"></a><br><sub><b>Appearance</b></sub></td>
   </tr>
 </table>
 

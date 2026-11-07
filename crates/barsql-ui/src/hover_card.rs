@@ -266,6 +266,13 @@ impl HoverCard {
     }
 }
 
+#[cfg(feature = "snapshot")]
+impl HoverCard {
+    pub(crate) fn showing(&self) -> bool {
+        self.card.is_some()
+    }
+}
+
 #[cfg(test)]
 impl HoverCard {
     // The header's name and detail, then each row's parts, all joined by spaces.

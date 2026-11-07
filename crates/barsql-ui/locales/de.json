@@ -437,12 +437,10 @@
     "search": "Tabelle suchen",
     "matches": "{{index}} von {{count}}",
     "noMatches": "Keine Tabelle passt",
-    "keysOnly": "Nur Schlüssel",
     "keysOnlyTooltip": "Nur die Schlüsselspalten zeigen",
     "zoomIn": "Vergrößern",
     "zoomOut": "Verkleinern",
     "zoomReset": "Zurück auf 100 %",
-    "fit": "Einpassen",
     "fitTooltip": "Das ganze Diagramm zeigen",
     "open": "Tabelle öffnen"
   },

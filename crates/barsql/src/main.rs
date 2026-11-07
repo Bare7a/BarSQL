@@ -30,7 +30,8 @@ fn main() -> anyhow::Result<()> {
     }
     let snapshot = std::env::var_os("BARSQL_SNAPSHOT").filter(|p| !p.is_empty()).map(Into::into);
     let screenshots = std::env::var_os("BARSQL_SCREENSHOTS").filter(|p| !p.is_empty()).map(Into::into);
-    let listener = match snapshot.as_ref().or(screenshots.as_ref()) {
+    let demo_video = std::env::var_os("BARSQL_DEMO_VIDEO").filter(|p| !p.is_empty()).map(Into::into);
+    let listener = match snapshot.as_ref().or(screenshots.as_ref()).or(demo_video.as_ref()) {
         Some(_) => None,
         None => match single_instance::claim(&data_dir, &args) {
             Instance::First(listener) => listener,
@@ -54,13 +55,15 @@ fn main() -> anyhow::Result<()> {
     }
     let snapshot_run = std::env::var_os("BARSQL_SNAPSHOT_RUN").is_some_and(|v| v == "1");
     let snapshot_panel = std::env::var("BARSQL_SNAPSHOT_PANEL").ok();
-    // "2048x1152"
+    // "1920x1080"
     let snapshot_size = std::env::var("BARSQL_SNAPSHOT_SIZE").ok().and_then(|size| {
         let (width, height) = size.split_once('x')?;
         Some((width.trim().parse().ok()?, height.trim().parse().ok()?))
     });
-    let check_updates = cfg!(feature = "production") && snapshot.is_none() && screenshots.is_none();
-    let options = LaunchOptions { snapshot, snapshot_run, snapshot_panel, snapshot_size, screenshots, check_updates };
+    let check_updates =
+        cfg!(feature = "production") && snapshot.is_none() && screenshots.is_none() && demo_video.is_none();
+    let options =
+        LaunchOptions { snapshot, snapshot_run, snapshot_panel, snapshot_size, screenshots, demo_video, check_updates };
     barsql_ui::run(bar, options);
     Ok(())
 }

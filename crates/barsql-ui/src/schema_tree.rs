@@ -1446,7 +1446,16 @@ impl SchemaTree {
         let guide_left = |level: usize| rems(INDENT_REM * level as f32 + ROW_PADDING.0 + ICON_SM.0 / 2.);
         let guides = (0..depth)
             .map(|level| div().absolute().top_0().bottom_0().left(guide_left(level)).w(px(1.)).bg(theme.border));
-        div().relative().w_full().pl(rems(INDENT_REM * depth as f32)).children(guides).child(element).into_any_element()
+        // Under the row's id too, as the row's context menu hides it from test lookups.
+        div()
+            .id(row.id)
+            .relative()
+            .w_full()
+            .pl(rems(INDENT_REM * depth as f32))
+            .children(guides)
+            .child(element)
+            .test_support()
+            .into_any_element()
     }
 
     // Sits over the row's end on a gradient that fades out the truncated name.
@@ -1508,7 +1517,8 @@ impl SchemaTree {
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.stop_propagation();
                         cx.emit(SchemaTreeEvent::Browse { schema: browse_schema.clone(), table: browse_table.clone() });
-                    })),
+                    }))
+                    .test_support(),
             )
     }
 
@@ -1801,6 +1811,12 @@ fn scenario_id(id: &str, connection: Option<&ConnectionConfig>) -> String {
 
 #[cfg(any(test, feature = "snapshot"))]
 impl SchemaTree {
+    // A spinner row is up while tables, columns or a group's objects load.
+    #[cfg(feature = "snapshot")]
+    pub(crate) fn loading(&self) -> bool {
+        self.rows.iter().any(|row| matches!(row.kind, RowKind::Note { spinner: true, .. }))
+    }
+
     // Each row as (scenario id, label, extra), where extra is the kind, badge or count.
     pub(crate) fn listed(&self) -> Vec<(String, String, String)> {
         self.rows
@@ -1863,6 +1879,13 @@ impl SchemaTree {
 
     pub(crate) fn import_into(&mut self, schema: &str, table: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.import(schema.to_string(), Some(table.to_string()), window, cx);
+    }
+
+    // The element id of the row with this scenario id, such as `t:public.users`.
+    pub(crate) fn row_id(&self, scenario: &str) -> Option<SharedString> {
+        let connection = self.connection.as_ref();
+        let row = self.rows.iter().find(|row| scenario_id(&row.id, connection) == scenario)?;
+        Some(row.id.clone())
     }
 }
 

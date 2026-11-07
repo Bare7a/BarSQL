@@ -354,6 +354,8 @@ pub fn open(
 ) {
     let title = t(cx, "schemaDiff.title");
     let view = cx.new(|cx| SchemaDiffView::new(source, schema, Rc::new(on_script), cx));
+    #[cfg(feature = "snapshot")]
+    cx.set_global(Opened(view.downgrade()));
     window.open_dialog(cx, move |dialog, window, cx| {
         let height = window.viewport_size().height * 0.75;
         let entry = view.clone();
@@ -366,4 +368,22 @@ pub fn open(
                 false
             })
     });
+}
+
+// Last opened dialog, for the demo video.
+#[cfg(feature = "snapshot")]
+pub(crate) struct Opened(pub WeakEntity<SchemaDiffView>);
+
+#[cfg(feature = "snapshot")]
+impl Global for Opened {}
+
+#[cfg(feature = "snapshot")]
+impl SchemaDiffView {
+    pub(crate) fn ready(&self) -> bool {
+        matches!(self.state, Compare::Ready { .. })
+    }
+
+    pub(crate) fn target_schema(&self) -> Option<&str> {
+        self.target_schema.as_deref()
+    }
 }

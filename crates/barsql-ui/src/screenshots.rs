@@ -1,9 +1,7 @@
-// README screenshots, run by `cargo xtask screenshots` via BARSQL_SCREENSHOTS. Plays the scenes against the
-// forum database, saves each as `<n>.png` and quits.
+// The screenshots for `cargo xtask screenshots`: plays the scenes against the forum database, saves each as
+// `<n>.png` and quits. The demo video in video.rs drives the window with the same robot.
 use std::path::PathBuf;
 
-#[cfg(feature = "snapshot")]
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Root;
 use gpui_kit::*;
 
@@ -18,27 +16,16 @@ pub fn windows_title_bar(_: &App) -> bool {
     false
 }
 
-// Records where an element was drawn so the scenes can click it.
 #[cfg(feature = "snapshot")]
-pub fn probe(element: impl IntoElement, name: &'static str) -> AnyElement {
-    let record = move |bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App| {
-        cx.default_global::<script::Probes>().0.insert(name, bounds);
-    };
-    div().relative().child(element).on_prepaint(record).into_any_element()
-}
-
-#[cfg(not(feature = "snapshot"))]
-pub fn probe(element: impl IntoElement, _: &'static str) -> AnyElement {
-    element.into_any_element()
-}
-
-#[cfg(feature = "snapshot")]
-pub fn begin(cx: &mut App) {
+pub fn begin(video: bool, cx: &mut App) {
     cx.set_global(script::WindowsTitleBar);
+    if video {
+        video::watch_inputs(cx);
+    }
 }
 
 #[cfg(not(feature = "snapshot"))]
-pub fn begin(_: &mut App) {}
+pub fn begin(_: bool, _: &mut App) {}
 
 #[cfg(feature = "snapshot")]
 pub fn run(window: WindowHandle<Root>, out: PathBuf, cx: &mut AsyncApp) {
@@ -52,8 +39,32 @@ pub fn run(_: WindowHandle<Root>, _: PathBuf, cx: &mut AsyncApp) {
 }
 
 #[cfg(feature = "snapshot")]
+pub fn record(window: WindowHandle<Root>, out: PathBuf, cx: &mut AsyncApp) {
+    video::run(window.into(), out, cx);
+}
+
+#[cfg(not(feature = "snapshot"))]
+pub fn record(_: WindowHandle<Root>, _: PathBuf, cx: &mut AsyncApp) {
+    eprintln!("BARSQL_DEMO_VIDEO needs a build with --features snapshot");
+    cx.update(|cx| cx.quit());
+}
+
+// The demo video's pointer, captions and cards, over everything else.
+#[cfg(feature = "snapshot")]
+pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
+    video::overlay(window, cx)
+}
+
+#[cfg(not(feature = "snapshot"))]
+pub fn overlay(_: &Window, _: &App) -> Option<AnyElement> {
+    None
+}
+
+#[cfg(feature = "snapshot")]
+mod video;
+
+#[cfg(feature = "snapshot")]
 mod script {
-    use std::collections::HashMap;
     use std::io::BufWriter;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
@@ -62,22 +73,23 @@ mod script {
     use barsql_sql::lang::TxnControl;
     use barsql_sql::structure::{ColumnRow, Draft, Row};
     use gpui_kit::component::{Root, WindowExt};
+    use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::*;
-    use image::DynamicImage;
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::{DynamicImage, RgbaImage};
 
     use crate::grid::Grid;
     use crate::schema_objects::Group;
     use crate::workspace::Workspace;
     use crate::{connection_dialog, export_dialog, import_dialog, query_tab, theme};
 
-    // In points. The PNGs come out at the display's scale.
-    const SIZE: (f32, f32) = (2048., 1152.);
+    // In points; shots come out at 1920 × 1080 pixels on any display.
+    pub(super) const SIZE: (f32, f32) = (1920., 1080.);
     const SIDEBAR_WIDTH: f32 = 364.;
     const JSON_WIDTH: f32 = 410.;
-    const WAIT: Duration = Duration::from_secs(30);
+    pub(super) const WAIT: Duration = Duration::from_secs(30);
     const POSTS_SQL: &str = "SELECT * FROM posts p ORDER BY p.id;";
-    const PLAN_SQL: &str = "SELECT c.name AS category, u.display_name AS author,
+    pub(super) const PLAN_SQL: &str = "SELECT c.name AS category, u.display_name AS author,
        COUNT(*) AS posts, SUM(p.views) AS views
 FROM posts p
 JOIN users u ON u.id = p.author_id
@@ -98,7 +110,7 @@ INSERT INTO categories
   ('Kotlin', 'Talk about anything related to Kotlin.', '{\"allowLinks\": true}')
 RETURNING *;
 ";
-    const CHART_SQL: &str = "SELECT date_trunc('month', created_at)::date AS month,
+    pub(super) const CHART_SQL: &str = "SELECT date_trunc('month', created_at)::date AS month,
        COUNT(*) AS posts,
        COUNT(*) FILTER (WHERE score >= 500) AS popular,
        COUNT(*) FILTER (WHERE score >= 900) AS top_rated
@@ -111,18 +123,13 @@ ORDER BY 1;";
     const DISPLAY_NAME: usize = 3;
     const PREFERENCES: usize = 10;
     // Relative so the dialog shows a short path. The xtask runs the app from the repo root.
-    const IMPORT_CSV: &str = "fixtures/screenshots/users.csv";
+    pub(super) const IMPORT_CSV: &str = "fixtures/screenshots/users.csv";
 
     pub struct WindowsTitleBar;
 
     impl Global for WindowsTitleBar {}
 
-    #[derive(Default)]
-    pub struct Probes(pub HashMap<&'static str, Bounds<Pixels>>);
-
-    impl Global for Probes {}
-
-    type Res<T> = Result<T, String>;
+    pub(super) type Res<T> = Result<T, String>;
 
     pub fn run(window: WindowHandle<Root>, out: PathBuf, cx: &mut AsyncApp) {
         cx.spawn(async move |cx| {
@@ -139,12 +146,16 @@ ORDER BY 1;";
 
     // A window behind others gets no frames, so every step draws one and input lands on what it showed. The
     // handle is untyped so nothing holds the root view, which dialogs update.
-    struct Robot {
-        window: AnyWindowHandle,
+    pub(super) struct Robot {
+        pub(super) window: AnyWindowHandle,
     }
 
     impl Robot {
-        fn act<R>(&self, cx: &mut AsyncApp, f: impl FnOnce(&Entity<Workspace>, &mut Window, &mut App) -> R) -> Res<R> {
+        pub(super) fn act<R>(
+            &self,
+            cx: &mut AsyncApp,
+            f: impl FnOnce(&Entity<Workspace>, &mut Window, &mut App) -> R,
+        ) -> Res<R> {
             self.window
                 .update(cx, |root, window, cx| {
                     let root = root.downcast::<Root>().map_err(|_| "no root")?;
@@ -154,7 +165,7 @@ ORDER BY 1;";
                 .map_err(|error| error.to_string())?
         }
 
-        fn workspace<R>(
+        pub(super) fn workspace<R>(
             &self,
             cx: &mut AsyncApp,
             f: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>) -> R,
@@ -170,11 +181,13 @@ ORDER BY 1;";
             let _ = self.window.update(cx, |_, window, cx| {
                 window.refresh();
                 window.draw(cx).clear(cx);
+                // Windows sends a hidden window no frames, so its next-frame callbacks wait on these.
+                window.simulate_next_frame(cx);
             });
             self.pause(cx, 40).await;
         }
 
-        async fn settle(
+        pub(super) async fn settle(
             &self,
             cx: &mut AsyncApp,
             what: &str,
@@ -244,6 +257,11 @@ ORDER BY 1;";
                     window.render_to_image().map_err(|error| error.to_string())
                 })
                 .map_err(|error| error.to_string())??;
+            let (width, height) = (SIZE.0 as u32, SIZE.1 as u32);
+            let image = match image.dimensions() == (width, height) {
+                true => image,
+                false => shrink(&image, width, height),
+            };
             let file = std::fs::File::create(path).map_err(|error| format!("{}: {error}", path.display()))?;
             let encoder =
                 PngEncoder::new_with_quality(BufWriter::new(file), CompressionType::Best, FilterType::Adaptive);
@@ -255,9 +273,35 @@ ORDER BY 1;";
             Ok(())
         }
 
-        fn probe(&self, cx: &mut AsyncApp, name: &str) -> Res<Point<Pixels>> {
-            let bounds = cx.update(|cx| cx.try_global::<Probes>().and_then(|probes| probes.0.get(name).copied()));
-            bounds.map(|bounds| bounds.center()).ok_or_else(|| format!("{name} was not drawn"))
+        // In the last frame. Two matches are an error, not try_find's panic, which would abort the app.
+        pub(super) fn bounds(&self, cx: &mut AsyncApp, id: impl Into<ElementId>) -> Res<Bounds<Pixels>> {
+            let id = id.into();
+            let found = self.act(cx, |_, window, _| window.find_all(id.clone()))?;
+            match found.as_slice() {
+                [element] => Ok(element.bounds()),
+                [] => Err(format!("{id} was not drawn")),
+                _ => Err(format!("{id} was drawn {} times", found.len())),
+            }
+        }
+
+        pub(super) fn center(&self, cx: &mut AsyncApp, id: impl Into<ElementId>) -> Res<Point<Pixels>> {
+            Ok(self.bounds(cx, id)?.center())
+        }
+
+        // Inputs all register under one id, and a password under its own role, so take the scope's first.
+        pub(super) fn field(&self, cx: &mut AsyncApp, scope: &'static str) -> Res<Point<Pixels>> {
+            let found = self
+                .act(cx, |_, window, _| window.within(scope).elements().first().map(|input| input.bounds().center()))?;
+            found.ok_or_else(|| format!("no input in {scope}"))
+        }
+
+        // A schema tree row by its scenario id, such as `t:public.users`.
+        pub(super) fn tree_row(&self, cx: &mut AsyncApp, row: &str) -> Res<Point<Pixels>> {
+            let id = self.act(cx, |workspace, _, cx| {
+                let tree = workspace.read(cx).sidebar().read(cx).panels().0;
+                tree.read(cx).row_id(row)
+            })?;
+            self.center(cx, id.ok_or_else(|| format!("no tree row {row}"))?)
         }
 
         async fn close_dialog(&self, cx: &mut AsyncApp) -> Res<()> {
@@ -269,8 +313,27 @@ ORDER BY 1;";
             self.act(cx, |workspace, _, cx| workspace.read(cx).active_grid(cx))?.ok_or_else(|| "no grid".into())
         }
 
-        fn cell(&self, cx: &mut AsyncApp, row: usize, col: usize) -> Res<Point<Pixels>> {
+        pub(super) fn cell(&self, cx: &mut AsyncApp, row: usize, col: usize) -> Res<Point<Pixels>> {
             let grid = self.grid(cx)?;
+            Ok(cx.update(|cx| grid.read(cx).cell_point(row, col)))
+        }
+
+        // Clicked, it selects the column.
+        pub(super) fn header(&self, cx: &mut AsyncApp, col: usize) -> Res<Point<Pixels>> {
+            let grid = self.grid(cx)?;
+            Ok(cx.update(|cx| grid.read(cx).header_point(col)))
+        }
+
+        // The row's number, which selects the row.
+        pub(super) fn gutter(&self, cx: &mut AsyncApp, row: usize) -> Res<Point<Pixels>> {
+            let grid = self.grid(cx)?;
+            Ok(cx.update(|cx| grid.read(cx).gutter_point(row)))
+        }
+
+        pub(super) fn structure_cell(&self, cx: &mut AsyncApp, row: usize, col: usize) -> Res<Point<Pixels>> {
+            let grid =
+                self.act(cx, |workspace, _, cx| workspace.read(cx).structure_tab().map(|tab| tab.read(cx).grid()))?;
+            let grid = grid.ok_or("no Structure tab")?;
             Ok(cx.update(|cx| grid.read(cx).cell_point(row, col)))
         }
 
@@ -283,12 +346,12 @@ ORDER BY 1;";
             Ok(())
         }
 
-        async fn fit_window(&self, cx: &mut AsyncApp) -> Res<()> {
+        pub(super) async fn fit_window(&self, cx: &mut AsyncApp) -> Res<()> {
             let target = size(px(SIZE.0), px(SIZE.1));
             let deadline = Instant::now() + WAIT;
             while self.act(cx, |_, window, _| window.viewport_size())? != target {
                 if Instant::now() > deadline {
-                    return Err("the window would not grow to 2048 × 1152".into());
+                    return Err("the window would not grow to 1920 × 1080".into());
                 }
                 self.act(cx, |_, window, _| window.resize(target))?;
                 self.pause(cx, 250).await;
@@ -317,7 +380,7 @@ ORDER BY 1;";
             Ok(())
         }
 
-        async fn activate(&self, cx: &mut AsyncApp, title: &str) -> Res<()> {
+        pub(super) async fn activate(&self, cx: &mut AsyncApp, title: &str) -> Res<()> {
             let found = self.workspace(cx, |workspace, window, cx| workspace.activate_title(title, window, cx))?;
             if !found {
                 return Err(format!("no {title} tab"));
@@ -345,6 +408,43 @@ ORDER BY 1;";
 
     fn query_running(workspace: &Entity<Workspace>, cx: &App) -> bool {
         workspace.read(cx).query_tab().is_some_and(|tab| tab.read(cx).is_running())
+    }
+
+    // Area averaging: a 2x render comes down in exact 2 × 2 blocks, a 125% one weighs pixels by overlap.
+    fn shrink(image: &RgbaImage, width: u32, height: u32) -> RgbaImage {
+        let (columns, rows) = (areas(image.width(), width), areas(image.height(), height));
+        let (from, to) = (image.width() as usize * 4, width as usize * 4);
+        let mut out = RgbaImage::new(width, height);
+        let mut line = vec![0f32; from];
+        for ((first, shares), target) in rows.iter().zip(out.chunks_exact_mut(to)) {
+            line.fill(0.);
+            for (row, share) in image.chunks_exact(from).skip(*first).zip(shares) {
+                for (sum, &value) in line.iter_mut().zip(row) {
+                    *sum += share * f32::from(value);
+                }
+            }
+            for ((first, shares), pixel) in columns.iter().zip(target.as_chunks_mut::<4>().0) {
+                for (channel, value) in pixel.iter_mut().enumerate() {
+                    let sum: f32 =
+                        shares.iter().enumerate().map(|(i, share)| share * line[(first + i) * 4 + channel]).sum();
+                    *value = (sum + 0.5) as u8;
+                }
+            }
+        }
+        out
+    }
+
+    // Along one axis, each output pixel's first source pixel and the shares of those it covers.
+    fn areas(from: u32, to: u32) -> Vec<(usize, Vec<f32>)> {
+        let ratio = f64::from(from) / f64::from(to);
+        (0..to)
+            .map(|ix| {
+                let (start, end) = (f64::from(ix) * ratio, f64::from(ix + 1) * ratio);
+                let (first, past) = (start.floor() as usize, (end.ceil() as usize).min(from as usize));
+                let share = |px: usize| ((end.min(px as f64 + 1.) - start.max(px as f64)) / ratio) as f32;
+                (first, (first..past).map(share).collect())
+            })
+            .collect()
     }
 
     // A slug column with a unique index, a longer title and is_locked dropped, typed as the catalog spells them.
@@ -559,7 +659,7 @@ ORDER BY 1;";
                 workspace.read(cx).active_grid(cx).is_some_and(|grid| grid.read(cx).selection_counts() == (14, 3))
             })
             .await?;
-        let formats = robot.probe(cx, "copy-format")?;
+        let formats = robot.center(cx, "copy-format")?;
         robot.click(cx, formats, Modifiers::none(), 1).await;
         robot.capture(cx, &shot(5)).await?;
         robot.keys(cx, "escape").await?;
@@ -768,5 +868,29 @@ ORDER BY 1;";
         robot.keys(cx, "right right down down right").await?;
         robot.capture(cx, &shot(15)).await?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use image::{Rgba, RgbaImage, imageops};
+
+        use super::shrink;
+
+        #[test]
+        fn a_2x_render_comes_down_in_whole_pixel_blocks() {
+            let render =
+                RgbaImage::from_fn(64, 36, |x, y| Rgba([(x * 37 + y * 11) as u8, (x * y) as u8, (x ^ y) as u8, 255]));
+            assert_eq!(shrink(&render, 32, 18), imageops::thumbnail(&render, 32, 18));
+        }
+
+        #[test]
+        fn a_125_percent_render_weighs_pixels_by_area() {
+            let stripes = RgbaImage::from_fn(5, 1, |x, _| {
+                let shade = if x % 2 == 1 { 255 } else { 0 };
+                Rgba([shade, shade, shade, 255])
+            });
+            let shades: Vec<u8> = shrink(&stripes, 4, 1).pixels().map(|pixel| pixel[0]).collect();
+            assert_eq!(shades, [51, 153, 153, 51]);
+        }
     }
 }

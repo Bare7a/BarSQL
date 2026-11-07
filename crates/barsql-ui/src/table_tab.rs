@@ -168,7 +168,7 @@ impl TableTab {
         (self.staging.edit_count(), self.staging.delete_count())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "snapshot"))]
     pub(crate) fn applied_filter(&self) -> &str {
         &self.applied_filter
     }
@@ -718,7 +718,7 @@ impl TableTab {
             .border_color(theme.border)
             .child(Icon::new(Lucide::Funnel).size(ICON_SM).text_color(theme.muted_foreground))
             .child(
-                completion::handlers(div(), &self.completion)
+                completion::handlers(div().id("table-filter"), &self.completion)
                     .when(self.completion.read(cx).is_open(cx), |el| el.key_context(completion::OPEN_CONTEXT))
                     .flex_1()
                     .min_w_0()
