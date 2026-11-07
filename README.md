@@ -12,7 +12,7 @@ Just a focused, native desktop tool for **PostgreSQL**, **MySQL / MariaDB**, **S
 
 🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)** · 🎬 **[Demo video](https://barsql.bare7a.eu/demo.mp4)** · 📖 **[User Guide](guide/README.md)**
 
-https://github.com/user-attachments/assets/95d6dcf5-c285-4993-ba2c-561c87219bdf
+https://github.com/user-attachments/assets/ea4b7bd3-82b9-469b-b99c-4619aeb6e83a
 
 ---
 
