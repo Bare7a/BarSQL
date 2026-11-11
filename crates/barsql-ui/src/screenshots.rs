@@ -853,15 +853,15 @@ ORDER BY 1;";
         robot.act(cx, |_, _, cx| query_tab::set_results_share(40., cx))?;
         robot.workspace(cx, |workspace, window, cx| workspace.close_active(window, cx))?;
 
-        // 15: light theme with the View menu open, over the users table.
+        // 15: light theme with View > Theme > Dark theme open, over the users table.
         robot.activate(cx, "users").await?;
         robot.workspace(cx, |workspace, window, cx| workspace.set_json_open(true, window, cx))?;
         robot.panel_widths(cx).await?;
         robot.act(cx, |_, window, cx| theme::set_choice(theme::ThemeChoice::Light, window, cx))?;
         robot.draw(cx).await;
-        // File is at (44, 17), past the bar's padding, logo and gap. The keys then open View > Theme.
+        // File is at (44, 17), past the bar's padding, logo and gap. The keys then open View > Theme > Dark theme.
         robot.click(cx, point(px(44.), px(17.)), Modifiers::none(), 1).await;
-        robot.keys(cx, "right right down down right").await?;
+        robot.keys(cx, "right right down down right down down down right").await?;
         robot.capture(cx, &shot(15)).await?;
         Ok(())
     }

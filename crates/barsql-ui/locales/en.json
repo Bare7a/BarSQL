@@ -362,7 +362,33 @@
   "theme": {
     "dark": "Dark",
     "light": "Light",
-    "system": "Match system"
+    "system": "Match system",
+    "laterDark": "{{name}} will show when your system switches to dark mode",
+    "laterLight": "{{name}} will show when your system switches to light mode",
+    "darkThemes": "Dark theme",
+    "lightThemes": "Light theme",
+    "select": "Select theme…",
+    "search": "Search themes…",
+    "customize": "Customize current theme…",
+    "openFolder": "Open themes folder",
+    "customName": "{{name}} (custom)",
+    "customNameN": "{{name}} (custom {{n}})",
+    "customizeFailed": "Couldn't save a copy of the theme: {{error}}",
+    "openFile": "Open file",
+    "problems": {
+      "unreadable": "couldn't be read: {{error}}",
+      "notJson": "line {{line}}, column {{column}}: {{error}}",
+      "tooBig": "is over 1 MB, so it was skipped",
+      "noThemes": "has no themes",
+      "missingName": "a theme has no name",
+      "missingMode": "{{theme}} needs \"mode\": \"dark\" or \"light\"",
+      "builtInName": "{{theme}} is a built-in theme's name",
+      "duplicateName": "{{theme}} is already used by another theme",
+      "badValue": "{{theme}}: {{key}} isn't valid",
+      "unknownKey": "{{theme}}: {{key}} isn't a theme key",
+      "more": "and {{count}} more problem",
+      "more_other": "and {{count}} more problems"
+    }
   },
   "commandPalette": {
     "placeholder": "Type a command…",

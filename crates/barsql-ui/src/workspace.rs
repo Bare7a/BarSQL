@@ -42,7 +42,7 @@ use crate::tokens::{ICON_2XS, ICON_XL, ICON_XS, RADIUS, RADIUS_LG, TEXT_LG, TEXT
 use crate::window_state::{self, WindowState};
 use crate::{
     LaunchOptions, about_dialog, command_palette, connection_dialog, context_menu, file_dialogs, form, grid, schema,
-    screenshots, shortcuts, shortcuts_dialog, theme, tips_dialog, title_bar, update_dialog,
+    screenshots, shortcuts, shortcuts_dialog, theme, theme_files, theme_picker, tips_dialog, title_bar, update_dialog,
 };
 
 const SIDEBAR_OPEN_KEY: &str = "barsql-sidebar-open";
@@ -604,6 +604,11 @@ impl Workspace {
             .chain([
                 cx.observe_global::<toast::Toasts>(|_, cx| cx.notify()),
                 cx.observe_window_appearance(window, |_, window, cx| theme::follow_system(window, cx)),
+                cx.observe_window_activation(window, |_, window, cx| {
+                    if window.is_window_active() {
+                        theme_files::refresh(window, cx);
+                    }
+                }),
             ])
             .collect::<Vec<_>>();
         let events = state::bar(cx).events();
@@ -2408,6 +2413,22 @@ impl Render for Workspace {
             .on_action(cx.listener(|_, _: &ThemeDark, window, cx| theme::set_choice(ThemeChoice::Dark, window, cx)))
             .on_action(cx.listener(|_, _: &ThemeLight, window, cx| theme::set_choice(ThemeChoice::Light, window, cx)))
             .on_action(cx.listener(|_, _: &ThemeSystem, window, cx| theme::set_choice(ThemeChoice::System, window, cx)))
+            .on_action(cx.listener(|_, action: &SetTheme, window, cx| theme::pick(&action.name, window, cx)))
+            .on_action(cx.listener(|_, _: &SelectTheme, window, cx| {
+                if !window.has_active_dialog(cx) {
+                    theme_picker::open(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|_, _: &CustomizeTheme, window, cx| {
+                if let Err(error) = theme_files::customize(window, cx) {
+                    toast::error(t_with(cx, "theme.customizeFailed", &[("error", &error.to_string())]), cx);
+                }
+            }))
+            .on_action(cx.listener(|_, _: &OpenThemesFolder, _, cx| {
+                if let Err(error) = theme_files::open_folder(cx) {
+                    toast::error_in(theme_files::folder(cx).display().to_string(), error.to_string(), cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &LanguageEn, window, cx| this.set_language("en", window, cx)))
             .on_action(cx.listener(|this, _: &LanguageDe, window, cx| this.set_language("de", window, cx)))
             .on_action(cx.listener(|this, _: &LanguageBg, window, cx| this.set_language("bg", window, cx)))

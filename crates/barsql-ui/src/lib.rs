@@ -63,6 +63,8 @@ mod table_tab;
 #[cfg(test)]
 mod test_support;
 mod theme;
+mod theme_files;
+mod theme_picker;
 mod tips_dialog;
 mod title_bar;
 mod toast;
@@ -132,6 +134,7 @@ pub fn run(bar: BarApp, options: LaunchOptions) {
         system_quit::init(bar.clone(), cx);
         schema::init(cx);
         saved_queries::init(cx);
+        theme_files::init(cx);
         theme::init(cx);
         actions::init(cx);
         grid::init(cx);

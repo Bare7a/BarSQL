@@ -17,7 +17,7 @@ mod tabs;
 pub mod update;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -57,6 +57,7 @@ pub struct BarApp {
 }
 
 struct Inner {
+    data_dir: PathBuf,
     stores: Stores,
     runtime: tokio::runtime::Handle,
     engines: Mutex<HashMap<String, PooledEngine>>,
@@ -90,6 +91,7 @@ impl BarApp {
         install_default_provider();
         let app = Self {
             inner: Arc::new(Inner {
+                data_dir: data_dir.to_path_buf(),
                 stores: Stores::open(data_dir)?,
                 runtime,
                 engines: Mutex::new(HashMap::new()),
@@ -122,6 +124,10 @@ impl BarApp {
 
     pub fn runtime(&self) -> &tokio::runtime::Handle {
         &self.inner.runtime
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.inner.data_dir
     }
 
     pub fn events(&self) -> async_channel::Receiver<AppEvent> {

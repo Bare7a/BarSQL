@@ -362,7 +362,33 @@
   "theme": {
     "dark": "Тъмна",
     "light": "Светла",
-    "system": "Като системата"
+    "system": "Като системата",
+    "laterDark": "{{name}} ще се покаже, когато системата ви премине в тъмен режим",
+    "laterLight": "{{name}} ще се покаже, когато системата ви премине в светъл режим",
+    "darkThemes": "Тъмна тема",
+    "lightThemes": "Светла тема",
+    "select": "Избор на тема…",
+    "search": "Търсене на теми…",
+    "customize": "Персонализиране на текущата тема…",
+    "openFolder": "Отваряне на папката с теми",
+    "customName": "{{name}} (персонализирана)",
+    "customNameN": "{{name}} (персонализирана {{n}})",
+    "customizeFailed": "Копието на темата не можа да бъде запазено: {{error}}",
+    "openFile": "Отваряне на файла",
+    "problems": {
+      "unreadable": "не може да бъде прочетен: {{error}}",
+      "notJson": "ред {{line}}, колона {{column}}: {{error}}",
+      "tooBig": "е над 1 MB и беше пропуснат",
+      "noThemes": "не съдържа теми",
+      "missingName": "една от темите няма име",
+      "missingMode": "{{theme}} се нуждае от \"mode\": \"dark\" или \"light\"",
+      "builtInName": "{{theme}} е името на вградена тема",
+      "duplicateName": "{{theme}} вече се използва от друга тема",
+      "badValue": "{{theme}}: {{key}} е невалиден",
+      "unknownKey": "{{theme}}: {{key}} не е ключ на тема",
+      "more": "и още {{count}} проблем",
+      "more_other": "и още {{count}} проблема"
+    }
   },
   "commandPalette": {
     "placeholder": "Въведете команда…",

@@ -362,7 +362,33 @@
   "theme": {
     "dark": "Dunkel",
     "light": "Hell",
-    "system": "Wie System"
+    "system": "Wie System",
+    "laterDark": "{{name}} wird angezeigt, sobald Ihr System in den dunklen Modus wechselt",
+    "laterLight": "{{name}} wird angezeigt, sobald Ihr System in den hellen Modus wechselt",
+    "darkThemes": "Dunkles Design",
+    "lightThemes": "Helles Design",
+    "select": "Design auswählen…",
+    "search": "Designs durchsuchen…",
+    "customize": "Aktuelles Design anpassen…",
+    "openFolder": "Design-Ordner öffnen",
+    "customName": "{{name}} (angepasst)",
+    "customNameN": "{{name}} (angepasst {{n}})",
+    "customizeFailed": "Die Kopie des Designs konnte nicht gespeichert werden: {{error}}",
+    "openFile": "Datei öffnen",
+    "problems": {
+      "unreadable": "konnte nicht gelesen werden: {{error}}",
+      "notJson": "Zeile {{line}}, Spalte {{column}}: {{error}}",
+      "tooBig": "ist größer als 1 MB und wurde übersprungen",
+      "noThemes": "enthält keine Designs",
+      "missingName": "ein Design hat keinen Namen",
+      "missingMode": "{{theme}} braucht \"mode\": \"dark\" oder \"light\"",
+      "builtInName": "{{theme}} ist der Name eines eingebauten Designs",
+      "duplicateName": "{{theme}} wird bereits von einem anderen Design verwendet",
+      "badValue": "{{theme}}: {{key}} ist ungültig",
+      "unknownKey": "{{theme}}: {{key}} ist kein Design-Schlüssel",
+      "more": "und {{count}} weiteres Problem",
+      "more_other": "und {{count}} weitere Probleme"
+    }
   },
   "commandPalette": {
     "placeholder": "Befehl eingeben…",

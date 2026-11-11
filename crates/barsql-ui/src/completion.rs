@@ -5,7 +5,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{InputBaseState, InputModeKind};
 use gpui_kit::component::input::{CompletionProvider, InputEvent};
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{ActiveTheme, Icon, Rope, RopeExt, h_flex};
+use gpui_kit::component::{ActiveTheme, Icon, Rope, RopeExt, Theme, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use lsp_types::{
@@ -266,7 +266,7 @@ impl<M: InputModeKind> Completion<M> {
         let suggestion = &self.items[ix];
         let selected = ix == self.selected;
         let palette = &metrics.palette;
-        let (icon, color) = kind_icon(suggestion.item.kind, cx.theme().is_dark());
+        let (icon, color) = kind_icon(suggestion.item.kind, cx.theme());
         let highlight = if selected { palette.selected_highlight } else { palette.highlight };
         let style =
             HighlightStyle { color: Some(highlight), font_weight: Some(FontWeight::BOLD), ..Default::default() };
@@ -334,51 +334,34 @@ struct Metrics {
     row_height: Pixels,
 }
 
-fn palette(cx: &App) -> Palette {
-    let theme = cx.theme();
-    let rgb_hsla = |value: u32| -> Hsla { rgb(value).into() };
-    if theme.is_dark() {
-        Palette {
-            background: theme.sidebar,
-            border: hsla(0., 0., 0.8, 0.2),
-            text: theme.foreground,
-            dim: theme.muted_foreground,
-            selected: rgb_hsla(0x04395e),
-            selected_text: rgb_hsla(0xffffff),
-            hover: rgb_hsla(0x2a2d2e),
-            highlight: rgb_hsla(0x2aaaff),
-            selected_highlight: rgb_hsla(0x2aaaff),
-        }
-    } else {
-        Palette {
-            background: theme.background,
-            border: hsla(0., 0., 0.38, 0.2),
-            text: theme.foreground,
-            dim: theme.muted_foreground,
-            selected: rgb_hsla(0x0060c0),
-            selected_text: rgb_hsla(0xffffff),
-            hover: rgb_hsla(0xe8e8e8),
-            highlight: rgb_hsla(0x0066bf),
-            selected_highlight: rgb_hsla(0xbbe7ff),
-        }
+fn palette(theme: &Theme) -> Palette {
+    Palette {
+        background: theme.popover,
+        border: theme.border,
+        text: theme.foreground,
+        dim: theme.muted_foreground,
+        selected: theme.list_active,
+        selected_text: theme.foreground,
+        hover: theme.list_hover,
+        highlight: theme.primary,
+        selected_highlight: theme.primary,
     }
 }
 
 // The list's background and border, which the editor's hover card shares.
 pub(crate) fn surface(cx: &App) -> (Hsla, Hsla) {
-    let palette = palette(cx);
+    let palette = palette(cx.theme());
     (palette.background, palette.border)
 }
 
-fn kind_icon(kind: Option<CompletionItemKind>, dark: bool) -> (Lucide, Hsla) {
-    let (icon, dark_color, light_color) = match kind {
-        Some(CompletionItemKind::CLASS) => (Lucide::Workflow, 0xee9d28, 0xd67e00),
-        Some(CompletionItemKind::FIELD) => (Lucide::Box, 0x75beff, 0x007acc),
-        Some(CompletionItemKind::MODULE) => (Lucide::Braces, 0xcccccc, 0x616161),
-        Some(CompletionItemKind::FUNCTION | CompletionItemKind::METHOD) => (Lucide::SquareFunction, 0xb180d7, 0x652d90),
-        _ => (Lucide::TextAlignStart, 0xcccccc, 0x616161),
-    };
-    (icon, rgb(if dark { dark_color } else { light_color }).into())
+fn kind_icon(kind: Option<CompletionItemKind>, theme: &Theme) -> (Lucide, Hsla) {
+    match kind {
+        Some(CompletionItemKind::CLASS) => (Lucide::Workflow, theme.yellow),
+        Some(CompletionItemKind::FIELD) => (Lucide::Box, theme.blue),
+        Some(CompletionItemKind::MODULE) => (Lucide::Braces, theme.muted_foreground),
+        Some(CompletionItemKind::FUNCTION | CompletionItemKind::METHOD) => (Lucide::SquareFunction, theme.magenta),
+        _ => (Lucide::TextAlignStart, theme.muted_foreground),
+    }
 }
 
 // First letter must start a word (label start, after a separator, or a capital after a lowercase letter) and
@@ -462,7 +445,7 @@ impl<M: InputModeKind> Render for Completion<M> {
             Some((font, row)) => (font.to_pixels(window.rem_size()), row.to_pixels(window.rem_size())),
             None => (px(theme::editor_font_size(cx)), px(theme::editor_font_size(cx) + 7.)),
         };
-        let metrics = Metrics { palette: palette(cx), font_size, row_height };
+        let metrics = Metrics { palette: palette(cx.theme()), font_size, row_height };
         let count = self.items.len();
         let height = metrics.row_height * count.min(VISIBLE_ROWS) as f32;
         let (background, border) = (metrics.palette.background, metrics.palette.border);
@@ -471,7 +454,7 @@ impl<M: InputModeKind> Render for Completion<M> {
             "completion-rows",
             count,
             cx.processor(move |this, range: Range<usize>, _, cx| {
-                let metrics = Metrics { palette: palette(cx), font_size, row_height };
+                let metrics = Metrics { palette: palette(cx.theme()), font_size, row_height };
                 range.map(|ix| this.row(ix, &metrics, cx)).collect()
             }),
         )
@@ -528,7 +511,42 @@ impl<M: InputModeKind> Completion<M> {
 
 #[cfg(test)]
 mod tests {
-    use super::{expand_snippet, fuzzy};
+    use gpui_kit::component::{Theme, ThemeMode};
+    use lsp_types::CompletionItemKind;
+
+    use super::{expand_snippet, fuzzy, kind_icon, palette};
+
+    fn barsql(mode: ThemeMode) -> Theme {
+        let mut theme = Theme::default();
+        theme.apply_config(&crate::theme_files::built_in().barsql(mode).config);
+        theme
+    }
+
+    #[test]
+    fn the_completion_list_takes_its_colors_from_the_theme() {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            let theme = barsql(mode);
+            let p = palette(&theme);
+            let surface = (theme.popover, theme.border, theme.foreground, theme.muted_foreground);
+            assert_eq!((p.background, p.border, p.text, p.dim), surface, "{mode:?}");
+            let rows = (theme.list_active, theme.foreground, theme.list_hover, theme.primary, theme.primary);
+            assert_eq!((p.selected, p.selected_text, p.hover, p.highlight, p.selected_highlight), rows, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn completion_icons_use_the_theme_hues() {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            let theme = barsql(mode);
+            let color = |kind: Option<CompletionItemKind>| kind_icon(kind, &theme).1;
+            assert_eq!(color(Some(CompletionItemKind::CLASS)), theme.yellow);
+            assert_eq!(color(Some(CompletionItemKind::FIELD)), theme.blue);
+            assert_eq!(color(Some(CompletionItemKind::FUNCTION)), theme.magenta);
+            assert_eq!(color(Some(CompletionItemKind::METHOD)), theme.magenta);
+            assert_eq!(color(Some(CompletionItemKind::MODULE)), theme.muted_foreground);
+            assert_eq!(color(None), theme.muted_foreground);
+        }
+    }
 
     #[test]
     fn snippets_place_the_caret_and_unescape() {

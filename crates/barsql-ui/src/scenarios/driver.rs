@@ -370,6 +370,11 @@ impl Driver<'_> {
         toasts.into_iter().filter(|(kind, _)| *kind == ToastKind::Error).map(|(_, text)| text).collect()
     }
 
+    pub fn info_toasts(&mut self) -> Vec<String> {
+        let toasts = self.cx.update(|_, cx| toast::messages(cx));
+        toasts.into_iter().filter(|(kind, _)| *kind == ToastKind::Info).map(|(_, text)| text).collect()
+    }
+
     pub fn grid(&mut self) -> Option<Entity<Grid>> {
         let results = self.results();
         self.cx.update(|_, cx| results.read(cx).active_grid())

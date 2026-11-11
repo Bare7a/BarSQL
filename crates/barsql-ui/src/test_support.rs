@@ -67,6 +67,7 @@ impl Env {
             state::init(app, cx);
             schema::init(cx);
             saved_queries::init(cx);
+            crate::theme_files::init(cx);
             theme::init(cx);
             actions::init(cx);
             grid::init(cx);

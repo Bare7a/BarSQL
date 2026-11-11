@@ -372,7 +372,33 @@
   "theme": {
     "dark": "Oscuro",
     "light": "Claro",
-    "system": "Igual que el sistema"
+    "system": "Igual que el sistema",
+    "laterDark": "{{name}} se mostrará cuando tu sistema cambie al modo oscuro",
+    "laterLight": "{{name}} se mostrará cuando tu sistema cambie al modo claro",
+    "darkThemes": "Tema oscuro",
+    "lightThemes": "Tema claro",
+    "select": "Seleccionar tema…",
+    "search": "Buscar temas…",
+    "customize": "Personalizar el tema actual…",
+    "openFolder": "Abrir la carpeta de temas",
+    "customName": "{{name}} (personalizado)",
+    "customNameN": "{{name}} (personalizado {{n}})",
+    "customizeFailed": "No se pudo guardar una copia del tema: {{error}}",
+    "openFile": "Abrir archivo",
+    "problems": {
+      "unreadable": "no se pudo leer: {{error}}",
+      "notJson": "línea {{line}}, columna {{column}}: {{error}}",
+      "tooBig": "supera 1 MB, así que se omitió",
+      "noThemes": "no tiene temas",
+      "missingName": "un tema no tiene nombre",
+      "missingMode": "{{theme}} necesita \"mode\": \"dark\" o \"light\"",
+      "builtInName": "{{theme}} es el nombre de un tema integrado",
+      "duplicateName": "{{theme}} ya lo usa otro tema",
+      "badValue": "{{theme}}: {{key}} no es válido",
+      "unknownKey": "{{theme}}: {{key}} no es una clave de tema",
+      "more": "y {{count}} problema más",
+      "more_other": "y {{count}} problemas más"
+    }
   },
   "commandPalette": {
     "placeholder": "Escribe un comando…",

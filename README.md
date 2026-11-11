@@ -173,6 +173,7 @@ Every feature in detail, one area per page:
 | [📥 Import & Export](guide/import-export.md) | CSV and SQL import, export formats |
 | [🤖 AI Assistants (MCP)](guide/ai-assistants.md) | Letting AI apps read your databases, and change them only where you allow it |
 | [🌍 The App](guide/app.md) | Themes, languages, palettes, the status bar, keyboard shortcuts, the data folder, auto updates |
+| [🎨 Themes](guide/themes.md) | The 16 built-in themes, Select theme…, and making your own |
 
 ---
 

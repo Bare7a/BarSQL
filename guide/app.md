@@ -1,6 +1,6 @@
 # 🌍 The App
 
-- **Dark & light** themes, or **match the system** and follow it as it changes
+- **16 themes** - Catppuccin, One, Dracula, Tokyo Night, Nord, Gruvbox, Solarized and BarSQL's own - plus **your own**. Pick one for dark and one for light, or **match the system** and follow it as it changes ([Themes](themes.md))
 - **Welcome screen** while no tab is open - a new connection or a SQLite file to start with, then a new query or the tab you closed last, plus the shortcuts to get around
 - **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
 - **English**, **Deutsch**, **Български** and **Español**
@@ -50,9 +50,10 @@ BarSQL-data/
   query_history.json
   saved_queries.json
   settings.json
+  themes/
 ```
 
-`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts. `mcp.log` appears once an AI assistant has used BarSQL, and `crash.log` if BarSQL ever hits a bug, whether it closes or says so in an error.
+`settings.json` keeps your UI preferences - theme, language, layout and keyboard shortcuts. `themes/` holds [your own themes](themes.md), once you add one. `mcp.log` appears once an AI assistant has used BarSQL, and `crash.log` if BarSQL ever hits a bug, whether it closes or says so in an error.
 
 When the app sits somewhere writable, that folder is created **right next to the executable** (beside the `.app` bundle on macOS) - move it to a USB stick, network drive, or another PC and it just works.
 

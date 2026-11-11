@@ -1,17 +1,18 @@
 use std::rc::Rc;
 
 use gpui_kit::component::GlobalState;
+use gpui_kit::component::ThemeMode;
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::{
     Action, App, Entity, Global, KeyBinding, KeyBindingContextPredicate, KeybindingKeystroke, Keystroke, Menu,
-    MenuItem, OsAction, SystemMenuType, WeakEntity, Window, actions,
+    MenuItem, OsAction, SharedString, SystemMenuType, WeakEntity, Window, actions,
 };
 
 use crate::i18n::{I18n, t};
 use crate::state::setting_bool;
-use crate::theme::ThemeChoice;
+use crate::theme::{MenuEntry, ThemeChoice};
 
 actions!(
     barsql,
@@ -28,6 +29,9 @@ actions!(
         ThemeDark,
         ThemeLight,
         ThemeSystem,
+        SelectTheme,
+        CustomizeTheme,
+        OpenThemesFolder,
         LanguageEn,
         LanguageDe,
         LanguageBg,
@@ -65,6 +69,13 @@ actions!(
         BringAllToFront,
     ]
 );
+
+// The theme lists' items. No keymap can name a theme, so it needs no JSON form.
+#[derive(Clone, Debug, PartialEq, Action)]
+#[action(namespace = barsql, no_json)]
+pub struct SetTheme {
+    pub name: SharedString,
+}
 
 // Quit isn't remappable. Remappable shortcuts and their menu accelerators come from `shortcuts`.
 pub fn init(cx: &mut App) {
@@ -152,12 +163,26 @@ fn menus(cx: &App) -> Vec<Menu> {
         MenuItem::os_action(t(cx, "menu.selectAll"), SelectAll, OsAction::SelectAll),
     ];
     let choice = crate::theme::choice(cx);
+    let theme_list = |mode: ThemeMode, label: &str| {
+        let items = crate::theme::menu_entries(mode, cx).into_iter().map(|entry| match entry {
+            MenuEntry::Theme { name, checked } => MenuItem::action(name.clone(), SetTheme { name }).checked(checked),
+            MenuEntry::Separator => MenuItem::separator(),
+        });
+        MenuItem::submenu(menu(t(cx, label), items.collect()))
+    };
     let theme = menu(
         t(cx, "viewSections.theme"),
         vec![
             MenuItem::action(t(cx, "theme.dark"), ThemeDark).checked(choice == ThemeChoice::Dark),
             MenuItem::action(t(cx, "theme.light"), ThemeLight).checked(choice == ThemeChoice::Light),
             MenuItem::action(t(cx, "theme.system"), ThemeSystem).checked(choice == ThemeChoice::System),
+            MenuItem::separator(),
+            theme_list(ThemeMode::Dark, "theme.darkThemes"),
+            theme_list(ThemeMode::Light, "theme.lightThemes"),
+            MenuItem::separator(),
+            MenuItem::action(t(cx, "theme.select"), SelectTheme),
+            MenuItem::action(t(cx, "theme.customize"), CustomizeTheme),
+            MenuItem::action(t(cx, "theme.openFolder"), OpenThemesFolder),
         ],
     );
     let lang = cx.global::<I18n>().lang();
