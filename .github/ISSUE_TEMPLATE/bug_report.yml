@@ -46,6 +46,7 @@ body:
         - Windows installer
         - Windows zip or BarSQL.exe
         - macOS zip or dmg
+        - Homebrew
         - Linux tar.gz or standalone binary
         - AppImage
         - deb, rpm or pkg.tar.zst

@@ -2,7 +2,7 @@
 
 1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`, `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current version.
 2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
-3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds for Linux (x86-64 and ARM64, in Ubuntu 22.04 containers), Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks.
+3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds for Linux (x86-64 and ARM64, in Ubuntu 22.04 containers), Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks, then points the [Homebrew](#homebrew) cask at the new zips.
 
 Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
 
@@ -42,6 +42,27 @@ With these repository secrets, the release workflow signs the apps and the dmg w
 - `packaging/macos/DeveloperIDG2CA.cer` is Apple's Developer ID intermediate certificate, which a `.p12` export leaves out and the workflow adds to its keychain. It expires in September 2031; replace it from [apple.com/certificateauthority](https://www.apple.com/certificateauthority/) before then.
 - To try the secrets without publishing, run the workflow by hand with the version left empty. Unzip `BarSQL-darwin-arm64.zip` from the run's `dist-macos` artifact: `spctl -a -vv BarSQL.app` should report `source=Notarized Developer ID`, and `xcrun stapler validate` should pass for the app and the dmg.
 - Locally, `BARSQL_MACOS_IDENTITY` signs with a certificate in the login keychain, named as `"Developer ID Application: …"` or, when two share that name, by the SHA-1 hash `security find-identity -v -p codesigning` lists. `BARSQL_NOTARY_KEY` (the `.p8` file's path), `BARSQL_NOTARY_KEY_ID` and `BARSQL_NOTARY_ISSUER` notarize too.
+
+## Homebrew
+
+`brew install bare7a/tap/barsql` installs the Mac app from [Bare7a/homebrew-tap](https://github.com/Bare7a/homebrew-tap). Once a release is out, the workflow's `homebrew` job fills in `packaging/homebrew/barsql.rb` with the version and the zips' digests from `SHA256SUMS` and pushes it to the tap as `Casks/barsql.rb`, so change the cask here, not in the tap. A fix that can't wait for the next release goes in both.
+
+If only the `homebrew` job fails, the release is already out: re-run just that job, and only for the newest release, since it writes its own version to the tap.
+
+The job pushes with a deploy key whose private half is the `HOMEBREW_TAP_DEPLOY_KEY` secret. To make one in a POSIX shell (Terminal on macOS, Git Bash on Windows), with `gh` signed in as Bare7a:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C 'BarSQL release workflow' -f tap-key
+gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo Bare7a/BarSQL < tap-key
+cat tap-key.pub
+rm tap-key tap-key.pub
+```
+
+Then add the printed key on the tap's [Settings → Deploy keys](https://github.com/Bare7a/homebrew-tap/settings/keys) with **Allow write access**. A key added there stays, while one added with `gh repo deploy-key add` is deleted whenever that `gh` login's token is revoked.
+
+- The cask sets `auto_updates`, since the app updates itself, so a plain `brew upgrade` only replaces BarSQL when the installed app is older than the cask.
+- After `brew tap bare7a/tap` and `brew trust --cask bare7a/tap/barsql` (one `brew install bare7a/tap/barsql` does both), `brew style --cask bare7a/tap/barsql` and `brew audit --cask --strict --online bare7a/tap/barsql` check the cask.
+- Homebrew's own [homebrew/cask](https://github.com/Homebrew/homebrew-cask), which would make it plain `brew install barsql`, takes an app once its GitHub repository has 75 stars, 30 forks or 30 watchers, or three times that when its owner submits it.
 
 ## How Updates Work
 

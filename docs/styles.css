@@ -95,6 +95,9 @@ code {
   white-space: nowrap;
 }
 
+/* Faint text on the code background is under 4.5:1 contrast in the light theme */
+.dl-alt code, .dl-all code, .matrix-notes code { color: var(--muted); }
+
 h1, h2, h3 { margin: 0; font-family: var(--font-display); line-height: 1.15; text-wrap: balance; }
 h2 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 650; letter-spacing: -0.035em; line-height: 1.08; }
 h3 { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.01em; }

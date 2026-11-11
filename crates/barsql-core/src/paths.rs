@@ -26,6 +26,8 @@ fn resolve() -> PathBuf {
         .as_deref()
         .filter(|_| !dev_mode)
         .map(|exe| portable_data_dir(env::consts::OS, exe))
+        // Admins can write to /Applications, but every account shares it, so a data folder is only reused there.
+        .filter(|cand| cand.exists() || !cand.parent().is_some_and(root_owned))
         .filter(|cand| is_writable_dir(cand));
     resolve_data_dir(dev_mode, wd.as_deref(), portable.as_deref(), cfg_dir.as_deref(), exe_dir.as_deref())
 }
@@ -88,6 +90,17 @@ fn is_writable_dir(dir: &Path) -> bool {
         }
         Err(_) => false,
     }
+}
+
+#[cfg(unix)]
+fn root_owned(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(dir).is_ok_and(|meta| meta.uid() == 0)
+}
+
+#[cfg(not(unix))]
+fn root_owned(_dir: &Path) -> bool {
+    false
 }
 
 fn executable_dir() -> Option<PathBuf> {
@@ -190,6 +203,13 @@ mod tests {
         assert!(is_writable_dir(tmp.path()));
         assert!(is_writable_dir(&tmp.path().join("child")));
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_owned_folders() {
+        assert!(root_owned(Path::new("/")));
+        assert!(!root_owned(Path::new("/no/such/folder")));
     }
 
     #[cfg(unix)]

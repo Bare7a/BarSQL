@@ -37,7 +37,7 @@ Anything that gets past what BarSQL means to allow, for example:
 - `verify-full`, `verify-ca`, `strict` or the SSH host key check accepting a server it should refuse
 - SQL loading a SQLite extension, which only a connection's extension list may do
 - The updater installing anything but the release's own file, or its admin step running anything else
-- The release workflow, the macOS signing and the attestations
+- The release workflow, the macOS signing, the attestations and the Homebrew tap (`Bare7a/homebrew-tap`)
 - A dependency's vulnerability that reaches BarSQL
 
 ## Known Limits
@@ -50,6 +50,7 @@ These are known limits rather than vulnerabilities:
 - **SQLite extensions are native code** and run with BarSQL's rights, so load only ones you trust.
 - **AI assistants do what you allow.** What they read goes to their AI service, and text in that data can steer them, so keep **Ask before running changes** on where a stray change would hurt.
 - **Updates trust GitHub.** The updater checks each download against the release's `SHA256SUMS`, fetched from GitHub over HTTPS, and refuses a file it doesn't list. It doesn't check the attestations below.
+- **Homebrew trusts the tap.** A Homebrew install checks the zip against the digest in the tap's cask, which the release workflow writes from `SHA256SUMS` with a deploy key. Homebrew runs the cask as code and doesn't check the attestations either.
 - **The Windows builds aren't code-signed yet**, so SmartScreen asks before the first launch.
 
 Attacks that need code already running as you, or admin rights, are out of scope too, as are problems in the database servers themselves; report those to their vendors.

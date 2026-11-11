@@ -36,6 +36,16 @@ No account required - just download and run.
 
 Every build above updates itself. The installer, the Linux packages and copies in protected folders ask for admin rights first.
 
+### Homebrew
+
+On macOS, [Homebrew](https://brew.sh) installs it too, and the app keeps updating itself:
+
+```bash
+brew install bare7a/tap/barsql
+```
+
+Already have BarSQL in Applications? Add `--adopt` to take over that copy.
+
 ### First launch
 
 The macOS app is signed with a Developer ID and notarized by Apple, so it opens like any other app.

@@ -308,3 +308,36 @@ jobs:
           files: dist/*
           generate_release_notes: true
           draft: false
+
+  # github.token can't push to another repository, so the tap takes a deploy key.
+  homebrew:
+    needs: [version, release]
+    if: github.repository == 'Bare7a/BarSQL'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: Bare7a/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+
+      - name: Update the cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sums="$(gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --output -)"
+          digest() { awk -v file="$1" '$2 == file { print $1 }' <<<"$sums"; }
+          sed -e "s/@VERSION@/$VERSION/" \
+            -e "s/@SHA256_ARM64@/$(digest BarSQL-darwin-arm64.zip)/" \
+            -e "s/@SHA256_AMD64@/$(digest BarSQL-darwin-amd64.zip)/" \
+            packaging/homebrew/barsql.rb > tap/Casks/barsql.rb
+          cd tap
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -am "barsql $VERSION"
+          git push

@@ -57,7 +57,7 @@ BarSQL-data/
 
 When the app sits somewhere writable, that folder is created **right next to the executable** (beside the `.app` bundle on macOS) - move it to a USB stick, network drive, or another PC and it just works.
 
-If the app lives in a read-only location (e.g. `/Applications` or a system path), it falls back to the OS per-user data directory instead:
+If the app lives in a read-only location or a system folder such as `/Applications`, it uses the OS per-user data directory instead, unless a `BarSQL-data` folder is already next to it:
 
 - **macOS** → `~/Library/Application Support/BarSQL-data`
 - **Linux** → `~/.config/BarSQL-data`
