@@ -20,6 +20,8 @@ pub struct Command {
     pub action: Box<dyn Action>,
     // As the keymap has it where the palette was opened.
     pub shortcut: Option<String>,
+    // A word the row also answers to, shown where a shortcut would be.
+    pub tag: Option<String>,
 }
 
 // The menus' actions and the editor's, in menu order, labelled as the menus and the shortcuts list label them.
@@ -84,7 +86,7 @@ pub fn commands(focus: &FocusHandle, window: &Window, cx: &App) -> Vec<Command> 
             let shortcut = window
                 .highest_precedence_binding_for_action_in(action.as_ref(), focus)
                 .map(|binding| binding.keystrokes().iter().map(keystroke_label).collect::<Vec<_>>().join(" "));
-            Command { label, action, shortcut }
+            Command { label, action, shortcut, tag: None }
         })
         .collect()
 }
@@ -95,7 +97,10 @@ pub fn rank(query: &str, commands: &[Command]) -> Vec<(usize, Vec<Range<usize>>)
     let mut matches: Vec<(usize, f64, Vec<Range<usize>>)> = commands
         .iter()
         .enumerate()
-        .filter_map(|(ix, command)| rank_candidate(&query, &command.label, &[]).map(|m| (ix, m.score, m.ranges)))
+        .filter_map(|(ix, command)| {
+            let tag = command.tag.as_deref().unwrap_or_default();
+            rank_candidate(&query, &command.label, &[tag]).map(|m| (ix, m.score, m.ranges))
+        })
         .collect();
     // Stable, so equal scores keep menu order.
     matches.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -123,6 +128,8 @@ pub struct CommandPalette {
     commands: Vec<Command>,
     items: Vec<(usize, Vec<Range<usize>>)>,
     active: usize,
+    // The row the list opened on, where an emptied query goes back to.
+    home: usize,
     scroll: ScrollHandle,
     hooks: Hooks,
     _subscription: Subscription,
@@ -147,13 +154,13 @@ impl CommandPalette {
         let items = rank("", &commands);
         let scroll = ScrollHandle::new();
         scroll.scroll_to_item(active);
-        Self { input, commands, items, active, scroll, hooks, _subscription: subscription }
+        Self { input, commands, items, active, home: active, scroll, hooks, _subscription: subscription }
     }
 
     fn set_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.items = rank(query, &self.commands);
-        self.active = 0;
-        self.scroll.scroll_to_item(0);
+        self.active = if query.trim().is_empty() { self.home } else { 0 };
+        self.scroll.scroll_to_item(self.active);
         self.cursor_moved(window, cx);
         cx.notify();
     }
@@ -232,7 +239,7 @@ impl CommandPalette {
                 this.confirm(window, cx);
             }))
             .child(div().flex_1().min_w_0().truncate().text_size(TEXT_BASE).child(label))
-            .when_some(command.shortcut.clone(), |el, shortcut| {
+            .when_some(command.shortcut.clone().or_else(|| command.tag.clone()), |el, shortcut| {
                 el.child(
                     div()
                         .flex_none()
@@ -339,7 +346,16 @@ mod tests {
     use crate::actions::NewTab;
 
     fn command(label: &str) -> Command {
-        Command { label: label.into(), action: Box::new(NewTab), shortcut: None }
+        Command { label: label.into(), action: Box::new(NewTab), shortcut: None, tag: None }
+    }
+
+    #[test]
+    fn a_tag_finds_rows_whose_label_doesnt_say_it() {
+        let tagged = |label: &str, tag: &str| Command { tag: Some(tag.into()), ..command(label) };
+        let commands = [tagged("Nord", "Dark"), tagged("One Light", "Light"), tagged("One Dark", "Dark")];
+        let order = |query: &str| rank(query, &commands).into_iter().map(|(ix, _)| ix).collect::<Vec<_>>();
+        assert_eq!(order("dark"), [2, 0], "a label that says it comes first");
+        assert_eq!(order("light"), [1]);
     }
 
     #[test]

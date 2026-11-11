@@ -1,6 +1,6 @@
 # 🌍 The App
 
-- **16 themes** - Catppuccin, One, Dracula, Tokyo Night, Nord, Gruvbox, Solarized and BarSQL's own - plus **your own**. Pick one for dark and one for light, or **match the system** and follow it as it changes ([Themes](themes.md))
+- **20 themes** - VS Code, Catppuccin, One, Dracula, Tokyo Night, Nord, Gruvbox, Solarized and BarSQL's own - plus **your own**. Pick one for dark and one for light, or **match the system** and follow it as it changes ([Themes](themes.md))
 - **Welcome screen** while no tab is open - a new connection or a SQLite file to start with, then a new query or the tab you closed last, plus the shortcuts to get around
 - **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
 - **English**, **Deutsch**, **Български** and **Español**

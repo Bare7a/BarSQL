@@ -11,4 +11,4 @@ Everything BarSQL does, one area per page. For downloads and screenshots, see th
 | [📥 Import & Export](import-export.md) | CSV and SQL import, export formats |
 | [🤖 AI Assistants (MCP)](ai-assistants.md) | Letting AI apps read your databases, and change them only where you allow it |
 | [🌍 The App](app.md) | Themes, languages, palettes, the status bar, keyboard shortcuts, the data folder, auto updates |
-| [🎨 Themes](themes.md) | The 16 built-in themes, Select theme…, and making your own |
+| [🎨 Themes](themes.md) | The 20 built-in themes, Select theme…, and making your own |

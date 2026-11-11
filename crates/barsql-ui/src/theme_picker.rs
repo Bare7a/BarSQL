@@ -16,7 +16,8 @@ pub fn open(window: &mut Window, cx: &mut App) -> Entity<CommandPalette> {
         for entry in theme::ordered(mode, cx) {
             let name = entry.config.name.clone();
             let label = name.to_string();
-            commands.push(Command { label, action: Box::new(SetTheme { name }), shortcut: Some(tag.to_string()) });
+            let tag = Some(tag.to_string());
+            commands.push(Command { label, action: Box::new(SetTheme { name }), shortcut: None, tag });
         }
     }
     let active = commands.iter().position(|command| command.label == showing.as_ref()).unwrap_or(0);

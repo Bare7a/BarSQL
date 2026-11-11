@@ -3,9 +3,22 @@ use std::time::Duration;
 use barsql_app::BarApp;
 use barsql_core::{ConnectionConfig, DriverType};
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext as _, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
+use gpui_kit::{AppContext as _, Context, Entity, Hsla, Render, TestAppContext, VisualTestContext, Window};
 
 use crate::{actions, grid, list_nav, plan_view, saved_queries, schema, schema_tree, shortcuts, state, theme};
+
+// WCAG 2 contrast of `top`, as it shows over `base`, against `base`.
+pub fn contrast(top: Hsla, base: Hsla) -> f32 {
+    let luminance = |color: Hsla| {
+        let (top, base) = (color.to_rgb(), base.to_rgb());
+        let shown = |top: f32, base: f32| top * color.a + base * (1. - color.a);
+        let linear = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        let [r, g, b] = [shown(top.r, base.r), shown(top.g, base.g), shown(top.b, base.b)].map(linear);
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let (a, b) = (luminance(top), luminance(Hsla { a: 1., ..base }));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
 
 // "mod" means the platform's command key, as in the default shortcuts.
 pub fn chord(keys: &str) -> String {

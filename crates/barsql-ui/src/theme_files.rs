@@ -6,7 +6,9 @@ use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use gpui_kit::component::highlighter::{HighlightThemeStyle, SyntaxColors};
-use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode, ThemeSet, try_parse_color};
+use gpui_kit::component::{
+    Theme, ThemeConfig, ThemeConfigColors, ThemeMode, ThemeSet, try_parse_background, try_parse_color,
+};
 use gpui_kit::{App, Global, SharedString, Window};
 use serde_json::{Map, Value, json};
 
@@ -26,6 +28,7 @@ const BUILT_IN: &[&str] = &[
     include_str!("../themes/nord.json"),
     include_str!("../themes/gruvbox.json"),
     include_str!("../themes/solarized.json"),
+    include_str!("../themes/vscode.json"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -310,7 +313,7 @@ pub fn load_folder(dir: &Path, themes: &Themes) -> FolderLoad {
                                 let (config, json) = (Rc::new(config), Rc::new(json));
                                 load.entries.push(ThemeEntry { config, json, author, url, source });
                             }
-                            Err(error) => problems.push(Problem::BadValue { theme: name, key: error.to_string() }),
+                            Err(error) => problems.push(Problem::Unreadable(format!("{name}: {error}"))),
                         }
                     }
                 }
@@ -362,8 +365,9 @@ fn clean_theme(
             "name" | "mode" => {}
             key if IGNORED_KEYS.contains(&key) => {}
             "colors" => {
-                let valid = |_: &str, value: &Value| {
-                    value.is_null() || value.as_str().is_some_and(|color| try_parse_color(color).is_ok())
+                let valid = |key: &str, value: &Value| {
+                    let color = |color: &str| try_parse_color(color).is_ok() || paints_gradient(key, color, mode);
+                    value.is_null() || value.as_str().is_some_and(color)
                 };
                 let colors = clean_section(value, "colors", &KNOWN.colors, valid, &name, problems);
                 clean.insert(key.into(), Value::Object(colors));
@@ -376,6 +380,17 @@ fn clean_theme(
     }
     fill_syntax(&mut clean, &themes.barsql(mode).json["highlight"]["syntax"]);
     Some((name, Value::Object(clean)))
+}
+
+// A gradient counts only on a key GPUI Kit paints one for. On any other it would quietly become the default color.
+fn paints_gradient(key: &str, value: &str, mode: ThemeMode) -> bool {
+    let tokens = |colors: Value| {
+        let config = serde_json::from_value::<ThemeConfig>(json!({ "mode": mode, "colors": colors })).ok()?;
+        let mut theme = Theme::default();
+        theme.apply_config(&Rc::new(config));
+        Some(theme.tokens)
+    };
+    try_parse_background(value).is_ok() && tokens(json!({ key: value })) != tokens(json!({}))
 }
 
 // Keeps the known keys whose values pass `valid`; reports the rest as `section["key"]`.
@@ -427,15 +442,20 @@ fn clean_highlight(value: &Value, theme: &str, problems: &mut Vec<Problem>) -> V
     Value::Object(clean)
 }
 
-// Syntax colors a theme leaves out come from BarSQL's; GPUI Kit would keep the previous theme's.
+// Syntax colors a theme leaves out come from BarSQL's; GPUI Kit would keep the previous theme's. Not the ones
+// under a key it set, which GPUI Kit colors like that key: `punctuation.bracket` as `punctuation`.
 fn fill_syntax(theme: &mut Map<String, Value>, base: &Value) {
     let highlight = theme.entry("highlight").or_insert_with(|| json!({}));
     let Some(syntax) = highlight.as_object_mut().map(|h| h.entry("syntax").or_insert_with(|| json!({}))) else {
         return;
     };
     if let (Some(syntax), Some(base)) = (syntax.as_object_mut(), base.as_object()) {
+        let set: HashSet<String> = syntax.keys().cloned().collect();
         for (key, style) in base {
-            syntax.entry(key.clone()).or_insert_with(|| style.clone());
+            let parent = key.split(['.', '_']).next().unwrap_or(key);
+            if !set.contains(key) && !set.contains(parent) {
+                syntax.insert(key.clone(), style.clone());
+            }
         }
     }
 }
@@ -453,10 +473,15 @@ pub fn slug(name: &str) -> String {
     if slug.is_empty() { "theme".into() } else { slug.into() }
 }
 
-// Saves the theme showing now as an editable copy in the folder, switches to it and opens the file.
+// Saves the theme showing now as an editable copy in the folder, switches to it and opens the file. A theme
+// from the folder is editable as it is, so its own file opens.
 pub fn customize(window: &mut Window, cx: &mut App) -> anyhow::Result<PathBuf> {
     use gpui_kit::component::ActiveTheme as _;
     let source = crate::theme::slot(cx.theme().mode, cx);
+    if let Source::File(path) = &source.source {
+        open_path(path, cx);
+        return Ok(path.clone());
+    }
     let dir = folder(cx);
     let base = source.config.name.to_string();
     let names: HashSet<String> = themes(cx).all().map(|entry| entry.config.name.to_lowercase()).collect();
@@ -530,7 +555,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use gpui_kit::component::{ThemeMode, try_parse_color};
+    use gpui_kit::component::{Theme, ThemeMode, try_parse_color};
     use serde_json::Value;
 
     use super::{
@@ -577,6 +602,10 @@ mod tests {
             "Gruvbox Light",
             "Solarized Dark",
             "Solarized Light",
+            "VS Code Dark Modern",
+            "VS Code Dark+",
+            "VS Code Light Modern",
+            "VS Code Light+",
         ];
         assert_eq!(names, expected);
     }
@@ -649,17 +678,22 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
+    const SURFACES: [&str; 3] = ["background", "sidebar.background", "popover.background"];
+
     #[test]
     fn built_in_themes_are_readable() {
         for entry in built_in().all() {
             let (colors, highlight) = (&entry.json["colors"], &entry.json["highlight"]);
             let c = |key: &str| rgba(&colors[key]);
             let editor = rgba(&highlight["editor.background"]);
+            // GPUI Kit shows a selection at 30% opacity at most.
+            let mut selection = c("selection.background");
+            selection[3] = selection[3].min(0.3);
             let mut pairs = vec![
-                ("foreground on background".to_string(), c("foreground"), c("background"), 4.5),
-                ("sidebar text".into(), c("sidebar.foreground"), c("sidebar.background"), 4.5),
-                ("popover text".into(), c("popover.foreground"), c("popover.background"), 4.5),
-                ("table header text".into(), c("table.head.foreground"), c("table.head.background"), 4.5),
+                ("foreground on background".to_string(), c("foreground"), c("background"), 7.),
+                ("sidebar text".into(), c("sidebar.foreground"), c("sidebar.background"), 6.),
+                ("popover text".into(), c("popover.foreground"), c("popover.background"), 6.),
+                ("table header text".into(), c("table.head.foreground"), c("table.head.background"), 6.),
                 (
                     "text on an active list row".into(),
                     c("foreground"),
@@ -672,7 +706,7 @@ mod tests {
                     over(c("table.active.background"), c("table.background")),
                     4.5,
                 ),
-                ("editor text".into(), rgba(&highlight["editor.foreground"]), editor, 4.5),
+                ("editor text".into(), rgba(&highlight["editor.foreground"]), editor, 7.),
                 ("primary as text on background".into(), c("primary.background"), c("background"), 3.),
                 ("primary as text on a popover".into(), c("primary.background"), c("popover.background"), 3.),
                 (
@@ -681,15 +715,115 @@ mod tests {
                     over(c("list.active.background"), c("popover.background")),
                     2.5,
                 ),
-                ("muted text on background".into(), c("muted.foreground"), c("background"), 3.),
-                ("muted text on the sidebar".into(), c("muted.foreground"), c("sidebar.background"), 3.),
+                ("muted text on background".into(), c("muted.foreground"), c("background"), 4.5),
+                ("muted text on the sidebar".into(), c("muted.foreground"), c("sidebar.background"), 4.),
+                ("muted text on a popover".into(), c("muted.foreground"), c("popover.background"), 4.),
+                ("an inactive tab's text".into(), c("tab.foreground"), c("tab_bar.background"), 4.),
+                ("line numbers".into(), rgba(&highlight["editor.line_number"]), editor, 3.),
+                // BarSQL draws its panels, grid and buttons with 1px lines, so those have to show too.
+                ("borders on background".into(), c("border"), c("background"), 1.4),
+                ("borders on the sidebar".into(), c("sidebar.border"), c("sidebar.background"), 1.3),
+                ("borders on a popover".into(), c("border"), c("popover.background"), 1.3),
+                ("a hovered row on background".into(), c("list.hover.background"), c("background"), 1.1),
+                ("the scrollbar thumb".into(), c("scrollbar.thumb.background"), c("background"), 1.5),
+                ("a selection in the editor".into(), selection, editor, 1.3),
+                (
+                    "editor text on a selection".into(),
+                    rgba(&highlight["editor.foreground"]),
+                    over(selection, editor),
+                    3.,
+                ),
             ];
-            for (key, style) in highlight["syntax"].as_object().expect("syntax colors") {
-                pairs.push((format!("syntax {key}"), rgba(&style["color"]), editor, 2.));
+            // Status and icon colors are also drawn as text and icons, on any of the three surfaces.
+            let marks = [
+                "danger.background",
+                "warning.background",
+                "success.background",
+                "base.yellow",
+                "base.blue",
+                "base.magenta",
+                "link",
+            ];
+            for (mark, surface) in marks.iter().flat_map(|mark| SURFACES.map(|surface| (mark, surface))) {
+                pairs.push((format!("{mark} as text on {surface}"), c(mark), c(surface), 3.));
             }
+            // A badge is its color as text over a tint of the same color.
+            let badges = ["danger.background", "warning.background", "success.background", "primary.background"];
+            for (badge, surface) in badges.iter().flat_map(|badge| SURFACES.map(|surface| (badge, surface))) {
+                let [r, g, b, _] = c(badge);
+                let tinted = over([r, g, b, crate::tokens::TINT], c(surface));
+                pairs.push((format!("{badge} as a badge on {surface}"), c(badge), tinted, 3.));
+            }
+            for button in ["primary", "danger", "secondary"] {
+                let text = c(&format!("{button}.foreground"));
+                for state in ["", "hover.", "active."] {
+                    let fill = c(&format!("{button}.{state}background"));
+                    // Most buttons are secondary ones, so at rest theirs reads as body text does.
+                    let floor = if button == "secondary" && state.is_empty() { 4.5 } else { 3. };
+                    pairs.push((format!("{button} button text on its {state}background"), text, fill, floor));
+                }
+            }
+            for (key, style) in highlight["syntax"].as_object().expect("syntax colors") {
+                pairs.push((format!("syntax {key}"), rgba(&style["color"]), editor, 3.));
+            }
+            // Rows and the current line are fills under text, so text has to hold on them too.
+            let rows = [
+                over(c("list.hover.background"), c("background")),
+                over(c("table.hover.background"), c("table.background")),
+                over(c("sidebar.accent.background"), c("sidebar.background")),
+            ];
+            let accents = SURFACES.map(|surface| over(c("accent.background"), c(surface)));
+            for row in rows.into_iter().chain(accents) {
+                pairs.push(("text on a hovered row".into(), c("foreground"), row, 4.));
+                pairs.push(("muted text on a hovered row".into(), c("muted.foreground"), row, 3.5));
+            }
+            for surface in ["table.background", "table.head.background", "secondary.background"] {
+                pairs.push((format!("muted text on {surface}"), c("muted.foreground"), c(surface), 4.));
+            }
+            for surface in ["sidebar.background", "table.background", "popover.background"] {
+                let thumb = c("scrollbar.thumb.background");
+                pairs.push((format!("the scrollbar thumb on {surface}"), thumb, c(surface), 1.4));
+            }
+            let current_line = over(rgba(&highlight["editor.active_line.background"]), editor);
+            let comment = rgba(&highlight["syntax"]["comment"]["color"]);
+            pairs.extend([
+                ("the caret".to_string(), c("caret"), editor, 3.),
+                ("the current line's number".into(), rgba(&highlight["editor.active_line_number"]), editor, 4.5),
+                ("editor text on the current line".into(), rgba(&highlight["editor.foreground"]), current_line, 4.5),
+                ("a comment on the current line".into(), comment, current_line, 3.),
+            ]);
             for (pair, text, background, floor) in pairs {
                 let ratio = ratio(text, background);
                 assert!(ratio >= floor, "{}: {pair} is {ratio:.2}:1, under {floor}:1", entry.config.name);
+            }
+        }
+    }
+
+    // GPUI Kit caps some opacities and fills in what a theme leaves out, so this reads what it resolves.
+    #[test]
+    fn resolved_themes_keep_selections_and_button_states_readable() {
+        use crate::test_support::contrast;
+        for entry in built_in().all() {
+            let mut theme = Theme::default();
+            theme.apply_config(&entry.config);
+            let name = &entry.config.name;
+            let editor = theme.highlight_theme.style.editor_background.expect("an editor background");
+            let selection = contrast(theme.selection, editor);
+            assert!(selection >= 1.3, "{name}: a selection is {selection:.2}:1 against the editor");
+            let buttons = [
+                ("primary", theme.primary_foreground, [theme.primary, theme.primary_hover, theme.primary_active]),
+                ("danger", theme.danger_foreground, [theme.danger, theme.danger_hover, theme.danger_active]),
+                (
+                    "secondary",
+                    theme.secondary_foreground,
+                    [theme.secondary, theme.secondary_hover, theme.secondary_active],
+                ),
+            ];
+            for (button, text, fills) in buttons {
+                for (state, fill) in ["at rest", "hovered", "pressed"].into_iter().zip(fills) {
+                    let ratio = contrast(text, fill);
+                    assert!(ratio >= 3., "{name}: {button} button text {state} is {ratio:.2}:1");
+                }
             }
         }
     }
@@ -752,6 +886,33 @@ mod tests {
         expected["keyword"] = serde_json::json!({"color": "#ff0000"});
         assert_eq!(entry.json["highlight"]["syntax"], expected);
         assert_eq!(entry.source, Source::File(dir.path().join("mine.json")));
+    }
+
+    #[test]
+    fn a_syntax_key_covers_the_keys_under_it() {
+        let theme = r##"{"name": "P", "mode": "dark", "highlight": {"syntax": {
+            "punctuation": {"color": "#ff0000"}, "comment": {"color": "#0000ff"}}}}"##;
+        let dir = folder(&[("p.json", &set(theme))]);
+        let load = load(dir.path());
+        let syntax = &load.entries[0].config.highlight.as_ref().expect("a highlight section").syntax;
+        let color = |name: &str| syntax.style(name).and_then(|style| style.color);
+        let (red, blue) = (try_parse_color("#ff0000").ok(), try_parse_color("#0000ff").ok());
+        assert_eq!((color("punctuation.bracket"), color("punctuation.delimiter")), (red, red));
+        assert_eq!(color("comment.doc"), blue);
+        let barsql = barsql_syntax(ThemeMode::Dark);
+        assert_eq!(load.entries[0].json["highlight"]["syntax"]["string.special"], barsql["string.special"]);
+    }
+
+    #[test]
+    fn a_gradient_loads_only_where_gpui_kit_paints_one() {
+        let theme = r##"{"name": "G", "mode": "dark", "colors": {
+            "primary.background": "linear-gradient(135deg, #000000, #ffffff)",
+            "primary.foreground": "linear-gradient(135deg, #000000, #ffffff)"}}"##;
+        let dir = folder(&[("g.json", &set(theme))]);
+        let load = load(dir.path());
+        let bad = Problem::BadValue { theme: "G".into(), key: r#"colors["primary.foreground"]"#.into() };
+        assert_eq!(problems(&load, "g.json"), [bad]);
+        assert_eq!(keys(&load.entries[0].json["colors"]), HashSet::from(["primary.background".to_string()]));
     }
 
     #[test]
@@ -908,6 +1069,9 @@ mod tests {
         let load = load(dir.path());
         assert!(load.reports.is_empty(), "{:?}", load.reports);
         assert_eq!(names(&load).len(), 1);
+        let colors = &load.entries[0].json["colors"];
+        let button = ratio(rgba(&colors["primary.foreground"]), rgba(&colors["primary.background"]));
+        assert!(button >= 4.5, "the example's button text is {button:.2}:1");
     }
 
     #[test]

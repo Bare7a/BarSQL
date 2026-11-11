@@ -1,11 +1,11 @@
 # 🎨 Themes
 
-BarSQL ships 16 themes, uses one for dark mode and one for light mode, and loads your own from the data folder.
+BarSQL ships 20 themes, uses one for dark mode and one for light mode, and loads your own from the data folder.
 
 ## 🖌️ Picking a Theme
 
 - **View ▸ Theme** - **Dark**, **Light** or **Match system** decides the mode, and the **Dark theme** and **Light theme** lists decide which theme each mode uses
-- **Select theme…** (also in the command palette) lists every theme and shows each one as you move to it with the arrow keys or by typing. **Enter** keeps it, **Esc** goes back to what you had
+- **Select theme…** (also in the command palette) lists every theme and shows each one as you move to it with the arrow keys or by typing. **Enter** keeps it, **Esc** goes back to what you had. Typing `dark` or `light` narrows the list to that mode
 - Picking a light theme while in Dark switches to Light, and the other way round. Under **Match system** the pick waits until the system switches, and a notice says so
 
 ## 📚 Built-in Themes
@@ -20,12 +20,13 @@ BarSQL ships 16 themes, uses one for dark mode and one for light mode, and loads
 | Nord | |
 | Gruvbox Dark | Gruvbox Light |
 | Solarized Dark | Solarized Light |
+| VS Code Dark Modern and Dark+ | VS Code Light Modern and Light+ |
 
-Each comes from its original project's palette, under the MIT license. Their licenses sit next to the theme files in `crates/barsql-ui/themes/`.
+Each comes from its original project's palette, under the MIT license. Where a palette's own text, lines, line numbers, comments, selections or status colors are too faint for a data grid, BarSQL uses a slightly stronger shade of the same color. Their licenses sit next to the theme files in `crates/barsql-ui/themes/`.
 
 ## ✏️ Making Your Own
 
-The quickest start is **View ▸ Theme ▸ Customize current theme…**. It saves a copy of the theme you're using to the `themes/` folder, switches to it and opens the file. Edit it, save, click back into BarSQL, and you'll see the change.
+The quickest start is **View ▸ Theme ▸ Customize current theme…**. It saves a copy of the theme you're using to the `themes/` folder, switches to it and opens the file. Edit it, save, click back into BarSQL, and you'll see the change. On a theme that's already yours, it opens that theme's file instead of copying it again.
 
 You can also put your own `.json` files in **`BarSQL-data/themes/`**. **Open themes folder** creates it and opens it. A file holds one or more themes:
 
@@ -43,6 +44,7 @@ You can also put your own `.json` files in **`BarSQL-data/themes/`**. **Open the
         "border": "#2a3038",
         "muted.foreground": "#8a93a0",
         "primary.background": "#5fb3b3",
+        "primary.foreground": "#101418",
         "sidebar.background": "#0c1014"
       },
       "highlight": {
@@ -60,8 +62,10 @@ You can also put your own `.json` files in **`BarSQL-data/themes/`**. **Open the
 
 - **Every theme** needs a `name` and a `mode`, `"dark"` or `"light"`. The name is what BarSQL saves when you pick the theme, so renaming it later switches back to BarSQL's own until you pick it again
 - **`colors`** sets the interface. Anything you leave out is worked out from the main colors: `background`, `foreground`, `border`, `muted.background`, `primary.background`, `secondary.background`, `overlay` and the six hues `base.red`, `base.green`, `base.blue`, `base.yellow`, `base.magenta` and `base.cyan`
+- **Button text** is `primary.foreground`. Left out, it's your `foreground`, so set it whenever that doesn't read on your `primary.background`
+- **Gradients**: a color that fills an area, such as `primary.background`, also takes `linear-gradient(135deg, #5fb3b3, #3a8f8f)`, with an angle and two colors
 - **`highlight`** sets the editor (`editor.background`, `editor.foreground`, `editor.active_line.background`, …) and, under `syntax`, the SQL colors: `keyword`, `operator`, `boolean`, `constant`, `string`, `string.special`, `number`, `comment`, `comment_doc`, `punctuation`, `punctuation.delimiter`, `punctuation.bracket`, `variable`, `property`, `function`, `type`, `attribute` and `tag`. Each takes a `color`, plus an optional `font_style` (`"italic"`) or `font_weight`. In SQL, table names use `type`, aliases use `variable` and column names the editor's text color
-- **Syntax colors you leave out** come from BarSQL Dark or BarSQL Light. Leave out `editor.background` and the editor takes the color of the theme's input fields, so set it to match your `background`
+- **Syntax colors you leave out** come from BarSQL Dark or BarSQL Light, except under a color you set: `punctuation` also colors `punctuation.delimiter` and `punctuation.bracket`, `string` colors `string.special`, and `comment` colors `comment_doc`, until you set those too. Leave out `editor.background` and the editor takes the color of the theme's input fields, so set it to match your `background`
 - **Fonts, sizes and corners** stay BarSQL's, so any set in a theme file are ignored
 - **More keys**: a file made by **Customize current theme…** lists every key BarSQL's own themes set, the quickest way to see what you can change
 - Only plain JSON loads: no comments and no trailing commas. Files over 1 MB, subfolders and editor backups such as `mine.json~` are skipped

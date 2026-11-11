@@ -13,10 +13,12 @@ use gpui_kit::{
     TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
-use super::{Choices, Grid, GridEvent, LANE, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text};
+use super::{
+    Choices, Colors, Grid, GridEvent, LANE, MAX_CELL_CHARS, Metrics, TableOverlay, Target, Width, display_text,
+};
 use crate::grid::copy::flag;
 use crate::grid::range::CellRange;
-use crate::test_support::Env;
+use crate::test_support::{Env, contrast};
 
 // The engine's own true and false, or 0 and 1 in a column declared boolean, as SQLite stores them.
 #[test]
@@ -30,6 +32,37 @@ fn booleans_come_from_the_engine_or_a_boolean_column() {
     assert_eq!(flag(Cell::Number("1"), "INTEGER"), None);
     assert_eq!(flag(Cell::Null, "boolean"), None, "NULL shows as NULL");
     assert_eq!(flag(Cell::Text("false"), "boolean"), Some(false), "a staged one");
+}
+
+// The grid mixes its own tints, so they're checked on the colors each theme resolves to.
+#[gpui_kit::test]
+fn cell_text_reads_on_every_tint_in_every_theme(cx: &mut TestAppContext) {
+    use gpui_kit::component::Theme;
+    let _env = Env::new(cx);
+    for entry in crate::theme_files::built_in().all() {
+        let colors = cx.update(|cx| {
+            Theme::global_mut(cx).apply_config(&entry.config);
+            Colors::new(cx)
+        });
+        let name = &entry.config.name;
+        let fills = [
+            ("a selected cell", colors.selected, colors.background),
+            ("a hovered selected cell", colors.selected_hover, colors.background),
+            ("the focused cell", colors.focused_cell, colors.background),
+            ("a staged cell", colors.staged, colors.background),
+            ("an added row", colors.added, colors.background),
+            ("a deleted row", colors.deleted, colors.background),
+            ("a striped row", colors.stripe, colors.background),
+        ];
+        for (what, fill, under) in fills {
+            // Each fill is opaque once it sits over what's under it.
+            let shown = gpui_kit::Rgba::from(under).blend(fill.into()).into();
+            let ratio = contrast(colors.text, shown);
+            assert!(ratio >= 4.5, "{name}: text on {what} is {ratio:.2}:1");
+        }
+        let faint = contrast(colors.faint, colors.head);
+        assert!(faint >= 3., "{name}: a type name in the header is {faint:.2}:1");
+    }
 }
 
 #[test]

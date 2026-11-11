@@ -342,6 +342,7 @@ fn customize_writes_a_copy_and_switches_to_it(cx: &mut TestAppContext) {
     let copy = read_json(file);
     let original = app.cx.update(|_, cx| theme_files::themes(cx).barsql(ThemeMode::Dark).json.clone());
     assert_eq!(copy["themes"][0]["name"], "BarSQL Dark (custom)");
+    assert_eq!(copy["author"], "Bare7a", "the copy keeps the theme's author");
     assert_eq!(copy["themes"][0]["colors"], original["colors"]);
     assert_eq!(copy["themes"][0]["highlight"], original["highlight"]);
     assert_eq!(opened(&mut app), [themes_dir(&mut app).join("barsql-dark-custom.json")], "the copy opens");
@@ -351,7 +352,7 @@ fn customize_writes_a_copy_and_switches_to_it(cx: &mut TestAppContext) {
     assert_eq!(reloaded["highlight"], original["highlight"], "the copy keeps its editor colors");
 }
 
-// A copy of a copy would be "(custom) (custom)", so the second one starts from BarSQL Dark again.
+// Customizing the copy only opens it, so the second one starts from BarSQL Dark again.
 #[gpui_kit::test]
 fn customize_numbers_the_next_copy(cx: &mut TestAppContext) {
     let mut app = open(cx);
@@ -363,15 +364,44 @@ fn customize_numbers_the_next_copy(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn customizing_a_user_theme_keeps_its_author(cx: &mut TestAppContext) {
+fn customizing_your_own_theme_opens_its_file(cx: &mut TestAppContext) {
     let mut app = open(cx);
-    write_theme(&mut app, "mine.json", &MINE.replacen(r#""name": "M""#, r#""name": "M", "author": "Me""#, 1));
+    write_theme(&mut app, "mine.json", MINE);
     refocus(&mut app);
     app.cx.update(|window, cx| theme::pick("Mine Dark", window, cx));
     app.dispatch(CustomizeTheme);
-    let copy = read_json(themes_dir(&mut app).join("mine-dark-custom.json"));
-    assert_eq!(copy["author"], "Me");
-    assert_eq!(shown(&mut app).0, "Mine Dark (custom)");
+    assert_eq!(opened(&mut app), [themes_dir(&mut app).join("mine.json")]);
+    assert_eq!(shown(&mut app).0, "Mine Dark");
+    assert_eq!(fs::read_dir(themes_dir(&mut app)).unwrap().count(), 1, "no copy is made");
+}
+
+#[gpui_kit::test]
+fn clearing_the_search_goes_back_to_the_theme_in_use(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.cx.update(|window, cx| theme::pick("Nord", window, cx));
+    let palette = app.cx.update(theme_picker::open);
+    app.cx.run_until_parked();
+    app.type_text("z");
+    assert_ne!(shown(&mut app).0, "Nord");
+    app.keys("backspace");
+    assert_eq!(cursor(&mut app, &palette), "Nord");
+    assert_eq!(shown(&mut app), ("Nord".into(), ThemeMode::Dark));
+}
+
+#[gpui_kit::test]
+fn searching_dark_lists_every_dark_theme(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    let palette = open_picker(&mut app);
+    app.type_text("dark");
+    let mut found = rows(&mut app, &palette);
+    let says = |name: &String| name.to_lowercase().contains("dark");
+    let others = found.iter().position(|name| !says(name)).unwrap_or(found.len());
+    assert!(!found[others..].iter().any(says), "names that say it come first: {found:?}");
+    let dark = app.cx.update(|_, cx| theme::ordered(ThemeMode::Dark, cx));
+    let mut dark: Vec<String> = dark.iter().map(|entry| entry.config.name.to_string()).collect();
+    found.sort();
+    dark.sort();
+    assert_eq!(found, dark);
 }
 
 #[gpui_kit::test]
