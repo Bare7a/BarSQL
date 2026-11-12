@@ -18,6 +18,8 @@ pub fn windows_title_bar(_: &App) -> bool {
 #[cfg(feature = "snapshot")]
 pub fn begin(video: bool, cx: &mut App) {
     cx.set_global(script::WindowsTitleBar);
+    // Windows and Linux default to subpixel text, whose colored glyph edges show once the images are scaled.
+    cx.set_text_rendering_mode(TextRenderingMode::Grayscale);
     if video {
         video::watch_inputs(cx);
     }

@@ -210,7 +210,8 @@ fn demo_video() -> Result<(), String> {
     let list = frames.join("frames.ffconcat");
     let video = out.join("BarSQL-demo.mp4");
     // BT.709, as players assume for HD, tagged on the frames for x264; scaled once, before fps repeats frames.
-    let filters = "scale=1920:1080:flags=lanczos:out_color_matrix=bt709,format=yuv420p,\
+    // accurate_rnd, as x86 builds otherwise truncate the chroma and tint the panels.
+    let filters = "scale=1920:1080:flags=lanczos+accurate_rnd:out_color_matrix=bt709,format=yuv420p,\
                    setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709,fps=30";
     let encoded = video.to_string_lossy();
     let input =
