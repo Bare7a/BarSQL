@@ -4,7 +4,7 @@ BarSQL ships 20 themes, uses one for dark mode and one for light mode, and loads
 
 ## 🖌️ Picking a Theme
 
-- **View ▸ Theme** - **Dark**, **Light** or **Match system** decides the mode, and the **Dark theme** and **Light theme** lists decide which theme each mode uses
+- **View ▸ Theme** - **Dark**, **Light** or **Match system** (the default) decides the mode, and the **Dark theme** and **Light theme** lists decide which theme each mode uses
 - **Select theme…** (also in the command palette) lists every theme and shows each one as you move to it with the arrow keys or by typing. **Enter** keeps it, **Esc** goes back to what you had. Typing `dark` or `light` narrows the list to that mode
 - Picking a light theme while in Dark switches to Light, and the other way round. Under **Match system** the pick waits until the system switches, and a notice says so
 

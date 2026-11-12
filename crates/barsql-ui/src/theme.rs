@@ -30,7 +30,7 @@ pub fn init(cx: &mut App) {
     apply_zoom(zoom(cx), None, cx);
 }
 
-// What the View > Theme menu picks. Unset or unknown values mean dark.
+// What the View > Theme menu picks. Unset or unknown values mean Match System.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeChoice {
     Dark,
@@ -40,9 +40,9 @@ pub enum ThemeChoice {
 
 pub fn choice(cx: &App) -> ThemeChoice {
     match setting(cx, THEME_KEY).as_deref() {
+        Some("dark") => ThemeChoice::Dark,
         Some("light") => ThemeChoice::Light,
-        Some("system") => ThemeChoice::System,
-        _ => ThemeChoice::Dark,
+        _ => ThemeChoice::System,
     }
 }
 

@@ -3,6 +3,7 @@ use gpui_kit::component::ActiveTheme as _;
 
 use super::driver::{Driver, open};
 use crate::actions::{About, ThemeDark, ThemeLight, ThemeSystem, ToggleJsonPanel, ToggleSidebar};
+use crate::state::set_setting;
 use crate::theme::{ThemeChoice, choice};
 
 #[gpui_kit::test]
@@ -34,16 +35,21 @@ fn the_view_menu_opens_and_closes_the_json_viewer(cx: &mut TestAppContext) {
 
 // The test platform reports a light system appearance.
 #[gpui_kit::test]
-fn the_theme_follows_the_system_when_asked(cx: &mut TestAppContext) {
+fn the_theme_follows_the_system_until_a_mode_is_picked(cx: &mut TestAppContext) {
     let mut app = open(cx);
     let theme = |app: &mut super::driver::Driver| app.cx.update(|_, cx| (choice(cx), cx.theme().mode.is_dark()));
-    assert_eq!(theme(&mut app), (ThemeChoice::Dark, true));
-    app.dispatch(ThemeSystem);
     assert_eq!(theme(&mut app), (ThemeChoice::System, false));
     app.dispatch(ThemeDark);
     assert_eq!(theme(&mut app), (ThemeChoice::Dark, true));
+    app.dispatch(ThemeSystem);
+    assert_eq!(theme(&mut app), (ThemeChoice::System, false));
     app.dispatch(ThemeLight);
     assert_eq!(theme(&mut app), (ThemeChoice::Light, false));
+    app.cx.update(|window, cx| {
+        set_setting(cx, "barsql-theme", "sepia");
+        crate::theme::reapply(window, cx);
+    });
+    assert_eq!(theme(&mut app), (ThemeChoice::System, false), "a value that isn't a mode");
 }
 
 // The palette runs the picked command where it was opened from.

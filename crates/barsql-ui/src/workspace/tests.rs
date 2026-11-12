@@ -452,7 +452,7 @@ fn the_menus_tick_what_is_on(cx: &mut TestAppContext) {
     let (workspace, cx) = open(cx);
     let menus = |cx: &mut VisualTestContext| cx.update(|_, cx| cx.get_menus().unwrap_or_default());
     let current = menus(cx);
-    assert_eq!(checked(&current, "Dark"), Some(true));
+    assert_eq!(checked(&current, "Match system"), Some(true));
     assert_eq!(checked(&current, "English"), Some(true));
     assert_eq!(checked(&current, "Sidebar"), Some(true));
     assert_eq!(checked(&current, "JSON viewer"), Some(false));

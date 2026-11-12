@@ -7,8 +7,8 @@ use gpui_kit::component::{ActiveTheme as _, Theme, ThemeMode, try_parse_color};
 use gpui_kit::{Entity, TestAppContext};
 use serde_json::Value;
 
-use super::driver::{Driver, open};
-use crate::actions::{CustomizeTheme, OpenThemesFolder, SelectTheme, SetTheme, ThemeLight, ThemeSystem};
+use super::driver::{self, Driver};
+use crate::actions::{CustomizeTheme, OpenThemesFolder, SelectTheme, SetTheme, ThemeDark, ThemeLight, ThemeSystem};
 use crate::command_palette::CommandPalette;
 use crate::state::{set_setting, setting};
 use crate::theme::{self, DARK_KEY, LIGHT_KEY, MenuEntry, ThemeChoice, choice};
@@ -19,6 +19,13 @@ const TEST_THEMES: &str = r##"{"name": "Test", "themes": [
     {"name": "Test Dark", "mode": "dark", "colors": {"background": "#101010"}},
     {"name": "Test Light", "mode": "light", "colors": {"background": "#fafafa"}}
 ]}"##;
+
+// Theme tests start in Dark. Match System would follow the test platform, which is always light.
+fn open(cx: &mut TestAppContext) -> Driver<'_> {
+    let mut app = driver::open(cx);
+    app.dispatch(ThemeDark);
+    app
+}
 
 fn add_user_themes(app: &mut Driver, json: &str) {
     let entries = parse_set(json, Source::File("t.json".into())).unwrap();
@@ -94,9 +101,7 @@ fn a_preview_changes_nothing_saved(cx: &mut TestAppContext) {
     add_user_themes(&mut app, TEST_THEMES);
     app.cx.update(|window, cx| theme::preview("Test Light", window, cx));
     assert_eq!(shown(&mut app), ("Test Light".into(), ThemeMode::Light));
-    for key in ["barsql-theme", DARK_KEY, LIGHT_KEY] {
-        assert_eq!(saved(&mut app, key), None, "{key}");
-    }
+    nothing_saved(&mut app);
     app.cx.update(theme::end_preview);
     assert_eq!(shown(&mut app), ("BarSQL Dark".into(), ThemeMode::Dark));
 }
@@ -158,9 +163,8 @@ fn the_theme_menu_picks_a_theme(cx: &mut TestAppContext) {
 }
 
 fn nothing_saved(app: &mut Driver) {
-    for key in ["barsql-theme", DARK_KEY, LIGHT_KEY] {
-        assert_eq!(saved(app, key), None, "{key}");
-    }
+    let keys = ["barsql-theme", DARK_KEY, LIGHT_KEY];
+    assert_eq!(keys.map(|key| saved(app, key)), [Some("dark".into()), None, None]);
 }
 
 // The rows are read from the list, so built-in themes can come and go.
