@@ -2,7 +2,7 @@
 
 1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`, `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current version.
 2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
-3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds for Linux (x86-64 and ARM64, in Ubuntu 22.04 containers), Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks, then points the [Homebrew](#homebrew) cask at the new zips.
+3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds for Linux (x86-64 and ARM64, in Ubuntu 22.04 containers), Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks, then points the [Homebrew](#homebrew) cask and the [Scoop](#scoop) manifest at the new zips and opens a [winget](#winget) pull request for the installer.
 
 Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
 
@@ -63,6 +63,33 @@ Then add the printed key on the tap's [Settings → Deploy keys](https://github.
 - The cask sets `auto_updates`, since the app updates itself, so a plain `brew upgrade` only replaces BarSQL when the installed app is older than the cask.
 - After `brew tap bare7a/tap` and `brew trust --cask bare7a/tap/barsql` (one `brew install bare7a/tap/barsql` does both), `brew style --cask bare7a/tap/barsql` and `brew audit --cask --strict --online bare7a/tap/barsql` check the cask.
 - Homebrew's own [homebrew/cask](https://github.com/Homebrew/homebrew-cask), which would make it plain `brew install barsql`, takes an app once its GitHub repository has 75 stars, 30 forks or 30 watchers, or three times that when its owner submits it.
+
+## winget
+
+`winget install Bare7a.BarSQL` runs `BarSQL-amd64-installer.exe` from the manifests in [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/Bare7a/BarSQL). Once a release is out, the workflow's `winget` job runs [winget-releaser](https://github.com/vedantmgoyal9/winget-releaser), whose Komac copies the last version's manifests forward with the new version, URL and SHA-256, and opens a pull request from the [Bare7a/winget-pkgs](https://github.com/Bare7a/winget-pkgs) fork. The version reaches `winget` once winget-pkgs' checks and moderators merge it.
+
+The job signs in with the `WINGET_TOKEN` secret, a classic token with the scopes [winget-releaser](https://github.com/vedantmgoyal9/winget-releaser#readme) asks for. Make one under [Tokens (classic)](https://github.com/settings/tokens), fork microsoft/winget-pkgs to Bare7a once, then paste the token into:
+
+```bash
+gh secret set WINGET_TOKEN --repo Bare7a/BarSQL
+```
+
+- If only the `winget` job fails, the release is already out: re-run just that job.
+- Every version copies the last one's description, tags and links, so change those in a pull request to winget-pkgs, and later versions carry them on.
+- `winget validate --manifest <folder>` checks a version's manifests locally.
+- winget finds an install by the `Bare7aBarSQL` uninstall key, the manifest's `ProductCode`, so keep that key name in `installer.nsi`.
+
+## Scoop
+
+`scoop bucket add bare7a https://github.com/Bare7a/scoop-bucket` and `scoop install bare7a/barsql` install the Windows zip from [Bare7a/scoop-bucket](https://github.com/Bare7a/scoop-bucket). Once a release is out, the workflow's `scoop` job fills in `packaging/scoop/barsql.json` with the version and the zip's digest from `SHA256SUMS` and pushes it to the bucket as `bucket/barsql.json`, so change the manifest here, not in the bucket.
+
+If only the `scoop` job fails, the release is already out: re-run just that job, and only for the newest release, since it writes its own version to the bucket.
+
+The job pushes with a deploy key whose private half is the `SCOOP_BUCKET_DEPLOY_KEY` secret. Make it the same way as the [tap's](#homebrew), and add its public half on the bucket's [Settings → Deploy keys](https://github.com/Bare7a/scoop-bucket/settings/keys) with **Allow write access**.
+
+- Scoop gives every version its own folder, and BarSQL keeps `BarSQL-data` next to a writable exe, so the manifest's `persist` keeps that folder in `~\scoop\persist\barsql` between versions. Copy MCP setup names Scoop's `current` folder for the same reason.
+- The app updates itself inside Scoop's folder, so `scoop list` shows the older version until `scoop update barsql` installs the new one again.
+- `scoop install <path to a filled-in barsql.json>` installs from a file, to try a manifest before a release.
 
 ## How Updates Work
 

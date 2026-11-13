@@ -338,6 +338,57 @@ jobs:
             -e "s/@SHA256_AMD64@/$(digest BarSQL-darwin-amd64.zip)/" \
             packaging/homebrew/barsql.rb > tap/Casks/barsql.rb
           cd tap
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+          git diff --quiet || git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
             commit -am "barsql $VERSION"
           git push
+
+  # github.token can't push to another repository, so the bucket takes a deploy key too.
+  scoop:
+    needs: [version, release]
+    if: github.repository == 'Bare7a/BarSQL'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: Bare7a/scoop-bucket
+          ssh-key: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+          path: scoop-bucket
+
+      - name: Update the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sums="$(gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --output -)"
+          hash="$(awk '$2 == "BarSQL-windows-amd64.zip" { print $1 }' <<<"$sums")"
+          if [ -z "$hash" ]; then
+            echo "::error::SHA256SUMS has no BarSQL-windows-amd64.zip."
+            exit 1
+          fi
+          mkdir -p scoop-bucket/bucket
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHA256_AMD64@/$hash/" packaging/scoop/barsql.json \
+            > scoop-bucket/bucket/barsql.json
+          cd scoop-bucket
+          git add bucket/barsql.json
+          git diff --cached --quiet || git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "barsql $VERSION"
+          git push
+
+  # winget-pkgs takes each version as a PR from the Bare7a/winget-pkgs fork, which needs a classic token.
+  winget:
+    needs: [version, release]
+    if: github.repository == 'Bare7a/BarSQL'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main on 2026-10-07
+        with:
+          identifier: Bare7a.BarSQL
+          installers-regex: '-installer\.exe$'
+          release-tag: ${{ needs.version.outputs.tag }}
+          token: ${{ secrets.WINGET_TOKEN }}
