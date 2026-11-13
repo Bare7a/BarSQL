@@ -1,0 +1,20 @@
+{
+    "##": "Bare7a/BarSQL's release workflow writes this from its packaging/scoop/barsql.json, with the version and digest.",
+    "version": "@VERSION@",
+    "description": "SQL client for PostgreSQL, MySQL, SQL Server, ClickHouse, SQLite and Turso",
+    "homepage": "https://barsql.bare7a.eu/",
+    "license": "GPL-3.0-only",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Bare7a/BarSQL/releases/download/v@VERSION@/BarSQL-windows-amd64.zip",
+            "hash": "@SHA256_AMD64@"
+        }
+    },
+    "shortcuts": [
+        [
+            "BarSQL.exe",
+            "BarSQL"
+        ]
+    ],
+    "persist": "BarSQL-data"
+}

@@ -45,6 +45,8 @@ body:
       options:
         - Windows installer
         - Windows zip or BarSQL.exe
+        - winget
+        - Scoop
         - macOS zip or dmg
         - Homebrew
         - Linux tar.gz or standalone binary

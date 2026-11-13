@@ -75,12 +75,26 @@ pub fn setup_json() -> String {
         crate::update::Kind::AppImage => install.target.clone(),
         _ => std::env::current_exe().map(|exe| dunce::canonicalize(&exe).unwrap_or(exe)).unwrap_or_default(),
     };
+    let data = barsql_core::paths::data_dir();
+    let setup = setup_for(&command, dunce::simplified(&data), |path| dunce::canonicalize(path).ok());
+    serde_json::to_string_pretty(&setup).unwrap_or_default()
+}
+
+// Scoop runs each version from its own folder behind a `current` junction, and its cleanup deletes old folders.
+fn setup_for(command: &Path, data: &Path, resolve: impl Fn(&Path) -> Option<PathBuf>) -> Value {
+    let dir = command.parent().unwrap_or(command);
+    let current =
+        dir.parent().map(|app| app.join("current")).filter(|current| resolve(current).as_deref() == Some(dir));
+    let stable = |path: &Path| match (&current, path.strip_prefix(dir)) {
+        (Some(current), Ok(rest)) => current.join(rest),
+        _ => path.to_path_buf(),
+    };
     let server = json!({
-        "command": command,
+        "command": stable(command),
         "args": ["--mcp"],
-        "env": { "BARSQL_DATA_DIR": dunce::simplified(&barsql_core::paths::data_dir()) },
+        "env": { "BARSQL_DATA_DIR": stable(data) },
     });
-    serde_json::to_string_pretty(&json!({ "mcpServers": { "BarSQL": server } })).unwrap_or_default()
+    json!({ "mcpServers": { "BarSQL": server } })
 }
 
 pub(crate) struct Server {

@@ -46,6 +46,23 @@ brew install bare7a/tap/barsql
 
 Already have BarSQL in Applications? Add `--adopt` to take over that copy.
 
+### winget and Scoop
+
+On Windows, [winget](https://learn.microsoft.com/windows/package-manager/) runs the installer for you:
+
+```powershell
+winget install Bare7a.BarSQL
+```
+
+[Scoop](https://scoop.sh) installs the portable build and keeps its `BarSQL-data` folder from one version to the next:
+
+```powershell
+scoop bucket add bare7a https://github.com/Bare7a/scoop-bucket
+scoop install bare7a/barsql
+```
+
+Either way the app keeps updating itself. Scoop's own list catches up at the next `scoop update barsql`.
+
 ### First launch
 
 The macOS app is signed with a Developer ID and notarized by Apple, so it opens like any other app.
