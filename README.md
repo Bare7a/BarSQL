@@ -36,6 +36,22 @@ No account required - just download and run.
 
 Every build above updates itself. The installer, the Linux packages and copies in protected folders ask for admin rights first.
 
+### Linux install script
+
+One command picks the build for your distro and chip, checks it against `SHA256SUMS` and installs it:
+
+```bash
+curl -fsSL https://barsql.bare7a.eu/install.sh | sh
+```
+
+On x86-64 with apt, dnf, zypper or pacman, that's the package, which asks for your password once. Anywhere else, ARM64 included, it's the portable build in `~/.local/share/barsql`, with a `BarSQL` command and an app menu entry. End the command with `sh -s -- --portable` instead to get the portable build anywhere. Run it again to update, though the app updates itself either way.
+
+To uninstall, remove the package with `sudo apt remove barsql`, `sudo dnf remove barsql`, `sudo zypper remove barsql` or `sudo pacman -R barsql`. The portable build keeps your `BarSQL-data` folder in `~/.local/share/barsql`, so move that out first to keep your connections, then:
+
+```bash
+rm -r ~/.local/share/barsql ~/.local/bin/BarSQL ~/.local/share/applications/BarSQL.desktop ~/.local/share/icons/hicolor/*/apps/BarSQL.png
+```
+
 ### Homebrew
 
 On macOS, [Homebrew](https://brew.sh) installs it too, and the app keeps updating itself:

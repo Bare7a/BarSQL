@@ -72,7 +72,7 @@ async function pointDownloadAtVisitor() {
     }
   }
 
-  const arm = card.querySelector(".dl-arm");
+  const arm = os === "linux" && document.querySelector(".dl-arm");
   if (arm && (await onArm())) {
     hero.href = arm.href;
     meta.textContent = arm.dataset.meta;
