@@ -1,6 +1,6 @@
 # ⚡ BarSQL
 
-![Rust](https://img.shields.io/badge/Rust-1.99+-B7410E?style=for-the-badge&logo=rust)
+![Rust](https://img.shields.io/badge/Rust-1.100+-B7410E?style=for-the-badge&logo=rust)
 ![GPUI](https://img.shields.io/badge/GPUI_Kit-0.9-4B275F?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)
 [![Release](https://img.shields.io/github/v/release/Bare7a/BarSQL?style=for-the-badge&color=success)](../../releases/latest)

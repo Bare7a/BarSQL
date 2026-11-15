@@ -109,8 +109,15 @@ fn executable_dir() -> Option<PathBuf> {
     exe.parent().map(Path::to_path_buf)
 }
 
+// Test binaries run from deps/ in Cargo's old build layout, and from build/<package>/<hash>/out/ since Rust 1.100.
 fn is_cargo_target_dir(dir: &Path) -> bool {
-    let dir = if dir.ends_with("deps") { dir.parent().unwrap_or(dir) } else { dir };
+    let dir = if dir.ends_with("deps") {
+        dir.parent().unwrap_or(dir)
+    } else if dir.ends_with("out") && dir.ancestors().nth(3).is_some_and(|build| build.ends_with("build")) {
+        dir.ancestors().nth(4).unwrap_or(dir)
+    } else {
+        dir
+    };
     let profile = dir.file_name().and_then(|n| n.to_str());
     let parent = dir.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str());
     matches!(profile, Some("debug" | "release")) && parent == Some("target")
@@ -193,6 +200,8 @@ mod tests {
         assert!(is_cargo_target_dir(Path::new("/src/barsql/target/debug")));
         assert!(is_cargo_target_dir(Path::new("/src/barsql/target/release")));
         assert!(is_cargo_target_dir(Path::new("/src/barsql/target/debug/deps")));
+        assert!(is_cargo_target_dir(Path::new("/src/barsql/target/debug/build/barsql-core/71fea04b64b02ab8/out")));
+        assert!(!is_cargo_target_dir(Path::new("/src/barsql/target/debug/build/out")));
         assert!(!is_cargo_target_dir(Path::new(r"C:\Program Files\BarSQL")));
         assert!(!is_cargo_target_dir(Path::new("/Applications/BarSQL.app/Contents/MacOS")));
     }
