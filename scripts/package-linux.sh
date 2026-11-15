@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the Linux release files for this machine's architecture in target/package/dist. Needs cargo-deb and
-# cargo-generate-rpm on x86-64, and LINUXDEPLOY for the AppImage. release.yml builds the Arch package separately.
+# Builds the Linux release files for this machine's architecture in target/package/dist. Needs cargo-deb,
+# cargo-generate-rpm and rpm (rpm-build on Fedora) on x86-64, and LINUXDEPLOY for the AppImage. release.yml builds the Arch package separately.
 # Only the tarball has "linux" in its name, so portable copies never update from the other files.
 set -euo pipefail
 
@@ -12,6 +12,10 @@ case "$(uname -m)" in
   aarch64) arch=arm64 appimage_arch=aarch64 ;;
   *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
+if [ "$arch" = amd64 ] && [ ! -x /usr/lib/rpm/find-requires ]; then
+  echo "BarSQL.rpm needs rpm's find-requires: install rpm (rpm-build on Fedora)" >&2
+  exit 1
+fi
 out="$root_dir/target/package/linux"
 dist="$root_dir/target/package/dist"
 
@@ -29,7 +33,8 @@ cd "$root_dir"
 if [ "$arch" = amd64 ]; then
   cp "$out/BarSQL" "$dist/BarSQL"
   cargo deb -p barsql --no-build --no-strip --output "$dist/BarSQL.deb"
-  cargo generate-rpm -p crates/barsql --payload-compress xz --output "$dist/BarSQL.rpm"
+  # rpm's find-requires lists only what the binary links; the builtin ldd scan adds libbsd and others RHEL lacks.
+  cargo generate-rpm -p crates/barsql --payload-compress xz --auto-req find-requires --output "$dist/BarSQL.rpm"
 fi
 
 if [ -n "${LINUXDEPLOY:-}" ]; then

@@ -124,10 +124,15 @@ jobs:
           key: release
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      # package-linux.sh makes the deb and the rpm on x86-64 only.
-      - name: Install cargo-deb and cargo-generate-rpm
+      # package-linux.sh makes the deb and the rpm on x86-64 only, and rpm's find-requires lists the rpm's dependencies.
+      - name: Install cargo-deb, cargo-generate-rpm and rpm
         if: matrix.target == 'linux' && runner.arch == 'X64'
-        run: cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          apt-get install -y --no-install-recommends rpm
+          cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
 
       - name: Install linuxdeploy
         if: matrix.target == 'linux'
@@ -214,8 +219,10 @@ jobs:
           readelf -d target/package/linux/BarSQL | grep NEEDED
           glibc="$(objdump -T target/package/linux/BarSQL | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)"
           echo "Needs $glibc"
-          if [ "$(printf '%s\n' "$glibc" GLIBC_2.35 | sort -V | tail -n1)" != GLIBC_2.35 ]; then
-            echo "::error::The binary needs $glibc, newer than Ubuntu 22.04's GLIBC_2.35."
+          # docs/install.sh turns away older systems, so the binary can't need more than its glibc_min.
+          floor="GLIBC_$(sed -n 's/^glibc_min=//p' docs/install.sh)"
+          if [ "$(printf '%s\n' "$glibc" "$floor" | sort -V | tail -n1)" != "$floor" ]; then
+            echo "::error::The binary needs $glibc, newer than $floor, the oldest glibc docs/install.sh accepts."
             exit 1
           fi
 

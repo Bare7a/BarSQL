@@ -64,6 +64,7 @@ async function pointDownloadAtVisitor() {
   document.getElementById("hero-download-label").textContent = `Download for ${names[os]}`;
   meta.textContent = main.dataset.meta;
   card.classList.add("dl-detected");
+  document.querySelector(`.cli-row[data-os="${os}"]`)?.classList.add("cli-detected");
 
   if (os === "macos") {
     for (const key of document.querySelectorAll("kbd[data-mod]")) {
@@ -72,7 +73,7 @@ async function pointDownloadAtVisitor() {
     }
   }
 
-  const arm = card.querySelector(".dl-arm");
+  const arm = os === "linux" && document.querySelector(".dl-arm");
   if (arm && (await onArm())) {
     hero.href = arm.href;
     meta.textContent = arm.dataset.meta;
@@ -188,7 +189,39 @@ function setUpLightbox() {
   });
 }
 
+// Without clipboard access, as on a plain http page, the command is selected to copy by hand.
+function setUpCopyButtons() {
+  const copyIcon = "icons.svg#i-copy";
+  const copyLabel = "Copy the command";
+  for (const cmd of document.querySelectorAll(".cli-cmd")) {
+    cmd.insertAdjacentHTML(
+      "beforeend",
+      `<button class="nav-icon cli-copy" type="button" aria-label="${copyLabel}"><svg class="icon" aria-hidden="true"><use href="${copyIcon}"/></svg></button>`,
+    );
+    const button = cmd.lastElementChild;
+    const icon = button.querySelector("use");
+    const code = cmd.querySelector("code");
+    let timer;
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+      } catch {
+        getSelection().selectAllChildren(code);
+        return;
+      }
+      icon.setAttribute("href", "icons.svg#i-check");
+      button.setAttribute("aria-label", "Copied");
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        icon.setAttribute("href", copyIcon);
+        button.setAttribute("aria-label", copyLabel);
+      }, 1500);
+    });
+  }
+}
+
 setUpTheme();
 pointDownloadAtVisitor();
+setUpCopyButtons();
 setUpDemo();
 setUpLightbox();

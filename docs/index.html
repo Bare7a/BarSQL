@@ -623,7 +623,6 @@ BarSQL-data/
           </div>
           <p class="dl-desc">One universal app for Apple Silicon and Intel, on macOS 12 or later.</p>
           <a class="btn btn-primary dl-main" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-macos-universal.dmg" data-meta="Universal .dmg · macOS 12 or later"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-download"/></svg>Download .dmg</a>
-          <p class="dl-alt">Homebrew: <code>brew install bare7a/tap/barsql</code></p>
           <div class="dl-more">
             <span class="dl-more-label">Other formats</span>
             <a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-darwin-arm64.zip">Apple Silicon <span>.zip</span></a>
@@ -638,7 +637,6 @@ BarSQL-data/
           </div>
           <p class="dl-desc">A portable x86-64 build, plus packages for Debian, Ubuntu, Fedora, RHEL and Arch.</p>
           <a class="btn btn-primary dl-main" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-linux-amd64.tar.gz" data-meta="Portable .tar.gz · Linux x86-64"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-download"/></svg>Download .tar.gz</a>
-          <p class="dl-alt">For ARM64: <a class="dl-arm" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-linux-arm64.tar.gz" data-meta="Portable .tar.gz · Linux ARM64">.tar.gz</a> or <a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-aarch64.AppImage">AppImage</a></p>
           <div class="dl-more">
             <span class="dl-more-label">Other formats</span>
             <div class="dl-row">
@@ -653,8 +651,38 @@ BarSQL-data/
           </div>
         </article>
       </div>
+      <div class="cli">
+        <h3>Prefer installing through CLI?</h3>
+        <div class="cli-box card">
+          <!-- Windows: uncomment once winget and the Scoop bucket are live.
+          <div class="cli-row" data-os="windows">
+            <span class="cli-os"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-windows"/></svg>Windows</span>
+            <div class="cli-cmds">
+              <div class="cli-cmd"><code>winget install Bare7a.BarSQL</code></div>
+              <div class="cli-cmd"><code>scoop bucket add bare7a https://github.com/Bare7a/scoop-bucket
+scoop install bare7a/barsql</code></div>
+            </div>
+          </div>
+          -->
+          <div class="cli-row" data-os="macos">
+            <span class="cli-os"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-apple"/></svg>macOS</span>
+            <div class="cli-cmds">
+              <div class="cli-cmd"><code>brew install bare7a/tap/barsql</code></div>
+            </div>
+          </div>
+          <div class="cli-row" data-os="linux">
+            <span class="cli-os"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-linux"/></svg>Linux</span>
+            <div class="cli-cmds">
+              <div class="cli-cmd"><code>curl -fsSL https://barsql.bare7a.eu/install.sh | sh</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
       <p class="dl-all">
-              Every build updates itself from inside the app. All of them, with their checksums, are on the
+              Every build updates itself from inside the app. ARM64 Linux has its own
+              <a class="dl-arm" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-linux-arm64.tar.gz" data-meta="Portable .tar.gz · Linux ARM64">.tar.gz</a>
+              and <a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-aarch64.AppImage">AppImage</a>.
+              All of them, with their checksums, are on the
               <a href="https://github.com/Bare7a/BarSQL/releases/latest" target="_blank" rel="noopener">latest release</a>.
               The Windows build isn't signed yet, so Windows asks once before the first launch:
               <a href="https://github.com/Bare7a/BarSQL#first-launch" target="_blank" rel="noopener">here's how</a>.
