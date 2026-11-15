@@ -6,7 +6,7 @@
 
 Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
 
-`cargo xtask package` builds this OS's packages locally, into `target/package/dist` (on Linux, after `cargo install cargo-deb cargo-generate-rpm` and installing `rpm`). `BARSQL_RELEASE_DIR=<that folder> cargo test -p barsql-app a_packaged_release_stages_its_app` runs the updater over them.
+`cargo xtask package` builds this OS's packages locally, into `target/package/dist` (on Linux, after `cargo install cargo-deb cargo-generate-rpm` and installing `rpm`, or `rpm-build` on Fedora). `BARSQL_RELEASE_DIR=<that folder> cargo test -p barsql-app a_packaged_release_stages_its_app` runs the updater over them.
 
 ## Packages
 

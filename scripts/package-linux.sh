@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the Linux release files for this machine's architecture in target/package/dist. Needs cargo-deb,
-# cargo-generate-rpm and rpm on x86-64, and LINUXDEPLOY for the AppImage. release.yml builds the Arch package separately.
+# cargo-generate-rpm and rpm (rpm-build on Fedora) on x86-64, and LINUXDEPLOY for the AppImage. release.yml builds the Arch package separately.
 # Only the tarball has "linux" in its name, so portable copies never update from the other files.
 set -euo pipefail
 
@@ -12,6 +12,10 @@ case "$(uname -m)" in
   aarch64) arch=arm64 appimage_arch=aarch64 ;;
   *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
+if [ "$arch" = amd64 ] && [ ! -x /usr/lib/rpm/find-requires ]; then
+  echo "BarSQL.rpm needs rpm's find-requires: install rpm (rpm-build on Fedora)" >&2
+  exit 1
+fi
 out="$root_dir/target/package/linux"
 dist="$root_dir/target/package/dist"
 

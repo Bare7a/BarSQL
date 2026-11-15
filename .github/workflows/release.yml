@@ -219,8 +219,10 @@ jobs:
           readelf -d target/package/linux/BarSQL | grep NEEDED
           glibc="$(objdump -T target/package/linux/BarSQL | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)"
           echo "Needs $glibc"
-          if [ "$(printf '%s\n' "$glibc" GLIBC_2.35 | sort -V | tail -n1)" != GLIBC_2.35 ]; then
-            echo "::error::The binary needs $glibc, newer than Ubuntu 22.04's GLIBC_2.35."
+          # docs/install.sh turns away older systems, so the binary can't need more than its glibc_min.
+          floor="GLIBC_$(sed -n 's/^glibc_min=//p' docs/install.sh)"
+          if [ "$(printf '%s\n' "$glibc" "$floor" | sort -V | tail -n1)" != "$floor" ]; then
+            echo "::error::The binary needs $glibc, newer than $floor, the oldest glibc docs/install.sh accepts."
             exit 1
           fi
 

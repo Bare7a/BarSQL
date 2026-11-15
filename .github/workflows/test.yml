@@ -52,6 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Shellcheck the install script
+        run: shellcheck --shell=sh docs/install.sh
+
       - name: Install GPUI build dependencies
         run: |
           sudo apt-get update
@@ -68,9 +71,6 @@ jobs:
 
       - name: Format
         run: cargo fmt --all --check
-
-      - name: Shellcheck the install script
-        run: shellcheck --shell=sh docs/install.sh
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked --features barsql-db/e2e,barsql-app/e2e,barsql-ui/e2e,barsql/snapshot -- -D warnings

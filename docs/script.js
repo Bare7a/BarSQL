@@ -191,11 +191,18 @@ function setUpLightbox() {
 
 // Without clipboard access, as on a plain http page, the command is selected to copy by hand.
 function setUpCopyButtons() {
-  for (const button of document.querySelectorAll(".cli-copy")) {
+  const copyIcon = "icons.svg#i-copy";
+  const copyLabel = "Copy the command";
+  for (const cmd of document.querySelectorAll(".cli-cmd")) {
+    cmd.insertAdjacentHTML(
+      "beforeend",
+      `<button class="nav-icon cli-copy" type="button" aria-label="${copyLabel}"><svg class="icon" aria-hidden="true"><use href="${copyIcon}"/></svg></button>`,
+    );
+    const button = cmd.lastElementChild;
     const icon = button.querySelector("use");
+    const code = cmd.querySelector("code");
     let timer;
     button.addEventListener("click", async () => {
-      const code = button.parentElement.querySelector("code");
       try {
         await navigator.clipboard.writeText(code.textContent);
       } catch {
@@ -206,8 +213,8 @@ function setUpCopyButtons() {
       button.setAttribute("aria-label", "Copied");
       clearTimeout(timer);
       timer = setTimeout(() => {
-        icon.setAttribute("href", "icons.svg#i-copy");
-        button.setAttribute("aria-label", "Copy the command");
+        icon.setAttribute("href", copyIcon);
+        button.setAttribute("aria-label", copyLabel);
       }, 1500);
     });
   }
