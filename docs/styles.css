@@ -96,7 +96,7 @@ code {
 }
 
 /* Faint text on the code background is under 4.5:1 contrast in the light theme */
-.dl-alt code, .dl-all code, .matrix-notes code { color: var(--muted); }
+.dl-all code, .matrix-notes code { color: var(--muted); }
 
 h1, h2, h3 { margin: 0; font-family: var(--font-display); line-height: 1.15; text-wrap: balance; }
 h2 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 650; letter-spacing: -0.035em; line-height: 1.08; }
@@ -690,8 +690,6 @@ kbd {
 
 .dl-desc { margin: 12px 0 20px; color: var(--muted); font-size: 0.92rem; }
 .dl-main { width: 100%; }
-.dl-alt { margin: 10px 0 0; color: var(--faint); font-size: 0.82rem; text-align: center; }
-.dl-alt a { font-family: var(--font-mono); }
 
 /* Every card gives its other formats two rows at the bottom, so the cards line up */
 .dl-more { display: grid; justify-items: start; gap: 8px; margin-top: auto; padding-top: 20px; }
@@ -720,6 +718,22 @@ kbd {
 }
 .dl-more a:hover { background: var(--surface-2); text-decoration: none; }
 .dl-more a span { color: var(--faint); font-family: var(--font-mono); font-size: 0.76rem; }
+
+/* Commands scroll sideways on narrow screens, and the copy button takes the whole line */
+.cli { max-width: 760px; margin: 40px auto 0; }
+.cli h3 { margin-bottom: 14px; font-size: 1.05rem; text-align: center; }
+.cli-box { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--highlight); }
+.cli-row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 14px 18px; }
+.cli-row + .cli-row { border-top: 1px solid var(--line); }
+.cli-os { display: flex; align-items: center; gap: 10px; height: 34px; font-weight: 600; }
+.cli-os .logo { width: 18px; height: 18px; }
+.cli-detected .cli-os { color: var(--accent-text); }
+.cli-cmds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.cli-cmd { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 2px 2px 2px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.cli-cmd code { flex: 1; min-width: 0; overflow-x: auto; padding: 0; border: 0; background: none; color: var(--text); font-size: 0.84rem; line-height: 1.6; white-space: pre; scrollbar-width: none; }
+.cli-copy { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.cli-copy:hover { background: var(--surface); color: var(--text); }
+.cli-copy .icon { width: 15px; height: 15px; }
 
 .dl-all { max-width: 760px; margin: 40px auto 0; text-align: center; color: var(--faint); font-size: 0.92rem; text-wrap: balance; }
 .dl-star { display: flex; justify-content: center; margin-top: 24px; }
@@ -848,6 +862,8 @@ kbd {
   .keys dd { justify-content: flex-start; }
   .footer-inner { grid-template-columns: minmax(0, 1fr); }
   .code-block { padding: 20px 18px; }
+  .cli-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .cli-os { height: auto; }
   /* The tool list's longest line is 36 characters, so the font follows the screen width to fit it */
   .tour-media .code-block { padding: 16px 14px; font-size: clamp(0.66rem, 3.3vw, 0.9rem); }
   .lightbox { padding: 64px 8px 24px; gap: 6px; }

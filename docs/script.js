@@ -64,6 +64,7 @@ async function pointDownloadAtVisitor() {
   document.getElementById("hero-download-label").textContent = `Download for ${names[os]}`;
   meta.textContent = main.dataset.meta;
   card.classList.add("dl-detected");
+  document.querySelector(`.cli-row[data-os="${os}"]`)?.classList.add("cli-detected");
 
   if (os === "macos") {
     for (const key of document.querySelectorAll("kbd[data-mod]")) {
@@ -188,7 +189,32 @@ function setUpLightbox() {
   });
 }
 
+// Without clipboard access, as on a plain http page, the command is selected to copy by hand.
+function setUpCopyButtons() {
+  for (const button of document.querySelectorAll(".cli-copy")) {
+    const icon = button.querySelector("use");
+    let timer;
+    button.addEventListener("click", async () => {
+      const code = button.parentElement.querySelector("code");
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+      } catch {
+        getSelection().selectAllChildren(code);
+        return;
+      }
+      icon.setAttribute("href", "icons.svg#i-check");
+      button.setAttribute("aria-label", "Copied");
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        icon.setAttribute("href", "icons.svg#i-copy");
+        button.setAttribute("aria-label", "Copy the command");
+      }, 1500);
+    });
+  }
+}
+
 setUpTheme();
 pointDownloadAtVisitor();
+setUpCopyButtons();
 setUpDemo();
 setUpLightbox();

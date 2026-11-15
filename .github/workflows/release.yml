@@ -124,10 +124,15 @@ jobs:
           key: release
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      # package-linux.sh makes the deb and the rpm on x86-64 only.
-      - name: Install cargo-deb and cargo-generate-rpm
+      # package-linux.sh makes the deb and the rpm on x86-64 only, and rpm's find-requires lists the rpm's dependencies.
+      - name: Install cargo-deb, cargo-generate-rpm and rpm
         if: matrix.target == 'linux' && runner.arch == 'X64'
-        run: cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          apt-get install -y --no-install-recommends rpm
+          cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
 
       - name: Install linuxdeploy
         if: matrix.target == 'linux'

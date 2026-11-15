@@ -622,7 +622,6 @@ BarSQL-data/
           </div>
           <p class="dl-desc">One universal app for Apple Silicon and Intel, on macOS 12 or later.</p>
           <a class="btn btn-primary dl-main" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-macos-universal.dmg" data-meta="Universal .dmg · macOS 12 or later"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-download"/></svg>Download .dmg</a>
-          <p class="dl-alt"><code>brew install bare7a/tap/barsql</code></p>
           <div class="dl-more">
             <span class="dl-more-label">Other formats</span>
             <a href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-darwin-arm64.zip">Apple Silicon <span>.zip</span></a>
@@ -637,7 +636,6 @@ BarSQL-data/
           </div>
           <p class="dl-desc">A portable x86-64 build, plus packages for Debian, Ubuntu, Fedora, RHEL and Arch.</p>
           <a class="btn btn-primary dl-main" href="https://github.com/Bare7a/BarSQL/releases/latest/download/BarSQL-linux-amd64.tar.gz" data-meta="Portable .tar.gz · Linux x86-64"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-download"/></svg>Download .tar.gz</a>
-          <p class="dl-alt"><code>curl -fsSL https://barsql.bare7a.eu/install.sh | sh</code></p>
           <div class="dl-more">
             <span class="dl-more-label">Other formats</span>
             <div class="dl-row">
@@ -651,6 +649,33 @@ BarSQL-data/
             </div>
           </div>
         </article>
+      </div>
+      <div class="cli">
+        <h3>Prefer installing through CLI?</h3>
+        <div class="cli-box">
+          <!-- Windows: uncomment once winget and the Scoop bucket are live.
+          <div class="cli-row" data-os="windows">
+            <span class="cli-os"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-windows"/></svg>Windows</span>
+            <div class="cli-cmds">
+              <div class="cli-cmd"><code>winget install Bare7a.BarSQL</code><button class="cli-copy" type="button" aria-label="Copy the command"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-copy"/></svg></button></div>
+              <div class="cli-cmd"><code>scoop bucket add bare7a https://github.com/Bare7a/scoop-bucket
+scoop install bare7a/barsql</code><button class="cli-copy" type="button" aria-label="Copy the command"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-copy"/></svg></button></div>
+            </div>
+          </div>
+          -->
+          <div class="cli-row" data-os="macos">
+            <span class="cli-os"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-apple"/></svg>macOS</span>
+            <div class="cli-cmds">
+              <div class="cli-cmd"><code>brew install bare7a/tap/barsql</code><button class="cli-copy" type="button" aria-label="Copy the command"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-copy"/></svg></button></div>
+            </div>
+          </div>
+          <div class="cli-row" data-os="linux">
+            <span class="cli-os"><svg class="logo" aria-hidden="true"><use href="logos.svg#l-linux"/></svg>Linux</span>
+            <div class="cli-cmds">
+              <div class="cli-cmd"><code>curl -fsSL https://barsql.bare7a.eu/install.sh | sh</code><button class="cli-copy" type="button" aria-label="Copy the command"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-copy"/></svg></button></div>
+            </div>
+          </div>
+        </div>
       </div>
       <p class="dl-all">
               Every build updates itself from inside the app. ARM64 Linux has its own

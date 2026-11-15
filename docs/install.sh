@@ -97,14 +97,19 @@ check_platform() {
     aarch64 | arm64) arch=arm64 ;;
     *) fail "BarSQL runs on x86-64 and ARM64 Linux, not $machine" ;;
   esac
-  if ldd --version 2>&1 | grep -qi musl || ls /lib/ld-musl-* >/dev/null 2>&1; then
-    fail "BarSQL needs glibc, and this system uses musl"
-  fi
+  # getconf decides, since a glibc system can have musl installed alongside it.
   libc=$(getconf GNU_LIBC_VERSION 2>/dev/null) || libc=
   glibc=${libc##* }
-  [ -n "$glibc" ] || fail "BarSQL needs glibc 2.35 or later, and this system's version couldn't be found"
+  if [ -z "$glibc" ]; then
+    if ldd --version 2>&1 | grep -qi musl || ls /lib/ld-musl-* >/dev/null 2>&1; then
+      fail "BarSQL needs glibc, and this system uses musl"
+    fi
+    fail "BarSQL needs glibc 2.35 or later, and this system's version couldn't be found"
+  fi
   version_at_least "$glibc" 2.35 ||
     fail "BarSQL needs glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36, RHEL 10), and this system has $glibc"
+  [ "$(getconf LONG_BIT 2>/dev/null)" = 64 ] ||
+    fail "BarSQL needs 64-bit Linux, and this system runs 32-bit programs"
 }
 
 need() {
@@ -169,14 +174,15 @@ choose_install() {
 install_package() {
   path=$tmp/$asset
   case $tool in
-    apt-get) set -- env DEBIAN_FRONTEND=noninteractive apt-get install -y "$path" ;;
+    # Unlike apt, apt-get and zypper give up at once on a held lock, as on a fresh Ubuntu's first updates.
+    apt-get) set -- env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "$path" ;;
     dnf) set -- dnf install -y "$path" ;;
-    zypper) set -- zypper --non-interactive install --allow-unsigned-rpm "$path" ;;
+    zypper) set -- env ZYPP_LOCK_TIMEOUT=300 zypper --non-interactive install --allow-unsigned-rpm "$path" ;;
     pacman) set -- pacman -U --noconfirm --needed "$path" ;;
   esac
   [ -n "$as_root" ] && say "$tool runs with $as_root, which may ask for your password."
   ${as_root:+"$as_root"} "$@" </dev/null ||
-    fail "$tool couldn't install $asset. To install BarSQL in your home folder instead, run:
+    fail "$tool couldn't install $asset. Fix the error above and run this again, or install BarSQL in your home folder instead:
   curl -fsSL $site/install.sh | sh -s -- --portable"
   say "BarSQL $version is installed. Open it from your app menu, or run BarSQL."
 }
@@ -205,11 +211,24 @@ add_menu_entry() {
   fi
 }
 
-install_portable() {
-  need tar
+# Under sudo the copy would land in root's home, and an older copy at ~/.local/bin keeps its data beside it.
+check_portable() {
+  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}${DOAS_USER:-}" ]; then
+    fail "the portable build installs for one user, so run this without sudo or doas"
+  fi
   data=${XDG_DATA_HOME:-$HOME/.local/share}
   bin=$HOME/.local/bin
   dir=$data/barsql
+  if { [ -e "$bin/BarSQL" ] || [ -L "$bin/BarSQL" ]; } && [ "$(readlink "$bin/BarSQL")" != "$dir/BarSQL" ]; then
+    old=$(readlink -f "$bin/BarSQL") || old=$bin/BarSQL
+    hint=
+    [ -d "${old%/*}/BarSQL-data" ] && hint=" To keep its connections, first move ${old%/*}/BarSQL-data to $dir/BarSQL-data."
+    fail "$bin/BarSQL is another copy of BarSQL. Move it out of the way and run this again.$hint"
+  fi
+}
+
+install_portable() {
+  need tar
   tar -xzf "$tmp/$asset" -C "$tmp" BarSQL || fail "couldn't unpack $asset"
   mkdir -p "$dir" "$bin"
   cp "$tmp/BarSQL" "$dir/.BarSQL.new"
@@ -259,6 +278,9 @@ main() {
   tag=$(latest_tag) || fail "couldn't find BarSQL's latest release on $repo/releases"
   version=${tag#v}
   choose_install
+  if [ "$tool" = portable ]; then
+    check_portable
+  fi
 
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/barsql-install.XXXXXX") || fail "couldn't create a temporary folder"
   trap 'rm -rf "$tmp"' EXIT
