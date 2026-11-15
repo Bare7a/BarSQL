@@ -50,6 +50,7 @@ body:
         - Linux tar.gz or standalone binary
         - AppImage
         - deb, rpm or pkg.tar.zst
+        - Linux install script
         - Built from source
 
   - type: dropdown
