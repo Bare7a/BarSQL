@@ -21,8 +21,8 @@ const ES_OWN: &str = include_str!("../locales/es.json");
 pub struct I18n {
     lang: &'static str,
     locale: Value,
-    strings: HashMap<String, String>,
-    fallback: HashMap<String, String>,
+    strings: HashMap<String, SharedString>,
+    fallback: HashMap<String, SharedString>,
     sql: Arc<SqlLabels>,
 }
 
@@ -60,7 +60,7 @@ fn load(json: &str, own: &str) -> Value {
     locale
 }
 
-fn flatten(value: &Value, prefix: &str, out: &mut HashMap<String, String>) {
+fn flatten(value: &Value, prefix: &str, out: &mut HashMap<String, SharedString>) {
     match value {
         Value::Object(map) => {
             for (key, child) in map {
@@ -69,7 +69,7 @@ fn flatten(value: &Value, prefix: &str, out: &mut HashMap<String, String>) {
             }
         }
         Value::String(text) => {
-            out.insert(prefix.to_string(), text.clone());
+            out.insert(prefix.to_string(), text.into());
         }
         _ => {}
     }
@@ -105,12 +105,16 @@ impl I18n {
         self.sql.clone()
     }
 
+    fn stored(&self, key: &str) -> Option<&SharedString> {
+        self.strings.get(key).or_else(|| self.fallback.get(key))
+    }
+
     fn raw(&self, key: &str) -> Option<&str> {
-        self.strings.get(key).or_else(|| self.fallback.get(key)).map(String::as_str)
+        self.stored(key).map(SharedString::as_str)
     }
 
     pub fn t(&self, key: &str) -> SharedString {
-        self.raw(key).map_or_else(|| SharedString::from(key.to_string()), |s| SharedString::from(s.to_string()))
+        self.stored(key).cloned().unwrap_or_else(|| SharedString::from(key))
     }
 
     pub fn t_with(&self, key: &str, vars: &[(&str, &str)]) -> SharedString {

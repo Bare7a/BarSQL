@@ -13,7 +13,6 @@ icon_assets!(
     [
         Activity,
         ArrowDownAZ,
-        Ban,
         Binary,
         Bookmark,
         BookmarkPlus,
@@ -25,7 +24,6 @@ icon_assets!(
         CalendarPlus,
         ChartColumn,
         ChevronsDownUp,
-        CircleAlert,
         CirclePlay,
         CircleQuestionMark,
         ClipboardCopy,
@@ -57,7 +55,6 @@ icon_assets!(
         PinOff,
         Plug,
         Puzzle,
-        RefreshCw,
         Route,
         Save,
         Scan,
@@ -66,7 +63,6 @@ icon_assets!(
         Sigma,
         SkipForward,
         SlidersHorizontal,
-        Square,
         SquareFunction,
         SquarePen,
         Table,
@@ -172,10 +168,10 @@ mod tests {
     use std::sync::Arc;
 
     use gpui_kit::AssetSource as _;
-    use gpui_kit::assets::IconName as Lucide;
+    use gpui_kit::assets::{Assets, IconName as Lucide};
     use gpui_kit::{Bounds, DevicePixels, TestAppContext, point, px, size};
 
-    use super::{AppAssets, LOGO, MARK_DARK, MARK_LIGHT, device_size, raster};
+    use super::{AppAssets, ExtraIcons, LOGO, MARK_DARK, MARK_LIGHT, device_size, raster};
 
     // A raster a pixel off the snapped bounds gets resampled. Each edge snaps on its own, ties toward zero.
     #[test]
@@ -227,5 +223,16 @@ mod tests {
             let path = icon.path();
             assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");
         }
+    }
+
+    #[test]
+    fn extra_icons_are_only_ones_gpui_kit_lacks() {
+        let defaults: Vec<_> = ExtraIcons
+            .list("")
+            .unwrap()
+            .into_iter()
+            .filter(|path| Assets.load(path).ok().flatten().is_some())
+            .collect();
+        assert!(defaults.is_empty(), "already in GPUI Kit's set: {defaults:?}");
     }
 }
