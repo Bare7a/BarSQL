@@ -222,12 +222,11 @@ impl PgEngine {
                     match tls {
                         None => spawn_connection(config.connect_raw(stream, NoTls).await),
                         Some(tls) => {
-                            let connector =
+                            let Ok(connector) =
                                 MakeTlsConnect::<russh::ChannelStream<russh::client::Msg>>::make_tls_connect(
                                     &mut MakeRustlsConnect::new(tls),
                                     &self.options.host,
-                                )
-                                .map_err(|err| QueryError::message(err.to_string()))?;
+                                );
                             spawn_connection(config.connect_raw(stream, connector).await)
                         }
                     }
@@ -268,11 +267,11 @@ impl PgEngine {
                 match tls {
                     None => token.cancel_query_raw(stream, NoTls).await,
                     Some(tls) => {
-                        let connector = MakeTlsConnect::<russh::ChannelStream<russh::client::Msg>>::make_tls_connect(
-                            &mut MakeRustlsConnect::new(tls),
-                            &self.options.host,
-                        )
-                        .map_err(|err| QueryError::message(err.to_string()))?;
+                        let Ok(connector) =
+                            MakeTlsConnect::<russh::ChannelStream<russh::client::Msg>>::make_tls_connect(
+                                &mut MakeRustlsConnect::new(tls),
+                                &self.options.host,
+                            );
                         token.cancel_query_raw(stream, connector).await
                     }
                 }

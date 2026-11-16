@@ -293,16 +293,21 @@ fn push_column_items(
         if let Some(seen) = seen.as_deref_mut() {
             seen.insert(key);
         }
-        items.push(CompletionItem {
-            label: c.name.clone(),
-            kind: ItemKind::Field,
-            detail: Some(column_detail(c, ctx.driver().dialect(), ctx.labels)),
-            insert_text: format_sql_identifier(&c.name, ctx.driver()),
-            filter_text: None,
-            label_detail: None,
-            snippet: false,
-            sort_text: rank(tier, score, &c.name),
-        });
+        items.push(column_item(c, tier, score, ctx));
+    }
+}
+
+// A column offered by its bare name.
+fn column_item(c: &ColumnInfo, tier: u8, score: u8, ctx: &CompletionContext) -> CompletionItem {
+    CompletionItem {
+        label: c.name.clone(),
+        kind: ItemKind::Field,
+        detail: Some(column_detail(c, ctx.driver().dialect(), ctx.labels)),
+        insert_text: format_sql_identifier(&c.name, ctx.driver()),
+        filter_text: None,
+        label_detail: None,
+        snippet: false,
+        sort_text: rank(tier, score, &c.name),
     }
 }
 
@@ -523,16 +528,7 @@ pub fn suggest_columns_in_scope(
                 if let Some(seen) = seen.as_deref_mut() {
                     seen.insert(key);
                 }
-                items.push(CompletionItem {
-                    label: c.name.clone(),
-                    kind: ItemKind::Field,
-                    detail: Some(column_detail(c, ctx.driver().dialect(), ctx.labels)),
-                    insert_text: format_sql_identifier(&c.name, ctx.driver()),
-                    filter_text: None,
-                    label_detail: None,
-                    snippet: false,
-                    sort_text: rank(0, score, &c.name),
-                });
+                items.push(column_item(c, 0, score, ctx));
             }
         }
     }
