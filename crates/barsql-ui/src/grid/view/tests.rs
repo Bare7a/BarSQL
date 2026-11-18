@@ -8,9 +8,9 @@ use barsql_io::ExportFormat;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Root;
 use gpui_kit::{
-    AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled as _,
-    TestAppContext, VisualTestContext, Window, div, point, px,
+    AppContext as _, Bounds, ClipboardItem, Context, Entity, InteractiveElement as _, IntoElement, Modifiers,
+    MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollEvent,
+    Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
 use super::{
@@ -504,6 +504,20 @@ fn space_types_in_a_cells_editor(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("right enter");
     cx.simulate_keystrokes("space x enter");
     assert_eq!(*edits.borrow(), [(0, 1, Some("name 0 x".into()))]);
+}
+
+// Copy in a cell's editor takes its selected text. With nothing selected the clipboard keeps what it had, rather than
+// the cell's old value.
+#[gpui_kit::test]
+fn copy_in_a_cells_editor_takes_only_its_selected_text(cx: &mut TestAppContext) {
+    let (_env, grid, cx) = open(cx, 3);
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { editable: true, ..Default::default() }, cx));
+    cx.write_to_clipboard(ClipboardItem::new_string("kept".into()));
+    cx.simulate_keystrokes("right enter space x");
+    cx.simulate_keystrokes(&format!("{}-c", modifier()));
+    assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some("kept"));
+    cx.simulate_keystrokes(&format!("{0}-a {0}-c", modifier()));
+    assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some("name 0 x"));
 }
 
 // (id, kind) in a table view, rows (1, like) and (2, love), where kind takes like, love or wow.

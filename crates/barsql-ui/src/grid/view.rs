@@ -1218,6 +1218,8 @@ impl Render for Grid {
                 .bg(theme.background)
                 // Its own Cut/Copy/Paste menu, not the grid's, which would also take focus and commit the edit.
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                // The input passes on a Copy with nothing selected, and the grid's would copy the cell's old value.
+                .on_action(|_: &Copy, _, _| {})
                 .on_action(cx.listener(|this, _: &NextCell, window, cx| this.step_edit(true, window, cx)))
                 .on_action(cx.listener(|this, _: &PrevCell, window, cx| this.step_edit(false, window, cx)))
                 .when(picker.is_some(), |editor| {

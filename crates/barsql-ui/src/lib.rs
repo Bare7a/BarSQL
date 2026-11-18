@@ -77,6 +77,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use barsql_app::BarApp;
+use gpui_kit::base::{self, ReduceMotionPreference};
 
 #[derive(Debug, Clone, Default)]
 pub struct LaunchOptions {
@@ -125,8 +126,8 @@ pub fn run(bar: BarApp, options: LaunchOptions) {
         if options.screenshots.is_some() || options.demo_video.is_some() {
             screenshots::begin(options.demo_video.is_some(), cx);
         }
-        // No animations, so dialogs, menus, tooltips and toasts open and close at once.
-        cx.set_reduce_motion(true);
+        // No animations whatever the system says, so dialogs, menus, tooltips and toasts open and close at once.
+        base::set_reduce_motion_preference(ReduceMotionPreference::Reduce, cx);
         syntax::init();
         assets::load_fonts(cx);
         state::init(bar.clone(), cx);
