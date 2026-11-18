@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use barsql_core::{ConnectionConfig, DriverType};
 use serde_json::{Value, json};
 
-use super::{MAX_ROWS, Server, TOOLS, lock};
+use super::{MAX_ROWS, Server, TOOLS, lock, setup_for};
 use crate::BarApp;
 
 const ENDLESS: &str = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
@@ -330,6 +330,52 @@ fn the_setup_names_this_executable_and_data_folder() {
     for path in [&server["command"], &server["env"]["BARSQL_DATA_DIR"]] {
         assert!(!path.as_str().unwrap().starts_with(r"\\?\"), "an AI app can't start {path}");
     }
+}
+
+fn named_paths(setup: &Value) -> (PathBuf, PathBuf) {
+    let server = &setup["mcpServers"]["BarSQL"];
+    let path = |value: &Value| PathBuf::from(value.as_str().unwrap());
+    (path(&server["command"]), path(&server["env"]["BARSQL_DATA_DIR"]))
+}
+
+#[test]
+fn the_setup_names_scoops_current_folder() {
+    let version = Path::new("/scoop/apps/barsql/1.2.8");
+    let current = |path: &Path| (path == Path::new("/scoop/apps/barsql/current")).then(|| version.to_path_buf());
+    let (command, data) = named_paths(&setup_for(&version.join("BarSQL.exe"), &version.join("BarSQL-data"), current));
+    assert_eq!(command, Path::new("/scoop/apps/barsql/current/BarSQL.exe"));
+    assert_eq!(data, Path::new("/scoop/apps/barsql/current/BarSQL-data"));
+}
+
+#[test]
+fn the_setup_keeps_paths_scoop_doesnt_manage() {
+    let version = Path::new("/scoop/apps/barsql/1.2.8");
+    let (exe, data) = (version.join("BarSQL.exe"), version.join("BarSQL-data"));
+    for elsewhere in [None, Some(PathBuf::from("/scoop/apps/barsql/1.2.9"))] {
+        assert_eq!(named_paths(&setup_for(&exe, &data, |_| elsewhere.clone())), (exe.clone(), data.clone()));
+    }
+    let config = Path::new("/home/u/.config/BarSQL-data");
+    let (command, kept) = named_paths(&setup_for(&exe, config, |_| Some(version.to_path_buf())));
+    assert_eq!(command, Path::new("/scoop/apps/barsql/current/BarSQL.exe"));
+    assert_eq!(kept, config);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_junction_to_the_version_folder_counts_as_current() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("1.2.8")).unwrap();
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J", "current", "1.2.8"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{made:?}");
+    let version = dunce::canonicalize(dir.path().join("1.2.8")).unwrap();
+    let resolve = |path: &Path| dunce::canonicalize(path).ok();
+    let (command, data) = named_paths(&setup_for(&version.join("BarSQL.exe"), &version.join("BarSQL-data"), resolve));
+    let current = dunce::canonicalize(dir.path()).unwrap().join("current");
+    assert_eq!((command, data), (current.join("BarSQL.exe"), current.join("BarSQL-data")));
 }
 
 #[test]
