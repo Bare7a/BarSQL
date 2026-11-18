@@ -74,7 +74,7 @@ impl Env {
         cx.executor().allow_parking();
         cx.update(|cx| {
             gpui_kit::init(cx);
-            cx.set_reduce_motion(true);
+            gpui_kit::base::set_reduce_motion_preference(gpui_kit::base::ReduceMotionPreference::Reduce, cx);
             crate::syntax::init();
             crate::assets::load_fonts(cx);
             state::init(app, cx);

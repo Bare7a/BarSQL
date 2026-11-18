@@ -9,6 +9,10 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
+    // GPUI draws on the main thread, which Windows gives 1 MB. Debug builds outgrew it; macOS and Linux give 8 MB.
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let icon = root.join("../../packaging/windows/icon.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
