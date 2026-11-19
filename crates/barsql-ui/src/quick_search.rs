@@ -13,6 +13,7 @@ use gpui_kit::*;
 use crate::connections_panel::parse_color;
 use crate::fuzzy::rank_candidate;
 use crate::i18n::t;
+use crate::modal::AtTop as _;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_SM, RADIUS_LG, TEXT_BASE, TEXT_XS};
 use crate::{form, saved_queries, schema};
@@ -407,7 +408,7 @@ pub fn open(
         let rem = window.rem_size();
         modal
             .w(rem * 55.385)
-            .margin_top(rem * 5.5)
+            .at_top(rem * 5.5, window)
             .p_0()
             .bg(cx.theme().sidebar)
             .rounded(RADIUS_LG)

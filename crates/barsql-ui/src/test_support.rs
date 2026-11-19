@@ -117,3 +117,16 @@ pub fn settle(cx: &mut VisualTestContext, mut done: impl FnMut(&mut VisualTestCo
     }
     panic!("timed out waiting for the UI to settle");
 }
+
+// The device row the open dialog's top lands on. Equal rows can differ in the last float digit.
+pub fn dialog_row(scale: f32, cx: &mut VisualTestContext) -> f32 {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    (f32::from(cx.debug_bounds("dialog-0").expect("the dialog is drawn").top()) * scale).round()
+}
+
+// GPUI Kit rounds a dialog's place to whole points, and the row rounds it again to a device pixel.
+pub fn assert_dialog_holds_its_row(rems: f32, rows: [f32; 2], scale: f32, cx: &mut VisualTestContext) {
+    let top = cx.update(|window, _| f32::from(window.rem_size()) * rems * scale);
+    assert_eq!(rows[0], rows[1], "at {scale}x");
+    assert!((rows[0] - top).abs() <= 0.5 * scale + 0.5, "at {scale}x the top is on row {}, not near {top}", rows[0]);
+}

@@ -153,6 +153,18 @@ impl Modal {
     }
 }
 
+// GPUI Kit rounds a dialog's offset from where its host would centre it, a spot that moves with the dialog's height.
+// Without a height in the host's layout, a dialog placed from the top keeps its device row as its content changes.
+pub trait AtTop {
+    fn at_top(self, top: Pixels, window: &Window) -> Self;
+}
+
+impl AtTop for Dialog {
+    fn at_top(self, top: Pixels, window: &Window) -> Self {
+        self.margin_top(top).mb(-window.viewport_size().height).self_start()
+    }
+}
+
 pub fn body() -> Div {
     v_flex().p(rems(1.231)).gap(rems(0.923))
 }

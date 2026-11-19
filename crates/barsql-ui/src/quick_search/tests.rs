@@ -6,7 +6,7 @@ use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext};
 
 use super::{Candidates, Kind, SchemaTables, TabEntry, Target, rank};
 use crate::actions::QuickSearch;
-use crate::test_support::{Env, settle};
+use crate::test_support::{Env, assert_dialog_holds_its_row, dialog_row, settle};
 use crate::workspace::Workspace;
 use crate::{saved_queries, schema};
 
@@ -247,6 +247,22 @@ fn arrows_pick_a_connection_and_its_new_tab_takes_the_keyboard(cx: &mut TestAppC
     cx.run_until_parked();
     let sql = cx.update(|_, cx| workspace.read(cx).active_sql(cx));
     assert_eq!(sql.as_deref(), Some("SELECT 9"));
+}
+
+#[gpui_kit::test]
+fn the_dialog_keeps_its_place_when_nothing_matches(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    session(&env);
+    let (workspace, cx) = open(cx);
+    let dialog = workspace.update_in(cx, |ws, window, cx| ws.open_quick_search(window, cx)).unwrap();
+    for scale in [1., 1.25, 1.5, 1.75, 2.] {
+        cx.simulate_scale_factor_change(scale);
+        let rows = ["", "nothing like this"].map(|query| {
+            cx.update(|window, cx| super::type_query(&dialog, query, window, cx));
+            dialog_row(scale, cx)
+        });
+        assert_dialog_holds_its_row(5.5, rows, scale, cx);
+    }
 }
 
 #[gpui_kit::test]
