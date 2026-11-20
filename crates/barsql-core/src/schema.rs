@@ -274,8 +274,6 @@ pub struct SchemaBundle {
     pub status: ConnectionStatus,
     pub schemas: Vec<SchemaInfo>,
     pub loaded_tables: Vec<SchemaTables>,
-    // One minimal request's round trip on an open connection. None for a local file.
-    pub latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

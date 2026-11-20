@@ -153,7 +153,6 @@ impl BarApp {
         let cfg = self.config(id)?;
         let engine = self.engine(id).await?;
         let mut status = within(SCHEMA_TIMEOUT, engine.connection_info()).await?;
-        let latency = within(SCHEMA_TIMEOUT, engine.round_trip()).await?;
         status.connected = true;
         let schemas = within(SCHEMA_TIMEOUT, engine.list_schemas()).await?;
         let browse = cfg.default_browse_schema();
@@ -164,7 +163,13 @@ impl BarApp {
             let tables = within(SCHEMA_TIMEOUT, engine.list_tables(&schema.name)).await?;
             loaded_tables.push(SchemaTables { schema: schema.name.clone(), tables });
         }
-        Ok(SchemaBundle { status, schemas, loaded_tables, latency_ms: latency.map(|d| d.as_millis() as u64) })
+        Ok(SchemaBundle { status, schemas, loaded_tables })
+    }
+
+    // One minimal request's round trip on an open connection. None for a local file.
+    pub(crate) async fn round_trip_inner(&self, id: &str) -> Result<Option<Duration>, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.round_trip()).await
     }
 
     pub(crate) async fn list_schemas_inner(&self, id: &str) -> Result<Vec<SchemaInfo>, QueryError> {

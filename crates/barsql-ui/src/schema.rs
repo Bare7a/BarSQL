@@ -258,7 +258,6 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
             match bundle {
                 Some(Ok(bundle)) => {
                     entry.status = Some(bundle.status);
-                    entry.latency_ms = bundle.latency_ms;
                     entry.schemas = Some(bundle.schemas);
                     for block in bundle.loaded_tables {
                         entry.tables.insert(block.schema, block.tables);
@@ -270,7 +269,10 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
             }
         });
         if loaded {
-            cx.update(|cx| load_functions(&id, generation, cx));
+            cx.update(|cx| {
+                load_functions(&id, generation, cx);
+                load_latency(&id, generation, cx);
+            });
         }
     })
     .detach();
@@ -365,6 +367,23 @@ fn load_functions(connection_id: &str, generation: u64, cx: &mut App) {
                 entry.functions = Some(functions);
                 entry.rebuild_catalog();
             });
+        }
+    })
+    .detach();
+}
+
+// After the schemas too, so the tree doesn't wait on it. Asking connects, so not after a disconnect.
+fn load_latency(connection_id: &str, generation: u64, cx: &mut App) {
+    if get(cx, connection_id).is_none_or(|entry| entry.generation != generation) {
+        return;
+    }
+    let bar = state::bar(cx);
+    let id = connection_id.to_string();
+    let load = state::spawn(cx, async move { bar.round_trip(&id).await });
+    let id = connection_id.to_string();
+    cx.spawn(async move |cx| {
+        if let Some(Ok(Some(elapsed))) = load.await {
+            apply(cx, &id, generation, |entry| entry.latency_ms = Some(elapsed.as_millis() as u64));
         }
     })
     .detach();
