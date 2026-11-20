@@ -8,6 +8,7 @@ pub enum Detail {
     Database { database: String, schema: Option<String> },
     Ssh(String),
     Tls(String),
+    Latency(u64),
 }
 
 // "PostgreSQL 17.2" from what the server says it runs. None until it has said, and for Turso, which doesn't.

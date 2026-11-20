@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionList, FunctionSignature, IndexInfo,
-    ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
+    ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo, TableInfo, TableSize, TriggerInfo,
 };
 use barsql_sql::ddl::{render_constraint, render_create_index, terminate_statement, unsupported_ddl};
 use barsql_sql::structure::check_body;
 use barsql_sql::{enum_values, qualified_table, quote_ident, quote_ident_list, quote_literal};
 use mysql_async::prelude::Queryable;
-use mysql_async::{Params, Row, Value as MyValue};
+use mysql_async::{Params, Row, Value as MyValue, params};
 
 use super::{MyEngine, my_error};
 use crate::dump::DumpColumn;
@@ -33,10 +34,9 @@ fn string(row: &Row, i: usize) -> String {
 }
 
 impl MyEngine {
-    async fn rows(self: &Arc<Self>, sql: &str, params: Vec<MyValue>) -> Result<Vec<Row>, QueryError> {
+    async fn rows(self: &Arc<Self>, sql: &str, params: impl Into<Params>) -> Result<Vec<Row>, QueryError> {
         let mut lease = self.lease().await?;
-        let params = if params.is_empty() { Params::Empty } else { Params::Positional(params) };
-        lease.conn.exec(sql, params).await.map_err(my_error)
+        lease.conn.exec(sql, params.into()).await.map_err(my_error)
     }
 
     async fn text_rows(self: &Arc<Self>, sql: &str) -> Result<(Vec<String>, Vec<Row>), QueryError> {
@@ -63,6 +63,14 @@ impl MyEngine {
         })
     }
 
+    // Timed from after get_conn, which may open a connection while the pool resets the one just returned.
+    pub async fn round_trip(self: &Arc<Self>) -> Result<Duration, QueryError> {
+        let mut lease = self.lease().await?;
+        let started = Instant::now();
+        lease.conn.ping().await.map_err(my_error)?;
+        Ok(started.elapsed())
+    }
+
     pub async fn list_schemas(self: &Arc<Self>) -> Result<Vec<SchemaInfo>, QueryError> {
         let (_, rows) = self.text_rows("SHOW DATABASES").await?;
         Ok(rows
@@ -84,7 +92,7 @@ impl MyEngine {
                 FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
                 ORDER BY ORDINAL_POSITION",
-                vec![schema.into(), table.into()],
+                vec![schema, table],
             )
             .await?;
         Ok(rows
@@ -112,7 +120,7 @@ impl MyEngine {
                 WHERE TABLE_SCHEMA = ?
                   AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
                 ORDER BY TABLE_NAME",
-                vec![schema.clone().into()],
+                vec![schema.as_str()],
             )
             .await?;
         Ok(rows
@@ -121,43 +129,83 @@ impl MyEngine {
             .collect())
     }
 
-    pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
+    // MariaDB and 5.7 open every table for this view unless TABLE_SCHEMA names one; only MySQL 8 runs the /*!80000 */.
+    pub async fn referencing_keys(
+        self: &Arc<Self>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
         let schema = self.schema_or(schema).to_string();
         let rows = self
             .rows(
-                "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, COALESCE(c.COLUMN_DEFAULT, ''), c.COLUMN_KEY,
-                    COALESCE((
-                        SELECT k.REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE k
-                        WHERE k.TABLE_SCHEMA = c.TABLE_SCHEMA
-                          AND k.TABLE_NAME = c.TABLE_NAME
-                          AND k.COLUMN_NAME = c.COLUMN_NAME
-                          AND k.REFERENCED_TABLE_NAME IS NOT NULL
-                        LIMIT 1
-                    ), ''),
-                    COALESCE((
-                        SELECT k.REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE k
-                        WHERE k.TABLE_SCHEMA = c.TABLE_SCHEMA
-                          AND k.TABLE_NAME = c.TABLE_NAME
-                          AND k.COLUMN_NAME = c.COLUMN_NAME
-                          AND k.REFERENCED_TABLE_NAME IS NOT NULL
-                        LIMIT 1
-                    ), ''),
-                    c.EXTRA, c.COLUMN_TYPE,
-                    c.ORDINAL_POSITION = 1 AND EXISTS (
-                        SELECT 1 FROM information_schema.TABLE_CONSTRAINTS tc
-                        WHERE tc.TABLE_SCHEMA = c.TABLE_SCHEMA
-                          AND tc.TABLE_NAME = c.TABLE_NAME
-                          AND tc.CONSTRAINT_TYPE = 'CHECK'
-                    )
-                FROM information_schema.COLUMNS c
-                WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
-                ORDER BY c.ORDINAL_POSITION",
-                vec![schema.clone().into(), table.into()],
+                "SELECT TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_COLUMN_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE REFERENCED_TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME = ?
+                    AND (TABLE_SCHEMA = ? /*!80000 OR TRUE */)
+                ORDER BY TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION",
+                vec![schema.as_str(), table, schema.as_str()],
             )
             .await?;
+        Ok(rows
+            .iter()
+            .map(|r| ReferencingKey {
+                schema: string(r, 0),
+                table: string(r, 1),
+                key: string(r, 2),
+                column: string(r, 3),
+                referenced_column: string(r, 4),
+            })
+            .collect())
+    }
+
+    // InnoDB's TABLE_ROWS is an estimate, and MySQL 8 caches these columns for up to a day.
+    pub async fn table_sizes(self: &Arc<Self>, schema: &str) -> Result<HashMap<String, TableSize>, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let rows = self
+            .rows(
+                "SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH + INDEX_LENGTH
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+                vec![schema],
+            )
+            .await?;
+        let number = |r: &Row, i: usize| text(r, i).and_then(|v| v.parse().ok());
+        Ok(rows.iter().map(|r| (string(r, 0), TableSize { rows: number(r, 1), bytes: number(r, 2) })).collect())
+    }
+
+    pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        // All three take the first key by name, so they agree; constants let MariaDB and 5.7 open only this table.
+        let first_key = |field: &str| {
+            format!(
+                "COALESCE((
+                    SELECT k.{field} FROM information_schema.KEY_COLUMN_USAGE k
+                    WHERE k.TABLE_SCHEMA = :schema AND k.TABLE_NAME = :table AND k.COLUMN_NAME = c.COLUMN_NAME
+                        AND k.REFERENCED_TABLE_NAME IS NOT NULL
+                    ORDER BY k.CONSTRAINT_NAME
+                    LIMIT 1
+                ), '')"
+            )
+        };
+        let sql = format!(
+            "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, COALESCE(c.COLUMN_DEFAULT, ''), c.COLUMN_KEY,
+                {}, {}, {},
+                c.EXTRA, c.COLUMN_TYPE,
+                c.ORDINAL_POSITION = 1 AND EXISTS (
+                    SELECT 1 FROM information_schema.TABLE_CONSTRAINTS tc
+                    WHERE tc.TABLE_SCHEMA = :schema AND tc.TABLE_NAME = :table AND tc.CONSTRAINT_TYPE = 'CHECK'
+                )
+            FROM information_schema.COLUMNS c
+            WHERE c.TABLE_SCHEMA = :schema AND c.TABLE_NAME = :table
+            ORDER BY c.ORDINAL_POSITION",
+            first_key("REFERENCED_TABLE_NAME"),
+            first_key("REFERENCED_COLUMN_NAME"),
+            first_key("CONSTRAINT_NAME"),
+        );
+        let rows = self.rows(&sql, params! { "schema" => &schema, "table" => table }).await?;
         // Checks come from the DDL, since MySQL's CHECK_CONSTRAINTS doesn't say which table each is on. Read only for a
         // table that has some.
-        let ddl = match rows.first().is_some_and(|r| string(r, 9) == "1") {
+        let ddl = match rows.first().is_some_and(|r| string(r, 10) == "1") {
             false => String::new(),
             true => {
                 let show = format!("SHOW CREATE TABLE {}", qualified_table(&MY, &schema, table));
@@ -172,8 +220,8 @@ impl MyEngine {
                 let foreign_table = string(r, 5);
                 // auto_increment, or VIRTUAL/STORED/PERSISTENT GENERATED. MySQL also tags an expression default
                 // DEFAULT_GENERATED, and that column still takes values.
-                let extra = string(r, 7).to_lowercase().replace("default_generated", "");
-                let mut values = enum_values::from_type(&string(r, 8), &MY);
+                let extra = string(r, 8).to_lowercase().replace("default_generated", "");
+                let mut values = enum_values::from_type(&string(r, 9), &MY);
                 if values.is_empty() {
                     values = enum_values::from_checks(&name, &checks, &MY);
                 }
@@ -186,6 +234,7 @@ impl MyEngine {
                     is_foreign: !foreign_table.is_empty(),
                     foreign_table,
                     foreign_column: string(r, 6),
+                    foreign_key: string(r, 7),
                     is_identity: extra.contains("auto_increment"),
                     is_computed: extra.contains("generated"),
                     enum_values: values,
@@ -202,7 +251,7 @@ impl MyEngine {
                 FROM information_schema.STATISTICS
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
                 ORDER BY INDEX_NAME, SEQ_IN_INDEX",
-                vec![schema.clone().into(), table.into()],
+                vec![schema.as_str(), table],
             )
             .await?;
         let mut out: Vec<IndexInfo> = Vec::new();
@@ -243,7 +292,7 @@ impl MyEngine {
                     AND kcu.TABLE_NAME = tc.TABLE_NAME
                 WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ?
                 ORDER BY tc.CONSTRAINT_TYPE, tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION",
-                vec![schema.clone().into(), table.into()],
+                vec![schema.as_str(), table],
             )
             .await?;
         let mut out: Vec<ConstraintInfo> = Vec::new();
@@ -283,7 +332,7 @@ impl MyEngine {
                 "SELECT CONSTRAINT_NAME, CHECK_CLAUSE
                 FROM information_schema.CHECK_CONSTRAINTS
                 WHERE CONSTRAINT_SCHEMA = ?",
-                vec![schema.into()],
+                vec![schema],
             )
             .await
             .unwrap_or_default();
@@ -298,7 +347,7 @@ impl MyEngine {
                 FROM information_schema.TRIGGERS
                 WHERE TRIGGER_SCHEMA = ? AND EVENT_OBJECT_TABLE = ?
                 ORDER BY TRIGGER_NAME",
-                vec![schema.clone().into(), table.into()],
+                vec![schema.as_str(), table],
             )
             .await?;
         Ok(rows
@@ -322,7 +371,7 @@ impl MyEngine {
                 FROM information_schema.ROUTINES
                 WHERE ROUTINE_SCHEMA = ?
                 ORDER BY ROUTINE_TYPE, ROUTINE_NAME",
-                vec![schema.clone().into()],
+                vec![schema.as_str()],
             )
             .await?;
         Ok(rows
@@ -352,7 +401,7 @@ impl MyEngine {
                 WHERE ROUTINE_TYPE = 'FUNCTION'
                     AND ROUTINE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql')
                 ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME",
-                Vec::new(),
+                (),
             )
             .await?;
         let params = self
@@ -362,7 +411,7 @@ impl MyEngine {
                 WHERE ROUTINE_TYPE = 'FUNCTION' AND ORDINAL_POSITION > 0
                     AND SPECIFIC_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql')
                 ORDER BY SPECIFIC_SCHEMA, SPECIFIC_NAME, ORDINAL_POSITION",
-                Vec::new(),
+                (),
             )
             .await?;
         let mut args: HashMap<(String, String), Vec<String>> = HashMap::new();

@@ -14,7 +14,7 @@ use crate::form::{self, ToolButton as _};
 use crate::i18n::{I18n, t, t_count, t_with};
 use crate::plan_tree::{
     Metric, PlanRow, available_metrics, collect_parent_keys, default_metric, flatten, format_cost, format_factor,
-    format_ms, format_rows, is_estimate_off,
+    format_ms, format_rows, is_estimate_off, is_full_scan,
 };
 use crate::scrollbars::HoverScrollbar as _;
 use crate::toast;
@@ -291,6 +291,16 @@ impl PlanView {
             .when(!node.relation.is_empty(), |el| el.child(form::badge(node.relation.clone(), theme.primary)))
             .when(!node.index.is_empty(), |el| el.child(form::badge(node.index.clone(), theme.success)))
             .when(node.never_run, |el| el.child(form::badge(t(cx, "results.planNeverRun"), theme.muted_foreground)))
+            .when(is_full_scan(node), |el| {
+                let hint = t(cx, "results.planFullScanHint");
+                el.child(
+                    form::badge(t(cx, "results.planFullScan"), theme.warning)
+                        .id(SharedString::from(format!("plan-full-scan-{key}")))
+                        .tooltip(move |window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(hint.clone()).build(window, cx)
+                        }),
+                )
+            })
             .when(estimate_off, |el| {
                 el.child(
                     h_flex()

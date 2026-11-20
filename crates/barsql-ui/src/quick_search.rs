@@ -10,6 +10,7 @@ use gpui_kit::component::{ActiveTheme, Icon, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::assets::engine_icon;
 use crate::connections_panel::parse_color;
 use crate::fuzzy::rank_candidate;
 use crate::i18n::t;
@@ -68,6 +69,15 @@ impl Kind {
             Self::Table => 70.,
             Self::Saved => 40.,
             Self::Connection => 10.,
+        }
+    }
+
+    fn heading(self) -> &'static str {
+        match self {
+            Self::Tab => "quickSearch.groupTabs",
+            Self::Table => "quickSearch.groupTables",
+            Self::Saved => "quickSearch.groupSaved",
+            Self::Connection => "quickSearch.groupConnections",
         }
     }
 }
@@ -201,6 +211,14 @@ pub fn rank(query: &str, candidates: &Candidates) -> Vec<Item> {
 
     items.sort_by(|a, b| b.rank().total_cmp(&a.rank()));
     items.truncate(MAX_ITEMS);
+    // Kinds stay together under their heading, the best match's kind first, so Enter opens the best match.
+    let mut kinds: Vec<Kind> = Vec::new();
+    for item in &items {
+        if !kinds.contains(&item.kind) {
+            kinds.push(item.kind);
+        }
+    }
+    items.sort_by_key(|item| kinds.iter().position(|kind| *kind == item.kind));
     items
 }
 
@@ -317,6 +335,10 @@ impl QuickSearchDialog {
         let label = StyledText::new(item.label.clone())
             .with_highlights(byte_ranges(&item.label, &item.ranges).into_iter().map(|range| (range, highlight)));
         let detail = item.detail.clone().filter(|detail| !detail.is_empty());
+        let icon = match &item.target {
+            Target::Connection(connection) => engine_icon(&connection.driver),
+            _ => Icon::new(item.icon),
+        };
         h_flex()
             .id(("quick-search-item", ix))
             .gap(rems(0.462))
@@ -335,7 +357,7 @@ impl QuickSearchDialog {
                 this.active = ix;
                 this.confirm(window, cx);
             }))
-            .child(Icon::new(item.icon).size(ICON_SM).text_color(color))
+            .child(icon.size(ICON_SM).text_color(color))
             .child(div().flex_1().min_w_0().truncate().text_size(TEXT_BASE).child(label))
             .when_some(detail, |el, detail| {
                 el.child(div().flex_none().text_size(TEXT_XS).text_color(theme.muted_foreground).child(detail))
@@ -357,8 +379,18 @@ impl Render for QuickSearchDialog {
                 .child(t(cx, "quickSearch.noResults"))
                 .into_any_element()
         } else {
-            let rows: Vec<_> =
-                self.items.iter().enumerate().map(|(ix, item)| self.row(ix, item, ix == active, cx)).collect();
+            // A heading shares its group's first row's child, as scroll_to_item counts children.
+            let rows = self.items.iter().enumerate().map(|(ix, item)| {
+                let row = self.row(ix, item, ix == active, cx).into_any_element();
+                if ix > 0 && self.items[ix - 1].kind == item.kind {
+                    return row;
+                }
+                let heading = div().px(rems(0.923)).pt(rems(0.615)).pb(rems(0.231));
+                v_flex()
+                    .child(heading.child(form::caption(t(cx, item.kind.heading()), cx)))
+                    .child(row)
+                    .into_any_element()
+            });
             let list = v_flex()
                 .id("quick-search-list")
                 .max_h(max_height)
@@ -386,7 +418,28 @@ impl Render for QuickSearchDialog {
                     .child(Styled::h(form::input(&self.input, window, cx), rems(2.462))),
             )
             .child(list)
+            .child(legend(cx))
     }
+}
+
+// The keys that work here, as GPUI Kit's own pickers don't say.
+fn legend(cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let pair = |keys: Vec<&'static str>, label: SharedString| {
+        h_flex().gap(rems(0.308)).children(keys.into_iter().map(|key| form::keycap(key, cx))).child(label)
+    };
+    h_flex()
+        .debug_selector(|| "quick-search-legend".into())
+        .gap(rems(1.231))
+        .px(rems(0.923))
+        .py(rems(0.538))
+        .border_t_1()
+        .border_color(theme.border)
+        .text_size(TEXT_XS)
+        .text_color(theme.muted_foreground)
+        .child(pair(vec!["↑", "↓"], t(cx, "quickSearch.navigate")))
+        .child(pair(vec!["Enter"], t(cx, "quickSearch.open")))
+        .child(pair(vec!["Esc"], t(cx, "quickSearch.close")))
 }
 
 pub fn open(

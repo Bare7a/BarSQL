@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use barsql_core::schema::primary_keys;
 use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
-    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, SqlDialect, TableInfo,
-    TriggerInfo,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo,
+    SqlDialect, TableInfo, TableSize, TriggerInfo,
 };
 use barsql_sql::ddl::{
     DdlColumn, compose_create_table, join_ddl, render_constraint, render_create_index, terminate_statement,
@@ -77,8 +78,21 @@ fn overload_kind(a: FunctionKind, b: FunctionKind) -> FunctionKind {
 
 impl PgEngine {
     async fn rows(self: &Arc<Self>, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>, QueryError> {
-        let lease = self.lease().await?;
-        lease.client().query(sql, params).await.map_err(|err| pg_error(&err))
+        let mut lease = self.lease().await?;
+        lease.broken = true;
+        let rows = lease.client().query(sql, params).await;
+        lease.broken = false;
+        rows.map_err(|err| pg_error(&err))
+    }
+
+    // The simple protocol answers in one round trip, where query() prepares first.
+    pub async fn round_trip(self: &Arc<Self>) -> Result<Duration, QueryError> {
+        let mut lease = self.lease().await?;
+        lease.broken = true;
+        let started = Instant::now();
+        let answered = lease.client().simple_query("SELECT 1").await;
+        lease.broken = false;
+        answered.map(|_| started.elapsed()).map_err(|err| pg_error(&err))
     }
 
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
@@ -180,6 +194,83 @@ impl PgEngine {
             .collect()
     }
 
+    // Like psql's "Referenced by": partitions' copies of a key are left out, and a partition shows its ancestors' keys.
+    // pg_partition_ancestors lists nothing for a plain table, hence the target itself.
+    pub async fn referencing_keys(
+        self: &Arc<Self>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
+        let (schema, table) = (self.schema_or(schema).to_string(), table.to_string());
+        let rows = self
+            .rows(
+                "WITH target AS (
+                    SELECT t.oid FROM pg_catalog.pg_class t
+                    JOIN pg_catalog.pg_namespace tn ON tn.oid = t.relnamespace
+                    WHERE tn.nspname = $1 AND t.relname = $2
+                )
+                SELECT n.nspname, c.relname, con.conname, a.attname, r.attname
+                FROM pg_catalog.pg_constraint con
+                JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                CROSS JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(attnum, refnum, ord)
+                JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+                JOIN pg_catalog.pg_attribute r ON r.attrelid = con.confrelid AND r.attnum = k.refnum
+                WHERE con.contype = 'f' AND con.conparentid = 0 AND con.confrelid IN (
+                    SELECT oid FROM target
+                    UNION ALL SELECT p.relid FROM target, pg_catalog.pg_partition_ancestors(target.oid) p)
+                ORDER BY n.nspname, c.relname, con.conname, k.ord",
+                &[&schema, &table],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| {
+                Ok(ReferencingKey {
+                    schema: get(r, 0)?,
+                    table: get(r, 1)?,
+                    key: get(r, 2)?,
+                    column: get(r, 3)?,
+                    referenced_column: get(r, 4)?,
+                })
+            })
+            .collect()
+    }
+
+    // pg_class's page counts take no lock, where pg_total_relation_size waits behind an open ALTER TABLE or TRUNCATE.
+    // It also opens the indexes and the TOAST table, and a REINDEX locks just the indexes. The counts are blank until
+    // a VACUUM or ANALYZE, which autovacuum leaves until 50 rows change, so such a table is sized exactly while no such
+    // lock is held or queued on any of them. A partitioned table keeps no storage of its own.
+    pub async fn table_sizes(self: &Arc<Self>, schema: &str) -> Result<HashMap<String, TableSize>, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let rows = self
+            .rows(
+                "WITH locked AS MATERIALIZED (
+                    SELECT relation FROM pg_catalog.pg_locks
+                    WHERE locktype = 'relation' AND mode = 'AccessExclusiveLock'
+                        AND database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+                )
+                SELECT c.relname,
+                    CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint
+                        ELSE pg_catalog.pg_stat_get_live_tuples(c.oid) END,
+                    CASE WHEN c.reltuples >= 0 THEN (c.relpages::bigint + COALESCE(toast.relpages, 0)
+                            + (SELECT COALESCE(sum(i.relpages), 0) FROM pg_catalog.pg_index x
+                                JOIN pg_catalog.pg_class i ON i.oid = x.indexrelid
+                                WHERE x.indrelid IN (c.oid, c.reltoastrelid)))
+                            * current_setting('block_size')::bigint
+                        WHEN NOT EXISTS (SELECT 1 FROM locked WHERE relation IN (c.oid, c.reltoastrelid)
+                                OR relation IN (SELECT x.indexrelid FROM pg_catalog.pg_index x
+                                    WHERE x.indrelid IN (c.oid, c.reltoastrelid)))
+                            THEN pg_catalog.pg_total_relation_size(c.oid) END
+                FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                LEFT JOIN pg_catalog.pg_class toast ON toast.oid = c.reltoastrelid
+                WHERE n.nspname = $1 AND c.relkind IN ('r', 'm')",
+                &[&schema],
+            )
+            .await?;
+        rows.iter().map(|r| Ok((get(r, 0)?, TableSize { rows: get(r, 1)?, bytes: get(r, 2)? }))).collect()
+    }
+
     pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
         let schema = self.schema_or(schema).to_string();
         let rows = self
@@ -195,6 +286,7 @@ impl PgEngine {
                     ),
                     COALESCE(fk.reftable::text, ''),
                     COALESCE(fk.refcolumn::text, ''),
+                    COALESCE(fk.conname::text, ''),
                     a.attidentity <> '',
                     a.attgenerated <> '',
                     ARRAY(
@@ -212,7 +304,7 @@ impl PgEngine {
                 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
                 LEFT JOIN pg_catalog.pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
                 LEFT JOIN LATERAL (
-                    SELECT ref.relname AS reftable, refatt.attname AS refcolumn
+                    SELECT ref.relname AS reftable, refatt.attname AS refcolumn, con.conname
                     FROM pg_catalog.pg_constraint con
                     JOIN pg_catalog.pg_class ref ON ref.oid = con.confrelid
                     JOIN pg_catalog.pg_attribute refatt ON refatt.attrelid = con.confrelid
@@ -231,9 +323,9 @@ impl PgEngine {
             .map(|r| {
                 let name: String = get(r, 0)?;
                 let foreign_table: String = get(r, 5)?;
-                let labels: Vec<String> = get(r, 9)?;
+                let labels: Vec<String> = get(r, 10)?;
                 let enum_values = if labels.is_empty() {
-                    enum_values::from_checks(&name, &get::<Vec<String>>(r, 10)?, &PG)
+                    enum_values::from_checks(&name, &get::<Vec<String>>(r, 11)?, &PG)
                 } else {
                     labels
                 };
@@ -246,8 +338,9 @@ impl PgEngine {
                     is_foreign: !foreign_table.is_empty(),
                     foreign_table,
                     foreign_column: get(r, 6)?,
-                    is_identity: get(r, 7)?,
-                    is_computed: get(r, 8)?,
+                    foreign_key: get(r, 7)?,
+                    is_identity: get(r, 8)?,
+                    is_computed: get(r, 9)?,
                     enum_values,
                 })
             })

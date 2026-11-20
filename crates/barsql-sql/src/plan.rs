@@ -35,6 +35,9 @@ pub struct PlanNode {
     pub rows_actual: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loops: Option<f64>,
+    // Rows a scan read before its own filter, where the engine says. Only the full-scan chip reads it.
+    #[serde(skip)]
+    pub rows_read: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,6 +255,8 @@ fn pg_node(raw: &Map<String, Json>) -> PlanNode {
     }
     if let Some(v) = plan_float(raw.get("Actual Rows")) {
         n.rows_actual = Some(v * loops);
+        let removed = plan_float(raw.get("Rows Removed by Filter")).unwrap_or(0.0);
+        n.rows_read = Some((v + removed) * loops);
     }
     n.children = object_slice(raw.get("Plans")).into_iter().map(pg_node).collect();
     finalize_node(&mut n);
@@ -465,6 +470,7 @@ fn mysql_cost(n: &mut PlanNode, raw: &Map<String, Json>) {
 fn mysql_rows_and_time(n: &mut PlanNode, raw: &Map<String, Json>) {
     n.rows_planned =
         ["rows_produced_per_join", "rows_examined_per_scan", "rows"].iter().find_map(|key| opt_float(raw.get(*key)));
+    n.rows_read = opt_float(raw.get("rows_examined_per_scan"));
     // MariaDB's r_rows is per loop like Postgres, but its time counters are already totals.
     let mut loops = 1.0;
     if let Some(v) = plan_float(raw.get("r_loops")) {

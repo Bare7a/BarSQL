@@ -109,10 +109,15 @@ fn categories_break_ties_and_the_list_stops_at_ten() {
     };
     let items = rank("users", &candidates);
     assert_eq!(items.len(), 10);
-    let top: Vec<Kind> = items.iter().take(4).map(|item| item.kind).collect();
-    assert_eq!(top, [Kind::Tab, Kind::Table, Kind::Saved, Kind::Connection]);
+    let mut kinds: Vec<Kind> = items.iter().map(|item| item.kind).collect();
+    kinds.dedup();
+    assert_eq!(kinds, [Kind::Tab, Kind::Table, Kind::Saved, Kind::Connection], "each kind together, best first");
     assert_eq!(items[0].ranges.first(), Some(&(0..5)));
-    assert_eq!(items[4].label, "users_10", "equal scores keep their order");
+    assert_eq!(
+        (items[1].label.as_str(), items[2].label.as_str()),
+        ("users", "users_10"),
+        "equal scores keep their order"
+    );
 }
 
 #[test]

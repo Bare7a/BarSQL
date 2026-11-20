@@ -3,8 +3,8 @@ use std::sync::Arc;
 use barsql_core::TableStructure;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError, RoutineInfo,
-    SchemaInfo, TableInfo, TriggerInfo,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError, ReferencingKey,
+    RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
 };
 
 use super::SqliteEngine;
@@ -52,6 +52,15 @@ impl SqliteEngine {
     pub async fn list_columns(self: &Arc<Self>, _schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
         let table = table.to_string();
         self.catalog(move |src| catalog::columns(src, &table)).await
+    }
+
+    pub async fn referencing_keys(
+        self: &Arc<Self>,
+        _schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
+        let table = table.to_string();
+        self.catalog(move |src| catalog::referencing_keys(src, &table)).await
     }
 
     pub async fn list_indexes(self: &Arc<Self>, _schema: &str, table: &str) -> Result<Vec<IndexInfo>, QueryError> {

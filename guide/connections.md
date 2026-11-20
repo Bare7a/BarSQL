@@ -2,6 +2,8 @@
 
 - Create, edit, test and manage database connections
 - Organize into **folders** with drag-and-drop reorder
+- **Paste a connection URL** at the top of the dialog to fill it in, or type one and press Enter: `postgres://`, `mysql://` / `mariadb://`, `sqlserver://` (and JDBC's `;databaseName=` form), `clickhouse://`, `libsql://` and `sqlite://`. The button beside it copies the connection back as a URL, without its password
+- Each connection shows its engine's logo in its color
 - Per-connection **tab colors**
 - **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session, and PostgreSQL, MySQL, SQLite and ClickHouse sessions refuse writes in the database too, so even a function that writes can't get through
 - **Ask before changes** for production connections - the editor confirms any statement that changes data or schema before it runs, and so does saving grid edits

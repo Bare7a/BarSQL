@@ -145,6 +145,23 @@ impl HttpClient {
         *self.0.idle.lock().unwrap_or_else(|e| e.into_inner()) = Some(Idle { conn, until: Instant::now() + keep });
     }
 
+    // Dials first, so the time leaves out the handshakes.
+    pub(crate) async fn time(&self, req: &Request<'_>, limit: usize) -> Result<Duration, HttpError> {
+        self.warm().await?;
+        let started = Instant::now();
+        self.send(req).await?.read_to_end(limit).await?;
+        Ok(started.elapsed())
+    }
+
+    async fn warm(&self) -> Result<(), HttpError> {
+        let until = self.0.idle.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|idle| idle.until);
+        if until.is_none_or(|until| until <= Instant::now()) {
+            let conn = self.dial().await?;
+            self.put_idle(conn, DEFAULT_KEEP_ALIVE);
+        }
+        Ok(())
+    }
+
     async fn dial(&self) -> Result<Conn, HttpError> {
         let origin = &self.0.origin;
         let unreachable = |err: &dyn std::fmt::Display| {

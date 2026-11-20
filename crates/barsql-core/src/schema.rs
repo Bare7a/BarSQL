@@ -14,6 +14,9 @@ pub struct ColumnInfo {
     pub foreign_table: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub foreign_column: String,
+    // The key's name, or SQLite's number for it, which tells two keys to the same table apart.
+    #[serde(skip)]
+    pub foreign_key: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_val: String,
     // Filled in by the server: identity, auto_increment, rowid alias.
@@ -37,6 +40,23 @@ pub struct TableInfo {
     pub name: String,
     #[serde(rename = "type")]
     pub kind: String,
+}
+
+// One row per column of a key pointing at the table; a multi-column key's rows share `key`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReferencingKey {
+    pub schema: String,
+    pub table: String,
+    pub key: String,
+    pub column: String,
+    pub referenced_column: String,
+}
+
+// A table's size as the catalog estimates it: rows, and bytes of data and indexes. None where it keeps no figure.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableSize {
+    pub rows: Option<i64>,
+    pub bytes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -254,6 +274,8 @@ pub struct SchemaBundle {
     pub status: ConnectionStatus,
     pub schemas: Vec<SchemaInfo>,
     pub loaded_tables: Vec<SchemaTables>,
+    // One minimal request's round trip on an open connection. None for a local file.
+    pub latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -2,6 +2,7 @@
 
 - Tree view: schemas → tables / views → columns, then **indexes**, **constraints** and **triggers**
 - Views are called out with their own icon and badge; **functions and procedures** close each schema
+- Tables show their size on disk from the catalog's own figures (PostgreSQL, MySQL / MariaDB, SQL Server and ClickHouse): PostgreSQL's and MySQL 8's are estimates as of their last statistics update, which MySQL 8 caches for up to a day, and **Refresh** reads them again
 - Columns show an icon for their type, and gold primary-key and blue foreign-key icons, as the grid and ER diagram do. Hover one for its full type, foreign-key target, default, whether it's generated, and the values an enum allows
 - Search tables and columns instantly, with the matches highlighted
 - Arrow keys move through the tree, `→` / `←` expand and collapse, and `Enter` expands a row or inserts a column's name
@@ -10,7 +11,7 @@
 - **Count rows** answers straight away, without opening a tab
 - **System views** - see what the server is doing (PostgreSQL activity, blocking and long-running queries; MySQL processes and open transactions; SQL Server requests, sessions and blocking; ClickHouse running queries) from the activity button above the tree or a connection's menu, and how a table is doing (statistics, index usage, ClickHouse parts, mutations and merges) from its menu. Each opens as an ordinary SQL tab and runs, so you can tweak it and run it again
 - Refresh the whole schema, or one schema from its right-click menu
-- **ER diagram** of a schema from its right-click menu, in a tab that comes back with the session - every table with all its columns, keys first, laid out so referenced tables stand left of the ones referencing them and the keys cross as little as possible. Drag to pan, zoom with the buttons, `⌘/Ctrl`+scroll or a pinch, and the fit button to see it all. Hover or click a table to light up its keys and neighbours, find one by name, show only the key columns, and double-click (or use the open button) to open it
+- **ER diagram** of a schema from its right-click menu, in a tab that comes back with the session - every table with all its columns, keys first, laid out so referenced tables stand left of the ones referencing them and the keys cross as little as possible. Drag to pan, zoom with the buttons, `⌘/Ctrl`+scroll or a pinch, and the fit button to see it all. Hover or click a table to light up its keys and neighbours, find one by name, show only the key columns, and double-click (or use the open button) to open it. Headers show each table's estimated rows where the engine keeps them, the empty search field counts the tables and foreign keys, and **Save as SVG** writes the diagram as drawn
 - **Compare schema…** with another schema or database of the same engine - missing and extra tables, added, dropped and changed columns, and a sync script you can copy or open in a tab
 
 Columns stay directly under their table. Indexes, constraints and triggers sit below them as collapsed groups and are fetched only when you open one, so expanding a table stays cheap.

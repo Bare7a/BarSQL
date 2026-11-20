@@ -32,6 +32,10 @@ impl BarApp {
         self.inner.stores.history.list(connection_id, limit)
     }
 
+    pub fn last_runs(&self) -> Vec<(String, String)> {
+        self.inner.stores.history.last_runs()
+    }
+
     pub(crate) fn record_history(&self, connection_id: &str, sql: &str, duration_ms: i64, error: Option<&QueryError>) {
         self.record_history_all(vec![history_entry(connection_id, sql, duration_ms, error)]);
     }

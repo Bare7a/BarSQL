@@ -225,23 +225,11 @@ impl ConnectionConfig {
     // Turso's dashboard hands out URLs with `?authToken=…`. The token goes in its own field, so the URL can be
     // shown without it.
     fn take_url_token(&mut self) {
-        let Some((base, query)) = self.url.split_once('?') else { return };
-        let mut token = None;
-        let rest: Vec<&str> = query
-            .split('&')
-            .filter(|pair| match pair.strip_prefix("authToken=") {
-                Some(value) => {
-                    token = Some(value.to_string());
-                    false
-                }
-                None => !pair.is_empty(),
-            })
-            .collect();
-        let Some(token) = token else { return };
+        let (url, Some(token)) = crate::conn_url::split_token(&self.url) else { return };
         if self.auth_token.is_empty() {
             self.auth_token = token;
         }
-        self.url = if rest.is_empty() { base.to_string() } else { format!("{base}?{}", rest.join("&")) };
+        self.url = url;
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -406,6 +394,12 @@ impl ExtensionsConfig {
 // Folder and file name, split on either separator, since a data folder can move between operating systems.
 pub fn path_parts(path: &str) -> (&str, &str) {
     path.rsplit_once(['/', '\\']).unwrap_or(("", path))
+}
+
+// SQL Server's `host\INSTANCE`, as its own tools write it. The Instance field wins over the host's.
+pub fn named_instance<'a>(host: &'a str, instance: &'a str) -> (&'a str, &'a str) {
+    let (host, named) = host.split_once('\\').unwrap_or((host, ""));
+    (host, if instance.is_empty() { named } else { instance })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

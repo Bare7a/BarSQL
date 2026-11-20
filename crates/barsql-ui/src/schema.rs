@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use barsql_core::{ColumnInfo, ConnectionStatus, DriverType, SchemaInfo, TableInfo};
+use barsql_core::{ColumnInfo, ConnectionStatus, DriverType, ReferencingKey, SchemaInfo, TableInfo, TableSize};
 use barsql_sql::lang::quoting::column_cache_key;
 use barsql_sql::lang::{Catalog, FunctionCatalog};
 use barsql_sql::schema_diff::Tables;
@@ -13,6 +13,30 @@ use crate::state;
 
 pub type Columns = Arc<Vec<ColumnInfo>>;
 pub type ColumnsLoad = Shared<Task<Result<Columns, String>>>;
+pub type References = Arc<Vec<Reference>>;
+
+// Another table's foreign key to a table. `columns` pairs each referencing column with the one it points at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reference {
+    pub schema: String,
+    pub table: String,
+    pub columns: Vec<(String, String)>,
+}
+
+// Tagged with an id while it runs, as `pending` is, so a load an invalidation overtook can't settle.
+enum Load<T> {
+    Running(u64),
+    Done(T),
+}
+
+impl<T> Load<T> {
+    fn done(&self) -> Option<&T> {
+        match self {
+            Load::Done(value) => Some(value),
+            Load::Running(_) => None,
+        }
+    }
+}
 
 // Shared by the sidebar tree and the editors. Tables load per schema, columns on first use, and failed loads
 // aren't cached, so the next use retries.
@@ -28,9 +52,14 @@ pub struct ConnectionSchema {
     driver: DriverType,
     // What the server said about itself when the schema loaded: database, user, version.
     status: Option<ConnectionStatus>,
+    latency_ms: Option<u64>,
     schemas: Option<Vec<SchemaInfo>>,
     tables: HashMap<String, Vec<TableInfo>>,
     tables_loading: HashSet<String>,
+    // A failed load is kept empty, so the tree doesn't ask again on every frame.
+    sizes: HashMap<String, Load<HashMap<String, TableSize>>>,
+    // A failed load is kept as None until the row viewer comes back to its table.
+    references: HashMap<String, Load<Option<References>>>,
     catalog: Option<Arc<Catalog>>,
     // The server's functions merged with the built-ins. Until they load, the catalog offers the built-ins alone.
     functions: Option<Arc<FunctionCatalog>>,
@@ -49,6 +78,10 @@ impl ConnectionSchema {
         self.status.as_ref()
     }
 
+    pub fn latency_ms(&self) -> Option<u64> {
+        self.latency_ms
+    }
+
     pub fn schemas(&self) -> Option<&[SchemaInfo]> {
         self.schemas.as_deref()
     }
@@ -59,6 +92,36 @@ impl ConnectionSchema {
 
     pub fn tables_loading(&self, schema: &str) -> bool {
         self.tables_loading.contains(schema)
+    }
+
+    pub fn size(&self, schema: &str, table: &str) -> Option<TableSize> {
+        self.sizes.get(schema)?.done()?.get(table).copied()
+    }
+
+    pub fn sizes_loaded(&self, schema: &str) -> bool {
+        self.sizes.get(schema).is_some_and(|load| load.done().is_some())
+    }
+
+    pub fn sizes_requested(&self, schema: &str) -> bool {
+        self.sizes.contains_key(schema)
+    }
+
+    pub fn references(&self, schema: &str, table: &str) -> Option<&References> {
+        self.references.get(&column_cache_key(schema, table))?.done()?.as_ref()
+    }
+
+    pub fn references_requested(&self, schema: &str, table: &str) -> bool {
+        self.references.contains_key(&column_cache_key(schema, table))
+    }
+
+    #[cfg(test)]
+    pub fn references_loading(&self, schema: &str, table: &str) -> bool {
+        matches!(self.references.get(&column_cache_key(schema, table)), Some(Load::Running(_)))
+    }
+
+    fn next_load(&mut self) -> u64 {
+        self.next_load += 1;
+        self.next_load
     }
 
     pub fn loading(&self) -> bool {
@@ -195,6 +258,7 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
             match bundle {
                 Some(Ok(bundle)) => {
                     entry.status = Some(bundle.status);
+                    entry.latency_ms = bundle.latency_ms;
                     entry.schemas = Some(bundle.schemas);
                     for block in bundle.loaded_tables {
                         entry.tables.insert(block.schema, block.tables);
@@ -210,6 +274,77 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
         }
     })
     .detach();
+}
+
+// Once per schema until a reload, which also refreshes the estimates.
+pub fn load_sizes(connection_id: &str, schema: &str, cx: &mut App) {
+    if get(cx, connection_id).is_some_and(|entry| entry.sizes_requested(schema)) {
+        return;
+    }
+    let entry = entry(cx, connection_id);
+    let load_id = entry.next_load();
+    entry.sizes.insert(schema.to_string(), Load::Running(load_id));
+    let generation = entry.generation;
+    let bar = state::bar(cx);
+    let (id, name) = (connection_id.to_string(), schema.to_string());
+    let load = state::spawn(cx, async move { bar.table_sizes(&id, &name).await });
+    let (id, name) = (connection_id.to_string(), schema.to_string());
+    cx.spawn(async move |cx| {
+        let sizes = load.await.and_then(Result::ok).unwrap_or_default();
+        apply(cx, &id, generation, |entry| settle(&mut entry.sizes, name, load_id, sizes));
+    })
+    .detach();
+}
+
+// Truncate leaves the old figures stale.
+pub fn forget_sizes(connection_id: &str, schema: &str, cx: &mut App) {
+    entry(cx, connection_id).sizes.remove(schema);
+}
+
+// One catalog query per table until its schema changes, so moving between its rows sends none.
+pub fn load_references(connection_id: &str, schema: &str, table: &str, cx: &mut App) {
+    if get(cx, connection_id).is_some_and(|entry| entry.references_requested(schema, table)) {
+        return;
+    }
+    let key = column_cache_key(schema, table);
+    let entry = entry(cx, connection_id);
+    let load_id = entry.next_load();
+    entry.references.insert(key.clone(), Load::Running(load_id));
+    let generation = entry.generation;
+    let bar = state::bar(cx);
+    let (id, schema, table) = (connection_id.to_string(), schema.to_string(), table.to_string());
+    let load = state::spawn(cx, async move { bar.referencing_keys(&id, &schema, &table).await });
+    let id = connection_id.to_string();
+    cx.spawn(async move |cx| {
+        let references = load.await.and_then(Result::ok).map(|keys| Arc::new(group_keys(&keys)));
+        apply(cx, &id, generation, |entry| settle(&mut entry.references, key, load_id, references));
+    })
+    .detach();
+}
+
+pub fn retry_failed_references(connection_id: &str, schema: &str, table: &str, cx: &mut App) {
+    let key = column_cache_key(schema, table);
+    if get(cx, connection_id).is_some_and(|entry| matches!(entry.references.get(&key), Some(Load::Done(None)))) {
+        entry(cx, connection_id).references.remove(&key);
+    }
+}
+
+// Relies on each key's rows arriving together.
+fn group_keys(keys: &[ReferencingKey]) -> Vec<Reference> {
+    keys.chunk_by(|a, b| a.key == b.key && a.schema == b.schema && a.table == b.table)
+        .map(|rows| Reference {
+            schema: rows[0].schema.clone(),
+            table: rows[0].table.clone(),
+            columns: rows.iter().map(|key| (key.column.clone(), key.referenced_column.clone())).collect(),
+        })
+        .collect()
+}
+
+// Unless an invalidation dropped or replaced the load.
+fn settle<T>(loads: &mut HashMap<String, Load<T>>, key: String, load_id: u64, value: T) {
+    if matches!(loads.get(&key), Some(Load::Running(running)) if *running == load_id) {
+        loads.insert(key, Load::Done(value));
+    }
 }
 
 // After the schemas, so the tree isn't waiting on it. A failure keeps the built-ins, and the tree doesn't show it.
@@ -303,7 +438,7 @@ pub fn load_tables(connection_id: &str, schema: &str, cx: &mut App) {
     .detach();
 }
 
-// After a rename or drop. Also forgets the schema's cached columns.
+// After a rename or drop, which can change any table's references. Also forgets the schema's columns and sizes.
 pub fn reload_tables(connection_id: &str, schema: &str, cx: &mut App) {
     let entry = entry(cx, connection_id);
     for table in entry.tables.remove(schema).unwrap_or_default() {
@@ -311,6 +446,8 @@ pub fn reload_tables(connection_id: &str, schema: &str, cx: &mut App) {
         entry.columns.remove(&key);
         entry.pending.remove(&key);
     }
+    entry.sizes.remove(schema);
+    entry.references.clear();
     load_tables(connection_id, schema, cx);
 }
 
@@ -320,6 +457,7 @@ pub fn reload_columns(connection_id: &str, schema: &str, table: &str, cx: &mut A
     let entry = entry(cx, connection_id);
     entry.columns.remove(&key);
     entry.pending.remove(&key);
+    entry.references.clear();
     drop(columns(connection_id, schema, table, cx));
 }
 
@@ -335,8 +473,7 @@ pub fn columns(connection_id: &str, schema: &str, table: &str, cx: &mut App) -> 
         return pending.clone();
     }
     let generation = entry.generation;
-    let load_id = entry.next_load;
-    entry.next_load += 1;
+    let load_id = entry.next_load();
     let (id, schema, table) = (connection_id.to_string(), schema.to_string(), table.to_string());
     let load = state::spawn(cx, async move { bar.list_columns(&id, &schema, &table).await });
     let (id, cache_key) = (connection_id.to_string(), key.clone());
@@ -366,11 +503,41 @@ pub fn columns(connection_id: &str, schema: &str, table: &str, cx: &mut App) -> 
 mod tests {
     use std::sync::{Arc, Barrier};
 
-    use barsql_core::DriverType;
+    use barsql_core::{DriverType, ReferencingKey};
     use gpui_kit::TestAppContext;
 
-    use super::Columns;
+    use super::{Columns, Reference, group_keys};
     use crate::test_support::Env;
+
+    #[test]
+    fn a_key_over_several_columns_is_one_reference() {
+        let key = |table: &str, name: &str, column: &str, referenced: &str| ReferencingKey {
+            schema: "main".into(),
+            table: table.into(),
+            key: name.into(),
+            column: column.into(),
+            referenced_column: referenced.into(),
+        };
+        let keys = vec![
+            key("lines", "fk_order", "order_id", "id"),
+            key("lines", "fk_order", "order_rev", "rev"),
+            key("lines", "fk_buyer", "buyer_id", "user_id"),
+            key("notes", "fk_order", "order_id", "id"),
+        ];
+        let reference = |table: &str, pairs: &[(&str, &str)]| Reference {
+            schema: "main".into(),
+            table: table.into(),
+            columns: pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
+        };
+        assert_eq!(
+            group_keys(&keys),
+            [
+                reference("lines", &[("order_id", "id"), ("order_rev", "rev")]),
+                reference("lines", &[("buyer_id", "user_id")]),
+                reference("notes", &[("order_id", "id")]),
+            ]
+        );
+    }
 
     // The load is a GPUI task fed by tokio, so the test executor is driven while it runs.
     fn column_names(env: &Env, cx: &mut TestAppContext) -> Vec<String> {

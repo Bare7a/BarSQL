@@ -1,8 +1,8 @@
 mod common;
 
 use barsql_core::{
-    ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig, FunctionKind, ObjectKind, ObjectRef, Row, RowDelete,
-    RowUpdate, Value,
+    ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig, FunctionKind, ObjectKind, ObjectRef, ReferencingKey,
+    Row, RowDelete, RowUpdate, Value,
 };
 use barsql_db::sqlite::SqliteConnectOptions;
 use barsql_db::{Cancel, Engine, ScriptEvent};
@@ -273,6 +273,36 @@ async fn ddl_for_routines_and_missing_objects_fails() {
     };
     assert!(engine.object_ddl(&object(ObjectKind::Function, "whatever")).await.is_err());
     assert!(engine.object_ddl(&object(ObjectKind::Table, "nope")).await.is_err());
+}
+
+// `Users` and `users(ID)` check the names' case; `notes` names no column against a two-column key.
+#[tokio::test]
+async fn keys_pointing_at_a_table_come_back_with_the_columns_they_point_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(&dir.path().join("refs.db"), false).await;
+    for sql in [
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
+        "CREATE TABLE posts (id INTEGER PRIMARY KEY, author_id INTEGER REFERENCES users(ID))",
+        "CREATE TABLE comments (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES Users)",
+        "CREATE TABLE orders (id INTEGER, rev INTEGER, PRIMARY KEY (id, rev))",
+        "CREATE TABLE lines (order_id INTEGER, order_rev INTEGER, FOREIGN KEY (order_id, order_rev) REFERENCES orders (id, rev))",
+        "CREATE TABLE notes (order_id INTEGER REFERENCES orders)",
+    ] {
+        exec(&engine, sql).await;
+    }
+    let found = |keys: Vec<ReferencingKey>| -> Vec<(String, String, String)> {
+        keys.into_iter().map(|k| (k.table, k.column, k.referenced_column)).collect()
+    };
+    let users = engine.referencing_keys("main", "users").await.unwrap();
+    let triple =
+        |table: &str, column: &str, referenced: &str| (table.to_string(), column.to_string(), referenced.to_string());
+    assert_eq!(found(users), [triple("comments", "user_id", "id"), triple("posts", "author_id", "id")]);
+    let orders = engine.referencing_keys("main", "orders").await.unwrap();
+    assert_eq!(orders[0].key, orders[1].key, "one key over two columns");
+    let lines = engine.list_columns("main", "lines").await.unwrap();
+    assert!(lines.iter().all(|c| c.foreign_key == orders[0].key), "{lines:?}");
+    assert_eq!(found(orders), [triple("lines", "order_id", "id"), triple("lines", "order_rev", "rev")]);
+    assert!(engine.referencing_keys("main", "lines").await.unwrap().is_empty());
 }
 
 async fn seeded(dir: &tempfile::TempDir) -> Engine {

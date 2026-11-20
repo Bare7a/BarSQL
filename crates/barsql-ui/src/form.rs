@@ -58,14 +58,32 @@ pub fn filter_button(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Button 
 // and label go in as children, sized here.
 pub trait ToolButton {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self;
+    fn tool_keys(
+        self,
+        icon: impl Into<Icon>,
+        icon_size: Rems,
+        label: impl Into<SharedString>,
+        keys: String,
+        color: Hsla,
+    ) -> Self;
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self;
     fn tool_label(self, label: impl Into<SharedString>) -> Self;
 }
 
 impl ToolButton for Button {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self {
-        tool_frame(self)
-            .child(h_flex().gap(rems(0.308)).text_size(TEXT_XS).child(icon.into().size(icon_size)).child(label.into()))
+        tool_frame(self).child(tool_row(icon, icon_size, label))
+    }
+
+    fn tool_keys(
+        self,
+        icon: impl Into<Icon>,
+        icon_size: Rems,
+        label: impl Into<SharedString>,
+        keys: String,
+        color: Hsla,
+    ) -> Self {
+        tool_frame(self).child(tool_row(icon, icon_size, label).child(key_chip(keys, color)))
     }
 
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self {
@@ -75,6 +93,10 @@ impl ToolButton for Button {
     fn tool_label(self, label: impl Into<SharedString>) -> Self {
         tool_frame(self).child(div().text_size(TEXT_XS).child(label.into()))
     }
+}
+
+fn tool_row(icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Div {
+    h_flex().gap(rems(0.308)).text_size(TEXT_XS).child(icon.into().size(icon_size)).child(label.into())
 }
 
 fn tool_frame(button: Button) -> Button {
@@ -129,24 +151,28 @@ pub fn section(cx: &App) -> Div {
 }
 
 pub fn select(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
-    labeled_select(id, label.into(), cx.theme().foreground, cx)
+    labeled_select(id, None, label.into(), cx.theme().foreground, cx)
+}
+
+pub fn select_with_icon(id: impl Into<ElementId>, icon: Icon, label: impl Into<SharedString>, cx: &App) -> Button {
+    labeled_select(id, Some(icon), label.into(), cx.theme().foreground, cx)
 }
 
 // A select with nothing chosen yet, dimmed like an input's placeholder.
 pub fn select_placeholder(id: impl Into<ElementId>, placeholder: impl Into<SharedString>, cx: &App) -> Button {
-    labeled_select(id, placeholder.into(), cx.theme().muted_foreground, cx)
+    labeled_select(id, None, placeholder.into(), cx.theme().muted_foreground, cx)
 }
 
-fn labeled_select(id: impl Into<ElementId>, label: SharedString, color: Hsla, cx: &App) -> Button {
+fn labeled_select(id: impl Into<ElementId>, icon: Option<Icon>, label: SharedString, color: Hsla, cx: &App) -> Button {
     let theme = cx.theme();
     Button::new(id).outline().w_full().h(rems(2.308)).pl(rems(0.769)).pr(rems(0.615)).bg(theme.background).child(
         h_flex()
             .w_full()
-            .justify_between()
             .gap(rems(0.462))
             .text_size(TEXT_BASE)
             .text_color(color)
-            .child(div().min_w_0().truncate().child(label))
+            .children(icon.map(|icon| icon.size(ICON_SM)))
+            .child(div().flex_1().min_w_0().truncate().child(label))
             .child(Icon::new(IconName::ChevronDown).size(ICON_MD).text_color(theme.muted_foreground)),
     )
 }
@@ -320,6 +346,18 @@ pub fn badge(text: impl Into<SharedString>, color: Hsla) -> Div {
 pub fn caption(text: impl Into<SharedString>, cx: &App) -> Div {
     let text: SharedString = text.into();
     div().text_size(TEXT_XS).font_semibold().text_color(cx.theme().muted_foreground).child(text.to_uppercase())
+}
+
+// A shortcut inside a button, tinted with the button's text so it reads on a primary one too.
+pub fn key_chip(keys: impl Into<SharedString>, color: Hsla) -> Div {
+    div()
+        .flex_none()
+        .px(rems(0.231))
+        .rounded(RADIUS_SM)
+        .bg(color.opacity(0.16))
+        .text_size(TEXT_2XS)
+        .text_color(color.opacity(0.85))
+        .child(keys.into())
 }
 
 // A shortcut on a key cap, as the tips and the empty states show them.

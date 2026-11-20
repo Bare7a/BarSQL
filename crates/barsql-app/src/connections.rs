@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,
-    RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TriggerInfo,
+    ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TableSize, TriggerInfo,
 };
 use barsql_db::Engine;
 use barsql_storage::ConnectionFolder;
@@ -153,6 +153,7 @@ impl BarApp {
         let cfg = self.config(id)?;
         let engine = self.engine(id).await?;
         let mut status = within(SCHEMA_TIMEOUT, engine.connection_info()).await?;
+        let latency = within(SCHEMA_TIMEOUT, engine.round_trip()).await?;
         status.connected = true;
         let schemas = within(SCHEMA_TIMEOUT, engine.list_schemas()).await?;
         let browse = cfg.default_browse_schema();
@@ -163,7 +164,7 @@ impl BarApp {
             let tables = within(SCHEMA_TIMEOUT, engine.list_tables(&schema.name)).await?;
             loaded_tables.push(SchemaTables { schema: schema.name.clone(), tables });
         }
-        Ok(SchemaBundle { status, schemas, loaded_tables })
+        Ok(SchemaBundle { status, schemas, loaded_tables, latency_ms: latency.map(|d| d.as_millis() as u64) })
     }
 
     pub(crate) async fn list_schemas_inner(&self, id: &str) -> Result<Vec<SchemaInfo>, QueryError> {
@@ -174,6 +175,25 @@ impl BarApp {
     pub(crate) async fn list_tables_inner(&self, id: &str, schema: &str) -> Result<Vec<TableInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_tables(schema)).await
+    }
+
+    pub(crate) async fn referencing_keys_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.referencing_keys(schema, table)).await
+    }
+
+    pub(crate) async fn table_sizes_inner(
+        &self,
+        id: &str,
+        schema: &str,
+    ) -> Result<HashMap<String, TableSize>, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.table_sizes(schema)).await
     }
 
     pub(crate) async fn list_columns_inner(

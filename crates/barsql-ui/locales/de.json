@@ -29,6 +29,8 @@
     }
   },
   "app": {
+    "recentConnections": "Zuletzt verwendete Verbindungen",
+    "pickEngine": "Oder mit einer Engine beginnen",
     "queryTabWithConn": "Abfrage {{num}} · {{conn}}",
     "statusRunning": "Läuft… {{seconds}} s",
     "statusStreaming_one": "Lädt… {{count}} Zeile · {{seconds}} s",
@@ -78,6 +80,9 @@
     "contextGoToDefinition": "Gehe zu Definition"
   },
   "connection": {
+    "pasteUrlPlaceholder": "Verbindungs-URL einfügen, um die Felder auszufüllen",
+    "copyUrl": "Als URL kopieren, ohne Passwort",
+    "urlNotRecognized": "BarSQL kann diese Verbindungs-URL nicht lesen",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",
@@ -120,6 +125,8 @@
     "driverNotInBuild": "{{driver}} ist in diesem Build nicht verfügbar."
   },
   "results": {
+    "planFullScan": "Vollständiger Scan",
+    "planFullScanHint": "Liest jede Zeile der Tabelle. Ein Index auf den gefilterten Spalten kann die meisten überspringen",
     "messages": "Meldungen",
     "messagesCount": "{{count}} Meldung",
     "messagesCount_other": "{{count}} Meldungen",
@@ -208,6 +215,12 @@
     "arrayError": "Das lässt sich nicht mehr als Array lesen."
   },
   "jsonViewer": {
+    "referencedBy": "Referenziert von",
+    "fields": "Felder",
+    "json": "JSON",
+    "copyValue": "Zum Kopieren klicken",
+    "noFieldMatch": "Keine Spalte und kein Wert passt zum Filter",
+    "allNull": "Jede Spalte ist NULL",
     "filterPlaceholder": "Schlüssel und Werte filtern",
     "noMatch": "// Kein Schlüssel und kein Wert passt zum Filter",
     "row": "Zeile {{number}}",
@@ -323,6 +336,7 @@
     "zoom": "Zoomen",
     "bringAllToFront": "Alle nach vorne bringen",
     "stripedRows": "Gestreifte Zeilen",
+    "typeColors": "Werte nach Typ einfärben",
     "commandPalette": "Befehlspalette…"
   },
   "errors": {
@@ -374,6 +388,7 @@
       "failed": "Update fehlgeschlagen"
     },
     "details": {
+      "latency": "Antwortzeit beim Verbinden: {{ms}} ms",
       "database": "Datenbank {{database}} · Schema {{schema}}",
       "databaseOnly": "Datenbank {{database}}",
       "ssh": "Über SSH {{address}}",
@@ -421,6 +436,8 @@
     "description": "Jeder Wert wird als SQL in die Abfrage eingesetzt, Text also in Anführungszeichen: 'Ann'. Ein leerer Wert läuft als NULL."
   },
   "import": {
+    "runRows": "{{rows}} Zeile importieren",
+    "runRows_other": "{{rows}} Zeilen importieren",
     "notUtf8": "Diese Datei ist kein UTF-8-Text, daher werden Zeichen, die sich nicht lesen lassen, als � importiert. Speichern Sie sie als UTF-8 und wählen Sie sie erneut.",
     "fileRows_one": "{{rows}} Zeile",
     "fileRows_other": "{{rows}} Zeilen",
@@ -475,6 +492,11 @@
     "blank": "(leer)"
   },
   "erDiagram": {
+    "exportSvg": "Als SVG speichern",
+    "tables": "{{count}} Tabelle",
+    "tables_other": "{{count}} Tabellen",
+    "foreignKeys": "{{count}} Fremdschlüssel",
+    "foreignKeys_other": "{{count}} Fremdschlüssel",
     "menu": "ER-Diagramm",
     "title": "ER-Diagramm · {{schema}}",
     "loading": "Tabellen werden geladen…",
@@ -614,5 +636,14 @@
       "autoIncrement": "Auto-Inkrement",
       "seeded": "Identität ({{seed}}, {{increment}})"
     }
+  },
+  "quickSearch": {
+    "groupTabs": "Offene Tabs",
+    "groupTables": "Tabellen",
+    "groupSaved": "Gespeicherte Abfragen",
+    "groupConnections": "Verbindungen",
+    "navigate": "Navigieren",
+    "open": "Öffnen",
+    "close": "Schließen"
   }
 }

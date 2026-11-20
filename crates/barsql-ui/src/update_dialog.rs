@@ -16,7 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::form;
-use crate::i18n::{t, t_with};
+use crate::i18n::{bytes, t, t_with};
 use crate::modal::{self, Modal};
 use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
@@ -125,17 +125,6 @@ fn check(base: String, cx: &App) -> Task<Result<Option<Release>, String>> {
         let kind = update::install().kind;
         update::check(&base, barsql_app::VERSION, kind, update::platform(), update::arch())
     })
-}
-
-// B to GB, one decimal above bytes, ties rounded up.
-fn format_bytes(n: u64) -> String {
-    if n == 0 {
-        return String::new();
-    }
-    let units = ["B", "KB", "MB", "GB"];
-    let i = ((n as f64).ln() / 1024f64.ln()).floor().min(3.) as usize;
-    let value = n as f64 / 1024f64.powi(i as i32);
-    if i == 0 { format!("{value:.0} {}", units[i]) } else { format!("{:.1} {}", (value * 10.).round() / 10., units[i]) }
 }
 
 // The last argument is the macOS password prompt.
@@ -359,10 +348,10 @@ impl UpdateDialog {
         let (label, rate, percent) = match transfer {
             None => (t(cx, "update.starting"), String::new(), None),
             Some(Transfer { written, total, rate }) => {
-                let rate = if rate == 0 { String::new() } else { format!("{}/s", format_bytes(rate)) };
+                let rate = if rate == 0 { String::new() } else { format!("{}/s", bytes(cx, rate as i64)) };
                 if total > 0 {
                     let percent = (written as f64 / total as f64 * 100.).round();
-                    let (written, total) = (format_bytes(written), format_bytes(total));
+                    let (written, total) = (bytes(cx, written as i64), bytes(cx, total as i64));
                     let label = t_with(
                         cx,
                         "update.progress",
@@ -370,7 +359,7 @@ impl UpdateDialog {
                     );
                     (label, rate, Some(percent as f32))
                 } else {
-                    (t_with(cx, "update.downloaded", &[("written", &format_bytes(written))]), rate, None)
+                    (t_with(cx, "update.downloaded", &[("written", &bytes(cx, written as i64))]), rate, None)
                 }
             }
         };
@@ -408,8 +397,10 @@ impl Render for UpdateDialog {
             UpdateState::UpToDate => Some(format!("v{current}")),
             UpdateState::Failed { .. } => None,
             state => state.release().map(|release| {
-                let size = format_bytes(release.asset.size);
-                let size = if size.is_empty() { size } else { format!(" · {size}") };
+                let size = match release.asset.size {
+                    0 => String::new(),
+                    size => format!(" · {}", bytes(cx, size as i64)),
+                };
                 format!("{current} → v{}{size}", release.version)
             }),
         };
@@ -559,24 +550,3 @@ fn check_after(base: String, delay: Duration, cx: &mut App) {
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod format_tests {
-    use super::format_bytes;
-
-    #[test]
-    fn sizes_format_with_one_decimal_above_bytes() {
-        let cases = [
-            (0, ""),
-            (512, "512 B"),
-            (1024, "1.0 KB"),
-            (1280, "1.3 KB"),
-            (1536, "1.5 KB"),
-            (12_582_912, "12.0 MB"),
-            (5 << 40, "5120.0 GB"),
-        ];
-        for (bytes, text) in cases {
-            assert_eq!(format_bytes(bytes), text, "{bytes}");
-        }
-    }
-}

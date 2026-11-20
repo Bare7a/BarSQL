@@ -9,6 +9,7 @@ Load a **CSV** (or any delimited file) or run a **`.sql` script**, from the ⬆ 
 - **Import into an existing table**, optionally emptying it first, **or create a new one** with types inferred from the data (integer, decimal, boolean, date, timestamp, text) - each one editable before you commit to it, and named in your engine's own dialect
 - Headers optional, `NULL` text configurable (`\N`, `NULL`, whatever your exporter writes), leading lines skippable for files with a preamble, whitespace trimmable
 - **Empty fields keep their meaning**: a bare one is `NULL`, a quoted `""` is an empty string - the same convention Postgres `COPY … FORMAT csv` uses, and what lets a BarSQL CSV export load straight back in. In a numeric or date column, where `""` is never valid, both mean `NULL`
+- The Import button says how many rows it will load once the file is counted
 - UTF-8 BOMs stripped, ragged rows tolerated, and the preview warns when a file isn't UTF-8 (like Excel's Windows-1252 CSVs), whose unreadable characters would load as `�`
 - **Bad rows are skipped and reported**, not fatal - or tick **stop at the first error** if you'd rather nothing partial lands
 - Rows load in batches with live progress, and **Stop** ends a long run

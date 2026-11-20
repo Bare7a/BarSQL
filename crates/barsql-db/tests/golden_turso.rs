@@ -36,6 +36,20 @@ async fn reset(engine: &Engine) {
     run_all(&mut session, &statements).await;
 }
 
+// Over HTTP the same catalog query reads the table-valued pragmas, as it does on a local file.
+#[tokio::test]
+async fn turso_keys_pointing_at_a_table_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    let engine = connect().await;
+    reset(&engine).await;
+    let mut session = engine.session().await.unwrap();
+    run_all(&mut session, &common::REF_TABLES.map(String::from)).await;
+    let keys = engine.referencing_keys("main", "ref_orders").await.unwrap();
+    let columns = engine.list_columns("main", "ref_lines").await.unwrap();
+    reset(&engine).await;
+    common::assert_ref_keys("turso", &keys, &columns, "main", &["ref_lines"]);
+}
+
 // Turso runs SQLite, so its fixtures reuse SQLite's setup and probes with what the server answers.
 #[tokio::test]
 async fn turso_values_and_errors_match_the_fixtures() {

@@ -423,7 +423,7 @@ impl ResultsPanel {
     }
 
     // The active result's grid, unless the Messages tab covers it.
-    fn shown_grid(&self) -> Option<&Entity<Grid>> {
+    pub(crate) fn shown_grid(&self) -> Option<&Entity<Grid>> {
         self.sets.get(self.active).filter(|_| !self.messages_open)?.grid.as_ref()
     }
 

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use barsql_app::{DiagramRef, EditorSession, EditorTab, TableViewRef};
-use barsql_core::SavedQuery;
+use barsql_core::{ConnectionConfig, DriverType, HistoryEntry, SavedQuery};
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::{
     AppContext as _, Entity, ExternalPaths, FileDropEvent, Modifiers, MouseButton, Pixels, TestAppContext,
@@ -94,6 +94,37 @@ fn the_welcome_screen_opens_a_query_tab(cx: &mut TestAppContext) {
     cx.simulate_click(button.center(), Modifiers::none());
     cx.run_until_parked();
     assert_eq!(cx.update(|_, cx| workspace.read(cx).tabs.len()), 1);
+}
+
+#[gpui_kit::test]
+fn the_welcome_screen_lists_recent_connections_by_their_last_query(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let file = std::path::Path::new(&env.connection.file_path).with_file_name("second.db");
+    let second = ConnectionConfig {
+        name: "Second".into(),
+        driver: DriverType::Sqlite,
+        file_path: file.display().to_string(),
+        ..Default::default()
+    };
+    let second = env.runtime.block_on(env.bar.save_connection(second)).unwrap();
+    let entry = HistoryEntry {
+        id: "h1".into(),
+        connection_id: second.id.clone(),
+        sql: "SELECT 1".into(),
+        executed_at: "2026-11-20T09:00:00.000Z".into(),
+        success: true,
+        ..Default::default()
+    };
+    // The seed query ran on the first connection.
+    env.bar.clear_query_history(&env.connection.id).unwrap();
+    env.bar.restore_query_history_entry(entry).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    let row = cx.debug_bounds("welcome-connection-0").expect("the welcome screen lists the connections");
+    cx.simulate_click(row.center(), Modifiers::none());
+    cx.run_until_parked();
+    let opened = cx.update(|_, cx| workspace.read(cx).active_query().map(|tab| tab.read(cx).connection.id.clone()));
+    assert_eq!(opened, Some(second.id), "the one a query last ran on comes first, though it was saved second");
 }
 
 #[gpui_kit::test]

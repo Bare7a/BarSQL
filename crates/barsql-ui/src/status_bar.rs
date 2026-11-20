@@ -187,6 +187,7 @@ fn detail_line(detail: &server::Detail, cx: &App) -> SharedString {
         }
         Detail::Ssh(address) => t_with(cx, "status.details.ssh", &[("address", address)]),
         Detail::Tls(mode) => t_with(cx, "status.details.tls", &[("mode", mode)]),
+        Detail::Latency(ms) => t_with(cx, "status.details.latency", &[("ms", &ms.to_string())]),
     }
 }
 

@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use barsql_core::TableStructure;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, FunctionList, IndexInfo, ObjectKind,
-    ObjectRef, QueryError, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest, TableInfo,
-    TriggerInfo, Value,
+    ObjectRef, QueryError, ReferencingKey, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest,
+    TableInfo, TableSize, TriggerInfo, Value,
 };
 use barsql_sql::dml::{build_insert, build_insert_with, build_table_select};
 use barsql_sql::{
@@ -209,6 +211,17 @@ impl Engine {
         dispatch!(self, e => e.connection_info().await)
     }
 
+    pub async fn round_trip(&self) -> Result<Option<Duration>, QueryError> {
+        Ok(Some(match self {
+            Engine::Postgres(e) => e.round_trip().await?,
+            Engine::MySql(e) => e.round_trip().await?,
+            Engine::SqlServer(e) => e.round_trip().await?,
+            Engine::ClickHouse(e) => e.round_trip().await?,
+            Engine::Turso(e) => e.round_trip().await?,
+            Engine::Sqlite(_) => return Ok(None),
+        }))
+    }
+
     pub async fn list_schemas(&self) -> Result<Vec<SchemaInfo>, QueryError> {
         dispatch!(self, e => e.list_schemas().await)
     }
@@ -219,6 +232,29 @@ impl Engine {
 
     pub async fn list_columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
         dispatch!(self, e => e.list_columns(schema, table).await)
+    }
+
+    // ClickHouse keeps no foreign keys.
+    pub async fn referencing_keys(&self, schema: &str, table: &str) -> Result<Vec<ReferencingKey>, QueryError> {
+        match self {
+            Engine::Postgres(e) => e.referencing_keys(schema, table).await,
+            Engine::MySql(e) => e.referencing_keys(schema, table).await,
+            Engine::SqlServer(e) => e.referencing_keys(schema, table).await,
+            Engine::Sqlite(e) => e.referencing_keys(schema, table).await,
+            Engine::Turso(e) => e.referencing_keys(schema, table).await,
+            Engine::ClickHouse(_) => Ok(Vec::new()),
+        }
+    }
+
+    // SQLite and Turso keep no figures short of counting every row.
+    pub async fn table_sizes(&self, schema: &str) -> Result<HashMap<String, TableSize>, QueryError> {
+        match self {
+            Engine::Postgres(e) => e.table_sizes(schema).await,
+            Engine::MySql(e) => e.table_sizes(schema).await,
+            Engine::SqlServer(e) => e.table_sizes(schema).await,
+            Engine::ClickHouse(e) => e.table_sizes(schema).await,
+            Engine::Sqlite(_) | Engine::Turso(_) => Ok(HashMap::new()),
+        }
     }
 
     pub async fn list_indexes(&self, schema: &str, table: &str) -> Result<Vec<IndexInfo>, QueryError> {
