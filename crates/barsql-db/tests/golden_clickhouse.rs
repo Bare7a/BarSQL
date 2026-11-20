@@ -18,6 +18,12 @@ async fn connect() -> Engine {
 }
 
 #[tokio::test]
+async fn clickhouse_reports_its_server_version() {
+    let version = connect().await.connection_info().await.unwrap().version;
+    assert!(version.starts_with(|c: char| c.is_ascii_digit()), "{version}");
+}
+
+#[tokio::test]
 async fn clickhouse_values_and_errors_match_the_fixtures() {
     let _serial = common::serial().await;
     let engine = connect().await;

@@ -105,7 +105,7 @@ fn syntax_args(syntax: &str) -> Option<String> {
 
 impl ChEngine {
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        let rows = self.rows("SELECT currentDatabase(), currentUser()", &[]).await?;
+        let rows = self.rows("SELECT currentDatabase(), currentUser(), version()", &[]).await?;
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
         Ok(ConnectionStatus {
             connected: true,
@@ -113,6 +113,7 @@ impl ChEngine {
             schema: text(row, 0),
             user: text(row, 1),
             host: self.options.host.clone(),
+            version: text(row, 2),
         })
     }
 

@@ -49,7 +49,7 @@ impl MyEngine {
     }
 
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        let (_, rows) = self.text_rows("SELECT DATABASE(), CURRENT_USER()").await?;
+        let (_, rows) = self.text_rows("SELECT DATABASE(), CURRENT_USER(), VERSION()").await?;
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
         let database = text(row, 0).ok_or_else(|| QueryError::message("no database selected"))?;
         let schema = if self.options.schema.is_empty() { database.clone() } else { self.options.schema.clone() };
@@ -59,6 +59,7 @@ impl MyEngine {
             schema,
             user: string(row, 1),
             host: self.options.host.clone(),
+            version: string(row, 2),
         })
     }
 

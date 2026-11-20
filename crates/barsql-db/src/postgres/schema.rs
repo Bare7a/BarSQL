@@ -82,8 +82,9 @@ impl PgEngine {
     }
 
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        let rows =
-            self.rows("SELECT current_database()::text, current_schema()::text, current_user::text", &[]).await?;
+        let sql = "SELECT current_database()::text, current_schema()::text, current_user::text,
+            current_setting('server_version')";
+        let rows = self.rows(sql, &[]).await?;
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
         Ok(ConnectionStatus {
             connected: true,
@@ -91,6 +92,7 @@ impl PgEngine {
             schema: get::<Option<String>>(row, 1)?.unwrap_or_default(),
             user: get::<Option<String>>(row, 2)?.unwrap_or_default(),
             host: self.options.host.clone(),
+            version: get::<Option<String>>(row, 3)?.unwrap_or_default(),
         })
     }
 

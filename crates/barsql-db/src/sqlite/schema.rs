@@ -21,7 +21,19 @@ impl SqliteEngine {
     }
 
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        Ok(ConnectionStatus { connected: true, database: "main".into(), schema: "main".into(), ..Default::default() })
+        let version = self
+            .with_conn(|conn| {
+                conn.query_row("SELECT sqlite_version()", [], |row| row.get::<_, String>(0))
+                    .map_err(|err| super::lite_error(&err))
+            })
+            .await?;
+        Ok(ConnectionStatus {
+            connected: true,
+            database: "main".into(),
+            schema: "main".into(),
+            version,
+            ..Default::default()
+        })
     }
 
     pub async fn list_schemas(self: &Arc<Self>) -> Result<Vec<SchemaInfo>, QueryError> {

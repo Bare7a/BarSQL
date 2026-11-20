@@ -13,6 +13,8 @@ use crate::actions::{PrevTab, Quit};
 use crate::dialogs::Asked;
 use crate::query_tab::TxnState;
 use crate::results::ResultStatus;
+use crate::status_bar::AiAccess;
+use crate::status_bar::server::Detail;
 use crate::update_dialog::{self, UpdateDialog, UpdateState};
 use crate::workspace::QuitRequests;
 
@@ -417,6 +419,60 @@ fn the_status_bar_names_the_connection_and_its_engine(cx: &mut TestAppContext) {
     assert_eq!(connection(&mut app), ("Local".into(), "SQLite".into(), false), "the sidebar's, not connected");
     app.connect();
     assert_eq!(connection(&mut app), ("Local".into(), "SQLite".into(), true));
+}
+
+// Once the server has answered, the version it runs takes the engine's place. Disconnected, the engine is back.
+#[gpui_kit::test]
+fn the_status_bar_names_the_server_version(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.wait_schema();
+    let shown = |app: &mut Driver| app.status_bar().connection.expect("a connection");
+    let connected = shown(&mut app);
+    assert!(connected.product.as_deref().is_some_and(|p| p.starts_with("SQLite 3.")), "{:?}", connected.product);
+    assert!(connected.details.iter().any(|d| matches!(d, Detail::Address(path) if path.ends_with("ui.db"))));
+    app.env.runtime.block_on(app.env.bar.disconnect(&app.connection.id));
+    assert_eq!(shown(&mut app).product, None);
+}
+
+// The bar's ends show and hide the side panels, as View > Sidebar and View > JSON viewer do.
+#[gpui_kit::test]
+fn the_status_bar_toggles_the_side_panels(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    assert!(app.shown("sidebar") && app.status_bar().sidebar_open);
+    app.click("status-toggle-sidebar");
+    assert!(!app.shown("sidebar") && !app.status_bar().sidebar_open);
+    app.click("status-toggle-sidebar");
+    assert!(app.shown("sidebar"));
+    assert!(!app.shown("json-panel"));
+    app.click("status-toggle-json");
+    assert!(app.shown("json-panel") && app.status_bar().json_open);
+    app.click("status-toggle-json");
+    assert!(!app.shown("json-panel"));
+}
+
+// The AI chip says the connection is shared over MCP, and opens its settings.
+#[gpui_kit::test]
+fn the_ai_chip_opens_the_connection_settings(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { mcp: true, mcp_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    assert_eq!(app.status_bar().ai, Some(AiAccess::Write));
+    app.click("status-ai");
+    assert!(app.dialog_open(), "the connection's settings");
+}
+
+// A read-only connection never lets assistants write, whatever its file says, so its chip doesn't claim they can.
+#[gpui_kit::test]
+fn a_read_only_connection_never_shows_ai_writes(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { read_only: true, mcp: true, mcp_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    assert_eq!(app.status_bar().ai, Some(AiAccess::Read));
 }
 
 #[gpui_kit::test]

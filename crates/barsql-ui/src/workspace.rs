@@ -33,7 +33,7 @@ use crate::schema_tree::{ActiveTable, TableChange};
 use crate::scrollbars;
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::state::{self, set_setting, set_setting_bool, set_setting_json, setting_bool};
-use crate::status_bar::{self, StatusAction, StatusActions, StatusBarState, StatusConnection};
+use crate::status_bar::{self, AiAccess, StatusAction, StatusActions, StatusBarState, StatusConnection, server};
 use crate::structure_tab::{StructureTab, StructureTabEvent};
 use crate::table_tab::{TableTab, TableTabEvent};
 use crate::theme::ThemeChoice;
@@ -270,6 +270,8 @@ pub struct Workspace {
     quit_dialog: Option<WeakFocusHandle>,
     // Tabs holding changes that closing them would lose.
     drafts: HashSet<EntityId>,
+    // Redraws the status bar's update chip as a download moves, with its dialog closed.
+    update_watch: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
     _app_events: Task<()>,
 }
@@ -603,6 +605,10 @@ impl Workspace {
             .into_iter()
             .chain([
                 cx.observe_global::<toast::Toasts>(|_, cx| cx.notify()),
+                cx.observe_global::<update_dialog::Flow>(|this, cx| {
+                    this.update_watch = update_dialog::flow(cx).map(|flow| cx.observe(&flow, |_, _, cx| cx.notify()));
+                    cx.notify();
+                }),
                 cx.observe_window_appearance(window, |_, window, cx| theme::follow_system(window, cx)),
                 cx.observe_window_activation(window, |_, window, cx| {
                     if window.is_window_active() {
@@ -648,6 +654,7 @@ impl Workspace {
             save_task: Task::ready(()),
             quit_dialog: None,
             drafts: HashSet::new(),
+            update_watch: None,
             _subscriptions: subscriptions,
             _app_events: app_events,
         };
@@ -2079,14 +2086,26 @@ impl Workspace {
     }
 
     pub(crate) fn status(&self, window: &Window, cx: &App) -> StatusBarState {
-        let named = |connection: &ConnectionConfig| StatusConnection {
-            name: connection.name.clone().into(),
-            engine: connection_dialog::engine_name(&connection.driver, cx),
-            connected: state::bar(cx).is_connected(&connection.id),
+        let named = |connection: &ConnectionConfig| {
+            let connected = state::bar(cx).is_connected(&connection.id);
+            let status = schema::get(cx, &connection.id).and_then(|cached| cached.status()).filter(|_| connected);
+            StatusConnection {
+                name: connection.name.clone().into(),
+                engine: connection_dialog::engine_name(&connection.driver, cx),
+                connected,
+                product: status.and_then(|s| server::server_label(&connection.driver, &s.version)).map(Into::into),
+                details: server::details(connection, status),
+            }
         };
         let Some(tab) = self.active_tab() else {
             let connection = self.sidebar.read(cx).selected().map(named);
-            return StatusBarState { connection, ..Default::default() };
+            return StatusBarState {
+                connection,
+                sidebar_open: self.sidebar_open,
+                json_open: self.json_open,
+                update: update_dialog::chip(cx),
+                ..Default::default()
+            };
         };
         let connection = tab.connection(cx);
         let live = match tab {
@@ -2113,10 +2132,17 @@ impl Workspace {
             read_only: connection.read_only,
             protected: connection.confirm_changes,
             extensions: connection.active_extensions().map(|path| path_parts(path).1.to_string()).collect(),
+            ai: connection.mcp.then_some(match connection.mcp_changes && !connection.read_only {
+                true => AiAccess::Write,
+                false => AiAccess::Read,
+            }),
             transaction,
             caret: query.filter(|_| grid.is_none()).map(|tab| tab.caret(cx)),
             aggregate: grid.and_then(|grid| grid.read(cx).aggregate()),
             live,
+            sidebar_open: self.sidebar_open,
+            json_open: self.json_open,
+            update: update_dialog::chip(cx),
             actions: StatusActions::default(),
         }
     }
@@ -2137,6 +2163,16 @@ impl Workspace {
             switch_connection: Some(on(Self::open_switcher)),
             edit_connection: self.active_tab().map(|_| on(Self::edit_tab_connection)),
             stop: query.filter(|tab| tab.read(cx).is_running()).map(|_| on(Self::stop_run)),
+            // As the View menu's items, so the check marks and the saved layout follow.
+            toggle_sidebar: Some(Rc::new(|window: &mut Window, cx: &mut App| {
+                window.dispatch_action(Box::new(ToggleSidebar), cx)
+            })),
+            toggle_json: Some(Rc::new(|window: &mut Window, cx: &mut App| {
+                window.dispatch_action(Box::new(ToggleJsonPanel), cx)
+            })),
+            open_update: Some(Rc::new(|window: &mut Window, cx: &mut App| {
+                update_dialog::reopen(window, cx);
+            })),
         }
     }
 
@@ -2491,6 +2527,7 @@ impl Render for Workspace {
             )
             .child(status_bar::render(
                 StatusBarState { actions: self.status_actions(cx), ..self.status(window, cx) },
+                window,
                 cx,
             ))
             .children(toast::render(window, cx))

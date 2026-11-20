@@ -75,9 +75,45 @@ fn is_skipped(version: &str, cx: &App) -> bool {
 
 // Keeps the dialog alive past its window, so Close leaves a download running and Check for Updates
 // reopens it where it left off.
-struct Flow(Entity<UpdateDialog>);
+pub(crate) struct Flow(Entity<UpdateDialog>);
 
 impl Global for Flow {}
+
+pub(crate) fn flow(cx: &App) -> Option<Entity<UpdateDialog>> {
+    cx.try_global::<Flow>().map(|flow| flow.0.clone())
+}
+
+// The status bar's word on the update, from where the flow stands.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateChip {
+    Available(String),
+    Downloading(Option<u8>),
+    Ready,
+    Failed,
+}
+
+// A failed check stays quiet, as the next launch checks again. A failed download or install doesn't.
+pub(crate) fn chip_for(state: &UpdateState, skipped: Option<&str>) -> Option<UpdateChip> {
+    match state {
+        UpdateState::Checking | UpdateState::UpToDate | UpdateState::Failed { stage: Stage::Check, .. } => None,
+        UpdateState::Available(release) => {
+            (skipped != Some(release.version.as_str())).then(|| UpdateChip::Available(release.version.clone()))
+        }
+        UpdateState::Downloading(_, Some(Transfer { written, total, .. })) if *total > 0 => {
+            Some(UpdateChip::Downloading(Some((written.saturating_mul(100) / total).min(100) as u8)))
+        }
+        UpdateState::Downloading(..) | UpdateState::Verifying(_) | UpdateState::Installing(_) => {
+            Some(UpdateChip::Downloading(None))
+        }
+        UpdateState::Ready(..) => Some(UpdateChip::Ready),
+        UpdateState::Failed { .. } => Some(UpdateChip::Failed),
+    }
+}
+
+pub fn chip(cx: &App) -> Option<UpdateChip> {
+    let skipped = cx.try_global::<Skipped>().and_then(|skipped| skipped.0.as_deref());
+    chip_for(&flow(cx)?.read(cx).state, skipped)
+}
 
 // BARSQL_UPDATE_API points the check at a test server.
 fn api_base() -> String {
@@ -450,7 +486,8 @@ pub fn open(window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
     open_in(api_base(), None, window, cx)
 }
 
-// A running or staged install reopens as it is. Passing a state skips the check, for screenshots.
+// A running or staged install reopens as it is. Passing a state skips the check, for screenshots and for reopening a
+// release already found.
 pub fn open_in(base: String, state: Option<UpdateState>, window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
     let running = cx
         .try_global::<Flow>()
@@ -469,6 +506,30 @@ pub fn open_in(base: String, state: Option<UpdateState>, window: &mut Window, cx
     view
 }
 
+// The status bar's chip: the dialog where the flow stands, without checking again.
+pub fn reopen(window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
+    match flow(cx).map(|flow| flow.read(cx).state.clone()) {
+        Some(state) if state.installing() => open_in(api_base(), None, window, cx),
+        Some(state @ (UpdateState::Available(_) | UpdateState::Failed { .. })) => {
+            open_in(api_base(), Some(state), window, cx)
+        }
+        _ => open(window, cx),
+    }
+}
+
+// Leaves the found release behind the toast, for the status bar. A dialog already open takes it in, so it stays the
+// flow and a download started there stays in step. An install under way or staged stays as it is.
+fn remember(base: String, release: Release, cx: &mut App) {
+    match flow(cx) {
+        Some(flow) if flow.read(cx).state.installing() => {}
+        Some(flow) => flow.update(cx, |dialog, cx| dialog.set_state(UpdateState::Available(release), cx)),
+        None => {
+            let view = cx.new(|cx| UpdateDialog::new(base, Some(UpdateState::Available(release)), cx));
+            cx.set_global(Flow(view));
+        }
+    }
+}
+
 pub fn check_on_startup(cx: &mut App) {
     check_after(api_base(), STARTUP_DELAY, cx);
 }
@@ -476,7 +537,7 @@ pub fn check_on_startup(cx: &mut App) {
 fn check_after(base: String, delay: Duration, cx: &mut App) {
     cx.spawn(async move |cx| {
         cx.background_executor().timer(delay).await;
-        let task = cx.update(|cx| check(base, cx));
+        let task = cx.update(|cx| check(base.clone(), cx));
         let Ok(Some(release)) = task.await else { return };
         cx.update(|cx| {
             if is_skipped(&release.version, cx) {
@@ -486,10 +547,11 @@ fn check_after(base: String, delay: Duration, cx: &mut App) {
             let action = ToastAction {
                 label: t(cx, "toast.update"),
                 on_click: Rc::new(|window, cx| {
-                    open(window, cx);
+                    reopen(window, cx);
                 }),
             };
             toast::push(message, ToastKind::Info, Some(Duration::ZERO), Some(action), cx);
+            remember(base, release, cx);
         });
     })
     .detach();

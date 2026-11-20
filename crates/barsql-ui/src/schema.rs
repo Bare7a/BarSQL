@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use barsql_core::{ColumnInfo, DriverType, SchemaInfo, TableInfo};
+use barsql_core::{ColumnInfo, ConnectionStatus, DriverType, SchemaInfo, TableInfo};
 use barsql_sql::lang::quoting::column_cache_key;
 use barsql_sql::lang::{Catalog, FunctionCatalog};
 use barsql_sql::schema_diff::Tables;
@@ -26,6 +26,8 @@ impl Global for Schemas {}
 #[derive(Default)]
 pub struct ConnectionSchema {
     driver: DriverType,
+    // What the server said about itself when the schema loaded: database, user, version.
+    status: Option<ConnectionStatus>,
     schemas: Option<Vec<SchemaInfo>>,
     tables: HashMap<String, Vec<TableInfo>>,
     tables_loading: HashSet<String>,
@@ -43,6 +45,10 @@ pub struct ConnectionSchema {
 }
 
 impl ConnectionSchema {
+    pub fn status(&self) -> Option<&ConnectionStatus> {
+        self.status.as_ref()
+    }
+
     pub fn schemas(&self) -> Option<&[SchemaInfo]> {
         self.schemas.as_deref()
     }
@@ -188,6 +194,7 @@ fn load(connection_id: &str, driver: DriverType, cx: &mut App) {
             entry.loading = false;
             match bundle {
                 Some(Ok(bundle)) => {
+                    entry.status = Some(bundle.status);
                     entry.schemas = Some(bundle.schemas);
                     for block in bundle.loaded_tables {
                         entry.tables.insert(block.schema, block.tables);

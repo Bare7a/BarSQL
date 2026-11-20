@@ -357,7 +357,28 @@
     "readOnly": "Schreibgeschützt",
     "protected": "Fragt vor Änderungen",
     "extensions": "{{count}} Erweiterung",
-    "extensions_other": "{{count}} Erweiterungen"
+    "extensions_other": "{{count}} Erweiterungen",
+    "showSidebar": "Seitenleiste einblenden",
+    "hideSidebar": "Seitenleiste ausblenden",
+    "showJsonViewer": "JSON-Viewer einblenden",
+    "hideJsonViewer": "JSON-Viewer ausblenden",
+    "aiRead": "KI-Zugriff",
+    "aiWrite": "KI darf schreiben",
+    "aiReadHint": "KI-Apps können diese Datenbank über MCP abfragen",
+    "aiWriteHint": "KI-Apps können diese Datenbank über MCP abfragen und ändern",
+    "update": {
+      "available": "Update auf {{version}}",
+      "downloading": "Update {{percent}} %",
+      "busy": "Update läuft…",
+      "ready": "Neu starten für Update",
+      "failed": "Update fehlgeschlagen"
+    },
+    "details": {
+      "database": "Datenbank {{database}} · Schema {{schema}}",
+      "databaseOnly": "Datenbank {{database}}",
+      "ssh": "Über SSH {{address}}",
+      "tls": "TLS: {{mode}}"
+    }
   },
   "theme": {
     "dark": "Dunkel",

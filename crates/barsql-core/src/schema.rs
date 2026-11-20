@@ -264,6 +264,9 @@ pub struct ConnectionStatus {
     pub user: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub host: String,
+    // As the server words it, like "17.2 (Debian 17.2-1.pgdg120+1)". Empty where the engine doesn't say.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub version: String,
 }
 
 pub fn primary_keys(columns: &[ColumnInfo]) -> Vec<String> {

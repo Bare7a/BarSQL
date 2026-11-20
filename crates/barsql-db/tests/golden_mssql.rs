@@ -19,6 +19,13 @@ async fn connect() -> Option<Engine> {
 }
 
 #[tokio::test]
+async fn sqlserver_reports_its_server_version() {
+    let Some(engine) = connect().await else { return };
+    let version = engine.connection_info().await.unwrap().version;
+    assert!(version.starts_with("Microsoft") && !version.contains('\n'), "{version}");
+}
+
+#[tokio::test]
 async fn sqlserver_values_and_errors_match_the_fixtures() {
     let _serial = common::serial().await;
     let Some(engine) = connect().await else { return };

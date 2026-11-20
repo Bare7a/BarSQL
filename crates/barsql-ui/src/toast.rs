@@ -97,6 +97,11 @@ pub fn dismiss(id: u64, cx: &mut App) {
 }
 
 #[cfg(test)]
+pub fn action(index: usize, cx: &App) -> Option<ToastAction> {
+    cx.try_global::<Toasts>()?.items.get(index)?.action.clone()
+}
+
+#[cfg(test)]
 pub fn messages(cx: &App) -> Vec<(ToastKind, String)> {
     cx.try_global::<Toasts>()
         .map(|toasts| toasts.items.iter().map(|toast| (toast.kind, toast.message.to_string())).collect())

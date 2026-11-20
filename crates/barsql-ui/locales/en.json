@@ -357,7 +357,28 @@
     "readOnly": "Read-only",
     "protected": "Asks before changes",
     "extensions": "{{count}} extension",
-    "extensions_other": "{{count}} extensions"
+    "extensions_other": "{{count}} extensions",
+    "showSidebar": "Show sidebar",
+    "hideSidebar": "Hide sidebar",
+    "showJsonViewer": "Show JSON viewer",
+    "hideJsonViewer": "Hide JSON viewer",
+    "aiRead": "AI access",
+    "aiWrite": "AI can write",
+    "aiReadHint": "AI apps can query this database over MCP",
+    "aiWriteHint": "AI apps can query and change this database over MCP",
+    "update": {
+      "available": "Update to {{version}}",
+      "downloading": "Updating {{percent}}%",
+      "busy": "Updating…",
+      "ready": "Restart to update",
+      "failed": "Update failed"
+    },
+    "details": {
+      "database": "Database {{database}} · Schema {{schema}}",
+      "databaseOnly": "Database {{database}}",
+      "ssh": "Through SSH {{address}}",
+      "tls": "TLS: {{mode}}"
+    }
   },
   "theme": {
     "dark": "Dark",

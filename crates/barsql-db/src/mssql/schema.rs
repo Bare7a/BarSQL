@@ -78,14 +78,17 @@ impl MsEngine {
     }
 
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        let rows = self.rows("SELECT DB_NAME(), SCHEMA_NAME(), SUSER_SNAME()", &[]).await?;
+        let rows = self.rows("SELECT DB_NAME(), SCHEMA_NAME(), SUSER_SNAME(), @@VERSION", &[]).await?;
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
+        // @@VERSION runs to several lines of build and OS detail. The first names the product and its version.
+        let version = string(row, 3);
         Ok(ConnectionStatus {
             connected: true,
             database: string(row, 0),
             schema: string(row, 1),
             user: string(row, 2),
             host: self.options.host.clone(),
+            version: version.lines().next().unwrap_or_default().trim().to_string(),
         })
     }
 

@@ -357,7 +357,28 @@
     "readOnly": "Само за четене",
     "protected": "Пита преди промени",
     "extensions": "{{count}} разширение",
-    "extensions_other": "{{count}} разширения"
+    "extensions_other": "{{count}} разширения",
+    "showSidebar": "Покажи страничната лента",
+    "hideSidebar": "Скрий страничната лента",
+    "showJsonViewer": "Покажи JSON прегледа",
+    "hideJsonViewer": "Скрий JSON прегледа",
+    "aiRead": "AI достъп",
+    "aiWrite": "AI може да пише",
+    "aiReadHint": "AI приложения могат да четат тази база през MCP",
+    "aiWriteHint": "AI приложения могат да четат и променят тази база през MCP",
+    "update": {
+      "available": "Актуализирай до {{version}}",
+      "downloading": "Актуализиране {{percent}}%",
+      "busy": "Актуализиране…",
+      "ready": "Рестартирай за актуализация",
+      "failed": "Актуализацията е неуспешна"
+    },
+    "details": {
+      "database": "База данни {{database}} · Схема {{schema}}",
+      "databaseOnly": "База данни {{database}}",
+      "ssh": "През SSH {{address}}",
+      "tls": "TLS: {{mode}}"
+    }
   },
   "theme": {
     "dark": "Тъмна",

@@ -24,6 +24,14 @@ async fn connect(prefix: &str, port: &str) -> Engine {
     })
 }
 
+#[tokio::test]
+async fn mysql_and_mariadb_report_their_server_versions() {
+    let mysql = connect("MYSQL", "33306").await.connection_info().await.unwrap().version;
+    assert!(mysql.starts_with(|c: char| c.is_ascii_digit()) && !mysql.contains("MariaDB"), "{mysql}");
+    let mariadb = connect("MARIADB", "33307").await.connection_info().await.unwrap().version;
+    assert!(mariadb.contains("MariaDB"), "{mariadb}");
+}
+
 async fn text(session: &mut Session, sql: &str) -> String {
     let res = session.buffered(sql, &Cancel::new()).await.unwrap_or_else(|err| panic!("{sql}: {err:?}"));
     res.text(0, 0).unwrap_or_default().to_string()

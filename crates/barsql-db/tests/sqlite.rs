@@ -146,6 +146,7 @@ async fn ping_and_schema_info() {
     assert_eq!(schemas, ["main"]);
     let info = engine.connection_info().await.unwrap();
     assert_eq!((info.database.as_str(), info.schema.as_str()), ("main", "main"));
+    assert!(info.version.starts_with("3."), "{}", info.version);
 }
 
 // The bundled build lists its built-ins. It leaves out the math functions, so completion won't offer them.

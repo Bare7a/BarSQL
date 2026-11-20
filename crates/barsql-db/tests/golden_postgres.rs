@@ -23,6 +23,12 @@ async fn connect(zone: TimeZone) -> Engine {
 }
 
 #[tokio::test]
+async fn postgres_reports_its_server_version() {
+    let info = connect(TimeZone::UTC).await.connection_info().await.unwrap();
+    assert!(info.version.starts_with(|c: char| c.is_ascii_digit()), "{}", info.version);
+}
+
+#[tokio::test]
 async fn postgres_values_and_errors_match_the_fixtures() {
     let _serial = common::serial().await;
     let mut report = Report::default();

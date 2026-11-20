@@ -219,6 +219,10 @@ mod tests {
             Lucide::ChevronsDownUp,
             Lucide::Copy,
             Lucide::EyeOff,
+            Lucide::PanelLeft,
+            Lucide::PanelRight,
+            Lucide::Bot,
+            Lucide::ArrowUp,
         ] {
             let path = icon.path();
             assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");
