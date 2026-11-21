@@ -282,7 +282,7 @@ mod install {
     use zip::write::SimpleFileOptions;
 
     use super::super::helper::{Host, Job, admin_swap, run_helper, sweep_staging};
-    use super::super::install::{InstallEvent, Stage, download_and_stage, extract_single};
+    use super::super::install::{InstallEvent, Stage, download_and_stage, extract_single, staging_dir_in};
     use super::super::{Asset, Kind, Release, arch, bundle_target, check, platform};
     use super::Server;
 
@@ -535,6 +535,19 @@ mod install {
         let missing = dir.path().join("no.log");
         assert_eq!(admin_swap(&gone, &new, "", &missing), 12);
         assert!(!missing.exists(), "the admin half never creates a log");
+    }
+
+    // Two installs in one process can read the clock in the same tick, as the UI's tests do.
+    #[test]
+    fn two_installs_in_one_clock_tick_stage_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = staging_dir_in(dir.path(), 42).unwrap();
+        let second = staging_dir_in(dir.path(), 42).unwrap();
+        assert_ne!(first, second);
+        assert!(first.is_dir() && second.is_dir());
+        let later = SystemTime::now() + Duration::from_secs(2 * 3600);
+        sweep_staging(dir.path(), later, |_| false);
+        assert!(!first.exists() && !second.exists(), "the sweep still knows both as staging folders");
     }
 
     #[test]

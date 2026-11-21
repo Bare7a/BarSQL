@@ -80,9 +80,9 @@
     "contextGoToDefinition": "Към дефиницията"
   },
   "connection": {
-    "pasteUrlPlaceholder": "Поставете URL адрес на връзка, за да попълните полетата",
+    "pasteUrl": "Попълване на полетата от URL адрес на връзка в клипборда",
     "copyUrl": "Копиране като URL адрес, без паролата",
-    "urlNotRecognized": "BarSQL не може да прочете този URL адрес на връзка",
+    "clipboardNotUrl": "В клипборда няма URL адрес на връзка, който BarSQL може да прочете",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",

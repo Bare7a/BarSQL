@@ -80,9 +80,9 @@
     "contextGoToDefinition": "Gehe zu Definition"
   },
   "connection": {
-    "pasteUrlPlaceholder": "Verbindungs-URL einfügen, um die Felder auszufüllen",
+    "pasteUrl": "Felder aus einer Verbindungs-URL in der Zwischenablage ausfüllen",
     "copyUrl": "Als URL kopieren, ohne Passwort",
-    "urlNotRecognized": "BarSQL kann diese Verbindungs-URL nicht lesen",
+    "clipboardNotUrl": "Die Zwischenablage enthält keine Verbindungs-URL, die BarSQL lesen kann",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",

@@ -29,6 +29,7 @@ icon_assets!(
         CirclePlay,
         CircleQuestionMark,
         ClipboardCopy,
+        ClipboardPaste,
         CodeXml,
         Clock,
         Columns3,

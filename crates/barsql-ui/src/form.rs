@@ -10,6 +10,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_fle
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::spinner::Spinner;
 use crate::tokens::{
     DIMMED, ICON_2XS, ICON_MD, ICON_SM, ICON_XL, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS,
     TINT, TINT_BORDER,
@@ -52,6 +53,12 @@ pub fn filter_bar(field: impl IntoElement, cx: &App) -> Div {
 
 pub fn filter_button(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Button {
     Button::new(id).small().size(rems(2.308)).p_0().child(icon.into().size(ICON_XS))
+}
+
+// A footer button with only an icon, as tall as the large ones beside it.
+pub fn icon_button(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Button {
+    let label = label.into();
+    named(Button::new(id).large().size(rems(2.)).p_0(), &label).tooltip(label).child(icon.into().size(ICON_SM))
 }
 
 // A text button beside a field, as tall as it.
@@ -111,13 +118,21 @@ fn named(button: Button, label: &SharedString) -> Button {
 // GPUI Kit draws a large button's icon at 19.5px beside its 13px label, so the icon goes in as a child at 14px.
 pub trait LargeButton {
     fn large_with_icon(self, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Self;
+    fn large_with_spinner(self, label: impl Into<SharedString>) -> Self;
 }
 
 impl LargeButton for Button {
     fn large_with_icon(self, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Self {
-        let label = label.into();
-        named(self.large(), &label).child(icon.into().size(ICON_SM)).child(div().min_w_0().truncate().child(label))
+        large_led_by(self, icon.into().size(ICON_SM), label.into())
     }
+
+    fn large_with_spinner(self, label: impl Into<SharedString>) -> Self {
+        large_led_by(self, Spinner::new(ICON_SM), label.into())
+    }
+}
+
+fn large_led_by(button: Button, lead: impl IntoElement, label: SharedString) -> Button {
+    named(button.large(), &label).child(lead).child(div().min_w_0().truncate().child(label))
 }
 
 fn tool_row(icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Div {

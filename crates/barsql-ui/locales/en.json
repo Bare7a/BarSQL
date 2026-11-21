@@ -80,9 +80,9 @@
     "contextGoToDefinition": "Go to definition"
   },
   "connection": {
-    "pasteUrlPlaceholder": "Paste a connection URL to fill in the fields",
+    "pasteUrl": "Fill in the fields from a connection URL on the clipboard",
     "copyUrl": "Copy as a URL, without the password",
-    "urlNotRecognized": "That isn't a connection URL BarSQL can read",
+    "clipboardNotUrl": "The clipboard doesn't hold a connection URL BarSQL can read",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",

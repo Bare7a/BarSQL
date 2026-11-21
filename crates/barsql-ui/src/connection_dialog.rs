@@ -198,7 +198,6 @@ fn input(
 }
 
 struct Fields {
-    link: Entity<InputState>,
     name: Entity<InputState>,
     file_path: Entity<InputState>,
     host: Entity<InputState>,
@@ -239,8 +238,6 @@ pub struct ConnectionForm {
     failed_extension: Option<(usize, SharedString)>,
     fields: Fields,
     error: Option<SharedString>,
-    // Link text BarSQL couldn't read, said so while the field still holds it.
-    unread_link: Option<String>,
     testing: bool,
     saving: bool,
     // Last listed databases and the server they came from.
@@ -262,7 +259,6 @@ impl ConnectionForm {
         let ssh = &config.ssh;
         let ssh_port = if ssh.port == 0 { DEFAULT_SSH_PORT } else { ssh.port };
         let fields = Fields {
-            link: input(String::new(), t(cx, "connection.pasteUrlPlaceholder"), false, window, cx),
             name: input(config.name.clone(), t(cx, "connection.namePlaceholder"), false, window, cx),
             file_path: input(config.file_path.clone(), t(cx, file_placeholder), false, window, cx),
             host: input(config.host.clone(), SharedString::default(), false, window, cx),
@@ -316,7 +312,6 @@ impl ConnectionForm {
             original: config,
             fields,
             error: None,
-            unread_link: None,
             testing: false,
             saving: false,
             databases: None,
@@ -324,48 +319,24 @@ impl ConnectionForm {
         }
     }
 
-    // A pasted URL fills the form at once. Anything else is typing: into an empty field it was meant as a URL,
-    // into a half-typed one it's a piece of it, like a password.
-    fn paste_link(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else { return };
-        match parse_connection_url(&text) {
-            Some(parts) => {
-                cx.stop_propagation();
-                self.fill_from_url(parts, window, cx);
-            }
-            None if Self::value(&self.fields.link, cx).trim().is_empty() => {
-                self.unread_link = Some(text.trim().to_string());
-            }
-            None => {}
-        }
-        cx.notify();
-    }
-
-    // A URL typed into the link field fills the form for a look before a Test or Save goes ahead.
-    fn take_link(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let link = Self::value(&self.fields.link, cx).trim().to_string();
-        if link.is_empty() {
-            return false;
-        }
-        match parse_connection_url(&link) {
+    fn paste_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match clipboard_url(cx) {
             Some(parts) => self.fill_from_url(parts, window, cx),
-            None => self.unread_link = Some(link),
+            None => toast::error(t(cx, "connection.clipboardNotUrl"), cx),
         }
-        cx.notify();
-        true
     }
 
-    fn link_error(&self, cx: &App) -> Option<SharedString> {
-        let unread = self.unread_link.as_deref()?;
-        (Self::value(&self.fields.link, cx).trim() == unread).then(|| t(cx, "connection.urlNotRecognized"))
+    // Name has focus when the dialog opens, so a URL pasted there fills the form. Other text pastes as usual.
+    fn paste_into_name(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(parts) = clipboard_url(cx) else { return };
+        cx.stop_propagation();
+        self.fill_from_url(parts, window, cx);
     }
 
     // Another server or login keeps nothing the URL leaves out: not the old password, token, port, instance or TLS.
     fn fill_from_url(&mut self, parts: UrlParts, window: &mut Window, cx: &mut Context<Self>) {
         let other_server = parts.other_server(&self.config(cx));
         let tls_given = parts.ssl_mode.is_some();
-        Self::set(&self.fields.link, "", window, cx);
-        self.unread_link = None;
         if parts.driver != self.driver {
             self.set_driver(parts.driver.clone(), window, cx);
         } else if other_server && self.driver.capabilities().location == Location::Network {
@@ -453,11 +424,8 @@ impl ConnectionForm {
                 Self::set(&self.fields.schema, &default_schema(&driver, ""), window, cx);
                 self.ssl_mode = default_tls(&driver).into();
             }
-            // A URL server is usually reached over https with a real certificate. Its dialog hides the link field.
-            Location::Url => {
-                self.ssl_mode = "verify-full".into();
-                Self::set(&self.fields.link, "", window, cx);
-            }
+            // A URL server is usually reached over https with a real certificate.
+            Location::Url => self.ssl_mode = "verify-full".into(),
             Location::LocalFile => {}
         }
         let placeholder = t(cx, copy(&driver).database_placeholder);
@@ -577,9 +545,6 @@ impl ConnectionForm {
     }
 
     fn test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.take_link(window, cx) {
-            return;
-        }
         let config = self.config(cx);
         if let Some(problem) = config_problem(&config, cx) {
             toast::error(problem, cx);
@@ -615,9 +580,6 @@ impl ConnectionForm {
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.busy() {
-            return;
-        }
-        if self.take_link(window, cx) {
             return;
         }
         let mut config = self.config(cx);
@@ -809,6 +771,10 @@ enum Browse {
     KnownHosts,
 }
 
+fn clipboard_url(cx: &App) -> Option<UrlParts> {
+    cx.read_from_clipboard().and_then(|item| item.text()).and_then(|text| parse_connection_url(&text))
+}
+
 // A selector for scenario tests and a scope for test lookups.
 fn labelled(selector: &'static str, input: Input) -> Stateful<Div> {
     div().id(selector).debug_selector(move || selector.into()).child(input)
@@ -875,26 +841,27 @@ impl Render for ConnectionForm {
             cx,
         );
         let location = self.driver.capabilities().location;
-        let link = h_flex()
-            .capture_action(cx.listener(Self::paste_link))
+        let url_buttons = h_flex()
+            .flex_1()
             .gap(rems(0.615))
             .child(
-                labelled(
-                    "conn-link",
-                    form::input(&f.link, window, cx)
-                        .prefix(Icon::new(Lucide::Link).size(ICON_SM).text_color(theme.muted_foreground)),
-                )
-                .flex_1(),
+                form::icon_button("conn-paste-url", Icon::new(Lucide::ClipboardPaste), t(cx, "connection.pasteUrl"))
+                    .debug_selector(|| "conn-paste-url".into())
+                    .on_click(cx.listener(|form, _, window, cx| form.paste_url(window, cx))),
             )
-            .child(
-                form::filter_button("conn-copy-url", Icon::new(Lucide::Copy))
-                    .debug_selector(|| "conn-copy-url".into())
-                    .tooltip(t(cx, "connection.copyUrl"))
-                    .on_click(cx.listener(|form, _, _, cx| form.copy_url(cx))),
-            );
+            .when(location != Location::Url, |el| {
+                el.child(
+                    form::icon_button("conn-copy-url", Icon::new(Lucide::Copy), t(cx, "connection.copyUrl"))
+                        .debug_selector(|| "conn-copy-url".into())
+                        .disabled(connection_url(&self.config(cx)).is_none())
+                        .on_click(cx.listener(|form, _, _, cx| form.copy_url(cx))),
+                )
+            });
         let mut body = modal::body()
-            .when(location != Location::Url, |el| el.child(link))
-            .child(form::group(t(cx, "connection.name"), labelled("conn-name", form::input(&f.name, window, cx)), cx))
+            .child(
+                form::group(t(cx, "connection.name"), labelled("conn-name", form::input(&f.name, window, cx)), cx)
+                    .capture_action(cx.listener(Self::paste_into_name)),
+            )
             .child(form::group(t(cx, "connection.driver"), driver_select, cx));
         let behaviour = form::section(cx).child(read_only).child(confirm_changes).child(form::group(
             t(cx, "connection.tabColor"),
@@ -973,10 +940,11 @@ impl Render for ConnectionForm {
         let body = body
             .child(behaviour)
             .child(self.mcp_section(cx))
-            .children(self.error.clone().or_else(|| self.link_error(cx)).map(|error| form::error(error, cx)));
+            .children(self.error.clone().map(|error| form::error(error, cx)));
         let (testing, busy) = (self.testing, self.busy());
         modal::scroll_content().child(modal::scroll_body(body)).child(
             modal::footer(cx)
+                .child(url_buttons)
                 .child(
                     Button::new("connection-cancel")
                         .large()
@@ -985,9 +953,13 @@ impl Render for ConnectionForm {
                 )
                 .child(
                     Button::new("connection-test")
-                        .large()
                         .debug_selector(|| "connection-test".into())
-                        .label(t(cx, if testing { "common.testing" } else { "common.test" }))
+                        .map(|button| match testing {
+                            true => button
+                                .large_with_spinner(t(cx, "common.test"))
+                                .accessibility_label(t(cx, "common.testing")),
+                            false => button.large().label(t(cx, "common.test")),
+                        })
                         .disabled(busy)
                         .on_click(cx.listener(|form, _, window, cx| form.test(window, cx))),
                 )
@@ -1345,7 +1317,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use gpui_kit::component::Root;
+    use gpui_kit::component::{Root, WindowExt as _};
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{AppContext as _, ClipboardItem, Entity, TestAppContext, VisualTestContext};
 
@@ -1389,10 +1361,7 @@ mod tests {
     }
 
     fn error(form: &Entity<ConnectionForm>, cx: &mut VisualTestContext) -> Option<String> {
-        cx.update(|_, cx| {
-            let form = form.read(cx);
-            form.error.clone().or_else(|| form.link_error(cx)).map(|e| e.to_string())
-        })
+        cx.update(|_, cx| form.read(cx).error.clone().map(|e| e.to_string()))
     }
 
     #[gpui_kit::test]
@@ -1452,13 +1421,15 @@ mod tests {
         assert!(saved.borrow().is_empty());
     }
 
-    fn paste(form: &Entity<ConnectionForm>, text: &str, cx: &mut VisualTestContext) {
+    fn paste(text: &str, cx: &mut VisualTestContext) {
         cx.update(|window, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-            let link = form.read(cx).fields.link.clone();
-            link.update(cx, |state, cx| state.focus(window, cx));
+            window.click("conn-paste-url", cx);
         });
-        cx.simulate_keystrokes(&chord("mod-v"));
+    }
+
+    fn driver(form: &Entity<ConnectionForm>, cx: &mut VisualTestContext) -> DriverType {
+        form.read_with(cx, |form, _| form.driver.clone())
     }
 
     fn values(
@@ -1474,43 +1445,163 @@ mod tests {
         let _env = Env::new(cx);
         let cx = window(cx);
         let (form, saved) = open_form(None, cx);
-        let login: [fn(&Fields) -> &Entity<InputState>; 6] =
-            [|f| &f.name, |f| &f.host, |f| &f.port, |f| &f.username, |f| &f.password, |f| &f.link];
-        paste(&form, "mysql://app:s3cret@db.local:3307/shop?ssl-mode=REQUIRED", cx);
-        assert_eq!(form.read_with(cx, |form, _| form.driver.clone()), DriverType::MySql);
-        assert_eq!(
-            values(&form, &login, cx),
-            ["shop", "db.local", "3307", "app", "s3cret", ""],
-            "the link empties itself"
-        );
+        let login: [fn(&Fields) -> &Entity<InputState>; 5] =
+            [|f| &f.name, |f| &f.host, |f| &f.port, |f| &f.username, |f| &f.password];
+        paste("mysql://app:s3cret@db.local:3307/shop?ssl-mode=REQUIRED", cx);
+        assert_eq!(driver(&form, cx), DriverType::MySql);
+        assert_eq!(values(&form, &login, cx), ["shop", "db.local", "3307", "app", "s3cret"]);
         assert_eq!(form.read_with(cx, |form, _| form.ssl_mode.clone()), "require");
         cx.update(|window, cx| window.click("conn-copy-url", cx));
         let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
         assert_eq!(copied.as_deref(), Some("mysql://app@db.local:3307/shop?ssl-mode=REQUIRED"));
-        paste(&form, "mysql://bob@db2.local/hr", cx);
+        paste("mysql://bob@db2.local/hr", cx);
         assert_eq!(
             values(&form, &login, cx),
-            ["shop", "db2.local", "3306", "bob", "", ""],
+            ["shop", "db2.local", "3306", "bob", ""],
             "nothing of the old login stays"
         );
         assert_eq!(form.read_with(cx, |form, _| form.ssl_mode.clone()), "disable", "nor its TLS");
-        paste(&form, "not a url", cx);
-        assert_eq!(values(&form, &login, cx)[1], "db2.local");
-        assert!(error(&form, cx).is_some(), "a paste BarSQL can't read says so");
-        cx.update(|window, cx| {
-            let link = form.read(cx).fields.link.clone();
-            link.update(cx, |state, cx| state.set_value("", window, cx));
+        assert!(saved.borrow().is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn a_clipboard_without_a_url_fills_nothing_and_says_so(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
+        fill(&form, |f| &f.host, "db.local", cx);
+        for text in ["", "not a url", "https://mydb-org.turso.io"] {
+            paste(text, cx);
+            assert_eq!(values(&form, &[|f| &f.host], cx), ["db.local"], "{text}");
+        }
+        assert_eq!(driver(&form, cx), DriverType::Postgres);
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        let said = "The clipboard doesn't hold a connection URL BarSQL can read";
+        assert!(toasts.iter().any(|(_, text)| text == said), "{toasts:?}");
+        assert_eq!(error(&form, cx), None, "nothing inline");
+    }
+
+    #[gpui_kit::test]
+    fn copy_waits_for_something_to_copy(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let copy = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string("before".into()));
+                window.click("conn-copy-url", cx);
+                let disabled = window.find("conn-copy-url").disabled() == Some(true);
+                (cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default(), disabled)
+            })
+        };
+        assert_eq!(copy(cx), ("before".into(), true), "a SQLite form with no file yet");
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
+        fill(&form, |f| &f.host, "", cx);
+        assert_eq!(copy(cx), ("before".into(), true), "a server with no host");
+        fill(&form, |f| &f.host, "db.local", cx);
+        let (copied, disabled) = copy(cx);
+        assert!(copied.starts_with("postgres://postgres@db.local:5432") && !disabled, "{copied}");
+    }
+
+    #[gpui_kit::test]
+    fn a_running_test_says_so_to_screen_readers(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let name = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                window.render_frame(cx);
+                window.find("connection-test").label().map(str::to_string)
+            })
+        };
+        assert_eq!(name(cx).as_deref(), Some("Test"));
+        form.update(cx, |form, cx| {
+            form.testing = true;
+            cx.notify();
         });
-        cx.simulate_input("postgres://half");
-        let typed = form.read_with(cx, |form, _| form.driver.clone());
-        assert_eq!(typed, DriverType::MySql, "typing a URL out fills nothing");
-        cx.simulate_keystrokes("enter");
-        assert_eq!(form.read_with(cx, |form, _| form.driver.clone()), DriverType::Postgres, "Enter reads it");
-        assert_eq!(values(&form, &login, cx)[1..], ["half", "5432", "postgres", "", ""]);
-        cx.simulate_input("nonsense");
-        cx.simulate_keystrokes("enter");
-        assert!(error(&form, cx).is_some(), "an unreadable URL says so");
-        assert!(saved.borrow().is_empty(), "neither Enter saved");
+        assert_eq!(name(cx).as_deref(), Some("Testing connection"));
+    }
+
+    #[gpui_kit::test]
+    fn the_url_buttons_have_names_for_screen_readers(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        open_form(None, cx);
+        cx.update(|window, cx| {
+            window.render_frame(cx);
+            for id in ["conn-paste-url", "conn-copy-url"] {
+                assert!(window.find(id).label().is_some_and(|label| !label.is_empty()), "{id}");
+            }
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_url_pasted_into_name_fills_the_form(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let paste_into_name = |text: &str, cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                let name = form.read(cx).fields.name.clone();
+                name.update(cx, |state, cx| state.focus(window, cx));
+            });
+            cx.simulate_keystrokes(&format!("{} {}", chord("mod-a"), chord("mod-v")));
+        };
+        paste_into_name("postgres://app@db.local:5433/forum", cx);
+        assert_eq!(driver(&form, cx), DriverType::Postgres);
+        let login: [fn(&Fields) -> &Entity<InputState>; 4] = [|f| &f.name, |f| &f.host, |f| &f.port, |f| &f.username];
+        assert_eq!(values(&form, &login, cx), ["forum", "db.local", "5433", "app"]);
+        paste_into_name("Forum (prod)", cx);
+        assert_eq!(values(&form, &[|f| &f.name, |f| &f.host], cx), ["Forum (prod)", "db.local"], "text stays text");
+        paste_into_name("ftp://files.local", cx);
+        assert_eq!(values(&form, &[|f| &f.name], cx), ["ftp://files.local"], "so does a URL BarSQL doesn't read");
+        assert_eq!(driver(&form, cx), DriverType::Postgres);
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        assert!(toasts.is_empty(), "{toasts:?}");
+    }
+
+    // German's labels are the longest, and its "Verbindung wird getestet" the longest of all.
+    #[gpui_kit::test]
+    fn the_footer_fits_in_german_while_a_test_runs(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        cx.update(|_, cx| cx.set_global(I18n::new("de")));
+        let shop = ConnectionConfig {
+            name: "Shop".into(),
+            driver: DriverType::Postgres,
+            host: "db.local".into(),
+            database: "shop".into(),
+            ..Default::default()
+        };
+        let (form, _) = open_form(Some(shop), cx);
+        form.update(cx, |form, cx| {
+            form.testing = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let mut bounds = |selector: &'static str| cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector}"));
+        let (paste, name) = (bounds("conn-paste-url"), bounds("conn-name"));
+        let (save, close) = (bounds("connection-save"), bounds("modal-close"));
+        assert!(paste.left() >= name.left() - gpui_kit::px(0.5), "{paste:?} vs {name:?}");
+        assert!(save.right() <= close.right() + gpui_kit::px(0.5), "{save:?} vs {close:?}");
+        assert_eq!(paste.size.height, save.size.height, "as tall as the buttons beside it");
+    }
+
+    #[gpui_kit::test]
+    fn turso_pastes_but_has_no_url_to_copy(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Turso, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("conn-copy-url").is_none());
+        assert!(cx.debug_bounds("conn-paste-url").is_some());
+        paste("libsql://mydb-org.turso.io?authToken=abc", cx);
+        assert_eq!(values(&form, &[|f| &f.url, |f| &f.auth_token], cx), ["libsql://mydb-org.turso.io", "abc"]);
+        paste("postgres://app@db9/x", cx);
+        assert_eq!(driver(&form, cx), DriverType::Postgres, "a URL for another engine leaves Turso");
     }
 
     #[gpui_kit::test]
@@ -1518,13 +1609,14 @@ mod tests {
         let _env = Env::new(cx);
         let cx = window(cx);
         let (form, _) = open_form(None, cx);
-        paste(&form, "sqlite:///Users/me/app.db", cx);
+        paste("sqlite:///Users/me/app.db", cx);
         assert_eq!(values(&form, &[|f| &f.name, |f| &f.file_path], cx), ["app.db", "/Users/me/app.db"]);
-        paste(&form, "clickhouse://default:pw@ch.example.com/analytics?secure=true", cx);
+        paste("clickhouse://default:pw@ch.example.com/analytics?secure=true", cx);
         assert_eq!(values(&form, &[|f| &f.port], cx), ["8443"], "TLS takes its port");
-        paste(&form, "clickhouse://default@ch2.example.com:8123/default", cx);
+        paste("clickhouse://default@ch2.example.com:8123/default", cx);
         assert_eq!(values(&form, &[|f| &f.port], cx), ["8123"]);
         assert_eq!(form.read_with(cx, |form, _| form.ssl_mode.clone()), "disable", "another server, TLS unsaid");
+        cx.update(|window, cx| window.close_dialog(cx));
         let mysql = ConnectionConfig {
             name: "Shop".into(),
             driver: DriverType::MySql,
@@ -1535,65 +1627,8 @@ mod tests {
             ..Default::default()
         };
         let (form, _) = open_form(Some(mysql), cx);
-        paste(&form, "mysql://root@db.local/billing", cx);
+        paste("mysql://root@db.local/billing", cx);
         assert_eq!(values(&form, &[|f| &f.database, |f| &f.schema], cx), ["billing", "billing"]);
-    }
-
-    #[gpui_kit::test]
-    fn a_link_left_behind_doesnt_block_test_or_save(cx: &mut TestAppContext) {
-        let _env = Env::new(cx);
-        let cx = window(cx);
-        let (form, _) = open_form(None, cx);
-        paste(&form, "https://mydb-org.turso.io", cx);
-        cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("libsql://mydb-org.turso.io".into())));
-        cx.simulate_keystrokes(&format!("{} {}", chord("mod-a"), chord("mod-v")));
-        assert_eq!(form.read_with(cx, |form, _| form.driver.clone()), DriverType::Turso, "a paste over unread text");
-        assert_eq!(values(&form, &[|f| &f.url, |f| &f.link], cx), ["libsql://mydb-org.turso.io", ""]);
-        form.update_in(cx, |form, window, cx| {
-            ConnectionForm::set(&form.fields.link, "https://typed.example", window, cx);
-            form.set_driver(DriverType::Turso, window, cx);
-        });
-        assert_eq!(values(&form, &[|f| &f.link], cx), [""], "Turso's dialog has no link field to hold it");
-        form.update_in(cx, |form, window, cx| {
-            ConnectionForm::set(&form.fields.link, "postgres://db9/x", window, cx);
-            form.test(window, cx);
-        });
-        assert_eq!(form.read_with(cx, |form, _| form.driver.clone()), DriverType::Postgres, "Test reads it first");
-    }
-
-    #[gpui_kit::test]
-    fn typing_or_pasting_part_of_a_url_fills_nothing(cx: &mut TestAppContext) {
-        let _env = Env::new(cx);
-        let cx = window(cx);
-        let (form, _) = open_form(None, cx);
-        cx.update(|window, cx| {
-            let link = form.read(cx).fields.link.clone();
-            link.update(cx, |state, cx| state.focus(window, cx));
-        });
-        cx.simulate_input("postgres://app:");
-        paste(&form, "S3cr3t!x", cx);
-        let link = values(&form, &[|f| &f.link], cx);
-        assert_eq!(link, ["postgres://app:S3cr3t!x"], "a pasted piece is typing");
-        assert_eq!(error(&form, cx), None);
-        // Undo, like an input method's commit, puts several characters back at once.
-        cx.simulate_keystrokes(&format!("{} backspace {}", chord("mod-a"), chord("mod-z")));
-        assert_eq!(values(&form, &[|f| &f.link], cx), link);
-        assert_eq!(form.read_with(cx, |form, _| form.driver.clone()), DriverType::Sqlite);
-    }
-
-    #[gpui_kit::test]
-    fn an_unread_url_says_so_while_the_field_holds_it(cx: &mut TestAppContext) {
-        let _env = Env::new(cx);
-        let cx = window(cx);
-        let (form, _) = open_form(None, cx);
-        paste(&form, "https://mydb-org.turso.io", cx);
-        assert!(error(&form, cx).is_some(), "a whole URL BarSQL can't read says so");
-        cx.simulate_keystrokes("backspace");
-        assert_eq!(error(&form, cx), None, "until the field changes");
-        cx.simulate_keystrokes(&format!("{} backspace", chord("mod-a")));
-        paste(&form, "https://mydb-org.turso.io", cx);
-        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Turso, window, cx));
-        assert_eq!(error(&form, cx), None, "Turso's dialog drops the link and what it said");
     }
 
     #[gpui_kit::test]
@@ -1611,13 +1646,13 @@ mod tests {
             ..Default::default()
         };
         let (form, _) = open_form(Some(sales), cx);
-        paste(&form, r"jdbc:sqlserver://sqlprod01\INST1;databaseName=Reports", cx);
+        paste(r"jdbc:sqlserver://sqlprod01\INST1;databaseName=Reports", cx);
         assert_eq!(
             values(&form, &[|f| &f.password, |f| &f.port], cx),
             ["pw", "14330"],
             "the same server in other case"
         );
-        paste(&form, "sqlserver://sa@sqlprod01%5CINST2/master", cx);
+        paste("sqlserver://sa@sqlprod01%5CINST2/master", cx);
         assert_eq!(values(&form, &[|f| &f.password, |f| &f.instance], cx), ["", "INST2"], "another instance");
     }
 

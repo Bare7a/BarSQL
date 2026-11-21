@@ -61,9 +61,19 @@ pub enum InstallEvent {
 
 fn staging_dir() -> io::Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let dir = std::env::temp_dir().join(format!("{STAGING_PREFIX}{}-{nanos}", std::process::id()));
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
+    staging_dir_in(&std::env::temp_dir(), nanos)
+}
+
+// Two installs in one process can read the clock in the same tick, so a name already taken moves on to the next.
+pub(super) fn staging_dir_in(parent: &Path, mut nanos: u128) -> io::Result<PathBuf> {
+    fs::create_dir_all(parent)?;
+    loop {
+        let dir = parent.join(format!("{STAGING_PREFIX}{}-{nanos}", std::process::id()));
+        match fs::create_dir(&dir) {
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => nanos += 1,
+            result => return result.map(|()| dir),
+        }
+    }
 }
 
 // Downloads to a fresh staging folder, checks the SHA256SUMS digest, then unpacks. An asset without a
