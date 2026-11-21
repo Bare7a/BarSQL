@@ -32,7 +32,7 @@ use crate::context_menu::{self, Entry};
 use crate::dialogs::{self, Confirm, Prompt};
 use crate::editor_commands::{self, CopyLine, CutLine, PasteLine, SelectAllOccurrences, ToggleComment};
 use crate::form::ToolButton;
-use crate::grid::{RowRef, copy};
+use crate::grid::{Grid, RowRef, copy};
 use crate::hover_card::HoverCard;
 use crate::i18n::{I18n, t, t_count, t_with};
 use crate::occurrences::{self, OccurrenceMarks};
@@ -267,6 +267,10 @@ impl QueryTab {
 
     pub fn focused_row(&self, cx: &App) -> Option<RowRef> {
         self.results.read(cx).focused_row(cx)
+    }
+
+    pub fn shown_grid(&self, cx: &App) -> Option<Entity<Grid>> {
+        self.results.read(cx).shown_grid().cloned()
     }
 
     pub fn results_focus(&self, cx: &App) -> Option<FocusHandle> {
@@ -1030,7 +1034,13 @@ impl QueryTab {
                     Button::new("run")
                         .debug_selector(|| "run".into())
                         .primary()
-                        .tool(Icon::new(Lucide::Play), ICON_XS, t(cx, "editor.run"))
+                        .tool_keys(
+                            Icon::new(Lucide::Play),
+                            ICON_XS,
+                            t(cx, "editor.run"),
+                            shortcuts::shown("runSelection", cx),
+                            theme.primary_foreground,
+                        )
                         .tooltip(hint(run, "runSelection", cx))
                         .on_click(cx.listener(|this, _, window, cx| this.run_selection(window, cx))),
                 )

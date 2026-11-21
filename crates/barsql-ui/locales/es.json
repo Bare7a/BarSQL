@@ -29,6 +29,8 @@
     }
   },
   "app": {
+    "recentConnections": "Conexiones recientes",
+    "pickEngine": "O empieza con un motor",
     "queryTabWithConn": "Consulta {{num}} · {{conn}}",
     "statusRunning": "Ejecutando… {{seconds}} s",
     "statusStreaming_one": "Recibiendo… {{count}} fila · {{seconds}} s",
@@ -78,6 +80,9 @@
     "contextGoToDefinition": "Ir a la definición"
   },
   "connection": {
+    "pasteUrlPlaceholder": "Pega una URL de conexión para rellenar los campos",
+    "copyUrl": "Copiar como URL, sin la contraseña",
+    "urlNotRecognized": "BarSQL no puede leer esta URL de conexión",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",
@@ -120,6 +125,8 @@
     "extensionsRemove": "Quitar extensión"
   },
   "results": {
+    "planFullScan": "Escaneo completo",
+    "planFullScanHint": "Lee todas las filas de la tabla. Un índice en las columnas por las que filtra puede saltarse la mayoría",
     "messages": "Mensajes",
     "messagesCount": "{{count}} mensaje",
     "messagesCount_other": "{{count}} mensajes",
@@ -208,6 +215,12 @@
     "arrayError": "Esto ya no se interpreta como un array."
   },
   "jsonViewer": {
+    "referencedBy": "Referenciado por",
+    "fields": "Campos",
+    "json": "JSON",
+    "copyValue": "Haz clic para copiar",
+    "noFieldMatch": "Ninguna columna ni valor coincide con el filtro",
+    "allNull": "Todas las columnas son NULL",
     "filterPlaceholder": "Filtrar claves y valores",
     "noMatch": "// Ninguna clave ni valor coincide con el filtro",
     "row": "Fila {{number}}",
@@ -323,6 +336,7 @@
     "zoom": "Zoom",
     "bringAllToFront": "Traer todo al frente",
     "stripedRows": "Filas alternadas",
+    "typeColors": "Colorear valores por tipo",
     "commandPalette": "Paleta de comandos…"
   },
   "errors": {
@@ -367,7 +381,29 @@
     "readOnly": "Solo lectura",
     "protected": "Pregunta antes de los cambios",
     "extensions": "{{count}} extensión",
-    "extensions_other": "{{count}} extensiones"
+    "extensions_other": "{{count}} extensiones",
+    "showSidebar": "Mostrar la barra lateral",
+    "hideSidebar": "Ocultar la barra lateral",
+    "showJsonViewer": "Mostrar el JSON Viewer",
+    "hideJsonViewer": "Ocultar el JSON Viewer",
+    "aiRead": "Acceso de IA",
+    "aiWrite": "La IA puede escribir",
+    "aiReadHint": "Las apps de IA pueden consultar esta base de datos por MCP",
+    "aiWriteHint": "Las apps de IA pueden consultar y cambiar esta base de datos por MCP",
+    "update": {
+      "available": "Actualizar a {{version}}",
+      "downloading": "Actualizando {{percent}} %",
+      "busy": "Actualizando…",
+      "ready": "Reinicia para actualizar",
+      "failed": "Falló la actualización"
+    },
+    "details": {
+      "latency": "Ida y vuelta de {{ms}} ms al conectar",
+      "database": "Base de datos {{database}} · Esquema {{schema}}",
+      "databaseOnly": "Base de datos {{database}}",
+      "ssh": "A través de SSH {{address}}",
+      "tls": "TLS: {{mode}}"
+    }
   },
   "theme": {
     "dark": "Oscuro",
@@ -410,6 +446,8 @@
     "description": "Cada valor se incluye en la consulta como SQL, así que escribe el texto entre comillas: 'Ana'. Un valor vacío se ejecuta como NULL."
   },
   "import": {
+    "runRows": "Importar {{rows}} fila",
+    "runRows_other": "Importar {{rows}} filas",
     "notUtf8": "Este archivo no es texto UTF-8, así que los caracteres que no se puedan leer se importarán como �. Guárdalo como UTF-8 y vuelve a elegirlo.",
     "fileRows_one": "{{rows}} fila",
     "fileRows_other": "{{rows}} filas",
@@ -464,6 +502,11 @@
     "blank": "(vacío)"
   },
   "erDiagram": {
+    "exportSvg": "Guardar como SVG",
+    "tables": "{{count}} tabla",
+    "tables_other": "{{count}} tablas",
+    "foreignKeys": "{{count}} clave foránea",
+    "foreignKeys_other": "{{count}} claves foráneas",
     "menu": "Diagrama ER",
     "title": "Diagrama ER · {{schema}}",
     "loading": "Cargando tablas…",
@@ -603,5 +646,14 @@
       "autoIncrement": "Autoincremental",
       "seeded": "Identidad ({{seed}}, {{increment}})"
     }
+  },
+  "quickSearch": {
+    "groupTabs": "Pestañas abiertas",
+    "groupTables": "Tablas",
+    "groupSaved": "Consultas guardadas",
+    "groupConnections": "Conexiones",
+    "navigate": "Navegar",
+    "open": "Abrir",
+    "close": "Cerrar"
   }
 }

@@ -3,22 +3,9 @@ use std::time::Duration;
 use barsql_app::BarApp;
 use barsql_core::{ConnectionConfig, DriverType};
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext as _, Context, Entity, Hsla, Render, TestAppContext, VisualTestContext, Window};
+use gpui_kit::{AppContext as _, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
 
 use crate::{actions, grid, list_nav, plan_view, saved_queries, schema, schema_tree, shortcuts, state, theme};
-
-// WCAG 2 contrast of `top`, as it shows over `base`, against `base`.
-pub fn contrast(top: Hsla, base: Hsla) -> f32 {
-    let luminance = |color: Hsla| {
-        let (top, base) = (color.to_rgb(), base.to_rgb());
-        let shown = |top: f32, base: f32| top * color.a + base * (1. - color.a);
-        let linear = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
-        let [r, g, b] = [shown(top.r, base.r), shown(top.g, base.g), shown(top.b, base.b)].map(linear);
-        0.2126 * r + 0.7152 * g + 0.0722 * b
-    };
-    let (a, b) = (luminance(top), luminance(Hsla { a: 1., ..base }));
-    (a.max(b) + 0.05) / (a.min(b) + 0.05)
-}
 
 // "mod" means the platform's command key, as in the default shortcuts.
 pub fn chord(keys: &str) -> String {
@@ -116,4 +103,17 @@ pub fn settle(cx: &mut VisualTestContext, mut done: impl FnMut(&mut VisualTestCo
         std::thread::sleep(Duration::from_millis(5));
     }
     panic!("timed out waiting for the UI to settle");
+}
+
+// The device row the open dialog's top lands on. Equal rows can differ in the last float digit.
+pub fn dialog_row(scale: f32, cx: &mut VisualTestContext) -> f32 {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    (f32::from(cx.debug_bounds("dialog-0").expect("the dialog is drawn").top()) * scale).round()
+}
+
+// GPUI Kit rounds a dialog's place to whole points, and the row rounds it again to a device pixel.
+pub fn assert_dialog_holds_its_row(rems: f32, rows: [f32; 2], scale: f32, cx: &mut VisualTestContext) {
+    let top = cx.update(|window, _| f32::from(window.rem_size()) * rems * scale);
+    assert_eq!(rows[0], rows[1], "at {scale}x");
+    assert!((rows[0] - top).abs() <= 0.5 * scale + 0.5, "at {scale}x the top is on row {}, not near {top}", rows[0]);
 }

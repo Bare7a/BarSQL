@@ -843,6 +843,16 @@ impl ImportDialog {
 
     fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let running = self.running.is_some();
+        // A counted CSV says how many rows the click will load.
+        let rows = self.preview.as_ref().filter(|preview| self.kind != Kind::Sql && preview.total_rows > 0);
+        let run_label = match (running, rows) {
+            (true, _) => t(cx, "import.running"),
+            (false, Some(preview)) => {
+                let rows = count(cx, preview.total_rows as usize);
+                t_count(cx, "import.runRows", preview.total_rows as i64, &[("rows", &rows)])
+            }
+            (false, None) => t(cx, "import.run"),
+        };
         modal::footer(cx)
             .child(
                 Button::new("import-dismiss")
@@ -856,7 +866,7 @@ impl ImportDialog {
                     .large()
                     .debug_selector(|| "import-run".into())
                     .primary()
-                    .label(t(cx, if running { "import.running" } else { "import.run" }))
+                    .label(run_label)
                     .disabled(!self.can_run(cx))
                     .on_click(cx.listener(|this, _, window, cx| this.run(window, cx))),
             )

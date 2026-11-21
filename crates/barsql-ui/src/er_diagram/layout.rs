@@ -1,5 +1,5 @@
 // Where the diagram puts its tables, and the keys between them. Sizes are rems of the 13px root.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use barsql_core::ColumnInfo;
 
@@ -78,7 +78,53 @@ pub struct Layout {
     pub height: f32,
 }
 
+// A point in rems from the diagram's corner.
+pub type Spot = (f32, f32);
+
+pub struct EdgePath {
+    pub from: Spot,
+    pub to: Spot,
+    pub controls: (Spot, Spot),
+    pub prongs: [(Spot, Spot); 3],
+    pub bar: (Spot, Spot),
+    pub head: [Spot; 3],
+}
+
 impl Layout {
+    // From the side facing the other box, with horizontal tangents. Both ends in the same column loop out on the right.
+    pub fn path(&self, edge: &Edge) -> EdgePath {
+        let row_y = |placed: Placed, row: Option<usize>| match row {
+            Some(row) => placed.y + HEADER_H + ROW_H * (row as f32 + 0.5),
+            None => placed.y + HEADER_H / 2.,
+        };
+        let (from, to) = (self.boxes[edge.from.0], self.boxes[edge.to.0]);
+        let (y1, y2) = (row_y(from, edge.from.1), row_y(to, edge.to.1));
+        // `inward` is the way the line arrives: +1 into a box's left side, -1 into its right.
+        let (x1, x2, bend, inward) = if to.x + BOX_W <= from.x {
+            (from.x, to.x + BOX_W, -1., -1.)
+        } else if to.x >= from.x + BOX_W {
+            (from.x + BOX_W, to.x, 1., 1.)
+        } else {
+            (from.x + BOX_W, to.x + BOX_W, 0., -1.)
+        };
+        let reach = ((x2 - x1).abs() / 2.).max(2.308);
+        let (c1, c2) = match bend {
+            0. => (x1 + reach, x2 + reach),
+            _ => (x1 + reach * bend, x2 - reach * bend),
+        };
+        // The prongs meet outside the box and spread to its side. A loop leaves to the right.
+        let (out, foot, half) = (if bend == 0. { 1. } else { bend }, 0.692, 0.346);
+        let (bar, back) = (x2 - inward * 0.462, x2 - inward * foot);
+        EdgePath {
+            from: (x1, y1),
+            to: (x2, y2),
+            controls: ((c1, y1), (c2, y2)),
+            prongs: [-half, 0., half].map(|dy| ((x1 + out * foot, y1), (x1, y1 + dy))),
+            bar: ((bar, y2 - half), (bar, y2 + half)),
+            head: [(x2, y2), (back, y2 - half), (back, y2 + half)],
+        }
+    }
+
     // The edges at a table, either way, and the tables at their other ends.
     pub fn related(&self, table: usize) -> (Vec<usize>, Vec<usize>) {
         let edges: Vec<usize> = (0..self.edges.len())
@@ -113,6 +159,18 @@ fn edges(tables: &[ErTable], keys_only: bool) -> Vec<Edge> {
         }
     }
     out
+}
+
+// Edges are per column; a key over several columns shares its name and counts once.
+pub fn key_count(tables: &[ErTable]) -> usize {
+    let names: HashSet<String> = tables.iter().map(|t| t.name.to_lowercase()).collect();
+    let mut keys = HashSet::new();
+    for (from, table) in tables.iter().enumerate() {
+        for column in table.columns.iter().filter(|c| c.is_foreign && names.contains(&c.foreign_table.to_lowercase())) {
+            keys.insert((from, &column.foreign_key));
+        }
+    }
+    keys.len()
 }
 
 // Referenced tables stand left of the ones that reference them, a column past their deepest reference; a table only
@@ -336,7 +394,7 @@ pub fn find(tables: &[ErTable], query: &str) -> Vec<usize> {
 mod tests {
     use barsql_core::ColumnInfo;
 
-    use super::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, SWEEPS, arrange, arrange_with, find};
+    use super::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, SWEEPS, arrange, arrange_with, find, key_count};
 
     fn column(name: &str, primary: bool, references: Option<&str>) -> ColumnInfo {
         ColumnInfo {
@@ -385,6 +443,29 @@ mod tests {
             }
         }
         count
+    }
+
+    #[test]
+    fn keys_are_counted_once_however_many_columns_they_span() {
+        let pointing = |name: &str, table: &str, key: &str| ColumnInfo {
+            foreign_key: key.into(),
+            ..column(name, false, Some(table))
+        };
+        let tables = vec![
+            ErTable::new("users".into(), vec![column("id", true, None)]),
+            ErTable::new("orders".into(), vec![column("id", true, None), column("rev", true, None)]),
+            ErTable::new(
+                "lines".into(),
+                vec![
+                    pointing("order_id", "orders", "fk_order"),
+                    pointing("order_rev", "orders", "fk_order"),
+                    pointing("created_by", "users", "fk_created"),
+                    pointing("user_email", "users", "fk_email"),
+                    pointing("gone_id", "elsewhere", "fk_gone"),
+                ],
+            ),
+        ];
+        assert_eq!(key_count(&tables), 3, "one key over two columns, two to users, none to a table not shown");
     }
 
     #[test]

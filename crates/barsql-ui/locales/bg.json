@@ -29,6 +29,8 @@
     }
   },
   "app": {
+    "recentConnections": "Скорошни връзки",
+    "pickEngine": "Или започнете с база данни",
     "queryTabWithConn": "Заявка {{num}} · {{conn}}",
     "statusRunning": "Изпълнява се… {{seconds}} s",
     "statusStreaming_one": "Зареждане… {{count}} ред · {{seconds}} s",
@@ -78,6 +80,9 @@
     "contextGoToDefinition": "Към дефиницията"
   },
   "connection": {
+    "pasteUrlPlaceholder": "Поставете URL адрес на връзка, за да попълните полетата",
+    "copyUrl": "Копиране като URL адрес, без паролата",
+    "urlNotRecognized": "BarSQL не може да прочете този URL адрес на връзка",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",
@@ -120,6 +125,8 @@
     "driverNotInBuild": "{{driver}} не е наличен в тази версия."
   },
   "results": {
+    "planFullScan": "Пълно сканиране",
+    "planFullScanHint": "Чете всеки ред от таблицата. Индекс по филтрираните колони може да пропусне повечето от тях",
     "messages": "Съобщения",
     "messagesCount": "{{count}} съобщение",
     "messagesCount_other": "{{count}} съобщения",
@@ -208,6 +215,12 @@
     "arrayError": "Това вече не може да се прочете като масив."
   },
   "jsonViewer": {
+    "referencedBy": "Сочат към него",
+    "fields": "Полета",
+    "json": "JSON",
+    "copyValue": "Щракнете, за да копирате",
+    "noFieldMatch": "Няма колона или стойност, отговаряща на филтъра",
+    "allNull": "Всяка колона е NULL",
     "filterPlaceholder": "Филтрирай ключове и стойности",
     "noMatch": "// Няма ключ или стойност, отговарящи на филтъра",
     "row": "Ред {{number}}",
@@ -323,6 +336,7 @@
     "zoom": "Мащабирай",
     "bringAllToFront": "Изнеси всички отпред",
     "stripedRows": "Редове на ивици",
+    "typeColors": "Оцветяване на стойностите по тип",
     "commandPalette": "Палитра с команди…"
   },
   "errors": {
@@ -357,7 +371,29 @@
     "readOnly": "Само за четене",
     "protected": "Пита преди промени",
     "extensions": "{{count}} разширение",
-    "extensions_other": "{{count}} разширения"
+    "extensions_other": "{{count}} разширения",
+    "showSidebar": "Покажи страничната лента",
+    "hideSidebar": "Скрий страничната лента",
+    "showJsonViewer": "Покажи JSON прегледа",
+    "hideJsonViewer": "Скрий JSON прегледа",
+    "aiRead": "AI достъп",
+    "aiWrite": "AI може да пише",
+    "aiReadHint": "AI приложения могат да четат тази база през MCP",
+    "aiWriteHint": "AI приложения могат да четат и променят тази база през MCP",
+    "update": {
+      "available": "Актуализирай до {{version}}",
+      "downloading": "Актуализиране {{percent}}%",
+      "busy": "Актуализиране…",
+      "ready": "Рестартирай за актуализация",
+      "failed": "Актуализацията е неуспешна"
+    },
+    "details": {
+      "latency": "Време за отговор при свързване: {{ms}} ms",
+      "database": "База данни {{database}} · Схема {{schema}}",
+      "databaseOnly": "База данни {{database}}",
+      "ssh": "През SSH {{address}}",
+      "tls": "TLS: {{mode}}"
+    }
   },
   "theme": {
     "dark": "Тъмна",
@@ -400,6 +436,8 @@
     "description": "Всяка стойност влиза в заявката като SQL, затова поставете текста в кавички: 'Ann'. Празна стойност се изпълнява като NULL."
   },
   "import": {
+    "runRows": "Импортиране на {{rows}} ред",
+    "runRows_other": "Импортиране на {{rows}} реда",
     "notUtf8": "Този файл не е UTF-8 текст, затова знаците, които не могат да се прочетат, ще се импортират като �. Запазете го като UTF-8 и го изберете отново.",
     "fileRows_one": "{{rows}} ред",
     "fileRows_other": "{{rows}} реда",
@@ -454,6 +492,11 @@
     "blank": "(празно)"
   },
   "erDiagram": {
+    "exportSvg": "Запазване като SVG",
+    "tables": "{{count}} таблица",
+    "tables_other": "{{count}} таблици",
+    "foreignKeys": "{{count}} външен ключ",
+    "foreignKeys_other": "{{count}} външни ключа",
     "menu": "ER диаграма",
     "title": "ER диаграма · {{schema}}",
     "loading": "Зареждане на таблиците…",
@@ -593,5 +636,14 @@
       "autoIncrement": "Автоинкремент",
       "seeded": "Идентичност ({{seed}}, {{increment}})"
     }
+  },
+  "quickSearch": {
+    "groupTabs": "Отворени раздели",
+    "groupTables": "Таблици",
+    "groupSaved": "Запазени заявки",
+    "groupConnections": "Връзки",
+    "navigate": "Придвижване",
+    "open": "Отваряне",
+    "close": "Затваряне"
   }
 }

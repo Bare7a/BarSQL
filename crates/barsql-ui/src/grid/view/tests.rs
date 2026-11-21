@@ -18,7 +18,8 @@ use super::{
 };
 use crate::grid::copy::flag;
 use crate::grid::range::CellRange;
-use crate::test_support::{Env, contrast};
+use crate::test_support::Env;
+use crate::theme::contrast;
 
 // The engine's own true and false, or 0 and 1 in a column declared boolean, as SQLite stores them.
 #[test]
@@ -57,8 +58,11 @@ fn cell_text_reads_on_every_tint_in_every_theme(cx: &mut TestAppContext) {
         for (what, fill, under) in fills {
             // Each fill is opaque once it sits over what's under it.
             let shown = gpui_kit::Rgba::from(under).blend(fill.into()).into();
-            let ratio = contrast(colors.text, shown);
-            assert!(ratio >= 4.5, "{name}: text on {what} is {ratio:.2}:1");
+            let tints = [("text", colors.text), ("a foreign key", colors.link_text), ("a number", colors.number)];
+            for (text, color) in tints.into_iter().chain([("a date", colors.date), ("JSON", colors.json)]) {
+                let ratio = contrast(color, shown);
+                assert!(ratio >= 4.5, "{name}: {text} on {what} is {ratio:.2}:1");
+            }
         }
         let faint = contrast(colors.faint, colors.head);
         assert!(faint >= 3., "{name}: a type name in the header is {faint:.2}:1");
@@ -310,7 +314,7 @@ fn the_totals_follow_staged_values(cx: &mut TestAppContext) {
     grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { staged, editable: true, ..Default::default() }, cx));
     assert_eq!(sum(cx), Some(13.0));
     grid.update(cx, |grid, cx| {
-        grid.patch_overlay(|overlay| drop(Arc::make_mut(&mut overlay.staged).insert((1, 0), Some("20".into()))), cx)
+        grid.patch_overlay(|overlay| Arc::make_mut(&mut overlay.staged).insert((1, 0), Some("20".into())).is_none(), cx)
     });
     assert_eq!(sum(cx), Some(31.0));
 }

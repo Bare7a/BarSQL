@@ -4,8 +4,7 @@ use std::sync::Arc;
 use barsql_app::{ResultEdits, ResultTable};
 use barsql_core::schema::primary_keys;
 use barsql_core::{ColumnInfo, RowDelete, RowUpdate, SqlDialect};
-use barsql_db::{Cell, CellKind, ChunkBuilder, ResultSet};
-use barsql_sql::{TypeFamily, type_family};
+use barsql_db::{Cell, ChunkBuilder, ResultSet};
 
 use crate::grid::{Choices, TableOverlay};
 use crate::table_edits::{Keys, Outcome, Staging, changes_row, key_row};
@@ -89,17 +88,19 @@ impl ResultEditor {
 
     // Brings an overlay from `overlay` up to date with the last change alone, as building it again is a pass over
     // everything staged.
-    pub fn patch(&self, overlay: &mut TableOverlay) {
-        let Some(keys) = &self.keyed else { return };
+    // True when a staged value changed.
+    pub fn patch(&self, overlay: &mut TableOverlay) -> bool {
+        let Some(keys) = &self.keyed else { return false };
         let pending = &self.staging.pending;
         let staged = Arc::make_mut(&mut overlay.staged);
+        let mut changed = false;
         for key in self.staging.touched() {
             let Some(row) = keys.row_of(key) else { continue };
             let edits = pending.edits.get(key);
             for (column, name) in self.table.columns.iter().enumerate() {
-                match name.as_ref().and_then(|name| edits?.get(name)) {
-                    Some(value) => staged.insert((row, column), value.clone()),
-                    None => staged.remove(&(row, column)),
+                changed |= match name.as_ref().and_then(|name| edits?.get(name)) {
+                    Some(value) => staged.insert((row, column), value.clone()).as_ref() != Some(value),
+                    None => staged.remove(&(row, column)).is_some(),
                 };
             }
             if pending.deletes.contains(key) {
@@ -108,6 +109,7 @@ impl ResultEditor {
                 overlay.deleted.remove(&row);
             }
         }
+        changed
     }
 
     pub fn edits(&self) -> ResultEdits {
@@ -223,7 +225,7 @@ fn push_cell(builder: &mut ChunkBuilder, cell: Cell<'_>) {
     }
 }
 
-// What was written keeps the kind its cell had, where it fits: digits stay a number and true or false a boolean.
+// What was written keeps the kind it showed with while staged.
 fn push_written(
     builder: &mut ChunkBuilder,
     before: Cell<'_>,
@@ -231,26 +233,16 @@ fn push_written(
     type_name: &str,
     dialect: Option<SqlDialect>,
 ) {
-    let Some(text) = value else { return builder.push_null() };
-    let number = text.parse::<f64>().is_ok();
-    let flag = matches!(text, "true" | "false");
-    let kind = match before {
-        Cell::Number(_) if number => CellKind::Number,
-        Cell::Bool(_) if flag => CellKind::Bool,
-        Cell::Null => match type_family(dialect, type_name) {
-            TypeFamily::Number if number => CellKind::Number,
-            TypeFamily::Boolean if flag => CellKind::Bool,
-            _ => CellKind::Text,
-        },
-        _ => CellKind::Text,
-    };
-    builder.push_kind(kind, |out| out.push_str(text));
+    match value {
+        Some(text) => push_cell(builder, barsql_io::typed(before, text, type_name, dialect)),
+        None => builder.push_null(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use barsql_core::ColumnInfo;
-    use barsql_db::ColumnMeta;
+    use barsql_db::{CellKind, ColumnMeta};
 
     use super::*;
 

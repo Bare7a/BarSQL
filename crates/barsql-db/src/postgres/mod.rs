@@ -192,7 +192,7 @@ impl PgEngine {
             Some(conn) => conn,
             None => self.open_conn().await?,
         };
-        Ok(PgLease { engine: self.clone(), conn: Some(conn), _permit: permit, reusable: true })
+        Ok(PgLease { engine: self.clone(), conn: Some(conn), _permit: permit, reusable: true, broken: false })
     }
 
     pub async fn session(self: &Arc<Self>) -> Result<PgSession, QueryError> {
@@ -313,6 +313,8 @@ pub(crate) struct PgLease {
     conn: Option<PgConn>,
     _permit: OwnedSemaphorePermit,
     pub(crate) reusable: bool,
+    // Still busy with a request nobody will read: a dropped catalog read, or a cancel that didn't settle.
+    pub(crate) broken: bool,
 }
 
 impl PgLease {
@@ -338,7 +340,7 @@ impl Drop for PgLease {
         let Some(conn) = self.conn.take() else {
             return;
         };
-        if self.reusable && !conn.client.is_closed() {
+        if self.reusable && !self.broken && !conn.client.is_closed() {
             let mut idle = self.engine.lock_idle();
             if idle.len() < MAX_IDLE {
                 idle.push(conn);

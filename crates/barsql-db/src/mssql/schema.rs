@@ -1,9 +1,12 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
-    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo,
+    TableInfo, TableSize, TriggerInfo,
 };
 use barsql_sql::ddl::{DdlColumn, compose_create_table, join_ddl, render_constraint, unsupported_ddl};
 use barsql_sql::structure::check_body;
@@ -77,15 +80,31 @@ impl MsEngine {
             .collect())
     }
 
+    pub async fn round_trip(self: &Arc<Self>) -> Result<Duration, QueryError> {
+        let mut lease = self.lease().await?;
+        lease.broken = true;
+        let mut tokens = Vec::new();
+        let client = lease.client();
+        let started = Instant::now();
+        let read = async move { client.simple_query("SELECT 1").await?.into_results().await };
+        captured(&mut tokens, read).await.map_err(|error| ms_error(error, ""))?;
+        let elapsed = started.elapsed();
+        lease.broken = false;
+        Ok(elapsed)
+    }
+
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        let rows = self.rows("SELECT DB_NAME(), SCHEMA_NAME(), SUSER_SNAME()", &[]).await?;
+        let rows = self.rows("SELECT DB_NAME(), SCHEMA_NAME(), SUSER_SNAME(), @@VERSION", &[]).await?;
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
+        // @@VERSION runs to several lines of build and OS detail. The first names the product and its version.
+        let version = string(row, 3);
         Ok(ConnectionStatus {
             connected: true,
             database: string(row, 0),
             schema: string(row, 1),
             user: string(row, 2),
             host: self.options.host.clone(),
+            version: version.lines().next().unwrap_or_default().trim().to_string(),
         })
     }
 
@@ -125,6 +144,53 @@ impl MsEngine {
         Ok(rows.iter().map(|r| TableInfo { schema: schema.clone(), name: string(r, 0), kind: string(r, 1) }).collect())
     }
 
+    pub async fn referencing_keys(
+        self: &Arc<Self>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
+        let schema = self.schema_or(schema);
+        let sql = format!(
+            "SELECT OBJECT_SCHEMA_NAME(fkc.parent_object_id), OBJECT_NAME(fkc.parent_object_id),
+                OBJECT_NAME(fkc.constraint_object_id), COL_NAME(fkc.parent_object_id, fkc.parent_column_id),
+                COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id)
+            FROM sys.foreign_key_columns fkc
+            WHERE fkc.referenced_object_id = {TABLE_ID}
+            ORDER BY 1, 2, fkc.constraint_object_id, fkc.constraint_column_id"
+        );
+        let rows = self.rows(&sql, &[schema, table]).await?;
+        Ok(rows
+            .iter()
+            .map(|r| ReferencingKey {
+                schema: string(r, 0),
+                table: string(r, 1),
+                key: string(r, 2),
+                column: string(r, 3),
+                referenced_column: string(r, 4),
+            })
+            .collect())
+    }
+
+    // dm_db_partition_stats would need VIEW DATABASE STATE.
+    pub async fn table_sizes(self: &Arc<Self>, schema: &str) -> Result<HashMap<String, TableSize>, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let rows = self
+            .rows(
+                "SELECT t.name,
+                    (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = t.object_id AND p.index_id IN (0, 1)),
+                    (SELECT SUM(a.used_pages) FROM sys.partitions p
+                        JOIN sys.allocation_units a ON a.container_id = p.partition_id
+                        WHERE p.object_id = t.object_id) * 8192
+                FROM sys.tables t
+                JOIN sys.schemas s ON s.schema_id = t.schema_id
+                WHERE s.name = @P1 AND t.is_ms_shipped = 0",
+                &[&schema],
+            )
+            .await?;
+        let number = |r: &TextRow, ix: usize| string(r, ix).parse().ok();
+        Ok(rows.iter().map(|r| (string(r, 0), TableSize { rows: number(r, 1), bytes: number(r, 2) })).collect())
+    }
+
     // One row per check that may list a column's values: its own, or a table check naming it, which SQL Server writes
     // as [name].
     pub async fn list_columns(self: &Arc<Self>, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
@@ -132,7 +198,7 @@ impl MsEngine {
         let sql = format!(
             "SELECT c.name, {COLUMN_TYPE}, CAST(c.is_nullable AS int), COALESCE(dc.definition, ''),
                 IIF(pk.column_id IS NULL, 0, 1), COALESCE(fk.ref_table, ''), COALESCE(fk.ref_column, ''),
-                CAST(c.is_identity AS int), CAST(c.is_computed AS int), ck.definition
+                COALESCE(fk.ref_key, ''), CAST(c.is_identity AS int), CAST(c.is_computed AS int), ck.definition
             FROM sys.columns c
             LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
             OUTER APPLY (
@@ -142,7 +208,8 @@ impl MsEngine {
             ) pk
             OUTER APPLY (
                 SELECT TOP (1) OBJECT_NAME(fkc.referenced_object_id) AS ref_table,
-                    COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS ref_column
+                    COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS ref_column,
+                    OBJECT_NAME(fkc.constraint_object_id) AS ref_key
                 FROM sys.foreign_key_columns fkc
                 WHERE fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
             ) fk
@@ -167,13 +234,14 @@ impl MsEngine {
                     is_foreign: !foreign_table.is_empty(),
                     foreign_table,
                     foreign_column: string(r, 6),
-                    is_identity: flag(r, 7),
-                    is_computed: flag(r, 8),
+                    foreign_key: string(r, 7),
+                    is_identity: flag(r, 8),
+                    is_computed: flag(r, 9),
                     enum_values: Vec::new(),
                 };
                 out.push((column, Vec::new()));
             }
-            if let (Some(check), Some((_, checks))) = (r.get(9).cloned().flatten(), out.last_mut()) {
+            if let (Some(check), Some((_, checks))) = (r.get(10).cloned().flatten(), out.last_mut()) {
                 checks.push(check);
             }
         }

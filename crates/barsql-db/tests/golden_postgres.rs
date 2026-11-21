@@ -23,6 +23,72 @@ async fn connect(zone: TimeZone) -> Engine {
 }
 
 #[tokio::test]
+async fn postgres_reports_its_server_version() {
+    let info = connect(TimeZone::UTC).await.connection_info().await.unwrap();
+    assert!(info.version.starts_with(|c: char| c.is_ascii_digit()), "{}", info.version);
+}
+
+// reltuples counts after ANALYZE, and the size takes in the indexes too. fresh_probe is too small for autovacuum to
+// analyze, and its size waits for no lock. A REINDEX locks just the indexes, and leaves an empty table's reltuples
+// at -1.
+#[tokio::test]
+async fn postgres_table_sizes_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    let engine = connect(TimeZone::UTC).await;
+    let mut session = engine.session().await.unwrap();
+    let setup = [
+        "DROP TABLE IF EXISTS sized_probe, fresh_probe, empty_probe",
+        "CREATE TABLE sized_probe (id int PRIMARY KEY)",
+        "INSERT INTO sized_probe SELECT generate_series(1, 100)",
+        "ANALYZE sized_probe",
+        "CREATE TABLE fresh_probe (id int PRIMARY KEY)",
+        "INSERT INTO fresh_probe VALUES (1), (2), (3)",
+        "CREATE TABLE empty_probe (id int PRIMARY KEY)",
+    ];
+    run_all(&mut session, &setup.map(String::from)).await;
+    let sizes = engine.table_sizes("public").await.unwrap();
+    let mut locker = engine.session().await.unwrap();
+    run_all(&mut locker, &["BEGIN".into(), "LOCK TABLE fresh_probe IN ACCESS EXCLUSIVE MODE".into()]).await;
+    let locked = tokio::time::timeout(Duration::from_secs(10), engine.table_sizes("public")).await;
+    run_all(&mut locker, &["ROLLBACK".into()]).await;
+    run_all(&mut locker, &["BEGIN".into(), "REINDEX TABLE empty_probe".into()]).await;
+    let reindexing = tokio::time::timeout(Duration::from_secs(10), engine.table_sizes("public")).await;
+    run_all(&mut locker, &["ROLLBACK".into()]).await;
+    run_all(&mut session, &["DROP TABLE sized_probe, fresh_probe, empty_probe".to_string()]).await;
+    let sized = sizes["sized_probe"];
+    assert_eq!(sized.rows, Some(100));
+    assert!(sized.bytes.is_some_and(|bytes| bytes > 8192), "{sized:?}");
+    let fresh = sizes["fresh_probe"];
+    assert!(fresh.rows.is_some() && fresh.bytes.is_some_and(|bytes| bytes > 0), "{fresh:?}");
+    let locked = locked.expect("no wait behind the lock").unwrap()["fresh_probe"];
+    assert!(locked.rows.is_some() && locked.bytes.is_none(), "{locked:?}");
+    let reindexing = reindexing.expect("no wait behind the REINDEX").unwrap();
+    let (empty, fresh) = (reindexing["empty_probe"], reindexing["fresh_probe"]);
+    assert!(empty.rows.is_some() && empty.bytes.is_none() && fresh.bytes.is_some(), "{reindexing:?}");
+}
+
+// Postgres copies ref_parts' key to each of its partitions, and it's still listed once.
+#[tokio::test]
+async fn postgres_keys_pointing_at_a_table_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    let engine = connect(TimeZone::UTC).await;
+    let mut session = engine.session().await.unwrap();
+    run_all(&mut session, &["DROP TABLE IF EXISTS ref_lines, ref_parts, ref_orders, ref_users".into()]).await;
+    run_all(&mut session, &common::REF_TABLES.map(String::from)).await;
+    let parts = [
+        "CREATE TABLE ref_parts (order_id int, order_rev int,
+            FOREIGN KEY (order_id, order_rev) REFERENCES ref_orders (id, rev)) PARTITION BY LIST (order_rev)",
+        "CREATE TABLE ref_parts_1 PARTITION OF ref_parts FOR VALUES IN (1)",
+        "CREATE TABLE ref_parts_2 PARTITION OF ref_parts FOR VALUES IN (2)",
+    ];
+    run_all(&mut session, &parts.map(String::from)).await;
+    let keys = engine.referencing_keys("public", "ref_orders").await.unwrap();
+    let columns = engine.list_columns("public", "ref_lines").await.unwrap();
+    run_all(&mut session, &["DROP TABLE ref_lines, ref_parts, ref_orders, ref_users".to_string()]).await;
+    common::assert_ref_keys("postgres", &keys, &columns, "public", &["ref_lines", "ref_parts"]);
+}
+
+#[tokio::test]
 async fn postgres_values_and_errors_match_the_fixtures() {
     let _serial = common::serial().await;
     let mut report = Report::default();

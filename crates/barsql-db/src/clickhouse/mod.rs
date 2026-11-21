@@ -208,6 +208,11 @@ impl ChEngine {
         Ok(rows)
     }
 
+    // /ping answers without running a query, so it adds nothing to the server's query log.
+    pub async fn round_trip(&self) -> Result<Duration, QueryError> {
+        Ok(self.client.time(&Request::get("/ping"), MAX_ERROR).await?)
+    }
+
     // A statement of the app's own that returns nothing, like KILL QUERY.
     async fn execute(&self, sql: &str) -> Result<(), QueryError> {
         let query_id = uuid::Uuid::new_v4().to_string();

@@ -12,6 +12,7 @@ use crate::editor_commands::{SelectAllOccurrences, ToggleComment};
 use crate::form;
 use crate::fuzzy::rank_candidate;
 use crate::i18n::t;
+use crate::modal::AtTop as _;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{RADIUS_LG, RADIUS_SM, TEXT_BASE, TEXT_XS};
 
@@ -54,6 +55,7 @@ fn catalog(cx: &App) -> Vec<(String, Box<dyn Action>)> {
         (item("shortcuts.items.toggleSidebar"), Box::new(ToggleSidebar)),
         (item("shortcuts.items.toggleJsonPanel"), Box::new(ToggleJsonPanel)),
         (item("menu.stripedRows"), Box::new(ToggleGridStripes)),
+        (item("menu.typeColors"), Box::new(ToggleGridTypeColors)),
         (item("shortcuts.items.toggleFullscreen"), Box::new(ToggleFullscreen)),
         (item("shortcuts.items.zoomIn"), Box::new(ZoomIn)),
         (item("shortcuts.items.zoomOut"), Box::new(ZoomOut)),
@@ -322,7 +324,7 @@ pub fn open_with(
         let on_dismiss = on_dismiss.clone();
         modal
             .w(rem * 46.154)
-            .margin_top(rem * 5.5)
+            .at_top(rem * 5.5, window)
             .p_0()
             .bg(cx.theme().sidebar)
             .rounded(RADIUS_LG)
@@ -342,8 +344,12 @@ pub fn open_with(
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::TestAppContext;
+
     use super::{Command, rank};
     use crate::actions::NewTab;
+    use crate::test_support::{Env, assert_dialog_holds_its_row, dialog_row, in_root};
+    use crate::workspace::Workspace;
 
     fn command(label: &str) -> Command {
         Command { label: label.into(), action: Box::new(NewTab), shortcut: None, tag: None }
@@ -366,5 +372,20 @@ mod tests {
         assert_eq!(order("zoom"), [2]);
         assert_eq!(order("tsb"), [1], "initials match");
         assert!(order("xyz").is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn the_palette_keeps_its_place_when_nothing_matches(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (workspace, cx) = in_root(cx, Workspace::new);
+        let palette = workspace.update_in(cx, |ws, window, cx| ws.open_command_palette(window, cx)).unwrap();
+        for scale in [1., 1.25, 1.5, 1.75, 2.] {
+            cx.simulate_scale_factor_change(scale);
+            let rows = ["", "nothing like this"].map(|query| {
+                palette.update_in(cx, |palette, window, cx| palette.set_query(query, window, cx));
+                dialog_row(scale, cx)
+            });
+            assert_dialog_holds_its_row(5.5, rows, scale, cx);
+        }
     }
 }

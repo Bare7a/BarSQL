@@ -6,6 +6,7 @@ use barsql_core::SqlDialect;
 use barsql_db::{ColumnMeta, ResultChunk, ResultSet};
 use barsql_io::ExportFormat;
 use barsql_sql::display_type;
+use barsql_sql::type_name::{TypeFamily, type_family};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::input::{Copy, Input, InputState, Paste, Redo, SelectAll, Undo};
@@ -30,6 +31,7 @@ const CONTEXT: &str = "Grid";
 const PICKING: &str = "picking";
 const FORMAT_KEY: &str = "barsql-export-format";
 pub const STRIPES_KEY: &str = "barsql-grid-stripes";
+pub const TYPE_COLORS_KEY: &str = "barsql-grid-type-colors";
 const MIN_COLUMN_PX: f32 = 40.;
 const RESIZE_HANDLE_PX: f32 = 5.;
 // Longer values are cut before layout. The cell viewer still shows them whole.
@@ -117,6 +119,8 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
+    cx.set_global(GridColors(Colors::new(cx)));
+    cx.observe_global::<gpui_kit::component::Theme>(|cx| cx.set_global(GridColors(Colors::new(cx)))).detach();
     let context = Some(CONTEXT);
     cx.bind_keys([
         KeyBinding::new("up", MoveUp, context),
@@ -188,6 +192,10 @@ pub struct RowRef {
     pub row: usize,
     pub columns: Vec<usize>,
     pub number: usize,
+    pub dialect: Option<SqlDialect>,
+    pub primary: HashSet<usize>,
+    pub foreign: HashMap<usize, String>,
+    pub staged: Option<Staged>,
 }
 
 pub enum GridEvent {
@@ -457,7 +465,25 @@ impl Grid {
     pub fn focused_row(&self) -> Option<RowRef> {
         let row = self.selection.focus_row.filter(|&row| row < self.set.rows())?;
         let number = self.order.display_of(row).unwrap_or(row) + 1;
-        Some(RowRef { set: self.set.clone(), row, columns: self.columns.clone(), number })
+        let (primary, foreign) =
+            self.overlay.as_ref().map(|overlay| (overlay.primary.clone(), overlay.foreign.clone())).unwrap_or_default();
+        Some(RowRef {
+            set: self.set.clone(),
+            row,
+            columns: self.columns.clone(),
+            number,
+            dialect: self.dialect,
+            primary,
+            foreign,
+            // The row's own cells only, so the grid's map stays unshared and patches in place.
+            staged: self.overlay.as_ref().map(|overlay| {
+                let cells = self
+                    .columns
+                    .iter()
+                    .filter_map(|&column| Some(((row, column), overlay.staged.get(&(row, column))?.clone())));
+                Arc::new(cells.collect())
+            }),
+        })
     }
 
     // A sort renumbers the focused row without moving it, so that counts as a change.
@@ -747,18 +773,10 @@ impl Grid {
             columns.iter().map(|&column| ColumnStats { name: name(column), ..Default::default() }).collect();
         for &row in &rows {
             for (stats, &column) in stats.iter_mut().zip(&columns) {
-                stats.add(self.counted(row, column));
+                stats.add(self.shown(row, column));
             }
         }
         Some(Aggregate { cells, columns: stats })
-    }
-
-    // A staged value shows as text, though where it replaces a number it counts as one.
-    fn counted(&self, row: usize, column: usize) -> barsql_db::Cell<'_> {
-        match (self.shown(row, column), self.set.cell(row, column)) {
-            (barsql_db::Cell::Text(text), barsql_db::Cell::Number(_)) => barsql_db::Cell::Number(text),
-            (shown, _) => shown,
-        }
     }
 
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -797,9 +815,9 @@ impl Grid {
     pub fn copy(&mut self, single_cell: bool, window: &mut Window, cx: &mut Context<Self>) {
         if single_cell && let Some((row, column)) = copy::single_cell(&self.selection, &self.view()) {
             let staged = self.staged();
-            let text = copy::cell_text(&self.set, staged.as_ref(), row, column);
+            let text = copy::cell_text(&self.set, staged.as_ref(), row, column, self.dialect);
             let target = CopyTarget { columns: vec![column], rows: vec![row] };
-            cx.write_to_clipboard(copy::clipboard_item(text, None, &self.set, staged.as_ref(), &target));
+            cx.write_to_clipboard(copy::clipboard_item(text, None, &self.set, staged.as_ref(), &target, self.dialect));
             toast::success(t(cx, "toast.copiedCell"), cx);
             return;
         }
@@ -833,7 +851,7 @@ impl Grid {
         let (set, table, dialect) = (self.set.clone(), self.table.clone(), self.dialect);
         let item = cx.background_spawn(async move {
             let text = copy::export(&set, staged.as_ref(), format, table.as_deref(), dialect, &target);
-            copy::clipboard_item(text, Some(format), &set, staged.as_ref(), &target)
+            copy::clipboard_item(text, Some(format), &set, staged.as_ref(), &target, dialect)
         });
         cx.spawn_in(window, async move |this, cx| {
             let item = item.await;
@@ -1215,7 +1233,7 @@ impl Render for Grid {
                 .h(ringed.size.height)
                 .border_2()
                 .border_color(theme.primary)
-                .bg(theme.background)
+                .bg(crate::theme::opaque(theme.background))
                 // Its own Cut/Copy/Paste menu, not the grid's, which would also take focus and commit the edit.
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 // The input passes on a Copy with nothing selected, and the grid's would copy the cell's old value.
@@ -1321,6 +1339,7 @@ fn lane_guard(scroll: GridScroll) -> impl IntoElement {
     .size_full()
 }
 
+#[derive(Clone, Copy)]
 struct Colors {
     background: Hsla,
     stripe: Hsla,
@@ -1340,6 +1359,7 @@ struct Colors {
     faint: Hsla,
     key: Hsla,
     link: Hsla,
+    link_text: Hsla,
     staged: Hsla,
     staged_border: Hsla,
     deleted: Hsla,
@@ -1349,6 +1369,9 @@ struct Colors {
     check_border: Hsla,
     danger: Hsla,
     success: Hsla,
+    number: Hsla,
+    date: Hsla,
+    json: Hsla,
 }
 
 // Mixes `amount` of `a` into `b`, in sRGB.
@@ -1358,12 +1381,19 @@ fn mix(a: Hsla, b: Hsla, amount: f32) -> Hsla {
     Rgba { r: lerp(a.r, b.r), g: lerp(a.g, b.g), b: lerp(a.b, b.b), a: lerp(a.a, b.a) }.into()
 }
 
+// Built once per theme, not every frame.
+struct GridColors(Colors);
+
+impl Global for GridColors {}
+
 impl Colors {
     fn new(cx: &App) -> Self {
         let theme = cx.theme();
         let accent = theme.primary;
         // Cells sit on the results pane, so tints mix against the base background.
         let background = theme.background;
+        let syntax =
+            |name: &str| theme.highlight_theme.style(name).and_then(|style| style.color).unwrap_or(theme.foreground);
         Self {
             background: theme.table,
             stripe: mix(theme.foreground, theme.table, 0.035),
@@ -1382,6 +1412,7 @@ impl Colors {
             faint: theme.muted_foreground.opacity(0.75),
             key: theme.warning,
             link: accent,
+            link_text: accent,
             staged: mix(theme.warning, background, 0.22),
             staged_border: theme.warning.opacity(0.55),
             deleted: theme.danger.opacity(0.11),
@@ -1390,6 +1421,48 @@ impl Colors {
             check_border: theme.muted_foreground.opacity(0.7),
             danger: theme.danger,
             success: theme.success,
+            number: syntax("number"),
+            date: syntax("constant"),
+            json: syntax("string.special"),
+        }
+        .readable()
+    }
+
+    // Tinted cell text keeps 4.5:1 on every fill, leaning toward the text colour only as far as it must.
+    fn readable(mut self) -> Self {
+        let fills = [
+            self.background,
+            self.stripe,
+            self.hover,
+            self.focused_row,
+            self.focused_cell,
+            self.selected,
+            self.selected_hover,
+            self.staged,
+            self.added,
+            self.deleted,
+        ]
+        .map(|fill| Hsla::from(Rgba::from(self.background).blend(fill.into())));
+        let text = self.text;
+        let readable = |tint: Hsla| {
+            (0..=10)
+                .map(|step| mix(text, tint, step as f32 / 10.))
+                .find(|tint| fills.iter().all(|fill| crate::theme::contrast(*tint, *fill) >= 4.5))
+                .unwrap_or(text)
+        };
+        self.link_text = readable(self.link);
+        self.number = readable(self.number);
+        self.date = readable(self.date);
+        self.json = readable(self.json);
+        self
+    }
+
+    fn typed(&self, family: TypeFamily) -> Option<Hsla> {
+        match family {
+            TypeFamily::Number => Some(self.number),
+            TypeFamily::Date | TypeFamily::Time | TypeFamily::DateTime => Some(self.date),
+            TypeFamily::Json | TypeFamily::Array => Some(self.json),
+            _ => None,
         }
     }
 }
@@ -1496,7 +1569,7 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     let total_width = grid.col_x.last().copied().unwrap_or_default();
     let rows = grid.order.len();
     let scroll = grid.scroll.position();
-    let colors = Colors::new(cx);
+    let colors = cx.global::<GridColors>().0;
     let base = grid_font(cx);
     let mut plain = Shaper::new(base.clone(), m.font_size, window);
     let mut italic = Shaper::new(Font { style: FontStyle::Italic, ..base.clone() }, m.font_size, window);
@@ -1526,6 +1599,20 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
     };
     let null = t(cx, "common.null");
     let striped = setting_bool(cx, STRIPES_KEY, false);
+    let typed = setting_bool(cx, TYPE_COLORS_KEY, false);
+    // Foreign keys take the link colour, as they open the rows they point at.
+    let tints: Vec<Option<Hsla>> = visible_cols
+        .clone()
+        .map(|col| {
+            let column = grid.columns[col];
+            match overlay.is_some_and(|overlay| overlay.foreign.contains_key(&column)) {
+                true => Some(colors.link_text),
+                false => typed
+                    .then(|| colors.typed(type_family(grid.dialect, &grid.set.columns[column].type_name)))
+                    .flatten(),
+            }
+        })
+        .collect();
 
     let mut background = Layer::new(bounds);
     background.quads.push(fill(bounds, colors.background));
@@ -1615,9 +1702,10 @@ fn prepaint(entity: &Entity<Grid>, bounds: Bounds<Pixels>, window: &mut Window, 
                     true => shaper.shape_struck(text, colors.muted, text_width, window),
                     false => shaper.shape(text, color, text_width, window),
                 };
+                let color = tints[col - visible_cols.start].unwrap_or(colors.text);
                 let line = match (&number, value.display()) {
-                    (Some(number), _) => shape(&mut plain, number, colors.text),
-                    (None, Some(text)) => shape(&mut plain, &display_text(text), colors.text),
+                    (Some(number), _) => shape(&mut plain, number, color),
+                    (None, Some(text)) => shape(&mut plain, &display_text(text), color),
                     (None, None) => shape(&mut italic, &null, colors.muted),
                 };
                 // Numbers line up on their decimal point, as in a spreadsheet: a shorter fraction leaves room on the

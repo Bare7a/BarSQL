@@ -1,9 +1,12 @@
 // Boxed, so the engines' async code compiles once here, not again in each crate that awaits it (about 3 MB each).
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,
-    RoutineInfo, Row, RowDelete, RowUpdate, SchemaBundle, SchemaInfo, TableDataRequest, TableInfo, TableStructure,
-    TriggerInfo,
+    ReferencingKey, RoutineInfo, Row, RowDelete, RowUpdate, SchemaBundle, SchemaInfo, TableDataRequest, TableInfo,
+    TableSize, TableStructure, TriggerInfo,
 };
 use barsql_db::{Cancel, ColumnMeta};
 use barsql_sql::QueryPlan;
@@ -59,6 +62,10 @@ impl BarApp {
         Box::pin(self.load_schema_data_inner(id))
     }
 
+    pub fn round_trip<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Option<Duration>, QueryError>> {
+        Box::pin(self.round_trip_inner(id))
+    }
+
     pub fn list_schemas<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Vec<SchemaInfo>, QueryError>> {
         Box::pin(self.list_schemas_inner(id))
     }
@@ -69,6 +76,23 @@ impl BarApp {
         schema: &'a str,
     ) -> BoxFuture<'a, Result<Vec<TableInfo>, QueryError>> {
         Box::pin(self.list_tables_inner(id, schema))
+    }
+
+    pub fn referencing_keys<'a>(
+        &'a self,
+        id: &'a str,
+        schema: &'a str,
+        table: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<ReferencingKey>, QueryError>> {
+        Box::pin(self.referencing_keys_inner(id, schema, table))
+    }
+
+    pub fn table_sizes<'a>(
+        &'a self,
+        id: &'a str,
+        schema: &'a str,
+    ) -> BoxFuture<'a, Result<HashMap<String, TableSize>, QueryError>> {
+        Box::pin(self.table_sizes_inner(id, schema))
     }
 
     pub fn list_columns<'a>(

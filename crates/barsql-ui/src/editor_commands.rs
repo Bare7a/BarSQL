@@ -2,7 +2,9 @@ use std::ops::Range;
 
 use gpui_kit::base::input::{AddCursorAbove, AddCursorBelow};
 use gpui_kit::component::RopeExt as _;
-use gpui_kit::component::input::{Copy, Cut, EditorState, Escape, GoToDefinition, Paste};
+use gpui_kit::component::input::{
+    Backspace, Copy, Cut, DeleteToNextWordEnd, DeleteToPreviousWordStart, EditorState, Escape, GoToDefinition, Paste,
+};
 use gpui_kit::*;
 use lsp_types::Position;
 
@@ -39,7 +41,8 @@ pub const CONTEXT: &str = "CodeEditor";
 const WHOLE_LINE: &str = "barsql-whole-line";
 
 pub fn init(cx: &mut App) {
-    let context = Some("CodeEditor > Input");
+    // The editor's own input. GPUI Kit's find box is an Input inside it too.
+    let context = Some("CodeEditor > Input && mode == editor");
     cx.bind_keys([
         os_binding("secondary-x", CutLine, context, cx),
         os_binding("secondary-c", CopyLine, context, cx),
@@ -106,6 +109,14 @@ pub fn handlers<E: InteractiveElement>(el: E, editor: &Entity<EditorState>, comm
     })
     // Escape drops the extra cursors but keeps the main selection, so Select Next Occurrence starts over from it.
     .capture_action(|_: &Escape, _, cx| occurrences::end_session(cx))
+    .capture_action({
+        let editor = on();
+        move |_: &DeleteToPreviousWordStart, window, cx| delete_word(&editor, true, window, cx)
+    })
+    .capture_action({
+        let editor = on();
+        move |_: &DeleteToNextWordEnd, window, cx| delete_word(&editor, false, window, cx)
+    })
     .on_action({
         let editor = on();
         move |_: &SelectLine, _, cx| select(&editor, cx, select_line)
@@ -161,10 +172,22 @@ fn edit(
     let (text, sel, editable) = read(editor, cx);
     let Some((range, new, select)) = change(&text, sel).filter(|_| editable) else { return };
     editor.update(cx, |state, cx| {
-        state.set_selected_range(range, cx);
-        state.replace(new, window, cx);
+        replace_range(state, range, new, window, cx);
         state.set_selected_range(select, cx);
     });
+}
+
+// Unlike selecting the range and calling `replace`, this leaves the caret where it was for undo to put back.
+fn replace_range(
+    state: &mut EditorState,
+    range: Range<usize>,
+    new: String,
+    window: &mut Window,
+    cx: &mut Context<EditorState>,
+) {
+    let text = state.text();
+    let range = lsp_types::Range::new(text.offset_to_position(range.start), text.offset_to_position(range.end));
+    state.apply_lsp_edits(&vec![lsp_types::TextEdit::new(range, new)], window, cx);
 }
 
 fn select(editor: &Entity<EditorState>, cx: &mut App, pick: impl FnOnce(&str, Range<usize>) -> Option<Range<usize>>) {
@@ -215,8 +238,7 @@ fn cut_line(editor: &Entity<EditorState>, window: &mut Window, cx: &mut App) {
         cx.write_to_clipboard(ClipboardItem::new_string_with_metadata(line_text(&text, sel.start), WHOLE_LINE.into()));
         let (range, _, select) = delete_lines(&text, sel);
         editor.update(cx, |state, cx| {
-            state.set_selected_range(range, cx);
-            state.replace("", window, cx);
+            replace_range(state, range, String::new(), window, cx);
             state.set_selected_range(select, cx);
         });
     }
@@ -245,8 +267,7 @@ fn paste_line(editor: &Entity<EditorState>, window: &mut Window, cx: &mut App) {
     };
     let (start, caret) = (line_start(&text, sel.start), sel.start + line.len());
     editor.update(cx, |state, cx| {
-        state.set_selected_range(start..start, cx);
-        state.replace(line, window, cx);
+        replace_range(state, start..start, line, window, cx);
         state.set_selected_range(caret..caret, cx);
     });
 }
@@ -452,11 +473,91 @@ fn select_line(text: &str, sel: Range<usize>) -> Option<Range<usize>> {
     Some(whole)
 }
 
+// VS Code's Ctrl+Backspace and Ctrl+Delete, as GPUI Kit's skip blank lines to the word past them. Like the line
+// commands it acts on the main caret alone. A selection, or the find box, is left to GPUI Kit.
+fn delete_word(editor: &Entity<EditorState>, left: bool, window: &mut Window, cx: &mut App) {
+    let state = editor.read(cx);
+    let caret = state.selected_range();
+    if !caret.is_empty() || !state.is_editable() || !state.focus_handle(cx).is_focused(window) {
+        return;
+    }
+    let (text, at) = (state.text(), caret.start);
+    let row = text.offset_to_point(at).row;
+    let (range, in_pair) = if left {
+        let from = text.line_start_offset(row.saturating_sub(1));
+        let head = text.slice(from..at).to_string();
+        let pair = head.chars().next_back().zip(text.char_at(at));
+        (from + word_left(&head)..at, pair.is_some_and(|(open, close)| PAIRS.contains(&[open, close])))
+    } else {
+        let to = text.line_end_offset(row + 1);
+        (at..at + word_right(&text.slice(at..to).to_string()), false)
+    };
+    cx.stop_propagation();
+    if in_pair {
+        window.dispatch_action(Box::new(Backspace), cx);
+    } else if !range.is_empty() {
+        editor.update(cx, |state, cx| replace_range(state, range, String::new(), window, cx));
+    }
+}
+
+// GPUI Kit's default pairs, which SQL uses. Its Backspace deletes an empty one whole, as VS Code's word delete does.
+const PAIRS: [[char; 2]; 5] = [['(', ')'], ['[', ']'], ['{', '}'], ['"', '"'], ['\'', '\'']];
+
+#[derive(Clone, Copy, PartialEq)]
+enum CharClass {
+    Blank,
+    Separator,
+    Word,
+}
+
+// VS Code's default word separators. Anything else but a space or tab is part of a word.
+fn char_class(c: char) -> CharClass {
+    match c {
+        ' ' | '\t' => CharClass::Blank,
+        _ if "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?".contains(c) => CharClass::Separator,
+        _ => CharClass::Word,
+    }
+}
+
+const BLANKS: [char; 2] = [' ', '\t'];
+
+fn word_left(head: &str) -> usize {
+    let line = &head[head.rfind('\n').map_or(0, |ix| ix + 1)..];
+    if line.is_empty() {
+        return head.strip_suffix('\n').map_or(0, |head| head.strip_suffix('\r').unwrap_or(head).len());
+    }
+    let start = head.len() - line.len();
+    let word = line.trim_end_matches(BLANKS);
+    if line.len() - word.len() > 1 {
+        return start + word.len();
+    }
+    let class = word.chars().next_back().map(char_class);
+    start + word.trim_end_matches(|c| Some(char_class(c)) == class).len()
+}
+
+fn word_right(rest: &str) -> usize {
+    let newline = rest.find('\n');
+    let line = &rest[..newline.unwrap_or(rest.len())];
+    let line = if newline.is_some() { line.strip_suffix('\r').unwrap_or(line) } else { line };
+    if line.is_empty() {
+        return newline.map_or(0, |newline| {
+            let next = &rest[newline + 1..];
+            newline + 1 + next.len() - next.trim_start_matches(BLANKS).len()
+        });
+    }
+    let blanks = line.len() - line.trim_start_matches(BLANKS).len();
+    if blanks > 0 {
+        return blanks;
+    }
+    let class = line.chars().next().map(char_class);
+    line.len() - line.trim_start_matches(|c| Some(char_class(c)) == class).len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Change, delete_lines, duplicate_lines, line_block, line_text, move_lines, parse_line, query_at, select_line,
-        toggle_comment,
+        toggle_comment, word_left, word_right,
     };
     use crate::occurrences::Query;
 
@@ -527,6 +628,83 @@ mod tests {
         assert_eq!(query_at(text, 6..6), Some((Query::word("SELECT"), 0..6)));
         assert_eq!(query_at(text, 34..36), Some((Query::selection("id"), 34..36)));
         assert_eq!(query_at("a  b", 2..2), None);
+    }
+
+    // Each `|` is where a press leaves the caret: Ctrl+Backspace from the end, or Ctrl+Delete from `at`.
+    fn backspaces(text: &str) -> String {
+        let mut stops = vec![];
+        let mut head = text;
+        while !head.is_empty() {
+            let start = word_left(head);
+            assert!(start < head.len(), "nothing deleted before {}", head.len());
+            head = &head[..start];
+            stops.push(start);
+        }
+        piped(text, stops)
+    }
+
+    fn deletes(text: &str, at: usize) -> String {
+        let mut stops = vec![];
+        let mut rest = &text[at..];
+        while !rest.is_empty() {
+            let end = word_right(rest);
+            assert!(end > 0, "nothing deleted at {}", text.len() - rest.len());
+            rest = &rest[end..];
+            stops.push(text.len() - rest.len());
+        }
+        piped(text, stops)
+    }
+
+    fn piped(text: &str, mut stops: Vec<usize>) -> String {
+        stops.sort_unstable();
+        let mut out = text.to_string();
+        for stop in stops.into_iter().rev() {
+            out.insert(stop, '|');
+        }
+        out
+    }
+
+    fn back(head: &str, rest: &str) -> String {
+        format!("{}{rest}", &head[..word_left(head)])
+    }
+
+    fn forward(head: &str, rest: &str) -> String {
+        format!("{head}{}", &rest[word_right(rest)..])
+    }
+
+    // VS Code's own cases, from its wordOperations tests.
+    #[test]
+    fn word_deletes_stop_where_vs_codes_do() {
+        assert_eq!(backspaces("   /* Just some text a+= 3 +5 */  "), "|   |/* |Just |some |text |a|+= |3 |+|5 |*/|  ");
+        assert_eq!(
+            deletes("   /* Just some text a+= 3 +5-3 */  ", 0),
+            "   |/*| |Just| |some| |text| |a|+=| |3| |+|5|-|3| |*/|  |"
+        );
+        assert_eq!(forward("public void Add( int x,", "\n                 int y )"), "public void Add( int x,int y )");
+        assert_eq!(forward("A line with text.", "\n   And another one"), "A line with text.And another one");
+        assert_eq!(back("A line with text.\n", "   And another one"), "A line with text.   And another one");
+        assert_eq!(back("{\n", "}"), "{}");
+    }
+
+    #[test]
+    fn ctrl_backspace_takes_blank_lines_one_line_break_at_a_time() {
+        assert_eq!(backspaces("SELECT 1;\n  \n\t\n"), "|SELECT |1|;|\n|  |\n|\t|\n");
+        assert_eq!(backspaces("a\r\n  \r\n"), "|a|\r\n|  |\r\n");
+        assert_eq!(back("", "x"), "x");
+    }
+
+    #[test]
+    fn ctrl_delete_at_a_line_end_takes_the_next_lines_indent() {
+        assert_eq!(deletes("SELECT 1\n\n    FROM t", 8), "SELECT 1\n|\n    |FROM| |t|");
+        assert_eq!(forward("a", "\r\n  b"), "ab");
+        assert_eq!(forward("a", ""), "a");
+    }
+
+    #[test]
+    fn dots_and_quotes_split_words_but_underscores_and_letters_dont() {
+        assert_eq!(backspaces("users.user_id"), "|users|.|user_id");
+        assert_eq!(backspaces("ça va😀"), "|ça |va😀");
+        assert_eq!(deletes("'ça' va😀", 0), "'|ça|'| |va😀|");
     }
 
     #[test]

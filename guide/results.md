@@ -3,7 +3,7 @@
 - **Virtualized** grid - smooth scroll over thousands of rows
 - **Result-set tabs** - switch between outputs when a run returns multiple result sets
 - **Sortable** columns, **fit columns** to their content, and **show / hide** columns
-- Headers show each column's **type** and **key icons**; numbers line up on the decimal point (long fractions are rounded for display), `NULL` is dimmed, and **striped rows** are a View-menu toggle
+- Headers show each column's **type** and **key icons**; numbers line up on the decimal point (long fractions are rounded for display), `NULL` is dimmed, and foreign-key values are drawn in a link color, as their header's icon is, made stronger where a theme's own would read faintly. **Striped rows** and **Color values by type** (numbers, dates and JSON in the theme's editor colors) are View-menu toggles
 - **Status bar stats** - cells selected in one column show their count, and the sum, average, min and max of their numbers; click one to copy it. A selection across columns breaks them down per column
 - **Quick charts** - the Chart button plots a result as bars or lines. A panel beside it picks the label column and up to five value columns, each in its own colour, and how rows that share a label combine (sum, count or average). It starts from sensible picks, keeps them when you switch back to the grid, and scrolls sideways through many bars
 - Right-click menus on cells, row numbers and headers: copy as any export format, filter by a value, sort, hide a column, mark rows for delete
@@ -12,7 +12,9 @@
 - **Cell viewer** for large values - JSON, XML, HTML, or plain text; beautify/minify; editable in table view
 - **JSON / JSONB** auto-parsed in cell and side viewer
 - **Arrays, maps and tuples** - PostgreSQL arrays and ClickHouse `Array`, `Map` and `Tuple` values read as JSON in both viewers; switch the cell viewer to Text for the literal itself
-- Side **JSON row viewer**, synced to the focused row and showing its number - filter keys and values (`/…/` for a regex) with the matches highlighted, **Copy JSON**, and **Hide NULL columns**
+- Side **row viewer**, synced to the focused row and showing its number, as **Fields** or **JSON** - filter keys and values (`/…/` for a regex) with the matches highlighted, **Copy JSON**, and **Hide NULL columns**
+  - **Fields** lists each column with its type and key icon over its value: click a value to copy it, or a foreign key's to open the row it points at
+  - In a table view, **Referenced by** lists the tables whose foreign keys point at the row and opens them filtered to the rows that do, on every column of a key over several. It asks the database once per table, so moving between rows sends no queries
 
 ## ✏️ Editing Data
 

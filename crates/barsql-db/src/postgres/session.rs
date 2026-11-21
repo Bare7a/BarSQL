@@ -24,14 +24,13 @@ const RUN_SAVEPOINT: &str = "barsql_run";
 pub struct PgSession {
     lease: PgLease,
     in_transaction: bool,
-    broken: bool,
     reporting: bool,
 }
 
 impl PgSession {
     pub(crate) async fn new(lease: PgLease) -> Result<Self, QueryError> {
         let schema = lease.engine().default_schema().to_string();
-        let session = Self { lease, in_transaction: false, broken: false, reporting: false };
+        let session = Self { lease, in_transaction: false, reporting: false };
         session.set_search_path(&schema).await?;
         Ok(session)
     }
@@ -42,7 +41,7 @@ impl PgSession {
     }
 
     pub fn is_broken(&self) -> bool {
-        self.broken || self.lease.client().is_closed()
+        self.lease.broken || self.lease.client().is_closed()
     }
 
     pub fn in_transaction(&self) -> bool {
@@ -227,7 +226,7 @@ impl StatementRunner for PgSession {
                     match tokio::time::timeout(CANCEL_GRACE.saturating_sub(at.elapsed()), stream.next()).await {
                         Ok(message) => message,
                         Err(_) => {
-                            self.broken = true;
+                            self.lease.broken = true;
                             let summary = close_set(set.take(), first_index, sink, started).await;
                             self.send_notices(first_index, sink).await;
                             return fail(QueryError::cancelled(), summary).await;

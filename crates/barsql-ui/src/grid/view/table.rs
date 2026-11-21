@@ -16,8 +16,15 @@ const LOAD_MORE_ROWS: f32 = 4.;
 impl Grid {
     // Turns on table-view mode. Also called to refresh the staged edits.
     pub fn set_overlay(&mut self, overlay: TableOverlay, cx: &mut Context<Self>) {
+        // The row viewer marks key columns and shows staged values, so either changing publishes the row again.
+        let republish = self.overlay.as_ref().is_none_or(|old| {
+            old.primary != overlay.primary || old.foreign != overlay.foreign || old.staged != overlay.staged
+        });
         self.overlay = Some(overlay);
         self.forget_aggregate();
+        if republish {
+            cx.emit(GridEvent::FocusedRowChanged);
+        }
         cx.notify();
     }
 
@@ -77,9 +84,8 @@ impl Grid {
         }
     }
 
-    // A staged value wins over the loaded one.
     pub fn shown(&self, row: usize, column: usize) -> Cell<'_> {
-        copy::shown(&self.set, self.overlay.as_ref().map(|overlay| &overlay.staged), row, column)
+        copy::shown(&self.set, self.overlay.as_ref().map(|overlay| &overlay.staged), row, column, self.dialect)
     }
 
     pub fn is_deleted(&self, row: usize) -> bool {
@@ -175,10 +181,13 @@ impl Grid {
         cx.notify();
     }
 
-    // Changes the overlay in place, for a change to a few of a large result's rows.
-    pub fn patch_overlay(&mut self, patch: impl FnOnce(&mut TableOverlay), cx: &mut Context<Self>) {
+    // Changes the overlay in place, for a change to a few of a large result's rows. `patch` says whether a staged
+    // value changed, which the row viewer shows.
+    pub fn patch_overlay(&mut self, patch: impl FnOnce(&mut TableOverlay) -> bool, cx: &mut Context<Self>) {
         if let Some(overlay) = self.overlay.as_mut() {
-            patch(overlay);
+            if patch(overlay) {
+                cx.emit(GridEvent::FocusedRowChanged);
+            }
             self.forget_aggregate();
             cx.notify();
         }
@@ -189,6 +198,7 @@ impl Grid {
         self.overlay = None;
         self.editing = None;
         self.forget_aggregate();
+        cx.emit(GridEvent::FocusedRowChanged);
         cx.notify();
     }
 

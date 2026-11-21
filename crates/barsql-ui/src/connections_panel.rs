@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use barsql_app::ConnectionFolder;
 use barsql_core::ConnectionConfig;
 use barsql_core::capabilities::Location;
+use barsql_core::config::named_instance;
 use barsql_sql::system_views::{ViewScope, views};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::ElementExt as _;
@@ -13,6 +14,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, v_flex
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::assets::engine_icon;
 use crate::dialogs::{self, Confirm, Prompt};
 use crate::form;
 use crate::i18n::{t, t_with};
@@ -21,7 +23,7 @@ use crate::saved_queries::failed;
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state::{self, set_setting_json, setting_json};
-use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM, TEXT_XS};
+use crate::tokens::{ICON_MD, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM, TEXT_XS};
 
 const COLLAPSED_KEY: &str = "barsql-folders-collapsed";
 
@@ -84,9 +86,9 @@ pub fn connection_subtitle(c: &ConnectionConfig) -> String {
         return if host.is_empty() { c.driver.to_string() } else { format!("{} · {host}", c.driver) };
     }
     // A SQL Server named instance, host\INSTANCE as its own tools write it.
-    let host = match c.instance.as_str() {
-        "" => c.host.clone(),
-        instance => format!("{}\\{instance}", c.host),
+    let host = match named_instance(&c.host, &c.instance) {
+        (host, "") => host.to_string(),
+        (host, instance) => format!("{host}\\{instance}"),
     };
     let place =
         [host.as_str(), c.database.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("/");
@@ -462,7 +464,7 @@ impl ConnectionsPanel {
                     .rounded_r(rems(0.154))
                     .bg(if connected { theme.success } else { theme.danger }),
             )
-            .child(Icon::new(Lucide::Database).size(ICON_SM).text_color(color))
+            .child(engine_icon(&connection.driver).size(ICON_MD).text_color(color))
             .child(
                 v_flex().flex_1().min_w_0().gap(px(1.)).child(div().truncate().child(connection.name.clone())).child(
                     div()

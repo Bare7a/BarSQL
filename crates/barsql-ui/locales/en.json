@@ -29,6 +29,8 @@
     }
   },
   "app": {
+    "recentConnections": "Recent connections",
+    "pickEngine": "Or start with an engine",
     "queryTabWithConn": "Query {{num}} · {{conn}}",
     "statusRunning": "Running… {{seconds}} s",
     "statusStreaming_one": "Streaming… {{count}} row · {{seconds}} s",
@@ -78,6 +80,9 @@
     "contextGoToDefinition": "Go to definition"
   },
   "connection": {
+    "pasteUrlPlaceholder": "Paste a connection URL to fill in the fields",
+    "copyUrl": "Copy as a URL, without the password",
+    "urlNotRecognized": "That isn't a connection URL BarSQL can read",
     "turso": "Turso / libSQL",
     "clickhouse": "ClickHouse",
     "sqlserver": "SQL Server",
@@ -120,6 +125,8 @@
     "driverNotInBuild": "{{driver}} is not available in this build."
   },
   "results": {
+    "planFullScan": "Full scan",
+    "planFullScanHint": "Reads every row of the table. An index on the columns it filters by may let it skip most of them",
     "messages": "Messages",
     "messagesCount": "{{count}} message",
     "messagesCount_other": "{{count}} messages",
@@ -208,6 +215,12 @@
     "arrayError": "This doesn't read as an array any more."
   },
   "jsonViewer": {
+    "referencedBy": "Referenced by",
+    "fields": "Fields",
+    "json": "JSON",
+    "copyValue": "Click to copy",
+    "noFieldMatch": "No column or value matches the filter",
+    "allNull": "Every column is NULL",
     "filterPlaceholder": "Filter keys and values",
     "noMatch": "// No key or value matches the filter",
     "row": "Row {{number}}",
@@ -323,6 +336,7 @@
     "zoom": "Zoom",
     "bringAllToFront": "Bring All to Front",
     "stripedRows": "Striped rows",
+    "typeColors": "Color values by type",
     "commandPalette": "Command Palette…"
   },
   "errors": {
@@ -357,7 +371,29 @@
     "readOnly": "Read-only",
     "protected": "Asks before changes",
     "extensions": "{{count}} extension",
-    "extensions_other": "{{count}} extensions"
+    "extensions_other": "{{count}} extensions",
+    "showSidebar": "Show sidebar",
+    "hideSidebar": "Hide sidebar",
+    "showJsonViewer": "Show JSON viewer",
+    "hideJsonViewer": "Hide JSON viewer",
+    "aiRead": "AI access",
+    "aiWrite": "AI can write",
+    "aiReadHint": "AI apps can query this database over MCP",
+    "aiWriteHint": "AI apps can query and change this database over MCP",
+    "update": {
+      "available": "Update to {{version}}",
+      "downloading": "Updating {{percent}}%",
+      "busy": "Updating…",
+      "ready": "Restart to update",
+      "failed": "Update failed"
+    },
+    "details": {
+      "latency": "Round trip {{ms}} ms when it connected",
+      "database": "Database {{database}} · Schema {{schema}}",
+      "databaseOnly": "Database {{database}}",
+      "ssh": "Through SSH {{address}}",
+      "tls": "TLS: {{mode}}"
+    }
   },
   "theme": {
     "dark": "Dark",
@@ -400,6 +436,8 @@
     "description": "Each value goes into the query as SQL, so put text in quotes: 'Ann'. An empty value runs as NULL."
   },
   "import": {
+    "runRows": "Import {{rows}} row",
+    "runRows_other": "Import {{rows}} rows",
     "notUtf8": "This file isn't UTF-8 text, so characters it can't read will import as �. Save it as UTF-8 and choose it again.",
     "fileRows_one": "{{rows}} row",
     "fileRows_other": "{{rows}} rows",
@@ -454,6 +492,11 @@
     "blank": "(empty)"
   },
   "erDiagram": {
+    "exportSvg": "Save as SVG",
+    "tables": "{{count}} table",
+    "tables_other": "{{count}} tables",
+    "foreignKeys": "{{count}} foreign key",
+    "foreignKeys_other": "{{count}} foreign keys",
     "menu": "ER diagram",
     "title": "ER diagram · {{schema}}",
     "loading": "Loading tables…",
@@ -593,5 +636,14 @@
       "autoIncrement": "Auto-increment",
       "seeded": "Identity ({{seed}}, {{increment}})"
     }
+  },
+  "quickSearch": {
+    "groupTabs": "Open tabs",
+    "groupTables": "Tables",
+    "groupSaved": "Saved queries",
+    "groupConnections": "Connections",
+    "navigate": "Navigate",
+    "open": "Open",
+    "close": "Close"
   }
 }

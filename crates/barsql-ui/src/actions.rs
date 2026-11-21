@@ -45,6 +45,7 @@ actions!(
         ToggleSidebar,
         ToggleJsonPanel,
         ToggleGridStripes,
+        ToggleGridTypeColors,
         ToggleFullscreen,
         KeyboardTips,
         KeyboardShortcuts,
@@ -198,6 +199,7 @@ fn menus(cx: &App) -> Vec<Menu> {
     let (sidebar_open, json_open) =
         (setting_bool(cx, "barsql-sidebar-open", true), setting_bool(cx, "barsql-json-open", false));
     let stripes = setting_bool(cx, crate::grid::STRIPES_KEY, false);
+    let type_colors = setting_bool(cx, crate::grid::TYPE_COLORS_KEY, false);
     let view = vec![
         MenuItem::action(t(cx, "menu.commandPalette"), CommandPalette),
         MenuItem::separator(),
@@ -215,6 +217,7 @@ fn menus(cx: &App) -> Vec<Menu> {
         MenuItem::action(t(cx, "menu.toggleSidebar"), ToggleSidebar).checked(sidebar_open),
         MenuItem::action(t(cx, "menu.toggleJsonPanel"), ToggleJsonPanel).checked(json_open),
         MenuItem::action(t(cx, "menu.stripedRows"), ToggleGridStripes).checked(stripes),
+        MenuItem::action(t(cx, "menu.typeColors"), ToggleGridTypeColors).checked(type_colors),
         MenuItem::separator(),
         MenuItem::action(t(cx, "menu.toggleFullscreen"), ToggleFullscreen),
     ];

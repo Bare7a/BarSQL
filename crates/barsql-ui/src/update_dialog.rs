@@ -16,7 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::form;
-use crate::i18n::{t, t_with};
+use crate::i18n::{bytes, t, t_with};
 use crate::modal::{self, Modal};
 use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
@@ -75,9 +75,45 @@ fn is_skipped(version: &str, cx: &App) -> bool {
 
 // Keeps the dialog alive past its window, so Close leaves a download running and Check for Updates
 // reopens it where it left off.
-struct Flow(Entity<UpdateDialog>);
+pub(crate) struct Flow(Entity<UpdateDialog>);
 
 impl Global for Flow {}
+
+pub(crate) fn flow(cx: &App) -> Option<Entity<UpdateDialog>> {
+    cx.try_global::<Flow>().map(|flow| flow.0.clone())
+}
+
+// The status bar's word on the update, from where the flow stands.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateChip {
+    Available(String),
+    Downloading(Option<u8>),
+    Ready,
+    Failed,
+}
+
+// A failed check stays quiet, as the next launch checks again. A failed download or install doesn't.
+pub(crate) fn chip_for(state: &UpdateState, skipped: Option<&str>) -> Option<UpdateChip> {
+    match state {
+        UpdateState::Checking | UpdateState::UpToDate | UpdateState::Failed { stage: Stage::Check, .. } => None,
+        UpdateState::Available(release) => {
+            (skipped != Some(release.version.as_str())).then(|| UpdateChip::Available(release.version.clone()))
+        }
+        UpdateState::Downloading(_, Some(Transfer { written, total, .. })) if *total > 0 => {
+            Some(UpdateChip::Downloading(Some((written.saturating_mul(100) / total).min(100) as u8)))
+        }
+        UpdateState::Downloading(..) | UpdateState::Verifying(_) | UpdateState::Installing(_) => {
+            Some(UpdateChip::Downloading(None))
+        }
+        UpdateState::Ready(..) => Some(UpdateChip::Ready),
+        UpdateState::Failed { .. } => Some(UpdateChip::Failed),
+    }
+}
+
+pub fn chip(cx: &App) -> Option<UpdateChip> {
+    let skipped = cx.try_global::<Skipped>().and_then(|skipped| skipped.0.as_deref());
+    chip_for(&flow(cx)?.read(cx).state, skipped)
+}
 
 // BARSQL_UPDATE_API points the check at a test server.
 fn api_base() -> String {
@@ -89,17 +125,6 @@ fn check(base: String, cx: &App) -> Task<Result<Option<Release>, String>> {
         let kind = update::install().kind;
         update::check(&base, barsql_app::VERSION, kind, update::platform(), update::arch())
     })
-}
-
-// B to GB, one decimal above bytes, ties rounded up.
-fn format_bytes(n: u64) -> String {
-    if n == 0 {
-        return String::new();
-    }
-    let units = ["B", "KB", "MB", "GB"];
-    let i = ((n as f64).ln() / 1024f64.ln()).floor().min(3.) as usize;
-    let value = n as f64 / 1024f64.powi(i as i32);
-    if i == 0 { format!("{value:.0} {}", units[i]) } else { format!("{:.1} {}", (value * 10.).round() / 10., units[i]) }
 }
 
 // The last argument is the macOS password prompt.
@@ -323,10 +348,10 @@ impl UpdateDialog {
         let (label, rate, percent) = match transfer {
             None => (t(cx, "update.starting"), String::new(), None),
             Some(Transfer { written, total, rate }) => {
-                let rate = if rate == 0 { String::new() } else { format!("{}/s", format_bytes(rate)) };
+                let rate = if rate == 0 { String::new() } else { format!("{}/s", bytes(cx, rate as i64)) };
                 if total > 0 {
                     let percent = (written as f64 / total as f64 * 100.).round();
-                    let (written, total) = (format_bytes(written), format_bytes(total));
+                    let (written, total) = (bytes(cx, written as i64), bytes(cx, total as i64));
                     let label = t_with(
                         cx,
                         "update.progress",
@@ -334,7 +359,7 @@ impl UpdateDialog {
                     );
                     (label, rate, Some(percent as f32))
                 } else {
-                    (t_with(cx, "update.downloaded", &[("written", &format_bytes(written))]), rate, None)
+                    (t_with(cx, "update.downloaded", &[("written", &bytes(cx, written as i64))]), rate, None)
                 }
             }
         };
@@ -372,8 +397,10 @@ impl Render for UpdateDialog {
             UpdateState::UpToDate => Some(format!("v{current}")),
             UpdateState::Failed { .. } => None,
             state => state.release().map(|release| {
-                let size = format_bytes(release.asset.size);
-                let size = if size.is_empty() { size } else { format!(" · {size}") };
+                let size = match release.asset.size {
+                    0 => String::new(),
+                    size => format!(" · {}", bytes(cx, size as i64)),
+                };
                 format!("{current} → v{}{size}", release.version)
             }),
         };
@@ -450,7 +477,8 @@ pub fn open(window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
     open_in(api_base(), None, window, cx)
 }
 
-// A running or staged install reopens as it is. Passing a state skips the check, for screenshots.
+// A running or staged install reopens as it is. Passing a state skips the check, for screenshots and for reopening a
+// release already found.
 pub fn open_in(base: String, state: Option<UpdateState>, window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
     let running = cx
         .try_global::<Flow>()
@@ -469,6 +497,30 @@ pub fn open_in(base: String, state: Option<UpdateState>, window: &mut Window, cx
     view
 }
 
+// The status bar's chip: the dialog where the flow stands, without checking again.
+pub fn reopen(window: &mut Window, cx: &mut App) -> Entity<UpdateDialog> {
+    match flow(cx).map(|flow| flow.read(cx).state.clone()) {
+        Some(state) if state.installing() => open_in(api_base(), None, window, cx),
+        Some(state @ (UpdateState::Available(_) | UpdateState::Failed { .. })) => {
+            open_in(api_base(), Some(state), window, cx)
+        }
+        _ => open(window, cx),
+    }
+}
+
+// Leaves the found release behind the toast, for the status bar. A dialog already open takes it in, so it stays the
+// flow and a download started there stays in step. An install under way or staged stays as it is.
+fn remember(base: String, release: Release, cx: &mut App) {
+    match flow(cx) {
+        Some(flow) if flow.read(cx).state.installing() => {}
+        Some(flow) => flow.update(cx, |dialog, cx| dialog.set_state(UpdateState::Available(release), cx)),
+        None => {
+            let view = cx.new(|cx| UpdateDialog::new(base, Some(UpdateState::Available(release)), cx));
+            cx.set_global(Flow(view));
+        }
+    }
+}
+
 pub fn check_on_startup(cx: &mut App) {
     check_after(api_base(), STARTUP_DELAY, cx);
 }
@@ -476,7 +528,7 @@ pub fn check_on_startup(cx: &mut App) {
 fn check_after(base: String, delay: Duration, cx: &mut App) {
     cx.spawn(async move |cx| {
         cx.background_executor().timer(delay).await;
-        let task = cx.update(|cx| check(base, cx));
+        let task = cx.update(|cx| check(base.clone(), cx));
         let Ok(Some(release)) = task.await else { return };
         cx.update(|cx| {
             if is_skipped(&release.version, cx) {
@@ -486,10 +538,11 @@ fn check_after(base: String, delay: Duration, cx: &mut App) {
             let action = ToastAction {
                 label: t(cx, "toast.update"),
                 on_click: Rc::new(|window, cx| {
-                    open(window, cx);
+                    reopen(window, cx);
                 }),
             };
             toast::push(message, ToastKind::Info, Some(Duration::ZERO), Some(action), cx);
+            remember(base, release, cx);
         });
     })
     .detach();
@@ -497,24 +550,3 @@ fn check_after(base: String, delay: Duration, cx: &mut App) {
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod format_tests {
-    use super::format_bytes;
-
-    #[test]
-    fn sizes_format_with_one_decimal_above_bytes() {
-        let cases = [
-            (0, ""),
-            (512, "512 B"),
-            (1024, "1.0 KB"),
-            (1280, "1.3 KB"),
-            (1536, "1.5 KB"),
-            (12_582_912, "12.0 MB"),
-            (5 << 40, "5120.0 GB"),
-        ];
-        for (bytes, text) in cases {
-            assert_eq!(format_bytes(bytes), text, "{bytes}");
-        }
-    }
-}
