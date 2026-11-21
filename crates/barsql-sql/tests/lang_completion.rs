@@ -6,8 +6,8 @@ use barsql_core::{
 use barsql_sql::lang::quoting::{column_cache_key, identifier_needs_quote};
 use barsql_sql::lang::{
     Catalog, ColumnMap, CompletionContext, CompletionItem, CursorSlot, FunctionCatalog, ItemKind, SqlLabels,
-    analyze_cursor, bindings_needing_columns, build_completion_items, completion_replace_range,
-    current_statement_start, parse_query, parse_statements,
+    analyze_cursor, at_join_condition_start, bindings_needing_columns, build_completion_items,
+    completion_replace_range, current_statement_start, parse_query, parse_statements,
 };
 
 const PG: DriverType = DriverType::Postgres;
@@ -817,4 +817,25 @@ fn user_functions_rank_first_and_carry_their_schema_when_needed() {
     let first_builtin = all.iter().position(|i| i.label == "abs").unwrap();
     let first_user = all.iter().position(|i| i.label == "add_one").unwrap();
     assert!(first_user < first_builtin, "user functions before built-ins");
+}
+
+#[test]
+fn nothing_is_offered_where_an_alias_goes() {
+    for sql in ["SELECT id AS i", "SELECT id AS ", "SELECT * FROM users AS u", "SELECT * FROM users u JOIN orders AS o"]
+    {
+        assert_eq!(slot(sql), CursorSlot::None, "{sql}");
+        assert!(labels(sql).is_empty(), "{sql}");
+    }
+    assert_ne!(slot("CREATE VIEW v AS SEL"), CursorSlot::None, "a view's body still completes");
+}
+
+#[test]
+fn a_join_condition_starts_after_on_and_a_space() {
+    let on = |sql: &str| at_join_condition_start(sql, Some(&PG));
+    assert!(on("SELECT * FROM users u JOIN orders o ON "));
+    assert!(on("SELECT * FROM users u LEFT JOIN orders o ON "));
+    assert!(!on("SELECT * FROM users u JOIN orders o ON"), "the space isn't typed yet");
+    assert!(!on("SELECT * FROM users u JOIN orders o ON o"));
+    assert!(!on("SELECT * FROM users u JOIN orders o "));
+    assert!(!on("SELECT * FROM users WHERE "));
 }

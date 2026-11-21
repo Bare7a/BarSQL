@@ -4,6 +4,7 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{InputBaseState, InputModeKind};
 use gpui_kit::component::input::{CompletionProvider, InputEvent};
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, Rope, RopeExt, Theme, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -14,8 +15,8 @@ use lsp_types::{
 };
 
 use crate::scrollbars::HoverScrollbar as _;
-use crate::sql_language::word_start;
-use crate::theme;
+use crate::sql_language::{continues_word, word_start};
+use crate::{form, theme};
 
 // GPUI Kit's completion menu uses tiny text, has no kind icons and can't be restyled, so the editors draw their
 // own list.
@@ -27,6 +28,7 @@ actions!(
         SelectPrevSuggestionPage,
         SelectNextSuggestionPage,
         AcceptSuggestion,
+        ConfirmSuggestion,
         HideSuggestions,
     ]
 );
@@ -35,6 +37,10 @@ actions!(
 pub const OPEN_CONTEXT: &str = "completing";
 const VISIBLE_ROWS: usize = 12;
 const WIDTH: Pixels = px(430.);
+// A row's padding, icon and gap before its label. The list sits that far left of the word, plus its border.
+const ROW_PAD: f32 = 2.;
+const ICON_COLUMN: f32 = 16.;
+const ICON_GAP: f32 = 4.;
 
 pub fn init(cx: &mut App) {
     let context = Some("completing > Input");
@@ -43,41 +49,81 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("down", SelectNextSuggestion, context),
         KeyBinding::new("pageup", SelectPrevSuggestionPage, context),
         KeyBinding::new("pagedown", SelectNextSuggestionPage, context),
-        KeyBinding::new("enter", AcceptSuggestion, context),
+        KeyBinding::new("enter", ConfirmSuggestion, context),
         KeyBinding::new("tab", AcceptSuggestion, context),
         KeyBinding::new("escape", HideSuggestions, context),
     ]);
 }
 
+// A key the list doesn't use, or one that arrives after it closed, goes on to the editor's own binding.
+fn when_open<M: InputModeKind>(
+    completion: &Entity<Completion<M>>,
+    window: &mut Window,
+    cx: &mut App,
+    act: impl FnOnce(&mut Completion<M>, &mut Window, &mut Context<Completion<M>>) -> bool,
+) {
+    if !completion.update(cx, |this, cx| this.is_open(cx) && act(this, window, cx)) {
+        cx.propagate();
+    }
+}
+
 pub fn handlers<E: InteractiveElement, M: InputModeKind>(el: E, completion: &Entity<Completion<M>>) -> E {
     let on = || completion.clone();
+    let step = |by: isize| {
+        let completion = on();
+        move |window: &mut Window, cx: &mut App| {
+            when_open(&completion, window, cx, |this, _, cx| {
+                this.step(by, cx);
+                true
+            })
+        }
+    };
+    let page = VISIBLE_ROWS as isize;
     el.on_action({
-        let completion = on();
-        move |_: &SelectPrevSuggestion, _, cx| completion.update(cx, |this, cx| this.step(-1, cx))
+        let step = step(-1);
+        move |_: &SelectPrevSuggestion, window, cx| step(window, cx)
+    })
+    .on_action({
+        let step = step(1);
+        move |_: &SelectNextSuggestion, window, cx| step(window, cx)
+    })
+    .on_action({
+        let step = step(-page);
+        move |_: &SelectPrevSuggestionPage, window, cx| step(window, cx)
+    })
+    .on_action({
+        let step = step(page);
+        move |_: &SelectNextSuggestionPage, window, cx| step(window, cx)
     })
     .on_action({
         let completion = on();
-        move |_: &SelectNextSuggestion, _, cx| completion.update(cx, |this, cx| this.step(1, cx))
-    })
-    .on_action({
-        let completion = on();
-        move |_: &SelectPrevSuggestionPage, _, cx| {
-            completion.update(cx, |this, cx| this.step(-(VISIBLE_ROWS as isize), cx))
+        move |_: &AcceptSuggestion, window, cx| {
+            when_open(&completion, window, cx, |this, window, cx| {
+                this.accept(this.selected, window, cx);
+                true
+            })
         }
     })
     .on_action({
         let completion = on();
-        move |_: &SelectNextSuggestionPage, _, cx| {
-            completion.update(cx, |this, cx| this.step(VISIBLE_ROWS as isize, cx))
+        move |_: &ConfirmSuggestion, window, cx| {
+            when_open(&completion, window, cx, |this, window, cx| {
+                let take = this.enter_accepts();
+                if take {
+                    this.accept(this.selected, window, cx);
+                }
+                take
+            })
         }
     })
     .on_action({
         let completion = on();
-        move |_: &AcceptSuggestion, window, cx| completion.update(cx, |this, cx| this.accept(this.selected, window, cx))
-    })
-    .on_action({
-        let completion = on();
-        move |_: &HideSuggestions, _, cx| completion.update(cx, |this, cx| this.hide(cx))
+        move |_: &HideSuggestions, window, cx| {
+            when_open(&completion, window, cx, |this, _, cx| {
+                this.hide(cx);
+                true
+            })
+        }
     })
     // A click in the editor closes the list. Row clicks stop propagation and accept the row instead.
     .on_any_mouse_down({
@@ -99,6 +145,14 @@ pub struct Completion<M: InputModeKind> {
     start: usize,
     open: bool,
     text: String,
+    // The caret after the last edit. Moving it any other way closes the list.
+    cursor: usize,
+    shown_at: usize,
+    // The start of a word nothing matched, so Backspace in it asks again.
+    no_match: Option<usize>,
+    // Enter takes a row only once one was picked with the arrows, or the list came from Ctrl+Space.
+    picked: bool,
+    invoked: bool,
     // Font size and row height. None means the SQL editor's.
     size: Option<(Rems, Rems)>,
     scroll: UniformListScrollHandle,
@@ -120,9 +174,18 @@ impl<M: InputModeKind> Completion<M> {
                     this.changed(window, cx);
                 }
             }),
+            cx.observe(&editor, |this, editor, cx| {
+                let state = editor.read(cx);
+                if this.open && state.text().len() == this.text.len() && state.cursor() != this.cursor {
+                    this.hide(cx);
+                }
+            }),
             cx.on_blur(&focus, window, |this, _, cx| this.hide(cx)),
         ];
-        let text = editor.read(cx).value().to_string();
+        let (text, cursor) = {
+            let state = editor.read(cx);
+            (state.value().to_string(), state.cursor())
+        };
         Self {
             editor,
             provider,
@@ -131,6 +194,11 @@ impl<M: InputModeKind> Completion<M> {
             start: 0,
             open: false,
             text,
+            cursor,
+            shown_at: cursor,
+            no_match: None,
+            picked: false,
+            invoked: false,
             size: None,
             scroll: UniformListScrollHandle::new(),
             request: Task::ready(()),
@@ -147,42 +215,78 @@ impl<M: InputModeKind> Completion<M> {
         self.provider = Some(provider);
     }
 
-    // Also false once the caret moves before the word start or onto another line.
-    pub fn is_open(&self, cx: &App) -> bool {
-        let state = self.editor.read(cx);
-        let cursor = state.cursor();
-        self.open && state.value().get(self.start..cursor).is_some_and(|word| !word.contains('\n'))
+    fn enter_accepts(&self) -> bool {
+        self.picked || self.invoked
     }
 
-    // A typed trigger character opens the list. Any edit while it's open refilters it.
+    // False as soon as the text or caret changes without this list seeing it.
+    pub fn is_open(&self, cx: &App) -> bool {
+        let state = self.editor.read(cx);
+        self.open && state.cursor() == self.cursor && state.text().len() == self.text.len()
+    }
+
+    // A name starting opens the list and typing it refilters. Backspace inside it does too. Anything else closes it.
     fn changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (text, cursor) = {
             let state = self.editor.read(cx);
             (state.value().to_string(), state.cursor())
         };
+        if text == self.text && cursor == self.cursor {
+            return;
+        }
         let grown = text.len().saturating_sub(self.text.len());
-        let inserted =
-            (grown > 0).then(|| text.get(cursor.saturating_sub(grown)..cursor)).flatten().map(str::to_string);
-        self.text = text;
-        let trigger = match (&self.provider, inserted) {
-            (Some(provider), Some(inserted)) => provider.is_completion_trigger(cursor, &inserted, cx),
-            _ => false,
+        let removed = self.text.len().saturating_sub(text.len());
+        let was_open = self.open
+            && if grown > 0 {
+                cursor.checked_sub(grown) == Some(self.cursor)
+            } else {
+                removed > 0 && (self.cursor == cursor + removed || self.cursor == cursor)
+            };
+        let typed = (grown > 0).then(|| text.get(cursor.saturating_sub(grown)..cursor)).flatten();
+        let single = typed.and_then(|typed| {
+            let mut chars = typed.chars();
+            chars.next().filter(|_| chars.next().is_none())
+        });
+        let refresh = match typed {
+            Some(typed) => {
+                self.provider.as_ref().is_some_and(|provider| provider.is_completion_trigger(cursor, typed, cx))
+                    || (was_open && single.is_some_and(continues_word))
+            }
+            None if removed > 0 => {
+                let start = word_start(&text, cursor);
+                let in_word = start < cursor || text[..cursor].ends_with('.');
+                in_word && (was_open || self.no_match == Some(start))
+            }
+            None => false,
         };
-        if self.open || trigger {
-            self.request(false, window, cx);
+        // A character that ends the word drops its list before anything new is asked for.
+        let ended = single.filter(|c| !continues_word(*c));
+        self.text = text;
+        self.cursor = cursor;
+        if ended.is_some() || !refresh {
+            self.hide(cx);
+        }
+        if refresh {
+            self.ask(false, ended, window, cx);
         }
     }
 
     // `invoked` means Ctrl+Space rather than typing.
     pub fn request(&mut self, invoked: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.ask(invoked, None, window, cx);
+    }
+
+    // `typed` is the character that asked when it isn't part of a name, like `.` or a space.
+    fn ask(&mut self, invoked: bool, typed: Option<char>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(provider) = self.provider.clone() else { return };
+        self.invoked |= invoked;
         let (text, cursor) = {
             let state = self.editor.read(cx);
             (state.value().to_string(), state.cursor())
         };
         let trigger_kind =
             if invoked { CompletionTriggerKind::INVOKED } else { CompletionTriggerKind::TRIGGER_CHARACTER };
-        let context = CompletionContext { trigger_kind, trigger_character: None };
+        let context = CompletionContext { trigger_kind, trigger_character: typed.map(String::from) };
         let task = provider.completions(&Rope::from(text.as_str()), cursor, context, window, cx);
         self.request = cx.spawn(async move |this, cx| {
             let items = match task.await {
@@ -214,14 +318,23 @@ impl<M: InputModeKind> Completion<M> {
         self.start = start;
         self.selected = 0;
         self.open = !self.items.is_empty();
+        self.no_match = (!self.open && start < cursor).then_some(start);
+        self.picked = false;
+        self.invoked &= self.open;
+        self.text = text.to_string();
+        self.cursor = cursor;
+        self.shown_at = cursor;
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
+        self.request = Task::ready(());
+        self.no_match = None;
+        self.picked = false;
+        self.invoked = false;
         if self.open {
             self.open = false;
-            self.request = Task::ready(());
             cx.notify();
         }
     }
@@ -236,6 +349,7 @@ impl<M: InputModeKind> Completion<M> {
         } else {
             self.selected.saturating_add_signed(by).min(count - 1)
         };
+        self.picked = true;
         self.scroll.scroll_to_item(self.selected, ScrollStrategy::Nearest);
         cx.notify();
     }
@@ -247,6 +361,8 @@ impl<M: InputModeKind> Completion<M> {
             (state.value(), state.cursor())
         };
         let (range, new_text) = edit(&item, self.start.min(cursor)..cursor, &text);
+        // Items a key behind end where they were asked for, so the word now runs to the caret.
+        let range = range.start.min(cursor)..if range.end == self.shown_at { cursor } else { range.end };
         let (new_text, caret) = if item.insert_text_format == Some(InsertTextFormat::SNIPPET) {
             expand_snippet(&new_text)
         } else {
@@ -260,6 +376,13 @@ impl<M: InputModeKind> Completion<M> {
             state.replace(new_text, window, cx);
             state.set_selected_range(at..at, cx);
         });
+        self.sync(cx);
+    }
+
+    // After an edit of the list's own, so the change it causes doesn't read as typing.
+    fn sync(&mut self, cx: &App) {
+        let state = self.editor.read(cx);
+        (self.text, self.cursor) = (state.value().to_string(), state.cursor());
     }
 
     fn row(&self, ix: usize, metrics: &Metrics, cx: &mut Context<Self>) -> AnyElement {
@@ -277,9 +400,9 @@ impl<M: InputModeKind> Completion<M> {
             .id(ix)
             .w_full()
             .h(metrics.row_height)
-            .pl(px(2.))
+            .pl(px(ROW_PAD))
             .pr(px(10.))
-            .gap(px(4.))
+            .gap(px(ICON_GAP))
             .text_color(if selected { palette.selected_text } else { palette.text })
             .when(selected, |el| el.bg(palette.selected))
             .when(!selected, |el| el.hover(|style| style.bg(palette.hover)))
@@ -291,7 +414,7 @@ impl<M: InputModeKind> Completion<M> {
                 }),
             )
             .child(
-                div().flex_none().w(px(16.)).flex().justify_center().child(
+                div().flex_none().w(px(ICON_COLUMN)).flex().justify_center().child(
                     Icon::new(icon).size(px(14.)).text_color(if selected { palette.selected_text } else { color }),
                 ),
             )
@@ -312,6 +435,12 @@ impl<M: InputModeKind> Completion<M> {
                 let size = metrics.font_size * 0.85;
                 div().flex_none().max_w(px(170.)).truncate().ml_auto().pl(size * 1.1).text_size(size).child(detail)
             }))
+            // Until a row is picked, only Tab takes it, so say so.
+            .when(selected && !self.enter_accepts(), |row| {
+                let hint = form::key_chip(metrics.tab.clone(), palette.selected_text)
+                    .debug_selector(|| "completion-tab-hint".into());
+                row.child(hint.when(suggestion.item.detail.is_none(), |hint| hint.ml_auto()))
+            })
             .into_any_element()
     }
 }
@@ -332,6 +461,7 @@ struct Metrics {
     palette: Palette,
     font_size: Pixels,
     row_height: Pixels,
+    tab: SharedString,
 }
 
 fn palette(theme: &Theme) -> Palette {
@@ -434,18 +564,21 @@ fn edit(item: &CompletionItem, word: Range<usize>, text: &str) -> (Range<usize>,
 impl<M: InputModeKind> Render for Completion<M> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.editor.read(cx);
+        let inset = px(1. + ROW_PAD + ICON_COLUMN + ICON_GAP);
         let anchor = self
             .is_open(cx)
-            .then(|| state.range_to_bounds(&(state.cursor()..state.cursor())))
+            .then(|| state.range_to_bounds(&(self.start..self.start)))
             .flatten()
-            .map(|bounds| point(bounds.left(), bounds.bottom()));
+            .map(|bounds| point(bounds.left() - inset, bounds.bottom()));
         let Some(anchor) = anchor else { return div().absolute().into_any_element() };
         // Match the editor's line height, 20px at the SQL editor's 13px.
         let (font_size, row_height) = match self.size {
             Some((font, row)) => (font.to_pixels(window.rem_size()), row.to_pixels(window.rem_size())),
             None => (px(theme::editor_font_size(cx)), px(theme::editor_font_size(cx) + 7.)),
         };
-        let metrics = Metrics { palette: palette(cx.theme()), font_size, row_height };
+        let tab: SharedString =
+            Kbd::format(&Keystroke { modifiers: Modifiers::none(), key: "tab".into(), key_char: None }).into();
+        let metrics = Metrics { palette: palette(cx.theme()), font_size, row_height, tab: tab.clone() };
         let count = self.items.len();
         let height = metrics.row_height * count.min(VISIBLE_ROWS) as f32;
         let (background, border) = (metrics.palette.background, metrics.palette.border);
@@ -454,7 +587,7 @@ impl<M: InputModeKind> Render for Completion<M> {
             "completion-rows",
             count,
             cx.processor(move |this, range: Range<usize>, _, cx| {
-                let metrics = Metrics { palette: palette(cx.theme()), font_size, row_height };
+                let metrics = Metrics { palette: palette(cx.theme()), font_size, row_height, tab: tab.clone() };
                 range.map(|ix| this.row(ix, &metrics, cx)).collect()
             }),
         )
@@ -490,6 +623,7 @@ impl<M: InputModeKind> Completion<M> {
             state.insert(text.to_string(), window, cx);
             state.focus_handle(cx).focus(window, cx);
         });
+        self.sync(cx);
         self.request(true, window, cx);
     }
 }

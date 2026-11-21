@@ -437,7 +437,7 @@ async fn sql(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
     cam.hold(cx, 1400).await?;
     cam.type_text(cx, "sco").await?;
     cam.hold(cx, 500).await?;
-    cam.keys(cx, "enter").await?;
+    cam.keys(cx, "tab").await?;
     cam.type_text(cx, " > 900\nORDER BY p.score DESC;").await?;
     cam.close_suggestions(cx).await?;
     cam.caption(cx, Some("Hover a table for its columns"));
@@ -529,7 +529,7 @@ async fn edit(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
     cam.type_text(cx, "sco").await?;
     cam.until(cx, "the filter suggestions", filtering).await?;
     cam.hold(cx, 600).await?;
-    cam.keys(cx, "enter").await?;
+    cam.keys(cx, "tab").await?;
     cam.type_text(cx, " > 900").await?;
     if cam.robot.act(cx, filtering)? {
         cam.keys(cx, "escape").await?;

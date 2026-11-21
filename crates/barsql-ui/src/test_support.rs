@@ -105,6 +105,15 @@ pub fn settle(cx: &mut VisualTestContext, mut done: impl FnMut(&mut VisualTestCo
     panic!("timed out waiting for the UI to settle");
 }
 
+// As a person types: each key's tasks finish and a frame draws before the next key.
+pub fn type_slowly(cx: &mut VisualTestContext, text: &str) {
+    for ch in text.chars() {
+        cx.simulate_input(&ch.to_string());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+}
+
 // The device row the open dialog's top lands on. Equal rows can differ in the last float digit.
 pub fn dialog_row(scale: f32, cx: &mut VisualTestContext) -> f32 {
     cx.update(|window, cx| window.draw(cx).clear(cx));
