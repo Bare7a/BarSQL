@@ -2,7 +2,7 @@
 
 1. The workspace starts at 1.0.0. For later releases, run `cargo xtask bump-version --patch` (or `--minor`, `--major`, or an explicit version such as `1.1.0`), then commit and push. `cargo xtask version` prints the current version.
 2. Tag and push (`git tag v1.0.0 && git push origin v1.0.0`), or start the workflow by hand on any branch (Actions → Release BarSQL → Run workflow) with the version, and it tags the commit it runs on.
-3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds for Linux (x86-64 and ARM64, in Ubuntu 22.04 containers), Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks, then points the [Homebrew](#homebrew) cask and the [Scoop](#scoop) manifest at the new zips and opens a [winget](#winget) pull request for the installer.
+3. `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` and isn't already on another commit, then builds for Linux (x86-64 and ARM64, in Ubuntu 22.04 containers), Windows and macOS while the full test suite runs on all three. Once both pass, it publishes every asset plus `SHA256SUMS`, each with a build provenance attestation that `gh attestation verify <file> --repo Bare7a/BarSQL` checks, then points the [Homebrew](#homebrew) cask and the [Scoop](#scoop) manifest at the new zips<!-- and opens a [winget](#winget) pull request for the installer -->.
 
 Run the workflow by hand with the version left empty to build the packages without publishing them; they stay on the run's page for 7 days.
 
@@ -65,6 +65,7 @@ Then add the printed key on the tap's [Settings → Deploy keys](https://github.
 - After `brew tap bare7a/tap` and `brew trust --cask bare7a/tap/barsql` (one `brew install bare7a/tap/barsql` does both), `brew style --cask bare7a/tap/barsql` and `brew audit --cask --strict --online bare7a/tap/barsql` check the cask.
 - Homebrew's own [homebrew/cask](https://github.com/Homebrew/homebrew-cask), which would make it plain `brew install barsql`, takes an app once its GitHub repository has 75 stars, 30 forks or 30 watchers, or three times that when its owner submits it.
 
+<!-- winget: uncomment once Microsoft approves Bare7a.BarSQL.
 ## winget
 
 `winget install Bare7a.BarSQL` runs `BarSQL-amd64-installer.exe` from the manifests in [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/Bare7a/BarSQL). Once a release is out, the workflow's `winget` job runs [winget-releaser](https://github.com/vedantmgoyal9/winget-releaser), whose Komac copies the last version's manifests forward with the new version, URL and SHA-256, and opens a pull request from the [Bare7a/winget-pkgs](https://github.com/Bare7a/winget-pkgs) fork. The version reaches `winget` once winget-pkgs' checks and moderators merge it.
@@ -79,6 +80,7 @@ gh secret set WINGET_TOKEN --repo Bare7a/BarSQL
 - Every version copies the last one's description, tags and links, so change those in a pull request to winget-pkgs, and later versions carry them on.
 - `winget validate --manifest <folder>` checks a version's manifests locally.
 - winget finds an install by the `Bare7aBarSQL` uninstall key, the manifest's `ProductCode`, so keep that key name in `installer.nsi`.
+-->
 
 ## Scoop
 

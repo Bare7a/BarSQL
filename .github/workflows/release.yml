@@ -386,16 +386,17 @@ jobs:
             commit -m "barsql $VERSION"
           git push
 
-  # winget-pkgs takes each version as a PR from the Bare7a/winget-pkgs fork, which needs a classic token.
-  winget:
-    needs: [version, release]
-    if: github.repository == 'Bare7a/BarSQL'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main on 2026-10-07
-        with:
-          identifier: Bare7a.BarSQL
-          installers-regex: '-installer\.exe$'
-          release-tag: ${{ needs.version.outputs.tag }}
-          token: ${{ secrets.WINGET_TOKEN }}
+  # winget: uncomment once Microsoft approves Bare7a.BarSQL.
+  # # winget-pkgs takes each version as a PR from the Bare7a/winget-pkgs fork, which needs a classic token.
+  # winget:
+  #   needs: [version, release]
+  #   if: github.repository == 'Bare7a/BarSQL'
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
+  #   steps:
+  #     - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main on 2026-10-07
+  #       with:
+  #         identifier: Bare7a.BarSQL
+  #         installers-regex: '-installer\.exe$'
+  #         release-tag: ${{ needs.version.outputs.tag }}
+  #         token: ${{ secrets.WINGET_TOKEN }}

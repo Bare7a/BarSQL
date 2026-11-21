@@ -45,7 +45,7 @@ body:
       options:
         - Windows installer
         - Windows zip or BarSQL.exe
-        - winget
+        # - winget # uncomment once Microsoft approves Bare7a.BarSQL.
         - Scoop
         - macOS zip or dmg
         - Homebrew
