@@ -17,14 +17,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::file_dialogs::{path_text, pick_import_file};
-use crate::form::{self, SelectMenu};
+use crate::form::{self, LargeButton as _, SelectMenu};
 use crate::i18n::{count, t, t_count, t_with};
 use crate::modal::{self, Modal};
 use crate::query_tab::new_tab_id;
 use crate::schema::Columns;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::spinner::Spinner;
-use crate::tokens::{DIMMED, ICON_XS, RADIUS, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS};
+use crate::tokens::{DIMMED, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM, TEXT_XS};
 use crate::{schema, state};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
@@ -794,7 +794,7 @@ impl ImportDialog {
                         cell()
                             .truncate()
                             .font_family(mono.clone())
-                            .text_size(TEXT_2XS)
+                            .text_size(TEXT_XS)
                             .text_color(theme.muted_foreground)
                             .when(skipped, |el| el.opacity(DIMMED))
                             .child(sample),
@@ -821,7 +821,7 @@ impl ImportDialog {
                     .border_color(theme.border)
                     .text_size(TEXT_SM)
                     .child(t(cx, "import.columnsHeading"))
-                    .child(div().text_size(TEXT_2XS).text_color(theme.muted_foreground).child(meta)),
+                    .child(div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(meta)),
             )
             .when(preview.not_utf8, |el| {
                 el.child(
@@ -905,7 +905,7 @@ impl ImportDialog {
             )
             .when(result.cancelled, |el| {
                 el.child(
-                    div().text_size(TEXT_2XS).text_color(theme.muted_foreground).child(t(cx, "import.cancelledNote")),
+                    div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(t(cx, "import.cancelledNote")),
                 )
             })
             .when(!result.errors.is_empty(), |el| {
@@ -916,7 +916,7 @@ impl ImportDialog {
                     .track_scroll(&self.errors_scroll)
                     .pl(rems(1.231))
                     .font_family(theme.mono_font_family.clone())
-                    .text_size(TEXT_2XS)
+                    .text_size(TEXT_XS)
                     .text_color(theme.muted_foreground)
                     .children(result.errors.iter().map(|error| div().child(format!("• {error}"))));
                 el.child(div().relative().child(errors).hover_scrollbar(&self.errors_scroll, ScrollbarAxis::Vertical))
@@ -984,10 +984,9 @@ impl Render for ImportDialog {
             .text_color(if self.path.is_empty() { theme.muted_foreground } else { theme.foreground })
             .child(div().min_w_0().truncate().child(path));
         let file_row = h_flex().gap(rems(0.615)).child(path_field).child(
-            Button::new("import-browse")
+            form::field_button("import-browse")
                 .debug_selector(|| "import-browse".into())
-                .icon(Icon::new(Lucide::FolderOpen))
-                .label(t(cx, "common.browse"))
+                .large_with_icon(Icon::new(Lucide::FolderOpen), t(cx, "common.browse"))
                 .disabled(running)
                 .on_click(cx.listener(|this, _, window, cx| this.pick(window, cx))),
         );

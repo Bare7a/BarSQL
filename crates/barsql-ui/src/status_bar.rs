@@ -302,7 +302,9 @@ fn stats_segment(total: &Aggregate, visible: [bool; 5], cx: &App) -> AnyElement 
                         .debug_selector(|| "status-spread".into())
                         .ghost()
                         .xsmall()
-                        .label(label)
+                        // The bar's 11px, where an xsmall label is 9.75px.
+                        .accessibility_label(label.clone())
+                        .child(div().text_size(TEXT_XS).child(label))
                         .dropdown_caret(true),
                 )
                 .content(move |_, _, cx| spread_table(&columns, cx))

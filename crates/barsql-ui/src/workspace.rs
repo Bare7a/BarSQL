@@ -16,7 +16,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{AppMenuBar, ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::component::scroll::Scrollbar;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Root, StyledExt, TitleBar, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Root, Sizable, StyledExt, TitleBar, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -25,6 +25,7 @@ use crate::assets::{LOGO, engine_icon, vector_img};
 use crate::connections_panel::{connection_subtitle, parse_color};
 use crate::dialogs::{self, Confirm};
 use crate::er_diagram::{self, ErDiagram};
+use crate::form::LargeButton as _;
 use crate::grid::{Grid, GridEvent, RowRef};
 use crate::i18n::{I18n, t, t_count, t_with};
 use crate::json_panel::{JsonPanel, JsonPanelEvent, RowSource};
@@ -1756,30 +1757,31 @@ impl Workspace {
     fn empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let has_connections = self.sidebar.read(cx).has_connections();
-        let button =
-            |id: &'static str, label: SharedString| Button::new(id).debug_selector(move || id.into()).label(label);
+        let button = |id: &'static str| Button::new(id).debug_selector(move || id.into());
         let actions: Vec<Button> = match has_connections {
             false => vec![
-                button("welcome-new-connection", t(cx, "sidebar.newConnection"))
+                button("welcome-new-connection")
                     .primary()
-                    .icon(IconName::Plus)
+                    .large_with_icon(IconName::Plus, t(cx, "sidebar.newConnection"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.sidebar.update(cx, |sidebar, cx| sidebar.add_connection(window, cx))
                     })),
-                button("welcome-open-sqlite", t(cx, "app.openSqlite"))
-                    .icon(engine_icon(&DriverType::Sqlite))
+                button("welcome-open-sqlite")
+                    .large_with_icon(engine_icon(&DriverType::Sqlite), t(cx, "app.openSqlite"))
                     .on_click(cx.listener(|this, _, window, cx| this.pick_sqlite(window, cx))),
             ],
             true => {
                 let mut actions = vec![
-                    button("welcome-new-query", t(cx, "app.newQuery"))
+                    button("welcome-new-query")
                         .primary()
-                        .icon(IconName::Plus)
+                        .large_with_icon(IconName::Plus, t(cx, "app.newQuery"))
                         .on_click(cx.listener(|this, _, window, cx| this.welcome_query(window, cx))),
                 ];
                 if !self.closed.is_empty() {
                     actions.push(
-                        button("welcome-reopen", t(cx, "tabs.reopenClosed"))
+                        button("welcome-reopen")
+                            .large()
+                            .label(t(cx, "tabs.reopenClosed"))
                             .on_click(cx.listener(|this, _, window, cx| this.reopen_closed_tab(window, cx))),
                     );
                 }

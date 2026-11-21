@@ -54,6 +54,11 @@ pub fn filter_button(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Button 
     Button::new(id).small().size(rems(2.308)).p_0().child(icon.into().size(ICON_XS))
 }
 
+// A text button beside a field, as tall as it.
+pub fn field_button(id: impl Into<ElementId>) -> Button {
+    Button::new(id).large().h(rems(2.308))
+}
+
 // 22px tall with an 11px label. GPUI Kit's small button is 19.5px and shrinks its icon to 11.4px, so the icon
 // and label go in as children, sized here.
 pub trait ToolButton {
@@ -72,7 +77,8 @@ pub trait ToolButton {
 
 impl ToolButton for Button {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self {
-        tool_frame(self).child(tool_row(icon, icon_size, label))
+        let label = label.into();
+        named(tool_frame(self), &label).child(tool_row(icon, icon_size, label))
     }
 
     fn tool_keys(
@@ -83,7 +89,8 @@ impl ToolButton for Button {
         keys: String,
         color: Hsla,
     ) -> Self {
-        tool_frame(self).child(tool_row(icon, icon_size, label).child(key_chip(keys, color)))
+        let label = label.into();
+        named(tool_frame(self), &label).child(tool_row(icon, icon_size, label).child(key_chip(keys, color)))
     }
 
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self {
@@ -91,7 +98,25 @@ impl ToolButton for Button {
     }
 
     fn tool_label(self, label: impl Into<SharedString>) -> Self {
-        tool_frame(self).child(div().text_size(TEXT_XS).child(label.into()))
+        let label = label.into();
+        named(tool_frame(self), &label).child(div().text_size(TEXT_XS).child(label))
+    }
+}
+
+// A label that goes in as a child isn't read out, so it's also the button's name.
+fn named(button: Button, label: &SharedString) -> Button {
+    button.accessibility_label(label.clone())
+}
+
+// GPUI Kit draws a large button's icon at 19.5px beside its 13px label, so the icon goes in as a child at 14px.
+pub trait LargeButton {
+    fn large_with_icon(self, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Self;
+}
+
+impl LargeButton for Button {
+    fn large_with_icon(self, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Self {
+        let label = label.into();
+        named(self.large(), &label).child(icon.into().size(ICON_SM)).child(div().min_w_0().truncate().child(label))
     }
 }
 
@@ -127,8 +152,20 @@ pub fn toggle_group() -> Div {
     h_flex().gap(rems(0.308))
 }
 
+// Among a dialog's fields, as tall as an input. A toolbar takes `toggle_small`, as tall as a tool button.
 pub fn toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
-    Button::new(id).small().flex_1().h(rems(1.692)).label(label).when(active, |button| button.primary())
+    segment(Button::new(id).h(rems(2.308)), label, TEXT_BASE, active)
+}
+
+pub fn toggle_small(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
+    segment(Button::new(id).small().h(rems(1.692)), label, TEXT_SM, active)
+}
+
+fn segment(button: Button, label: impl Into<SharedString>, size: Rems, active: bool) -> Button {
+    let label = label.into();
+    named(button.flex_1(), &label)
+        .child(div().min_w_0().truncate().text_size(size).child(label))
+        .when(active, |button| button.primary())
 }
 
 pub fn progress(label: impl Into<SharedString>, fraction: f32, cx: &App) -> Div {
@@ -213,7 +250,7 @@ pub fn select_small(id: impl Into<ElementId>, label: impl Into<SharedString>, cx
     let theme = cx.theme();
     Button::new(id)
         .outline()
-        .h(rems(1.846))
+        .h(rems(1.692))
         .min_w(rems(5.385))
         .pl(rems(0.615))
         .pr(rems(0.462))

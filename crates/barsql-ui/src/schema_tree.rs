@@ -19,6 +19,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Sty
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::form::LargeButton as _;
 use crate::i18n::{I18n, bytes, count, t, t_count, t_with};
 use crate::list_nav::{self, BarClearance, LIST_INSET};
 use crate::schema::{self, Schemas};
@@ -1778,9 +1779,7 @@ impl Render for SchemaTree {
                 .child(
                     Button::new("connect")
                         .primary()
-                        .small()
-                        .icon(Icon::new(Lucide::Plug))
-                        .label(t(cx, "sidebar.connectButton"))
+                        .large_with_icon(Icon::new(Lucide::Plug), t(cx, "sidebar.connectButton"))
                         .disabled(self.connecting)
                         .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
                 )

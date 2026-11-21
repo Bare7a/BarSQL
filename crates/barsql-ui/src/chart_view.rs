@@ -300,7 +300,7 @@ impl ChartView {
         let kinds = form::toggle_group().children(
             [(Kind::Bars, "chart-bars", "chart.bar"), (Kind::Line, "chart-line", "chart.line")].map(
                 |(choice, id, key)| {
-                    form::toggle(id, t(cx, key), kind == choice)
+                    form::toggle_small(id, t(cx, key), kind == choice)
                         .debug_selector(move || id.into())
                         .on_click(cx.listener(move |this, _, _, cx| this.edit(cx, |s| s.kind = choice)))
                 },
@@ -313,7 +313,7 @@ impl ChartView {
             (Aggregate::Average, "chart-average", "chart.average"),
         ];
         let aggregates = form::toggle_group().children(choices.map(|(choice, id, key)| {
-            form::toggle(id, t(cx, key), combines && aggregate == choice)
+            form::toggle_small(id, t(cx, key), combines && aggregate == choice)
                 .debug_selector(move || id.into())
                 .disabled(!combines || (choice != Aggregate::Count && numeric.is_empty()))
                 .when(!combines, |button| button.tooltip(t(cx, "chart.nothingToCombine")))

@@ -17,7 +17,7 @@ use gpui_kit::*;
 use crate::assets::engine_icon;
 use crate::connections_panel::parse_color;
 use crate::file_dialogs;
-use crate::form::{self, SelectMenu, ToolButton};
+use crate::form::{self, LargeButton as _, SelectMenu, ToolButton};
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::schema;
@@ -762,8 +762,7 @@ impl ConnectionForm {
         cx: &mut Context<Self>,
     ) -> Div {
         h_flex().gap(rems(0.615)).child(form::input(input, window, cx).flex_1()).child(
-            Button::new(id)
-                .large()
+            form::field_button(id)
                 .debug_selector(move || id.into())
                 .label(t(cx, "common.browse"))
                 .on_click(cx.listener(move |form, _, window, cx| form.browse(target, window, cx))),
@@ -1129,9 +1128,7 @@ impl ConnectionForm {
         });
         let copy = Button::new("conn-mcp-setup")
             .debug_selector(|| "conn-mcp-setup".into())
-            .large()
-            .icon(Icon::new(Lucide::Copy))
-            .label(t(cx, "connection.copyMcpSetup"))
+            .large_with_icon(Icon::new(Lucide::Copy), t(cx, "connection.copyMcpSetup"))
             .on_click(|_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(barsql_app::mcp::setup_json()));
                 toast::success(t(cx, "toast.copiedMcpSetup"), cx);

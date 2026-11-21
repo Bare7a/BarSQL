@@ -489,8 +489,9 @@ impl PlanView {
             Button::new("plan-quiet-fields")
                 .debug_selector(|| "plan-quiet-fields".into())
                 .ghost()
-                .xsmall()
-                .label(label)
+                .tool_label(label)
+                // Its label lines up with the field names above.
+                .ml(rems(-0.615))
                 .on_click(cx.listener(|view, _, _, cx| {
                     view.all_fields = !view.all_fields;
                     cx.notify();

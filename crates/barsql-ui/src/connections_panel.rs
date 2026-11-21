@@ -16,7 +16,7 @@ use gpui_kit::*;
 
 use crate::assets::engine_icon;
 use crate::dialogs::{self, Confirm, Prompt};
-use crate::form;
+use crate::form::{self, LargeButton as _};
 use crate::i18n::{t, t_with};
 use crate::list_nav::{self, LIST_INSET, ListNav, NavDelete, NavDown, NavFirst, NavLast, NavOpen, NavUp};
 use crate::saved_queries::failed;
@@ -638,8 +638,7 @@ impl Render for ConnectionsPanel {
                 Button::new("new-connection")
                     .debug_selector(|| "new-connection".into())
                     .flex_1()
-                    .icon(Icon::new(IconName::Plus))
-                    .label(t(cx, "sidebar.newConnection"))
+                    .large_with_icon(Icon::new(IconName::Plus), t(cx, "sidebar.newConnection"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ConnectionsEvent::Edit(Box::default())))),
             )
             .child(
