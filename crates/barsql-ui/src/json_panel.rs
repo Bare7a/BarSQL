@@ -10,7 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{
     Editor, EditorState, InputEvent, InputState, RangeDecoration, RangeDecorationCollection, RangeDecorationStyle,
 };
-use gpui_kit::component::scroll::ScrollbarAxis;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt, TITLE_BAR_HEIGHT, h_flex, v_flex,
@@ -38,6 +38,7 @@ const VIEW_KEY: &str = "barsql-json-view";
 // Long values show their first lines; the cell viewer has the rest.
 const VALUE_LINES: usize = 6;
 const JSON_LINES: usize = 12;
+const INSET: Rems = rems(0.769);
 
 // A table view's table, whose rows other tables' foreign keys point at.
 #[derive(Clone, PartialEq)]
@@ -283,7 +284,14 @@ impl JsonPanel {
         self.row.as_ref().map(|_| self.shown.as_str())
     }
 
-    fn field(&self, ix: usize, field: &RowField, row: &RowRef, cx: &Context<Self>) -> impl IntoElement + use<> {
+    fn field(
+        &self,
+        ix: usize,
+        field: &RowField,
+        row: &RowRef,
+        end: Pixels,
+        cx: &Context<Self>,
+    ) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let foreign = row.foreign.get(&field.column).filter(|_| field.value.is_some()).cloned();
         let key = match (row.primary.contains(&field.column), row.foreign.contains_key(&field.column)) {
@@ -331,7 +339,8 @@ impl JsonPanel {
         v_flex()
             .id(("json-field", ix))
             .gap(rems(0.231))
-            .px(rems(0.769))
+            .pl(INSET)
+            .pr(end)
             .py(rems(0.538))
             .border_b_1()
             .border_color(theme.border)
@@ -351,7 +360,14 @@ impl EventEmitter<JsonPanelEvent> for JsonPanel {}
 
 impl JsonPanel {
     // No rows point at a NULL, and a result without a referenced column can't say which do.
-    fn reference(&self, ix: usize, reference: &Reference, row: &RowRef, cx: &Context<Self>) -> Option<AnyElement> {
+    fn reference(
+        &self,
+        ix: usize,
+        reference: &Reference,
+        row: &RowRef,
+        margin: Pixels,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
         let driver = &self.source.as_ref()?.driver;
         let mut filters = Vec::new();
         for (column, referenced) in &reference.columns {
@@ -369,7 +385,8 @@ impl JsonPanel {
         let element = h_flex()
             .id(("json-reference", ix))
             .debug_selector(move || format!("json-reference-{ix}"))
-            .mx(rems(0.385))
+            .ml(rems(0.385))
+            .mr(margin)
             .px(rems(0.385))
             .py(rems(0.385))
             .gap(rems(0.462))
@@ -425,6 +442,9 @@ impl Render for JsonPanel {
         // The header lines up with the tab bar, the filter row with the toolbar, and the buttons with the window's.
         let column = |button: Button| h_flex().flex_none().w(TITLE_BAR_HEIGHT).justify_center().child(button);
         let nulls_tip = t(cx, if self.hide_nulls { "jsonViewer.showNulls" } else { "jsonViewer.hideNulls" });
+        // The list's bar overlays its right edge, so the fields end clear of it.
+        let end = Scrollbar::width().max(INSET.to_pixels(window.rem_size()));
+        let reference_margin = end - rems(0.385).to_pixels(window.rem_size());
         let header = h_flex()
             .debug_selector(|| "json-panel-header".into())
             .h(rems(2.769))
@@ -535,7 +555,7 @@ impl Render for JsonPanel {
                             .iter()
                             .flat_map(|references| references.iter())
                             .enumerate()
-                            .filter_map(|(ix, reference)| self.reference(ix, reference, row, cx))
+                            .filter_map(|(ix, reference)| self.reference(ix, reference, row, reference_margin, cx))
                             .collect();
                         let list = v_flex()
                             .id("json-fields")
@@ -544,7 +564,9 @@ impl Render for JsonPanel {
                             .overflow_y_scroll()
                             .track_scroll(&self.fields_scroll)
                             .children(empty)
-                            .children(self.fields.iter().enumerate().map(|(ix, field)| self.field(ix, field, row, cx)))
+                            .children(
+                                self.fields.iter().enumerate().map(|(ix, field)| self.field(ix, field, row, end, cx)),
+                            )
                             .when(!references.is_empty(), |el| {
                                 el.child(
                                     div()
@@ -592,7 +614,7 @@ mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
 
-    use super::{JsonPanel, JsonPanelEvent, RowSource, SETTLE, View};
+    use super::{JsonPanel, JsonPanelEvent, RowSource, SETTLE, Scrollbar, View};
     use crate::grid::RowRef;
     use crate::schema;
     use crate::test_support::{Env, settle};
@@ -877,6 +899,26 @@ mod tests {
                     assert!((center.y - close_y).abs() < px(0.5), "zoom {zoom}, {id} is in the header");
                 }
             });
+        }
+    }
+
+    // The list's bar overlays its right edge.
+    #[gpui_kit::test]
+    fn the_fields_end_clear_of_the_bar(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = cx.add_window_view(JsonPanel::new);
+        panel.update_in(cx, |panel, window, cx| {
+            panel.set_view(View::Fields, window, cx);
+            panel.show(Some(row()), None, window, cx);
+        });
+        for zoom in [10., 13., 22.] {
+            cx.update(|window, cx| {
+                window.set_rem_size(px(zoom));
+                window.render_frame(cx);
+            });
+            let value = cx.debug_bounds("json-field-value-0").expect("the fields are drawn");
+            let edge = cx.debug_bounds("json-panel").expect("the panel is drawn").right();
+            assert!(edge - value.right() >= Scrollbar::width() - px(0.5), "zoom {zoom}: {value:?}");
         }
     }
 
