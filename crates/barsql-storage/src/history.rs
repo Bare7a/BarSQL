@@ -65,6 +65,17 @@ impl HistoryStore {
             .collect()
     }
 
+    // Each connection's last run, newest first, without copying the SQL.
+    pub fn last_runs(&self) -> Vec<(String, String)> {
+        let mut last: Vec<(String, String)> = Vec::new();
+        for entry in self.lock().iter().rev() {
+            if !last.iter().any(|(id, _)| *id == entry.connection_id) {
+                last.push((entry.connection_id.clone(), entry.executed_at.clone()));
+            }
+        }
+        last
+    }
+
     // Puts back a deleted entry where it was, by when it ran. For undoing a delete.
     pub fn restore(&self, entry: HistoryEntry) -> io::Result<()> {
         let mut entries = self.lock();

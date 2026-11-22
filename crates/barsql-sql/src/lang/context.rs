@@ -365,6 +365,11 @@ pub fn analyze_cursor(before: &str, driver: Option<&DriverType>) -> SqlCursor {
         return SqlCursor { slot: CursorSlot::Dot { segments, prefix, replace_len }, shape };
     }
 
+    // An alias is being named, so there's nothing to offer.
+    if is_keyword(prev, "as") && matches!(shape.clause, Clause::Select | Clause::From) {
+        return SqlCursor { slot: CursorSlot::None, shape };
+    }
+
     if is_comparison(prev) {
         return SqlCursor { slot: CursorSlot::Value { prefix, replace_len }, shape };
     }

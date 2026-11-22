@@ -19,7 +19,8 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Sty
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::i18n::{I18n, count, t, t_count, t_with};
+use crate::form::LargeButton as _;
+use crate::i18n::{I18n, bytes, count, t, t_count, t_with};
 use crate::list_nav::{self, BarClearance, LIST_INSET};
 use crate::schema::{self, Schemas};
 use crate::schema_actions::{self, Applied, Change};
@@ -343,6 +344,7 @@ impl SchemaTree {
         let searching = !self.needle.is_empty();
         let mut tables_to_load = Vec::new();
         let mut columns_to_load = Vec::new();
+        let mut sizes_to_load = Vec::new();
         for sch in schemas {
             let key = format!("{}:{}", conn.id, sch.name);
             let open = self.expanded_schemas.get(&key) == Some(&true);
@@ -352,6 +354,9 @@ impl SchemaTree {
                 }
                 continue;
             };
+            if open && !data.sizes_requested(&sch.name) {
+                sizes_to_load.push(sch.name.clone());
+            }
             for table in tables {
                 let schema_name = if table.schema.is_empty() { &sch.name } else { &table.schema };
                 let loaded = data.columns(schema_name, &table.name).is_some();
@@ -368,6 +373,9 @@ impl SchemaTree {
         }
         for name in tables_to_load {
             schema::load_tables(&conn.id, &name, cx);
+        }
+        for name in sizes_to_load {
+            schema::load_sizes(&conn.id, &name, cx);
         }
         for (schema_name, table) in columns_to_load {
             self.load_columns(&conn.id, &schema_name, &table, cx);
@@ -701,7 +709,10 @@ impl SchemaTree {
                 }
                 (schema, table, renamed.map_or(TableChange::Dropped, TableChange::Renamed))
             }
-            Change::Truncate { schema, table } => (schema, table, TableChange::Altered),
+            Change::Truncate { schema, table } => {
+                schema::forget_sizes(id, schema, cx);
+                (schema, table, TableChange::Altered)
+            }
             Change::RenameColumn { schema, table, .. } | Change::DropColumn { schema, table, .. } => {
                 self.forget_groups(id, schema, table, true, cx);
                 if !cascaded {
@@ -1334,6 +1345,11 @@ impl SchemaTree {
                 }
                 RowKind::Table { schema, table, expanded, .. } => {
                     let (relation_icon, relation_badge) = relation_look(&ObjectKind::for_relation(&table.kind));
+                    let size = self
+                        .connection
+                        .as_ref()
+                        .and_then(|c| schema::get(cx, &c.id)?.size(&schema, &table.name)?.bytes)
+                        .map(|size| bytes(cx, size));
                     let active = self.active_table.as_ref().is_some_and(|active| {
                         self.connection.as_ref().is_some_and(|c| c.id == active.connection_id)
                             && active.schema == schema
@@ -1353,6 +1369,9 @@ impl SchemaTree {
                         }))
                         .child(div().flex_1().min_w_0().truncate().child(marked(name.clone().into(), &self.needle)))
                         .children(relation_badge.map(|key| badge(t(cx, key), theme.primary)))
+                        .children(
+                            size.map(|size| mono(div()).flex_none().text_size(TEXT_2XS).text_color(muted).child(size)),
+                        )
                         .when(active, |el| {
                             el.child(
                                 div()
@@ -1760,9 +1779,7 @@ impl Render for SchemaTree {
                 .child(
                     Button::new("connect")
                         .primary()
-                        .small()
-                        .icon(Icon::new(Lucide::Plug))
-                        .label(t(cx, "sidebar.connectButton"))
+                        .large_with_icon(Icon::new(Lucide::Plug), t(cx, "sidebar.connectButton"))
                         .disabled(self.connecting)
                         .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
                 )

@@ -1,7 +1,7 @@
 # ⚡ BarSQL
 
 ![Rust](https://img.shields.io/badge/Rust-1.100+-B7410E?style=for-the-badge&logo=rust)
-![GPUI](https://img.shields.io/badge/GPUI_Kit-0.9-4B275F?style=for-the-badge)
+![GPUI](https://img.shields.io/badge/GPUI_Kit-0.10-4B275F?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)
 [![Release](https://img.shields.io/github/v/release/Bare7a/BarSQL?style=for-the-badge&color=success)](../../releases/latest)
 
@@ -12,7 +12,7 @@ Just a focused, native desktop tool for **PostgreSQL**, **MySQL / MariaDB**, **S
 
 🌐 **[barsql.bare7a.eu](https://barsql.bare7a.eu)** · 🎬 **[Demo video](https://barsql.bare7a.eu/demo.mp4)** · 📖 **[User Guide](guide/README.md)**
 
-https://github.com/user-attachments/assets/50aee6fa-c4e9-4271-9903-0fbe7c2c7fcc
+https://github.com/user-attachments/assets/e523952a-dade-40da-9951-9dc990abd5ae
 
 ---
 
@@ -219,7 +219,7 @@ Every feature in detail, one area per page:
 | [📥 Import & Export](guide/import-export.md) | CSV and SQL import, export formats |
 | [🤖 AI Assistants (MCP)](guide/ai-assistants.md) | Letting AI apps read your databases, and change them only where you allow it |
 | [🌍 The App](guide/app.md) | Themes, languages, palettes, the status bar, keyboard shortcuts, the data folder, auto updates |
-| [🎨 Themes](guide/themes.md) | The 20 built-in themes, Select theme…, and making your own |
+| [🎨 Themes](guide/themes.md) | The 21 built-in themes, Select theme…, and making your own |
 
 ---
 

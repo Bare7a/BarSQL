@@ -14,5 +14,5 @@ pub use export::{
     EXPORT_FORMATS, ExportChunk, ExportFormat, Exporter, export_to_string, is_space, restringify_json, sql_literal,
 };
 pub use format::{format_query, format_sql};
-pub use row_json::{match_ranges, row_json};
+pub use row_json::{RowField, StagedCells, flag, match_ranges, row_fields, row_json, shown_cell, typed};
 pub use write::{WriteOutcome, write_chunks};

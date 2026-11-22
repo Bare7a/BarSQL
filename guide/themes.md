@@ -1,6 +1,6 @@
 # 🎨 Themes
 
-BarSQL ships 20 themes, uses one for dark mode and one for light mode, and loads your own from the data folder.
+BarSQL ships 21 themes, uses one for dark mode and one for light mode, and loads your own from the data folder.
 
 ## 🖌️ Picking a Theme
 
@@ -13,6 +13,7 @@ BarSQL ships 20 themes, uses one for dark mode and one for light mode, and loads
 | Dark | Light |
 | ---- | ----- |
 | BarSQL Dark | BarSQL Light |
+| BarSQL Dark Glass | |
 | Catppuccin Frappé, Macchiato and Mocha | Catppuccin Latte |
 | One Dark | One Light |
 | Dracula | |
@@ -66,6 +67,7 @@ You can also put your own `.json` files in **`BarSQL-data/themes/`**. **Open the
 - **Gradients**: a color that fills an area, such as `primary.background`, also takes `linear-gradient(135deg, #5fb3b3, #3a8f8f)`, with an angle and two colors
 - **`highlight`** sets the editor (`editor.background`, `editor.foreground`, `editor.active_line.background`, …) and, under `syntax`, the SQL colors: `keyword`, `operator`, `boolean`, `constant`, `string`, `string.special`, `number`, `comment`, `comment_doc`, `punctuation`, `punctuation.delimiter`, `punctuation.bracket`, `variable`, `property`, `function`, `type`, `attribute` and `tag`. Each takes a `color`, plus an optional `font_style` (`"italic"`) or `font_weight`. In SQL, table names use `type`, aliases use `variable` and column names the editor's text color
 - **Syntax colors you leave out** come from BarSQL Dark or BarSQL Light, except under a color you set: `punctuation` also colors `punctuation.delimiter` and `punctuation.bracket`, `string` colors `string.special`, and `comment` colors `comment_doc`, until you set those too. Leave out `editor.background` and the editor takes the color of the theme's input fields, so set it to match your `background`
+- **Glass**: `"window": "blurred"` beside `mode` frosts what's behind the window on macOS and Windows, wherever your colors are see-through, as BarSQL Dark Glass does with 60% for `background` and the panels. The blur adds no tint of its own, so colors under text need to stay mostly opaque to read over a light window. Linux keeps the window solid
 - **Fonts, sizes and corners** stay BarSQL's, so any set in a theme file are ignored
 - **More keys**: a file made by **Customize current theme…** lists every key BarSQL's own themes set, the quickest way to see what you can change
 - Only plain JSON loads: no comments and no trailing commas. Files over 1 MB, subfolders and editor backups such as `mine.json~` are skipped

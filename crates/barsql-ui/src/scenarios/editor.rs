@@ -13,6 +13,8 @@ use crate::actions::{PrevTab, Quit};
 use crate::dialogs::Asked;
 use crate::query_tab::TxnState;
 use crate::results::ResultStatus;
+use crate::status_bar::AiAccess;
+use crate::status_bar::server::Detail;
 use crate::update_dialog::{self, UpdateDialog, UpdateState};
 use crate::workspace::QuitRequests;
 
@@ -142,6 +144,91 @@ fn select(app: &mut super::driver::Driver, range: std::ops::Range<usize>) {
     let tab = app.tab();
     app.cx.update(|_, cx| tab.read(cx).editor().update(cx, |state, cx| state.set_selected_range(range, cx)));
     app.cx.run_until_parked();
+}
+
+// As in VS Code, Ctrl+Backspace and Ctrl+Delete stop at a line break, so blank lines don't take a word with them.
+#[gpui_kit::test]
+fn word_deletes_stop_at_line_breaks(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    let word = if cfg!(target_os = "macos") { "alt" } else { "ctrl" };
+    let (back, forward) = (format!("{word}-backspace"), format!("{word}-delete"));
+    app.set_sql("SELECT 1;\n  \n\t\n");
+    select(&mut app, 15..15);
+    for left in ["SELECT 1;\n  \n\t", "SELECT 1;\n  \n", "SELECT 1;\n  ", "SELECT 1;\n", "SELECT 1;", "SELECT 1"] {
+        app.keys(&back);
+        assert_eq!(app.sql(), left);
+    }
+    app.keys("mod-z");
+    let tab = app.tab();
+    let editor = app.cx.update(|_, cx| tab.read(cx).editor());
+    assert_eq!(app.sql(), "SELECT 1;");
+    assert_eq!(app.cx.update(|_, cx| editor.read(cx).selected_range()), 9..9, "undo puts the caret back");
+
+    app.set_sql("SELECT 1\n\n    FROM t");
+    select(&mut app, 8..8);
+    app.keys(&forward);
+    assert_eq!(app.sql(), "SELECT 1\n    FROM t");
+    app.keys(&forward);
+    assert_eq!(app.sql(), "SELECT 1FROM t", "the next line's indent goes with its line break");
+
+    select(&mut app, 7..8);
+    app.keys(&back);
+    assert_eq!(app.sql(), "SELECT FROM t", "a selection goes as it is");
+    app.keys("mod-f");
+    app.type_text("a b");
+    app.keys(&back);
+    assert_eq!(app.sql(), "SELECT FROM t", "the find box keeps it");
+}
+
+// As in VS Code, Ctrl+Backspace in a pair the editor just closed deletes the pair, as Backspace does.
+#[gpui_kit::test]
+fn ctrl_backspace_inside_an_empty_pair_deletes_both(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    let back = if cfg!(target_os = "macos") { "alt-backspace" } else { "ctrl-backspace" };
+    app.set_sql("SELECT ");
+    select(&mut app, 7..7);
+    for (open, closed) in [("(", "SELECT ()"), ("'", "SELECT ''"), ("[", "SELECT []")] {
+        app.type_text(open);
+        assert_eq!(app.sql(), closed);
+        app.keys(back);
+        assert_eq!(app.sql(), "SELECT ");
+    }
+}
+
+// As in VS Code, undo puts the caret back, so the next key doesn't replace the lines it brought back.
+#[gpui_kit::test]
+fn undoing_a_line_command_puts_the_caret_back(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    let tab = app.tab();
+    let editor = app.cx.update(|_, cx| tab.read(cx).editor());
+    for keys in ["alt-down", "alt-up", "shift-alt-down", "mod-shift-k", "mod-/", "mod-x", "mod-c mod-v"] {
+        app.set_sql("one\ntwo\nthree");
+        select(&mut app, 5..5);
+        app.keys(keys);
+        app.keys("mod-z");
+        assert_eq!(app.sql(), "one\ntwo\nthree", "{keys}");
+        assert_eq!(app.cx.update(|_, cx| editor.read(cx).selected_range()), 5..5, "{keys}");
+    }
+}
+
+// The find box is inside the editor's key context, but the line commands are the editor's alone.
+#[gpui_kit::test]
+fn the_find_box_keeps_its_own_keys(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.set_sql("one\ntwo");
+    select(&mut app, 1..1);
+    app.keys("mod-f");
+    app.type_text("zz");
+    app.keys("mod-shift-k alt-down mod-/ mod-d mod-l");
+    assert_eq!(app.sql(), "one\ntwo");
+    app.keys("mod-a mod-x");
+    let cut = app.cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(cut.as_deref(), Some("zz"), "the find box cut its own text");
+    assert_eq!(app.sql(), "one\ntwo");
 }
 
 #[gpui_kit::test]
@@ -417,6 +504,60 @@ fn the_status_bar_names_the_connection_and_its_engine(cx: &mut TestAppContext) {
     assert_eq!(connection(&mut app), ("Local".into(), "SQLite".into(), false), "the sidebar's, not connected");
     app.connect();
     assert_eq!(connection(&mut app), ("Local".into(), "SQLite".into(), true));
+}
+
+// Once the server has answered, the version it runs takes the engine's place. Disconnected, the engine is back.
+#[gpui_kit::test]
+fn the_status_bar_names_the_server_version(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    app.connect();
+    app.wait_schema();
+    let shown = |app: &mut Driver| app.status_bar().connection.expect("a connection");
+    let connected = shown(&mut app);
+    assert!(connected.product.as_deref().is_some_and(|p| p.starts_with("SQLite 3.")), "{:?}", connected.product);
+    assert!(connected.details.iter().any(|d| matches!(d, Detail::Address(path) if path.ends_with("ui.db"))));
+    app.env.runtime.block_on(app.env.bar.disconnect(&app.connection.id));
+    assert_eq!(shown(&mut app).product, None);
+}
+
+// The bar's ends show and hide the side panels, as View > Sidebar and View > JSON viewer do.
+#[gpui_kit::test]
+fn the_status_bar_toggles_the_side_panels(cx: &mut TestAppContext) {
+    let mut app = open(cx);
+    assert!(app.shown("sidebar") && app.status_bar().sidebar_open);
+    app.click("status-toggle-sidebar");
+    assert!(!app.shown("sidebar") && !app.status_bar().sidebar_open);
+    app.click("status-toggle-sidebar");
+    assert!(app.shown("sidebar"));
+    assert!(!app.shown("json-panel"));
+    app.click("status-toggle-json");
+    assert!(app.shown("json-panel") && app.status_bar().json_open);
+    app.click("status-toggle-json");
+    assert!(!app.shown("json-panel"));
+}
+
+// The AI chip says the connection is shared over MCP, and opens its settings.
+#[gpui_kit::test]
+fn the_ai_chip_opens_the_connection_settings(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { mcp: true, mcp_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    assert_eq!(app.status_bar().ai, Some(AiAccess::Write));
+    app.click("status-ai");
+    assert!(app.dialog_open(), "the connection's settings");
+}
+
+// A read-only connection never lets assistants write, whatever its file says, so its chip doesn't claim they can.
+#[gpui_kit::test]
+fn a_read_only_connection_never_shows_ai_writes(cx: &mut TestAppContext) {
+    let mut app = open_with(cx, |env| {
+        let config = ConnectionConfig { read_only: true, mcp: true, mcp_changes: true, ..env.connection.clone() };
+        env.runtime.block_on(env.bar.save_connection(config)).unwrap()
+    });
+    app.connect();
+    assert_eq!(app.status_bar().ai, Some(AiAccess::Read));
 }
 
 #[gpui_kit::test]

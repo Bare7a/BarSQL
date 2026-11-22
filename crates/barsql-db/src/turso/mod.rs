@@ -10,13 +10,13 @@ mod hrana;
 mod tests;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use barsql_core::TableStructure;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, FunctionList, IndexInfo, ObjectRef,
-    QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo, Value,
+    QueryError, ReferencingKey, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo, Value,
 };
 use barsql_sql::{first_keyword, strip_leading_comments};
 
@@ -65,6 +65,15 @@ enum Protocol {
     V3,
     // Older servers. /v2/pipeline answers with every row at once.
     V2,
+}
+
+impl Protocol {
+    fn version(self) -> &'static str {
+        match self {
+            Protocol::V3 => "v3",
+            Protocol::V2 => "v2",
+        }
+    }
 }
 
 pub struct TursoEngine {
@@ -140,12 +149,8 @@ impl TursoEngine {
         baton: Option<String>,
         requests: Vec<PipelineRequest>,
     ) -> Result<PipelineResponse, HError> {
-        let version = match self.protocol {
-            Protocol::V3 => "v3",
-            Protocol::V2 => "v2",
-        };
         let body = serde_json::to_vec(&PipelineBody { baton, requests }).expect("serializable");
-        let mut res = self.post(client, &format!("{path}/{version}/pipeline"), &body).await?;
+        let mut res = self.post(client, &format!("{path}/{}/pipeline", self.protocol.version()), &body).await?;
         let body = res.read_to_end(MAX_BODY).await.map_err(|err| HError { message: err.message, code: None })?;
         serde_json::from_slice(&body)
             .map_err(|err| HError { message: format!("the server's answer isn't Hrana: {err}"), code: None })
@@ -175,6 +180,12 @@ impl TursoEngine {
             .map_err(join_error)?
     }
 
+    // The protocol's version check, which runs no statement and opens no stream.
+    pub async fn round_trip(&self) -> Result<Duration, QueryError> {
+        let target = format!("{}/{}", self.options.endpoint.path, self.protocol.version());
+        Ok(self.client.time(&self.authorized(Request::get(&target)), MAX_BODY).await?)
+    }
+
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
         Ok(ConnectionStatus {
             connected: true,
@@ -201,6 +212,15 @@ impl TursoEngine {
     pub async fn list_columns(self: &Arc<Self>, _schema: &str, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
         let table = table.to_string();
         self.catalog(move |src| catalog::columns(src, &table)).await
+    }
+
+    pub async fn referencing_keys(
+        self: &Arc<Self>,
+        _schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
+        let table = table.to_string();
+        self.catalog(move |src| catalog::referencing_keys(src, &table)).await
     }
 
     pub async fn list_indexes(self: &Arc<Self>, _schema: &str, table: &str) -> Result<Vec<IndexInfo>, QueryError> {

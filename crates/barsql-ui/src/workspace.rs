@@ -10,35 +10,38 @@ use barsql_app::{
 };
 use barsql_core::capabilities::DefaultSchema;
 use barsql_core::config::path_parts;
-use barsql_core::{ConnectionConfig, SavedQuery};
+use barsql_core::{ConnectionConfig, DriverType, SavedQuery};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{AppMenuBar, ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::component::scroll::Scrollbar;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Root, StyledExt, TitleBar, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Root, Sizable, StyledExt, TitleBar, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::actions::*;
-use crate::assets::{LOGO, vector_img};
+use crate::assets::{LOGO, engine_icon, vector_img};
+use crate::connections_panel::{connection_subtitle, parse_color};
 use crate::dialogs::{self, Confirm};
 use crate::er_diagram::{self, ErDiagram};
-use crate::grid::RowRef;
+use crate::form::LargeButton as _;
+use crate::grid::{Grid, GridEvent, RowRef};
 use crate::i18n::{I18n, t, t_count, t_with};
-use crate::json_panel::JsonPanel;
+use crate::json_panel::{JsonPanel, JsonPanelEvent, RowSource};
 use crate::query_tab::{QueryTab, QueryTabEvent, TxnState, new_tab_id};
 use crate::quick_search::{self, QuickSearchDialog, TabEntry, Target};
+use crate::relative_time::format_relative_time;
 use crate::schema_tree::{ActiveTable, TableChange};
 use crate::scrollbars;
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::state::{self, set_setting, set_setting_bool, set_setting_json, setting_bool};
-use crate::status_bar::{self, StatusAction, StatusActions, StatusBarState, StatusConnection};
+use crate::status_bar::{self, AiAccess, StatusAction, StatusActions, StatusBarState, StatusConnection, server};
 use crate::structure_tab::{StructureTab, StructureTabEvent};
 use crate::table_tab::{TableTab, TableTabEvent};
 use crate::theme::ThemeChoice;
 use crate::toast;
-use crate::tokens::{ICON_2XS, ICON_XL, ICON_XS, RADIUS, RADIUS_LG, TEXT_LG, TEXT_MD, TEXT_SM};
+use crate::tokens::{ICON_2XS, ICON_MD, ICON_XL, ICON_XS, RADIUS, RADIUS_LG, TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS};
 use crate::window_state::{self, WindowState};
 use crate::{
     LaunchOptions, about_dialog, command_palette, connection_dialog, context_menu, file_dialogs, form, grid, schema,
@@ -52,6 +55,7 @@ const JSON_WIDTH_KEY: &str = "barsql-json-w";
 const SIDEBAR_WIDTHS: (f32, f32, f32) = (280., 200., 520.);
 const JSON_WIDTHS: (f32, f32, f32) = (320., 220., 640.);
 const CLOSED_TABS_LIMIT: usize = 10;
+const RECENT_CONNECTIONS: usize = 5;
 const SESSION_SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
 
 #[derive(Clone, PartialEq)]
@@ -158,6 +162,14 @@ impl TabView {
         match self {
             Self::Query(tab) => tab.read(cx).focused_row(cx),
             Self::Table(tab) => tab.read(cx).focused_row(cx),
+            Self::Diagram(_) | Self::Structure(_) => None,
+        }
+    }
+
+    fn shown_grid(&self, cx: &App) -> Option<Entity<Grid>> {
+        match self {
+            Self::Query(tab) => tab.read(cx).shown_grid(cx),
+            Self::Table(tab) => Some(tab.read(cx).grid()),
             Self::Diagram(_) | Self::Structure(_) => None,
         }
     }
@@ -270,6 +282,8 @@ pub struct Workspace {
     quit_dialog: Option<WeakFocusHandle>,
     // Tabs holding changes that closing them would lose.
     drafts: HashSet<EntityId>,
+    // Redraws the status bar's update chip as a download moves, with its dialog closed.
+    update_watch: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
     _app_events: Task<()>,
 }
@@ -295,6 +309,7 @@ pub fn open(options: LaunchOptions, cx: &mut App) {
         let mut after: Option<crate::snapshot::AfterRun> = None;
         let window = cx.open_window(window_options, |window, cx| {
             window.set_rem_size(px(theme::zoom(cx)));
+            window.set_background_appearance(theme::window_background(cx));
             let view = cx.new(|cx| Workspace::new(window, cx));
             if track {
                 view.update(cx, |workspace, cx| workspace.track_window(saved.clone(), window, cx));
@@ -603,6 +618,10 @@ impl Workspace {
             .into_iter()
             .chain([
                 cx.observe_global::<toast::Toasts>(|_, cx| cx.notify()),
+                cx.observe_global::<update_dialog::Flow>(|this, cx| {
+                    this.update_watch = update_dialog::flow(cx).map(|flow| cx.observe(&flow, |_, _, cx| cx.notify()));
+                    cx.notify();
+                }),
                 cx.observe_window_appearance(window, |_, window, cx| theme::follow_system(window, cx)),
                 cx.observe_window_activation(window, |_, window, cx| {
                     if window.is_window_active() {
@@ -619,6 +638,25 @@ impl Workspace {
                 }
             }
         });
+        let json_panel = cx.new(|cx| JsonPanel::new(window, cx));
+        // The row viewer's foreign keys open their rows as the grid's own jump does.
+        let subscriptions = subscriptions
+            .into_iter()
+            .chain([cx.subscribe_in(&json_panel, window, |this, _, event: &JsonPanelEvent, window, cx| match event {
+                JsonPanelEvent::OpenForeignKey { row, column } => {
+                    if let Some(grid) = this.active_tab().and_then(|tab| tab.shown_grid(cx)) {
+                        let (row, column) = (*row, *column);
+                        grid.update(cx, |_, cx| cx.emit(GridEvent::OpenForeignKey { row, column }));
+                    }
+                }
+                JsonPanelEvent::OpenTable { schema, table, filter } => {
+                    if let Some(TabView::Table(tab)) = this.active_tab() {
+                        let connection = tab.read(cx).connection.clone();
+                        this.open_table(connection, schema.clone(), table.clone(), Some(filter.clone()), window, cx);
+                    }
+                }
+            })])
+            .collect();
         let mut this = Self {
             sidebar,
             menu_bar: (!cfg!(target_os = "macos") || screenshots::windows_title_bar(cx)).then(|| {
@@ -630,7 +668,7 @@ impl Workspace {
             sidebar_open: setting_bool(cx, SIDEBAR_OPEN_KEY, true),
             panels: cx.new(|_| ResizableState::default()),
             sidebar_width: panel_width(cx, SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTHS),
-            json_panel: cx.new(|cx| JsonPanel::new(window, cx)),
+            json_panel,
             json_open: setting_bool(cx, JSON_OPEN_KEY, false),
             json_width: panel_width(cx, JSON_WIDTH_KEY, JSON_WIDTHS),
             window_state: None,
@@ -648,6 +686,7 @@ impl Workspace {
             save_task: Task::ready(()),
             quit_dialog: None,
             drafts: HashSet::new(),
+            update_watch: None,
             _subscriptions: subscriptions,
             _app_events: app_events,
         };
@@ -1405,11 +1444,25 @@ impl Workspace {
     }
 
     fn sync_json_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A closed panel holds no row, so it asks nothing about one.
         if !self.json_open {
+            self.json_panel.update(cx, |panel, cx| panel.show(None, None, window, cx));
             return;
         }
         let row = self.active_tab().and_then(|tab| tab.focused_row(cx));
-        self.json_panel.update(cx, |panel, cx| panel.show(row, window, cx));
+        let source = match self.active_tab() {
+            Some(TabView::Table(tab)) => {
+                let tab = tab.read(cx);
+                Some(RowSource {
+                    connection_id: tab.connection.id.clone(),
+                    driver: tab.connection.driver.clone(),
+                    schema: tab.schema.clone(),
+                    table: tab.table.clone(),
+                })
+            }
+            _ => None,
+        };
+        self.json_panel.update(cx, |panel, cx| panel.show(row, source, window, cx));
     }
 
     fn toggle_json_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1704,30 +1757,31 @@ impl Workspace {
     fn empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let has_connections = self.sidebar.read(cx).has_connections();
-        let button =
-            |id: &'static str, label: SharedString| Button::new(id).debug_selector(move || id.into()).label(label);
+        let button = |id: &'static str| Button::new(id).debug_selector(move || id.into());
         let actions: Vec<Button> = match has_connections {
             false => vec![
-                button("welcome-new-connection", t(cx, "sidebar.newConnection"))
+                button("welcome-new-connection")
                     .primary()
-                    .icon(IconName::Plus)
+                    .large_with_icon(IconName::Plus, t(cx, "sidebar.newConnection"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.sidebar.update(cx, |sidebar, cx| sidebar.add_connection(window, cx))
                     })),
-                button("welcome-open-sqlite", t(cx, "app.openSqlite"))
-                    .icon(Icon::new(Lucide::Database))
+                button("welcome-open-sqlite")
+                    .large_with_icon(engine_icon(&DriverType::Sqlite), t(cx, "app.openSqlite"))
                     .on_click(cx.listener(|this, _, window, cx| this.pick_sqlite(window, cx))),
             ],
             true => {
                 let mut actions = vec![
-                    button("welcome-new-query", t(cx, "app.newQuery"))
+                    button("welcome-new-query")
                         .primary()
-                        .icon(IconName::Plus)
+                        .large_with_icon(IconName::Plus, t(cx, "app.newQuery"))
                         .on_click(cx.listener(|this, _, window, cx| this.welcome_query(window, cx))),
                 ];
                 if !self.closed.is_empty() {
                     actions.push(
-                        button("welcome-reopen", t(cx, "tabs.reopenClosed"))
+                        button("welcome-reopen")
+                            .large()
+                            .label(t(cx, "tabs.reopenClosed"))
                             .on_click(cx.listener(|this, _, window, cx| this.reopen_closed_tab(window, cx))),
                     );
                 }
@@ -1765,7 +1819,90 @@ impl Workspace {
                     )
                 },
             ))
+            .child(match has_connections {
+                true => self.welcome_recent(cx).into_any_element(),
+                false => self.welcome_engines(cx).into_any_element(),
+            })
             .child(form::shortcut_hints(hints, cx))
+    }
+
+    // By last query, newest first, then the rest in saved order.
+    fn welcome_recent(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
+        let sidebar = self.sidebar.read(cx);
+        let last = state::bar(cx).last_runs();
+        let used = last.iter().filter_map(|(id, at)| sidebar.connection(id).map(|c| (c.clone(), Some(at.clone()))));
+        let unused = sidebar.connections().iter().filter(|c| !last.iter().any(|(id, _)| *id == c.id));
+        let recent: Vec<(ConnectionConfig, Option<String>)> =
+            used.chain(unused.map(|c| (c.clone(), None))).take(RECENT_CONNECTIONS).collect();
+        let (lang, now) = (cx.global::<I18n>().lang(), jiff::Timestamp::now().as_millisecond());
+        let rows = recent.into_iter().enumerate().map(|(ix, (connection, at))| {
+            let color = parse_color(&connection.color).unwrap_or(theme.primary);
+            let when = at.map(|at| format_relative_time(&at, lang, now));
+            let subtitle = connection_subtitle(&connection);
+            h_flex()
+                .id(("welcome-connection", ix))
+                .debug_selector(move || format!("welcome-connection-{ix}"))
+                .w_full()
+                .gap(rems(0.615))
+                .px(rems(0.769))
+                .py(rems(0.538))
+                .rounded(RADIUS)
+                .cursor_pointer()
+                .hover(|style| style.bg(theme.secondary))
+                .child(engine_icon(&connection.driver).size(ICON_MD).text_color(color))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().truncate().text_color(theme.foreground).child(connection.name.clone()))
+                        .child(div().truncate().text_size(TEXT_XS).text_color(theme.muted_foreground).child(subtitle)),
+                )
+                .children(
+                    when.map(|when| {
+                        div().flex_none().text_size(TEXT_XS).text_color(theme.muted_foreground).child(when)
+                    }),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| this.open_query_tab(connection.clone(), window, cx)))
+                .test_support()
+        });
+        v_flex()
+            .w(rems(26.154))
+            .gap(rems(0.308))
+            .child(div().px(rems(0.769)).child(form::caption(t(cx, "app.recentConnections"), cx)))
+            .children(rows)
+    }
+
+    fn welcome_engines(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
+        let engines = DriverType::KNOWN.into_iter().filter(|driver| driver.is_supported()).map(|driver| {
+            let name = connection_dialog::engine_name(&driver, cx);
+            let id = SharedString::from(format!("welcome-engine-{driver}"));
+            h_flex()
+                .id(id.clone())
+                .debug_selector(move || id.to_string())
+                .w(rems(11.538))
+                .gap(rems(0.615))
+                .px(rems(0.769))
+                .py(rems(0.615))
+                .rounded(RADIUS)
+                .border_1()
+                .border_color(theme.border)
+                .cursor_pointer()
+                .hover(|style| style.bg(theme.secondary))
+                .child(engine_icon(&driver).size(ICON_MD).text_color(theme.muted_foreground))
+                .child(div().min_w_0().truncate().text_size(TEXT_SM).child(name))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let driver = driver.clone();
+                    this.sidebar.update(cx, |sidebar, cx| sidebar.add_connection_for(driver, window, cx))
+                }))
+                .test_support()
+        });
+        v_flex()
+            .items_center()
+            .gap(rems(0.615))
+            .child(form::caption(t(cx, "app.pickEngine"), cx))
+            .child(h_flex().w(rems(36.)).flex_wrap().justify_center().gap(rems(0.615)).children(engines))
     }
 
     // A query tab on the selected connection, or the first one when none is picked yet.
@@ -2079,14 +2216,32 @@ impl Workspace {
     }
 
     pub(crate) fn status(&self, window: &Window, cx: &App) -> StatusBarState {
-        let named = |connection: &ConnectionConfig| StatusConnection {
-            name: connection.name.clone().into(),
-            engine: connection_dialog::engine_name(&connection.driver, cx),
-            connected: state::bar(cx).is_connected(&connection.id),
+        let named = |connection: &ConnectionConfig| {
+            let connected = state::bar(cx).is_connected(&connection.id);
+            let status = schema::get(cx, &connection.id).and_then(|cached| cached.status()).filter(|_| connected);
+            StatusConnection {
+                name: connection.name.clone().into(),
+                engine: connection_dialog::engine_name(&connection.driver, cx),
+                connected,
+                product: status.and_then(|s| server::server_label(&connection.driver, &s.version)).map(Into::into),
+                details: {
+                    let latency = schema::get(cx, &connection.id).and_then(|c| c.latency_ms()).filter(|_| connected);
+                    server::details(connection, status)
+                        .into_iter()
+                        .chain(latency.map(server::Detail::Latency))
+                        .collect()
+                },
+            }
         };
         let Some(tab) = self.active_tab() else {
             let connection = self.sidebar.read(cx).selected().map(named);
-            return StatusBarState { connection, ..Default::default() };
+            return StatusBarState {
+                connection,
+                sidebar_open: self.sidebar_open,
+                json_open: self.json_open,
+                update: update_dialog::chip(cx),
+                ..Default::default()
+            };
         };
         let connection = tab.connection(cx);
         let live = match tab {
@@ -2113,10 +2268,17 @@ impl Workspace {
             read_only: connection.read_only,
             protected: connection.confirm_changes,
             extensions: connection.active_extensions().map(|path| path_parts(path).1.to_string()).collect(),
+            ai: connection.mcp.then_some(match connection.mcp_changes && !connection.read_only {
+                true => AiAccess::Write,
+                false => AiAccess::Read,
+            }),
             transaction,
             caret: query.filter(|_| grid.is_none()).map(|tab| tab.caret(cx)),
             aggregate: grid.and_then(|grid| grid.read(cx).aggregate()),
             live,
+            sidebar_open: self.sidebar_open,
+            json_open: self.json_open,
+            update: update_dialog::chip(cx),
             actions: StatusActions::default(),
         }
     }
@@ -2137,6 +2299,16 @@ impl Workspace {
             switch_connection: Some(on(Self::open_switcher)),
             edit_connection: self.active_tab().map(|_| on(Self::edit_tab_connection)),
             stop: query.filter(|tab| tab.read(cx).is_running()).map(|_| on(Self::stop_run)),
+            // As the View menu's items, so the check marks and the saved layout follow.
+            toggle_sidebar: Some(Rc::new(|window: &mut Window, cx: &mut App| {
+                window.dispatch_action(Box::new(ToggleSidebar), cx)
+            })),
+            toggle_json: Some(Rc::new(|window: &mut Window, cx: &mut App| {
+                window.dispatch_action(Box::new(ToggleJsonPanel), cx)
+            })),
+            open_update: Some(Rc::new(|window: &mut Window, cx: &mut App| {
+                update_dialog::reopen(window, cx);
+            })),
         }
     }
 
@@ -2336,12 +2508,6 @@ fn panel_width(cx: &App, key: &str, (default, min, max): (f32, f32, f32)) -> Pix
     window_state::stored_width(cx, key, default, min, max)
 }
 
-// Accepts `#rrggbb` only.
-fn parse_color(color: &str) -> Option<Hsla> {
-    let hex = color.strip_prefix('#')?;
-    (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten().map(|rgb_value| rgb(rgb_value).into())
-}
-
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
@@ -2371,6 +2537,17 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleJsonPanel, window, cx| this.toggle_json_panel(window, cx)))
             .on_action(cx.listener(|_, _: &ToggleGridStripes, window, cx| {
                 set_setting_bool(cx, grid::STRIPES_KEY, !setting_bool(cx, grid::STRIPES_KEY, false));
+                set_menus(cx);
+                window.refresh();
+            }))
+            .on_action(cx.listener(|_, _: &ToggleEnterAcceptsSuggestions, window, cx| {
+                let on = crate::completion::enter_accepts_suggestions(cx);
+                set_setting_bool(cx, crate::completion::ENTER_KEY, !on);
+                set_menus(cx);
+                window.refresh();
+            }))
+            .on_action(cx.listener(|_, _: &ToggleGridTypeColors, window, cx| {
+                set_setting_bool(cx, grid::TYPE_COLORS_KEY, !setting_bool(cx, grid::TYPE_COLORS_KEY, false));
                 set_menus(cx);
                 window.refresh();
             }))
@@ -2491,6 +2668,7 @@ impl Render for Workspace {
             )
             .child(status_bar::render(
                 StatusBarState { actions: self.status_actions(cx), ..self.status(window, cx) },
+                window,
                 cx,
             ))
             .children(toast::render(window, cx))

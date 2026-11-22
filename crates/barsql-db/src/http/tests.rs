@@ -84,6 +84,15 @@ async fn connection_close_and_short_keep_alive_aren_t_reused() {
 }
 
 #[tokio::test]
+async fn warming_dials_only_without_an_idle_connection_and_the_next_request_takes_it() {
+    let server = fake(vec![Reply::Send(OK_HELLO)]).await;
+    let client = server.client();
+    client.warm().await.unwrap();
+    client.time(&Request::get("/"), 1024).await.unwrap();
+    assert_eq!(server.accepted(), 1);
+}
+
+#[tokio::test]
 async fn an_unfinished_body_drops_its_connection() {
     let big: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\npartial";
     let server = fake(vec![Reply::Send(big), Reply::Send(OK_HELLO)]).await;

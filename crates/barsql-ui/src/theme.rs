@@ -1,5 +1,5 @@
 use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
-use gpui_kit::{App, Global, SharedString, Window, WindowAppearance, px};
+use gpui_kit::{App, Global, Hsla, SharedString, Window, WindowAppearance, WindowBackgroundAppearance, px};
 
 use crate::i18n::t_with;
 use crate::state::{set_setting, setting};
@@ -20,6 +20,24 @@ const EDITOR_FONT_RANGE: (f32, f32) = (10., 24.);
 struct Previewing(bool);
 
 impl Global for Previewing {}
+
+// For what covers other drawing, which a see-through theme colour wouldn't.
+pub fn opaque(color: Hsla) -> Hsla {
+    Hsla { a: 1., ..color }
+}
+
+// WCAG 2 contrast of `top`, as it shows over `base`, against `base`.
+pub fn contrast(top: Hsla, base: Hsla) -> f32 {
+    let luminance = |color: Hsla| {
+        let (top, base) = (color.to_rgb(), base.to_rgb());
+        let shown = |top: f32, base: f32| top * color.a + base * (1. - color.a);
+        let linear = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        let [r, g, b] = [shown(top.r, base.r), shown(top.g, base.g), shown(top.b, base.b)].map(linear);
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let (a, b) = (luminance(top), luminance(opaque(base)));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
 
 pub fn init(cx: &mut App) {
     fill_slots(cx);
@@ -209,6 +227,17 @@ fn show(mode: ThemeMode, window: &mut Window, cx: &mut App) {
     Theme::change(mode, Some(window), cx);
     Theme::global_mut(cx).focus_ring = false;
     apply_zoom(zoom(cx), Some(window), cx);
+    window.set_background_appearance(window_background(cx));
+}
+
+// Linux compositors may not blur, and a see-through window would show the desktop sharp.
+pub fn window_background(cx: &App) -> WindowBackgroundAppearance {
+    let theme = cx.theme();
+    let glass = theme_files::themes(cx).find(theme.theme_name(), theme.mode).is_some_and(theme_files::blurred);
+    match glass && cfg!(any(target_os = "macos", target_os = "windows")) {
+        true => WindowBackgroundAppearance::Blurred,
+        false => WindowBackgroundAppearance::Opaque,
+    }
 }
 
 pub fn zoom(cx: &App) -> f32 {

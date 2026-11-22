@@ -10,6 +10,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_fle
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::spinner::Spinner;
 use crate::tokens::{
     DIMMED, ICON_2XS, ICON_MD, ICON_SM, ICON_XL, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS,
     TINT, TINT_BORDER,
@@ -54,18 +55,49 @@ pub fn filter_button(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Button 
     Button::new(id).small().size(rems(2.308)).p_0().child(icon.into().size(ICON_XS))
 }
 
+// A footer button with only an icon, as tall as the large ones beside it.
+pub fn icon_button(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Button {
+    let label = label.into();
+    named(Button::new(id).large().size(rems(2.)).p_0(), &label).tooltip(label).child(icon.into().size(ICON_SM))
+}
+
+// A text button beside a field, as tall as it.
+pub fn field_button(id: impl Into<ElementId>) -> Button {
+    Button::new(id).large().h(rems(2.308))
+}
+
 // 22px tall with an 11px label. GPUI Kit's small button is 19.5px and shrinks its icon to 11.4px, so the icon
 // and label go in as children, sized here.
 pub trait ToolButton {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self;
+    fn tool_keys(
+        self,
+        icon: impl Into<Icon>,
+        icon_size: Rems,
+        label: impl Into<SharedString>,
+        keys: String,
+        color: Hsla,
+    ) -> Self;
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self;
     fn tool_label(self, label: impl Into<SharedString>) -> Self;
 }
 
 impl ToolButton for Button {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self {
-        tool_frame(self)
-            .child(h_flex().gap(rems(0.308)).text_size(TEXT_XS).child(icon.into().size(icon_size)).child(label.into()))
+        let label = label.into();
+        named(tool_frame(self), &label).child(tool_row(icon, icon_size, label))
+    }
+
+    fn tool_keys(
+        self,
+        icon: impl Into<Icon>,
+        icon_size: Rems,
+        label: impl Into<SharedString>,
+        keys: String,
+        color: Hsla,
+    ) -> Self {
+        let label = label.into();
+        named(tool_frame(self), &label).child(tool_row(icon, icon_size, label).child(key_chip(keys, color)))
     }
 
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self {
@@ -73,8 +105,38 @@ impl ToolButton for Button {
     }
 
     fn tool_label(self, label: impl Into<SharedString>) -> Self {
-        tool_frame(self).child(div().text_size(TEXT_XS).child(label.into()))
+        let label = label.into();
+        named(tool_frame(self), &label).child(div().text_size(TEXT_XS).child(label))
     }
+}
+
+// A label that goes in as a child isn't read out, so it's also the button's name.
+fn named(button: Button, label: &SharedString) -> Button {
+    button.accessibility_label(label.clone())
+}
+
+// GPUI Kit draws a large button's icon at 19.5px beside its 13px label, so the icon goes in as a child at 14px.
+pub trait LargeButton {
+    fn large_with_icon(self, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Self;
+    fn large_with_spinner(self, label: impl Into<SharedString>) -> Self;
+}
+
+impl LargeButton for Button {
+    fn large_with_icon(self, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Self {
+        large_led_by(self, icon.into().size(ICON_SM), label.into())
+    }
+
+    fn large_with_spinner(self, label: impl Into<SharedString>) -> Self {
+        large_led_by(self, Spinner::new(ICON_SM), label.into())
+    }
+}
+
+fn large_led_by(button: Button, lead: impl IntoElement, label: SharedString) -> Button {
+    named(button.large(), &label).child(lead).child(div().min_w_0().truncate().child(label))
+}
+
+fn tool_row(icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Div {
+    h_flex().gap(rems(0.308)).text_size(TEXT_XS).child(icon.into().size(icon_size)).child(label.into())
 }
 
 fn tool_frame(button: Button) -> Button {
@@ -105,8 +167,20 @@ pub fn toggle_group() -> Div {
     h_flex().gap(rems(0.308))
 }
 
+// Among a dialog's fields, as tall as an input. A toolbar takes `toggle_small`, as tall as a tool button.
 pub fn toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
-    Button::new(id).small().flex_1().h(rems(1.692)).label(label).when(active, |button| button.primary())
+    segment(Button::new(id).h(rems(2.308)), label, TEXT_BASE, active)
+}
+
+pub fn toggle_small(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
+    segment(Button::new(id).small().h(rems(1.692)), label, TEXT_SM, active)
+}
+
+fn segment(button: Button, label: impl Into<SharedString>, size: Rems, active: bool) -> Button {
+    let label = label.into();
+    named(button.flex_1(), &label)
+        .child(div().min_w_0().truncate().text_size(size).child(label))
+        .when(active, |button| button.primary())
 }
 
 pub fn progress(label: impl Into<SharedString>, fraction: f32, cx: &App) -> Div {
@@ -129,24 +203,28 @@ pub fn section(cx: &App) -> Div {
 }
 
 pub fn select(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
-    labeled_select(id, label.into(), cx.theme().foreground, cx)
+    labeled_select(id, None, label.into(), cx.theme().foreground, cx)
+}
+
+pub fn select_with_icon(id: impl Into<ElementId>, icon: Icon, label: impl Into<SharedString>, cx: &App) -> Button {
+    labeled_select(id, Some(icon), label.into(), cx.theme().foreground, cx)
 }
 
 // A select with nothing chosen yet, dimmed like an input's placeholder.
 pub fn select_placeholder(id: impl Into<ElementId>, placeholder: impl Into<SharedString>, cx: &App) -> Button {
-    labeled_select(id, placeholder.into(), cx.theme().muted_foreground, cx)
+    labeled_select(id, None, placeholder.into(), cx.theme().muted_foreground, cx)
 }
 
-fn labeled_select(id: impl Into<ElementId>, label: SharedString, color: Hsla, cx: &App) -> Button {
+fn labeled_select(id: impl Into<ElementId>, icon: Option<Icon>, label: SharedString, color: Hsla, cx: &App) -> Button {
     let theme = cx.theme();
     Button::new(id).outline().w_full().h(rems(2.308)).pl(rems(0.769)).pr(rems(0.615)).bg(theme.background).child(
         h_flex()
             .w_full()
-            .justify_between()
             .gap(rems(0.462))
             .text_size(TEXT_BASE)
             .text_color(color)
-            .child(div().min_w_0().truncate().child(label))
+            .children(icon.map(|icon| icon.size(ICON_SM)))
+            .child(div().flex_1().min_w_0().truncate().child(label))
             .child(Icon::new(IconName::ChevronDown).size(ICON_MD).text_color(theme.muted_foreground)),
     )
 }
@@ -187,7 +265,7 @@ pub fn select_small(id: impl Into<ElementId>, label: impl Into<SharedString>, cx
     let theme = cx.theme();
     Button::new(id)
         .outline()
-        .h(rems(1.846))
+        .h(rems(1.692))
         .min_w(rems(5.385))
         .pl(rems(0.615))
         .pr(rems(0.462))
@@ -322,6 +400,18 @@ pub fn caption(text: impl Into<SharedString>, cx: &App) -> Div {
     div().text_size(TEXT_XS).font_semibold().text_color(cx.theme().muted_foreground).child(text.to_uppercase())
 }
 
+// A shortcut inside a button, tinted with the button's text so it reads on a primary one too.
+pub fn key_chip(keys: impl Into<SharedString>, color: Hsla) -> Div {
+    div()
+        .flex_none()
+        .px(rems(0.231))
+        .rounded(RADIUS_SM)
+        .bg(color.opacity(0.16))
+        .text_size(TEXT_2XS)
+        .text_color(color.opacity(0.85))
+        .child(keys.into())
+}
+
 // A shortcut on a key cap, as the tips and the empty states show them.
 pub fn keycap(keys: impl Into<SharedString>, cx: &App) -> Div {
     let theme = cx.theme();
@@ -364,8 +454,9 @@ fn key_parts(shortcut: &str) -> Vec<&str> {
 pub fn shortcut_hints(hints: impl IntoIterator<Item = (String, SharedString)>, cx: &App) -> Div {
     let hints: Vec<(String, SharedString)> = hints.into_iter().filter(|(keys, _)| !keys.is_empty()).collect();
     let muted = cx.theme().muted_foreground;
-    // Both columns share a row height, so each label stays level with its keys.
+    // Both columns share a row height and gap, so each label stays level with its keys.
     let row = || h_flex().h(rems(1.846));
+    let column = || v_flex().gap(rems(0.462));
     let keys = |shortcut: &str| {
         row().gap(rems(0.308)).children(key_parts(shortcut).into_iter().enumerate().flat_map(|(ix, key)| {
             let plus = (ix > 0).then(|| div().child("+").into_any_element());
@@ -377,8 +468,8 @@ pub fn shortcut_hints(hints: impl IntoIterator<Item = (String, SharedString)>, c
         .gap(rems(1.231))
         .text_size(TEXT_SM)
         .text_color(muted)
-        .child(v_flex().items_end().children(hints.iter().map(|(_, label)| row().child(label.clone()))))
-        .child(v_flex().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut))))
+        .child(column().items_end().children(hints.iter().map(|(_, label)| row().child(label.clone()))))
+        .child(column().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut))))
 }
 
 pub fn empty_state(icon: Option<Icon>, text: impl Into<SharedString>, cx: &App) -> Div {

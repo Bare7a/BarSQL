@@ -6,7 +6,7 @@ use gpui_kit::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext
 use super::{QueryTab, TxnState, char_offset, dotted_title, misspelt_range, new_tab_id, results_share, word_range};
 use crate::results::ResultStatus;
 use crate::schema;
-use crate::test_support::{Env, settle};
+use crate::test_support::{Env, settle, type_slowly};
 
 fn open<'a>(env: &Env, cx: &'a mut TestAppContext, sql: &str) -> (Entity<QueryTab>, &'a mut VisualTestContext) {
     let tab =
@@ -497,4 +497,307 @@ fn hovering_a_function_shows_its_calls_and_docs(cx: &mut TestAppContext) {
             "Non-null values of the group joined as text, by commas or the separator.",
         ]
     );
+}
+
+fn enter_after_picking(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::state::set_setting_bool(cx, crate::completion::ENTER_KEY, false));
+}
+
+fn catalog_ready(env: &Env, cx: &mut VisualTestContext) {
+    let id = env.connection.id.clone();
+    settle(cx, |cx| cx.update(|_, cx| schema::catalog(cx, &id).is_some()));
+}
+
+fn labels_of(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> Vec<String> {
+    cx.update(|_, cx| tab.read(cx).completion.read(cx).labels(cx))
+}
+
+#[gpui_kit::test]
+fn nothing_is_suggested_until_a_name_starts(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    for line in ["SELECT * FROM things ", "SELECT * FROM things;", "SELECT id,", "SELECT count(*", "SELECT 1"] {
+        let (tab, cx) = open(&env, cx, "");
+        catalog_ready(&env, cx);
+        type_slowly(cx, line);
+        assert!(labels_of(&tab, cx).is_empty(), "after {line:?}: {:?}", labels_of(&tab, cx));
+    }
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    assert_eq!(labels_of(&tab, cx), ["things"]);
+}
+
+#[gpui_kit::test]
+fn a_caret_move_or_a_paste_closes_the_list(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.simulate_keystrokes("left");
+    assert!(labels_of(&tab, cx).is_empty(), "moving left closed it");
+    cx.simulate_keystrokes("right");
+    assert!(labels_of(&tab, cx).is_empty(), "coming back doesn't reopen it");
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("ngs".into()));
+    cx.simulate_keystrokes(&format!("{}-v", modifier()));
+    assert!(labels_of(&tab, cx).is_empty(), "a paste closed it");
+}
+
+#[gpui_kit::test]
+fn stepping_over_a_closing_paren_closes_the_list(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM things WHERE coalesce(na");
+    settle(cx, |cx| labels_of(&tab, cx).iter().any(|l| l == "name"));
+    type_slowly(cx, ")");
+    assert_eq!(text(&tab, cx), "SELECT * FROM things WHERE coalesce(na)");
+    assert!(labels_of(&tab, cx).is_empty());
+}
+
+#[gpui_kit::test]
+fn backspace_brings_the_list_back_after_a_typo(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thinx");
+    assert!(labels_of(&tab, cx).is_empty());
+    cx.simulate_keystrokes("backspace");
+    settle(cx, |cx| labels_of(&tab, cx) == ["things"]);
+}
+
+#[gpui_kit::test]
+fn a_name_may_start_with_any_letter(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    let provider = cx.update(|_, cx| tab.read(cx).completion.read(cx).provider()).unwrap();
+    let trigger = |s: &str, cx: &mut VisualTestContext| cx.update(|_, cx| provider.is_completion_trigger(0, s, cx));
+    assert!(trigger("é", cx) && trigger("_", cx) && trigger(".", cx));
+    assert!(trigger(" ", cx), "a space asks too, for the join conditions after ON");
+    assert!(!trigger(",", cx) && !trigger("=", cx) && !trigger("1", cx));
+}
+
+fn join_tables(env: &Env) {
+    for sql in [
+        "CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT)",
+        "CREATE TABLE kids (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id))",
+    ] {
+        env.runtime.block_on(env.bar.execute_query(&env.connection.id, sql)).unwrap();
+    }
+}
+
+fn columns_cached(env: &Env, tables: &[&str], cx: &mut VisualTestContext) {
+    let id = env.connection.id.clone();
+    settle(cx, |cx| {
+        cx.update(|_, cx| {
+            schema::get(cx, &id).is_some_and(|entry| tables.iter().all(|t| entry.columns("main", t).is_some()))
+        })
+    });
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn a_space_after_join_on_offers_the_foreign_key_join(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    enter_after_picking(cx);
+    join_tables(&env);
+    let line = "SELECT * FROM kids k JOIN parents p ON ";
+    let (tab, cx) = open(&env, cx, "");
+    wait_for_table(&env, "kids", cx);
+    type_slowly(cx, line);
+    settle(cx, |cx| labels_of(&tab, cx) == ["k.parent_id = p.id"]);
+    cx.simulate_keystrokes("tab");
+    assert_eq!(text(&tab, cx), format!("{line}k.parent_id = p.id"));
+
+    let (tab, cx) = open(&env, cx, "");
+    wait_for_table(&env, "kids", cx);
+    type_slowly(cx, line);
+    settle(cx, |cx| !labels_of(&tab, cx).is_empty());
+    cx.simulate_keystrokes("enter");
+    assert_eq!(text(&tab, cx), format!("{line}\n"), "Enter still ends the line");
+
+    let (tab, cx) = open(&env, cx, "");
+    wait_for_table(&env, "kids", cx);
+    type_slowly(cx, "SELECT * FROM things t JOIN parents p ON ");
+    columns_cached(&env, &["things", "parents"], cx);
+    assert!(labels_of(&tab, cx).is_empty(), "no foreign key, no list: {:?}", labels_of(&tab, cx));
+}
+
+#[gpui_kit::test]
+fn enter_ends_the_line_unless_a_row_was_picked(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    enter_after_picking(cx);
+    for line in [
+        "SELECT * FROM things",
+        "SELECT * FROM thin",
+        "SELECT * FROM things ORDER BY id DESC",
+        "SELECT * FROM things u",
+        "SELECT * FROM things WHERE coalesce(na)",
+    ] {
+        let (tab, cx) = open(&env, cx, "");
+        catalog_ready(&env, cx);
+        type_slowly(cx, line);
+        cx.simulate_keystrokes("enter");
+        assert_eq!(text(&tab, cx), format!("{line}\n"));
+    }
+}
+
+#[gpui_kit::test]
+fn tab_arrows_or_ctrl_space_take_the_suggestion(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    enter_after_picking(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thin");
+    cx.simulate_keystrokes("tab");
+    assert_eq!(text(&tab, cx), "SELECT * FROM things");
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thin");
+    cx.simulate_keystrokes("down enter");
+    assert_eq!(text(&tab, cx), "SELECT * FROM things", "picked with the arrows");
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.simulate_keystrokes("down");
+    type_slowly(cx, "n");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(text(&tab, cx), "SELECT * FROM thin\n", "typing after the arrows unpicks");
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thin");
+    cx.simulate_keystrokes("escape ctrl-space");
+    settle(cx, |cx| labels_of(&tab, cx) == ["things"]);
+    cx.simulate_keystrokes("enter");
+    assert_eq!(text(&tab, cx), "SELECT * FROM things", "Ctrl+Space lists take Enter");
+}
+
+#[gpui_kit::test]
+fn keys_the_list_cant_use_reach_the_editor(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    enter_after_picking(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.simulate_keystrokes("space tab");
+    assert!(!text(&tab, cx).contains("things"), "{:?}", text(&tab, cx));
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.simulate_keystrokes("n tab");
+    assert_eq!(text(&tab, cx), "SELECT * FROM things", "a list one key behind replaces the whole word");
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.simulate_keystrokes(&format!("{}-z enter", modifier()));
+    let after = text(&tab, cx);
+    assert!(after.ends_with('\n') && !after.contains("things"), "undo then Enter: {after:?}");
+
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    cx.simulate_keystrokes("shift-left shift-left");
+    type_slowly(cx, "u");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(text(&tab, cx), "SELECT * FROM tu\n", "typing over a selection");
+}
+
+#[gpui_kit::test]
+fn accepting_a_suggestion_leaves_the_list_closed(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thing");
+    cx.simulate_keystrokes("tab");
+    assert_eq!(text(&tab, cx), "SELECT * FROM things");
+    assert!(labels_of(&tab, cx).is_empty(), "{:?}", labels_of(&tab, cx));
+}
+
+#[gpui_kit::test]
+fn a_preview_shows_its_suggestions(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "SELECT 1");
+    catalog_ready(&env, cx);
+    let completion = cx.update(|_, cx| tab.read(cx).completion());
+    cx.update(|window, cx| completion.update(cx, |this, cx| this.preview("SELECT * FROM thi", window, cx)));
+    settle(cx, |cx| labels_of(&tab, cx) == ["things"]);
+}
+
+fn caret_left(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> f32 {
+    cx.update(|_, cx| {
+        let state = tab.read(cx).editor.read(cx);
+        f32::from(state.range_to_bounds(&(state.cursor()..state.cursor())).unwrap().left())
+    })
+}
+
+#[gpui_kit::test]
+fn the_list_follows_the_cursor(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    let left = |cx: &mut VisualTestContext| f32::from(cx.debug_bounds("completion").expect("list drawn").left());
+    type_slowly(cx, "SELECT * FROM t");
+    let (first, caret) = (left(cx), caret_left(&tab, cx));
+    assert!((first - caret).abs() < 1., "{first} vs caret at {caret}");
+    type_slowly(cx, "hin");
+    let (moved, caret) = (left(cx), caret_left(&tab, cx));
+    assert!((moved - caret).abs() < 1. && moved > first, "{moved} vs caret at {caret}, from {first}");
+}
+
+#[gpui_kit::test]
+fn by_default_enter_takes_a_suggestion_that_changes_the_text(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    join_tables(&env);
+    for (line, after) in [
+        ("SELECT * FROM thin", "SELECT * FROM things"),
+        ("SELECT * FROM things", "SELECT * FROM things\n"),
+        ("select * from things order by id desc", "select * from things order by id desc\n"),
+        ("SELECT * FROM kids k JOIN parents p ON ", "SELECT * FROM kids k JOIN parents p ON k.parent_id = p.id"),
+    ] {
+        let (tab, cx) = open(&env, cx, "");
+        wait_for_table(&env, "kids", cx);
+        type_slowly(cx, line);
+        settle(cx, |cx| !labels_of(&tab, cx).is_empty());
+        assert!(cx.debug_bounds("completion-tab-hint").is_none(), "no Tab hint after {line:?}");
+        cx.simulate_keystrokes("enter");
+        assert_eq!(text(&tab, cx), after, "Enter after {line:?}");
+    }
+}
+
+#[gpui_kit::test]
+fn every_frame_draws_the_list_at_the_cursor(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    crate::completion::take_placements();
+    cx.update(|window, cx| crate::theme::set_editor_font_size(18., window, cx));
+    cx.run_until_parked();
+    let want = caret_left(&tab, cx);
+    let placed: Vec<f32> = crate::completion::take_placements().into_iter().map(f32::from).collect();
+    assert!(
+        !placed.is_empty() && placed.iter().all(|x| (x - want).abs() < 1.),
+        "placed at {placed:?}, caret at {want}"
+    );
+}
+
+#[gpui_kit::test]
+fn the_tab_hint_shows_until_enter_would_take_the_row(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    enter_after_picking(cx);
+    let (_tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thin");
+    assert!(cx.debug_bounds("completion-tab-hint").is_some());
+    cx.simulate_keystrokes("down");
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.debug_bounds("completion-tab-hint").is_none());
 }

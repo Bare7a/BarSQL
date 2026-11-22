@@ -1,5 +1,7 @@
 // Needs the compose databases. Start them with `cargo xtask e2e up`, then run
 // `cargo test -p barsql-ui --features e2e engines`.
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,6 +17,7 @@ use crate::cell_viewer::Opened;
 use crate::file_dialogs::Stub;
 use crate::grid::Grid;
 use crate::i18n::t;
+use crate::status_bar::server::Detail;
 use crate::table_tab::TableTab;
 
 // In a table's menu, after Browse data, Edit structure, SELECT in new tab and Count rows.
@@ -499,6 +502,29 @@ fn database_picker(cx: &mut TestAppContext, engine: Engine) {
     assert_eq!(app.cx.update(|_, cx| form.read(cx).database(cx)), config.database);
 }
 
+// The tree doesn't wait on the ping: the schemas land first, and the round trip shows in the status bar after them.
+fn round_trip(cx: &mut TestAppContext, engine: Engine) {
+    let mut app = open_on(cx, engine);
+    let id = app.connection.id.clone();
+    let timed_with_schemas = Rc::new(Cell::new(None));
+    let _watch = app.cx.update(|_, cx| {
+        let (id, timed_with_schemas) = (id.clone(), timed_with_schemas.clone());
+        cx.observe_global::<crate::schema::Schemas>(move |cx| {
+            if timed_with_schemas.get().is_none()
+                && let Some(entry) = crate::schema::get(cx, &id).filter(|entry| entry.schemas().is_some())
+            {
+                timed_with_schemas.set(Some(entry.latency_ms().is_some()));
+            }
+        })
+    });
+    app.connect();
+    app.wait_schema();
+    app.settle(|cx| cx.update(|_, cx| crate::schema::get(cx, &id).is_some_and(|entry| entry.latency_ms().is_some())));
+    assert_eq!(timed_with_schemas.get(), Some(false), "the schemas waited for the round trip");
+    let details = app.status_bar().connection.expect("a connection").details;
+    assert!(details.iter().any(|d| matches!(d, Detail::Latency(_))), "{details:?}");
+}
+
 macro_rules! per_engine {
     ($($test:ident => $body:ident;)*) => {
         mod postgres {
@@ -529,6 +555,7 @@ macro_rules! per_engine {
 per_engine! {
     a_connection_is_added_tested_connected_and_disconnected => dialog;
     the_database_picker_lists_the_servers_databases => database_picker;
+    the_status_bar_times_a_round_trip_after_the_schemas_load => round_trip;
     a_simple_query_shows_its_row => simple_query;
     explain_shows_an_estimated_plan => explain;
     a_typed_explain_shows_the_plan_viewer => typed_explain;

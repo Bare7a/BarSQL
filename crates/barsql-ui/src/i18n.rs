@@ -202,6 +202,44 @@ pub fn count(cx: &App, n: usize) -> String {
     format_count(n, cx.global::<I18n>().lang())
 }
 
+// Rounded as shown, so a value just under a step reads as the next unit rather than 1,024 of this one.
+fn rounded(value: f64, decimals: usize) -> f64 {
+    let scale = 10f64.powi(decimals as i32);
+    (value * scale).round() / scale
+}
+
+// Steps up a unit while the value, rounded as it shows, reaches `base`.
+fn scaled(mut value: f64, base: f64, units: usize) -> (f64, usize) {
+    let mut unit = 0;
+    while unit + 1 < units && rounded(value, usize::from(unit > 0)) >= base {
+        value /= base;
+        unit += 1;
+    }
+    (value, unit)
+}
+
+// By 1024s, as the engines' own size functions count.
+pub fn format_bytes(bytes: i64, lang: &str) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let (value, unit) = scaled(bytes as f64, 1024., UNITS.len());
+    format!("{} {}", format_number(value, usize::from(unit > 0), lang), UNITS[unit])
+}
+
+// For row estimates, where the size matters more than the digits.
+pub fn format_compact(n: i64, lang: &str) -> String {
+    const UNITS: [&str; 4] = ["", "k", "M", "B"];
+    let (value, unit) = scaled(n as f64, 1000., UNITS.len());
+    format!("{}{}", format_number(value, usize::from(unit > 0), lang), UNITS[unit])
+}
+
+pub fn bytes(cx: &App, bytes: i64) -> String {
+    format_bytes(bytes, cx.global::<I18n>().lang())
+}
+
+pub fn compact(cx: &App, n: i64) -> String {
+    format_compact(n, cx.global::<I18n>().lang())
+}
+
 pub fn t(cx: &App, key: &str) -> SharedString {
     cx.global::<I18n>().t(key)
 }
@@ -217,6 +255,23 @@ pub fn t_count(cx: &App, key: &str, count: i64, vars: &[(&str, &str)]) -> Shared
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizes_and_estimates_read_short() {
+        assert_eq!(format_bytes(512, "en"), "512 B");
+        assert_eq!(format_bytes(50_381, "en"), "49.2 KB");
+        assert_eq!(format_bytes(3_328_599_654, "de"), "3,1 GB");
+        assert_eq!(format_bytes(2048, "en"), "2 KB");
+        assert_eq!(format_bytes(1280, "en"), "1.3 KB");
+        assert_eq!(format_bytes(1_048_575, "en"), "1 MB", "rounding up to the next unit");
+        assert_eq!(format_bytes(1_073_741_823, "de"), "1 GB");
+        assert_eq!(format_compact(999_950, "en"), "1M");
+        assert_eq!(format_compact(999_950_000, "en"), "1B");
+        assert_eq!(format_compact(120, "en"), "120");
+        assert_eq!(format_compact(12_345, "en"), "12.3k");
+        assert_eq!(format_compact(2_000, "en"), "2k");
+        assert_eq!(format_compact(1_250_000, "es"), "1,3M");
+    }
 
     #[test]
     fn counts_group_by_language() {

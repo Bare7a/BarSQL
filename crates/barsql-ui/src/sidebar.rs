@@ -10,7 +10,8 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, v_flex
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::connection_dialog;
+use crate::assets::engine_icon;
+use crate::connection_dialog::{self, ConnectionForm};
 use crate::connections_panel::{ConnectionsEvent, ConnectionsPanel, connection_subtitle, parse_color};
 
 use crate::history_panel::{HistoryEvent, HistoryPanel};
@@ -180,7 +181,9 @@ impl Sidebar {
             "saved" => self.panel = Panel::Saved,
             "recent" => self.panel = Panel::Recent,
             "connections" => self.switcher_open = true,
-            "connection-dialog" => self.edit_connection(self.selected().cloned(), window, cx),
+            "connection-dialog" => {
+                self.edit_connection(self.selected().cloned(), window, cx);
+            }
             "import" => self.schema_tree.update(cx, |tree, cx| tree.import_default(window, cx)),
             _ => self.panel = Panel::Schema,
         }
@@ -306,16 +309,22 @@ impl Sidebar {
         self.edit_connection(None, window, cx);
     }
 
+    // The welcome screen's engines.
+    pub fn add_connection_for(&mut self, driver: DriverType, window: &mut Window, cx: &mut Context<Self>) {
+        let form = self.edit_connection(None, window, cx);
+        form.update(cx, |form, cx| form.set_driver(driver, window, cx));
+    }
+
     pub(crate) fn edit_connection(
         &mut self,
         config: Option<ConnectionConfig>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Entity<ConnectionForm> {
         let this = cx.entity().downgrade();
         connection_dialog::open(config, window, cx, move |_, _, cx| {
             let _ = this.update(cx, |sidebar, cx| sidebar.reload_connections(cx));
-        });
+        })
     }
 
     // SQLite files opened from the OS or dropped on the window become a prefilled new connection.
@@ -396,7 +405,9 @@ impl Sidebar {
                         .child(Icon::new(IconName::Plus).size(ICON_XS))
                         .child(t(cx, "sidebar.newConnection")),
                 )
-                .on_click(cx.listener(|this, _, window, cx| this.edit_connection(None, window, cx)))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.edit_connection(None, window, cx);
+                }))
                 .into_any_element();
         };
         let color = parse_color(&current.color).unwrap_or(theme.primary);
@@ -408,7 +419,7 @@ impl Sidebar {
                     .gap(rems(0.462))
                     .text_size(TEXT_BASE)
                     .text_color(theme.foreground)
-                    .child(Icon::new(Lucide::Database).size(ICON_SM).text_color(color))
+                    .child(engine_icon(&current.driver).size(ICON_SM).text_color(color))
                     .child(div().flex_1().min_w_0().truncate().font_semibold().child(current.name.clone()))
                     .child(div().flex_none().size(rems(0.538)).rounded_full().bg(if connected {
                         theme.success

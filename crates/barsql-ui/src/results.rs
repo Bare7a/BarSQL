@@ -11,7 +11,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Selectable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -423,7 +423,7 @@ impl ResultsPanel {
     }
 
     // The active result's grid, unless the Messages tab covers it.
-    fn shown_grid(&self) -> Option<&Entity<Grid>> {
+    pub(crate) fn shown_grid(&self) -> Option<&Entity<Grid>> {
         self.sets.get(self.active).filter(|_| !self.messages_open)?.grid.as_ref()
     }
 
@@ -1008,8 +1008,7 @@ impl ResultsPanel {
             Button::new("use-meant-name")
                 .debug_selector(|| "use-meant-name".into())
                 .outline()
-                .xsmall()
-                .label(t_with(cx, "errors.useName", &[("name", &fix.meant)]))
+                .tool_label(t_with(cx, "errors.useName", &[("name", &fix.meant)]))
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(ResultsEvent::Fix(fix.clone()))))
         });
         error.card(jump_button, fix_button, cx).into_any_element()

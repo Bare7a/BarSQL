@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use barsql_core::SqlDialect;
@@ -47,34 +46,19 @@ pub fn single_cell(selection: &Selection, view: &View) -> Option<(usize, usize)>
     Some((row, column))
 }
 
-// Staged table view edits keyed by (row, column). `None` is a staged NULL.
-pub type Staged = Arc<HashMap<(usize, usize), Option<String>>>;
+pub type Staged = Arc<barsql_io::StagedCells>;
 
-// A staged value wins over the loaded one.
-pub fn shown<'a>(set: &'a ResultSet, staged: Option<&'a Staged>, row: usize, column: usize) -> Cell<'a> {
-    match staged.and_then(|staged| staged.get(&(row, column))) {
-        Some(Some(text)) => Cell::Text(text),
-        Some(None) => Cell::Null,
-        None => set.cell(row, column),
-    }
+pub fn shown<'a>(
+    set: &'a ResultSet,
+    staged: Option<&'a Staged>,
+    row: usize,
+    column: usize,
+    dialect: Option<SqlDialect>,
+) -> Cell<'a> {
+    barsql_io::shown_cell(set, staged.map(|staged| &**staged), row, column, dialect)
 }
 
-// The engine's own booleans, plus 1/0 and true/false in a column declared boolean, as SQLite and staged edits hold them.
-pub fn flag(cell: Cell, type_name: &str) -> Option<bool> {
-    let boolean = || ["boolean", "bool"].iter().any(|name| type_name.trim().eq_ignore_ascii_case(name));
-    let spelled = |text: &str, words: [&str; 3]| words.iter().any(|word| text.eq_ignore_ascii_case(word));
-    match cell {
-        Cell::Bool(on) => Some(on),
-        Cell::Number(text) | Cell::Text(text) if boolean() => {
-            if spelled(text, ["1", "true", "t"]) {
-                Some(true)
-            } else {
-                spelled(text, ["0", "false", "f"]).then_some(false)
-            }
-        }
-        _ => None,
-    }
-}
+pub use barsql_io::flag;
 
 // Booleans copy as TRUE and FALSE, except into JSON and SQL, which write their own literals.
 fn copy_cell<'a>(cell: Cell<'a>, type_name: &str, format: Option<ExportFormat>) -> Cell<'a> {
@@ -86,8 +70,14 @@ fn copy_cell<'a>(cell: Cell<'a>, type_name: &str, format: Option<ExportFormat>) 
     }
 }
 
-pub fn cell_text(set: &ResultSet, staged: Option<&Staged>, row: usize, column: usize) -> String {
-    let cell = copy_cell(shown(set, staged, row, column), &set.columns[column].type_name, None);
+pub fn cell_text(
+    set: &ResultSet,
+    staged: Option<&Staged>,
+    row: usize,
+    column: usize,
+    dialect: Option<SqlDialect>,
+) -> String {
+    let cell = copy_cell(shown(set, staged, row, column, dialect), &set.columns[column].type_name, None);
     cell.display().unwrap_or_default().to_string()
 }
 
@@ -109,7 +99,7 @@ pub fn chunks(
             let Some(row) = rows.next() else {
                 return exporter.take()?.finish();
             };
-            let cells: Vec<_> = target.columns.iter().map(|&c| shown(&set, staged.as_ref(), row, c)).collect();
+            let cells: Vec<_> = target.columns.iter().map(|&c| shown(&set, staged.as_ref(), row, c, dialect)).collect();
             if let Some(chunk) = exporter.as_mut()?.push(&cells) {
                 return Some(chunk);
             }
@@ -127,18 +117,20 @@ pub fn export(
 ) -> String {
     let names: Vec<String> = target.columns.iter().map(|&c| set.columns[c].name.clone()).collect();
     let types: Vec<String> = target.columns.iter().map(|&c| set.columns[c].type_name.clone()).collect();
-    let cell = |row, c: usize| copy_cell(shown(set, staged, row, c), &set.columns[c].type_name, Some(format));
+    let cell = |row, c: usize| copy_cell(shown(set, staged, row, c, dialect), &set.columns[c].type_name, Some(format));
     let rows = target.rows.iter().map(|&row| target.columns.iter().map(|&c| cell(row, c)).collect());
     export_to_string(format, &names, &types, table, dialect, rows)
 }
 
 // Keeps NULLs as None so a paste can put back exactly what was copied.
-pub fn values(set: &ResultSet, staged: Option<&Staged>, target: &CopyTarget) -> Vec<Vec<Option<String>>> {
-    target
-        .rows
-        .iter()
-        .map(|&row| target.columns.iter().map(|&c| shown(set, staged, row, c).display().map(str::to_string)).collect())
-        .collect()
+pub fn values(
+    set: &ResultSet,
+    staged: Option<&Staged>,
+    target: &CopyTarget,
+    dialect: Option<SqlDialect>,
+) -> Vec<Vec<Option<String>>> {
+    let value = |row, c| shown(set, staged, row, c, dialect).display().map(str::to_string);
+    target.rows.iter().map(|&row| target.columns.iter().map(|&c| value(row, c)).collect()).collect()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -157,12 +149,15 @@ pub fn clipboard_item(
     set: &ResultSet,
     staged: Option<&Staged>,
     target: &CopyTarget,
+    dialect: Option<SqlDialect>,
 ) -> ClipboardItem {
     if target.rows.len() * target.columns.len() > EXACT_PASTE_CELLS {
         return ClipboardItem::new_string(text);
     }
-    let copied =
-        CopiedCells { barsql_cells: values(set, staged, target), format: format.map(|format| format.id().into()) };
+    let copied = CopiedCells {
+        barsql_cells: values(set, staged, target, dialect),
+        format: format.map(|format| format.id().into()),
+    };
     ClipboardItem::new_string_with_json_metadata(text, copied)
 }
 
@@ -210,6 +205,8 @@ mod tests {
 
     use barsql_db::{ChunkBuilder, ColumnMeta};
 
+    use std::collections::HashMap;
+
     use super::*;
     use crate::grid::sort::RowOrder;
 
@@ -243,7 +240,7 @@ mod tests {
         assert_eq!(export(&set(), None, ExportFormat::Csv, None, None, &target), "note,id\nx,3\n\"a,b\",1\n,2");
         let staged: Staged = Arc::new(HashMap::from([((0, 2), Some("staged".into())), ((2, 0), None)]));
         assert_eq!(export(&set(), Some(&staged), ExportFormat::Csv, None, None, &target), "note,id\nx,\nstaged,1\n,2");
-        assert_eq!(values(&set(), Some(&staged), &target)[1], [Some("staged".into()), Some("1".into())]);
+        assert_eq!(values(&set(), Some(&staged), &target, None)[1], [Some("staged".into()), Some("1".into())]);
     }
 
     #[test]
@@ -304,9 +301,9 @@ mod tests {
         assert!(copy(ExportFormat::Json, None).contains("\"active\": true"), "{}", copy(ExportFormat::Json, None));
         let sql = copy(ExportFormat::Sql, Some(SqlDialect::Sqlite));
         assert!(sql.contains("(TRUE, FALSE)") && sql.contains("(FALSE, TRUE)"), "{sql}");
-        assert_eq!(cell_text(&set, None, 0, 0), "TRUE", "a lone cell");
+        assert_eq!(cell_text(&set, None, 0, 0, None), "TRUE", "a lone cell");
         assert_eq!(
-            values(&set, None, &target)[0],
+            values(&set, None, &target, None)[0],
             [Some("1".into()), Some("false".into())],
             "pasted back as they were"
         );
@@ -320,7 +317,7 @@ mod tests {
         let mut selection = Selection::default();
         selection.focus(1, 1);
         assert_eq!(single_cell(&selection, &view), Some((1, 2)));
-        assert_eq!(cell_text(&set(), None, 1, 2), "", "NULL copies as nothing");
+        assert_eq!(cell_text(&set(), None, 1, 2, None), "", "NULL copies as nothing");
         selection.focus(1, -1);
         assert_eq!(single_cell(&selection, &view), None, "the gutter is not a cell");
         selection.focus(0, 0);
@@ -335,13 +332,17 @@ mod tests {
         let view = View { order: &order, columns: &columns };
         let target = resolve(&Selection::default(), &view);
         let text = export(&set(), None, ExportFormat::Text, None, None, &target);
-        let item = clipboard_item(text.clone(), Some(ExportFormat::Text), &set(), None, &target);
+        let item = clipboard_item(text.clone(), Some(ExportFormat::Text), &set(), None, &target, None);
         assert_eq!(item.text(), Some(text.clone()), "other apps get the text");
-        assert_eq!(copied_cells(&item), Some(values(&set(), None, &target)));
+        assert_eq!(copied_cells(&item), Some(values(&set(), None, &target, None)));
         assert_eq!(copied_cells(&ClipboardItem::new_string(text.clone())), None);
         assert_eq!(copied_cells(&ClipboardItem::new_string_with_json_metadata(text, [1, 2])), None, "another app's");
         let huge = CopyTarget { columns: vec![0], rows: vec![0; EXACT_PASTE_CELLS + 1] };
-        assert_eq!(copied_cells(&clipboard_item(String::new(), None, &set(), None, &huge)), None, "too big to carry");
+        assert_eq!(
+            copied_cells(&clipboard_item(String::new(), None, &set(), None, &huge, None)),
+            None,
+            "too big to carry"
+        );
     }
 
     #[test]
@@ -350,7 +351,7 @@ mod tests {
         let columns = [1, 2, 0];
         let view = View { order: &order, columns: &columns };
         let target = resolve(&Selection::default(), &view);
-        let item = |format| clipboard_item(String::new(), format, &set(), None, &target);
+        let item = |format| clipboard_item(String::new(), format, &set(), None, &target, None);
         assert_eq!(
             aligned_text(&item(Some(ExportFormat::Text))).as_deref(),
             Some("ann  a,b  1\nbob       2\ncy   x    3")
@@ -358,12 +359,15 @@ mod tests {
         assert_eq!(aligned_text(&item(Some(ExportFormat::Csv))), None, "other formats paste as copied");
         assert_eq!(aligned_text(&item(None)), None, "a lone cell pastes raw");
         let one = resolve(&Selection::default(), &View { order: &order, columns: &[1] });
-        assert_eq!(aligned_text(&clipboard_item(String::new(), Some(ExportFormat::Text), &set(), None, &one)), None);
+        assert_eq!(
+            aligned_text(&clipboard_item(String::new(), Some(ExportFormat::Text), &set(), None, &one, None)),
+            None
+        );
         assert_eq!(aligned_text(&ClipboardItem::new_string("a\tb".into())), None);
 
         let staged: Staged =
             Arc::new(HashMap::from([((0, 1), Some("two\nlines".into())), ((1, 2), Some("t\tab".into()))]));
-        let item = clipboard_item(String::new(), Some(ExportFormat::Text), &set(), Some(&staged), &target);
+        let item = clipboard_item(String::new(), Some(ExportFormat::Text), &set(), Some(&staged), &target, None);
         assert_eq!(aligned_text(&item).as_deref(), Some("two lines  a,b   1\nbob        t ab  2\ncy         x     3"));
     }
 }

@@ -2,11 +2,11 @@ use barsql_app::{EditorSession, EditorTab};
 use barsql_core::{ConnectionConfig, DriverType, SavedQuery, TableInfo};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{Root, WindowExt};
-use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext};
+use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext, px, size};
 
 use super::{Candidates, Kind, SchemaTables, TabEntry, Target, rank};
 use crate::actions::QuickSearch;
-use crate::test_support::{Env, settle};
+use crate::test_support::{Env, assert_dialog_holds_its_row, dialog_row, settle};
 use crate::workspace::Workspace;
 use crate::{saved_queries, schema};
 
@@ -98,7 +98,7 @@ fn tables_and_saved_queries_already_open_are_left_out() {
 }
 
 #[test]
-fn categories_break_ties_and_the_list_stops_at_ten() {
+fn categories_break_ties_and_every_match_is_listed() {
     let names: Vec<String> = (10..22).map(|n| format!("users_{n}")).collect();
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let candidates = Candidates {
@@ -108,11 +108,16 @@ fn categories_break_ties_and_the_list_stops_at_ten() {
         saved: vec![saved("s", "users", "other")],
     };
     let items = rank("users", &candidates);
-    assert_eq!(items.len(), 10);
-    let top: Vec<Kind> = items.iter().take(4).map(|item| item.kind).collect();
-    assert_eq!(top, [Kind::Tab, Kind::Table, Kind::Saved, Kind::Connection]);
+    assert_eq!(items.len(), 16, "the tab, 13 tables, the saved query and the connection");
+    let mut kinds: Vec<Kind> = items.iter().map(|item| item.kind).collect();
+    kinds.dedup();
+    assert_eq!(kinds, [Kind::Tab, Kind::Table, Kind::Saved, Kind::Connection], "each kind together, best first");
     assert_eq!(items[0].ranges.first(), Some(&(0..5)));
-    assert_eq!(items[4].label, "users_10", "equal scores keep their order");
+    assert_eq!(
+        (items[1].label.as_str(), items[2].label.as_str()),
+        ("users", "users_10"),
+        "equal scores keep their order"
+    );
 }
 
 #[test]
@@ -250,6 +255,22 @@ fn arrows_pick_a_connection_and_its_new_tab_takes_the_keyboard(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn the_dialog_keeps_its_place_when_nothing_matches(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    session(&env);
+    let (workspace, cx) = open(cx);
+    let dialog = workspace.update_in(cx, |ws, window, cx| ws.open_quick_search(window, cx)).unwrap();
+    for scale in [1., 1.25, 1.5, 1.75, 2.] {
+        cx.simulate_scale_factor_change(scale);
+        let rows = ["", "nothing like this"].map(|query| {
+            cx.update(|window, cx| super::type_query(&dialog, query, window, cx));
+            dialog_row(scale, cx)
+        });
+        assert_dialog_holds_its_row(5.5, rows, scale, cx);
+    }
+}
+
+#[gpui_kit::test]
 fn saved_queries_open_from_the_palette(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     session(&env);
@@ -272,4 +293,85 @@ fn saved_queries_open_from_the_palette(cx: &mut TestAppContext) {
         (workspace.active_title(cx), workspace.active_sql(cx))
     });
     assert_eq!((title.as_str(), sql.as_deref()), ("Heavy things", Some("SELECT * FROM things")));
+}
+
+fn save_queries(env: &Env, count: usize) {
+    for n in 0..count {
+        let query = SavedQuery {
+            name: format!("Query {n:03}"),
+            connection_id: env.connection.id.clone(),
+            sql: format!("SELECT {n}"),
+            ..Default::default()
+        };
+        env.bar.save_saved_query(query).unwrap();
+    }
+}
+
+fn redraw(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+// Every match is listed, yet only the rows on screen are built, so a long list costs what a short one does.
+#[gpui_kit::test]
+fn a_long_list_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    session(&env);
+    save_queries(&env, 60);
+    let (workspace, cx) = open(cx);
+    cx.update(|_, cx| saved_queries::refresh(cx));
+    cx.simulate_resize(size(px(1200.), px(500.)));
+    let dialog = workspace.update_in(cx, |ws, window, cx| ws.open_quick_search(window, cx)).unwrap();
+    cx.run_until_parked();
+    cx.simulate_input("query");
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| dialog.read(cx).items.len()), 60);
+    assert!(cx.debug_bounds("quick-search-row-0").is_some(), "the best match is on screen");
+    assert!(cx.debug_bounds("quick-search-row-15").is_none(), "a match below isn't built");
+
+    let down = ["down"; 15].join(" ");
+    cx.simulate_keystrokes(&down);
+    redraw(cx);
+    let list = cx.debug_bounds("quick-search-list").expect("the list is drawn");
+    let row = cx.debug_bounds("quick-search-row-15").expect("Down scrolls to the picked match");
+    assert!(list.top() <= row.top() && row.bottom() <= list.bottom(), "{row:?} shows inside {list:?}");
+
+    cx.simulate_keystrokes(&["up"; 15].join(" "));
+    redraw(cx);
+    let first = cx.debug_bounds("quick-search-row-0").expect("Up scrolls back to the first match");
+    assert!(first.top() > list.top(), "its heading shows above it");
+
+    cx.simulate_keystrokes(&down);
+    let picked = cx.update(|_, cx| dialog.read(cx).items[15].label.clone());
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| workspace.read(cx).active_title(cx)), picked);
+}
+
+// Many matches fill 80% of the window, whatever its height. Fewer leave the list no taller than its rows.
+#[gpui_kit::test]
+fn the_dialog_grows_to_most_of_the_window(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    session(&env);
+    save_queries(&env, 60);
+    let (workspace, cx) = open(cx);
+    cx.update(|_, cx| saved_queries::refresh(cx));
+    let dialog = workspace.update_in(cx, |ws, window, cx| ws.open_quick_search(window, cx)).unwrap();
+    cx.update(|window, cx| super::type_query(&dialog, "query", window, cx));
+    for height in [900., 600.] {
+        cx.simulate_resize(size(px(1200.), px(height)));
+        redraw(cx);
+        let shown = cx.debug_bounds("quick-search").expect("the dialog is drawn");
+        let tall = shown.size.height;
+        assert!((tall - px(height * 0.8)).abs() <= px(0.5), "{tall:?} tall in a {height}px window");
+        let legend = cx.debug_bounds("quick-search-legend").expect("the legend is drawn");
+        assert!((legend.bottom() - shown.bottom()).abs() <= px(0.5), "the list scrolls, the legend stays in view");
+    }
+
+    cx.update(|window, cx| super::type_query(&dialog, "", window, cx));
+    redraw(cx);
+    let list = cx.debug_bounds("quick-search-list").expect("the list is drawn");
+    let last = cx.debug_bounds("quick-search-row-1").expect("the connection, after the tab");
+    let past = list.bottom() - last.bottom();
+    assert!(past.abs() <= px(0.5), "the list runs {past:?} past its last row");
+    assert_eq!((last.left(), last.right()), (list.left(), list.right()), "a row and its highlight span the list");
 }

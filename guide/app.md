@@ -1,14 +1,14 @@
 # 🌍 The App
 
-- **20 themes** - VS Code, Catppuccin, One, Dracula, Tokyo Night, Nord, Gruvbox, Solarized and BarSQL's own - plus **your own**. Pick one for dark and one for light, or **match the system** and follow it as it changes ([Themes](themes.md))
-- **Welcome screen** while no tab is open - a new connection or a SQLite file to start with, then a new query or the tab you closed last, plus the shortcuts to get around
+- **21 themes** - VS Code, Catppuccin, One, Dracula, Tokyo Night, Nord, Gruvbox, Solarized and BarSQL's own, a frosted-glass one included - plus **your own**. Pick one for dark and one for light, or **match the system** and follow it as it changes ([Themes](themes.md))
+- **Welcome screen** while no tab is open - a new connection, a SQLite file or an engine to start with, then a new query, the tab you closed last and your **recent connections** (the ones your queries last ran on, a click away from a query tab), plus the shortcuts to get around
 - **Command palette** (`Ctrl/⌘+Shift+P`) - every menu and editor command, with its shortcut, ready to run where you opened it
 - **English**, **Deutsch**, **Български** and **Español**
-- **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs
+- **Quick Search palette** (`Ctrl+P`) - jump to connections, tables, saved queries, history, tabs, grouped by kind with the best match's group first
 - Custom shortcuts editor + keyboard tips
 - Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
 - Tab menu: close others, to the right or all, **pin**, duplicate, rename, copy SQL
-- **Status bar** - the tab's connection (click to switch it), the caret's line and column (click to go to a line), cursor count, the open transaction, and a running query with its **Stop** button. Read-only, ask-before-changes and extension chips open the connection's settings, and a guarded connection with a tab color tints the whole bar with it
+- **Status bar** - the tab's connection (click to switch it), the caret's line and column (click to go to a line), cursor count, the open transaction, and a running query with its **Stop** button. Read-only, ask-before-changes and extension chips open the connection's settings, and a guarded connection with a tab color tints the whole bar with it. The connection's tooltip has the server's version, address, database, SSH and TLS, and the round trip measured when it connected
 - Everything opens instantly - no animations
 - **Window state persistence** - size, position and maximized state restored between sessions
 

@@ -6,18 +6,18 @@ use barsql_io::is_space;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{Enter, InputEvent, InputState, MoveDown, MoveUp};
 use gpui_kit::component::scroll::ScrollbarAxis;
-use gpui_kit::component::{ActiveTheme, Icon, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, VirtualListScrollHandle, WindowExt, h_flex, v_flex, v_virtual_list};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::assets::engine_icon;
 use crate::connections_panel::parse_color;
 use crate::fuzzy::rank_candidate;
 use crate::i18n::t;
+use crate::modal::AtTop as _;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_SM, RADIUS_LG, TEXT_BASE, TEXT_XS};
 use crate::{form, saved_queries, schema};
-
-const MAX_ITEMS: usize = 10;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TabEntry {
@@ -67,6 +67,15 @@ impl Kind {
             Self::Table => 70.,
             Self::Saved => 40.,
             Self::Connection => 10.,
+        }
+    }
+
+    fn heading(self) -> &'static str {
+        match self {
+            Self::Tab => "quickSearch.groupTabs",
+            Self::Table => "quickSearch.groupTables",
+            Self::Saved => "quickSearch.groupSaved",
+            Self::Connection => "quickSearch.groupConnections",
         }
     }
 }
@@ -199,7 +208,14 @@ pub fn rank(query: &str, candidates: &Candidates) -> Vec<Item> {
     }
 
     items.sort_by(|a, b| b.rank().total_cmp(&a.rank()));
-    items.truncate(MAX_ITEMS);
+    // Kinds stay together under their heading, the best match's kind first, so Enter opens the best match.
+    let mut kinds: Vec<Kind> = Vec::new();
+    for item in &items {
+        if !kinds.contains(&item.kind) {
+            kinds.push(item.kind);
+        }
+    }
+    items.sort_by_key(|item| kinds.iter().position(|kind| *kind == item.kind));
     items
 }
 
@@ -223,6 +239,34 @@ fn byte_ranges(text: &str, ranges: &[Range<usize>]) -> Vec<Range<usize>> {
     ranges.iter().filter_map(|range| Some(*offsets.get(range.start)?..*offsets.get(range.end)?)).collect()
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Row {
+    Heading(Kind),
+    Item(usize),
+}
+
+impl Row {
+    // The list builds only the rows on screen and places them by height: 29px and 41px at the 13px root.
+    fn height(self, window: &Window) -> Pixels {
+        let rem = window.rem_size();
+        match self {
+            Self::Heading(_) => (rem * 2.231).round(),
+            Self::Item(_) => (rem * 3.154).round(),
+        }
+    }
+}
+
+fn rows(items: &[Item]) -> Vec<Row> {
+    let mut rows = Vec::with_capacity(items.len() + 4);
+    for (ix, item) in items.iter().enumerate() {
+        if ix == 0 || items[ix - 1].kind != item.kind {
+            rows.push(Row::Heading(item.kind));
+        }
+        rows.push(Row::Item(ix));
+    }
+    rows
+}
+
 type OnOpen = Rc<dyn Fn(Target, &mut Window, &mut App)>;
 
 // Tables show up only once their schema has loaded.
@@ -231,8 +275,9 @@ pub struct QuickSearchDialog {
     candidates: Candidates,
     query: String,
     items: Vec<Item>,
+    rows: Vec<Row>,
     active: usize,
-    scroll: ScrollHandle,
+    scroll: VirtualListScrollHandle,
     on_open: OnOpen,
     _subscriptions: Vec<Subscription>,
 }
@@ -257,8 +302,9 @@ impl QuickSearchDialog {
             candidates,
             query: String::new(),
             items: Vec::new(),
+            rows: Vec::new(),
             active: 0,
-            scroll: ScrollHandle::new(),
+            scroll: VirtualListScrollHandle::new(),
             on_open,
             _subscriptions: subscriptions,
         };
@@ -273,6 +319,7 @@ impl QuickSearchDialog {
 
     fn rerank(&mut self, cx: &mut Context<Self>) {
         self.items = rank(&self.query, &self.candidates);
+        self.rows = rows(&self.items);
         cx.notify();
     }
 
@@ -287,15 +334,22 @@ impl QuickSearchDialog {
         }
         let current = self.active_ix();
         self.active = if down { (current + 1).min(self.items.len() - 1) } else { current.saturating_sub(1) };
-        self.scroll.scroll_to_item(self.active);
+        self.reveal(!down);
         cx.notify();
+    }
+
+    // Going up onto a kind's first row shows its heading as well. Going down shows it anyway, above the row.
+    fn reveal(&self, with_heading: bool) {
+        let Some(row) = self.rows.iter().position(|row| *row == Row::Item(self.active)) else { return };
+        let heading = with_heading && row > 0 && matches!(self.rows[row - 1], Row::Heading(_));
+        self.scroll.scroll_to_item(if heading { row - 1 } else { row }, ScrollStrategy::Nearest);
     }
 
     #[cfg(feature = "snapshot")]
     pub(crate) fn highlight(&mut self, label: &str, cx: &mut Context<Self>) {
         if let Some(ix) = self.items.iter().position(|item| item.label == label) {
             self.active = ix;
-            self.scroll.scroll_to_item(ix);
+            self.reveal(false);
             cx.notify();
         }
     }
@@ -308,7 +362,20 @@ impl QuickSearchDialog {
         on_open(target, window, cx);
     }
 
-    fn row(&self, ix: usize, item: &Item, active: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn list_row(&self, row: Row, active: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let height = row.height(window);
+        match row {
+            Row::Heading(kind) => div()
+                .h(height)
+                .px(rems(0.923))
+                .pt(rems(0.615))
+                .child(form::caption(t(cx, kind.heading()), cx))
+                .into_any_element(),
+            Row::Item(ix) => self.row(ix, &self.items[ix], ix == active, cx).h(height).into_any_element(),
+        }
+    }
+
+    fn row(&self, ix: usize, item: &Item, active: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = cx.theme();
         let color = item.color.as_deref().and_then(parse_color).unwrap_or(theme.muted_foreground);
         let highlight =
@@ -316,11 +383,16 @@ impl QuickSearchDialog {
         let label = StyledText::new(item.label.clone())
             .with_highlights(byte_ranges(&item.label, &item.ranges).into_iter().map(|range| (range, highlight)));
         let detail = item.detail.clone().filter(|detail| !detail.is_empty());
+        let icon = match &item.target {
+            Target::Connection(connection) => engine_icon(&connection.driver),
+            _ => Icon::new(item.icon),
+        };
         h_flex()
             .id(("quick-search-item", ix))
+            .debug_selector(move || format!("quick-search-row-{ix}"))
+            .w_full()
             .gap(rems(0.462))
             .px(rems(0.923))
-            .py(rems(0.769))
             .cursor_pointer()
             .when(active, |el| el.bg(theme.accent))
             .hover(|style| style.bg(theme.accent))
@@ -334,7 +406,7 @@ impl QuickSearchDialog {
                 this.active = ix;
                 this.confirm(window, cx);
             }))
-            .child(Icon::new(item.icon).size(ICON_SM).text_color(color))
+            .child(icon.size(ICON_SM).text_color(color))
             .child(div().flex_1().min_w_0().truncate().text_size(TEXT_BASE).child(label))
             .when_some(detail, |el, detail| {
                 el.child(div().flex_none().text_size(TEXT_XS).text_color(theme.muted_foreground).child(detail))
@@ -345,9 +417,6 @@ impl QuickSearchDialog {
 impl Render for QuickSearchDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let rem = window.rem_size();
-        let max_height = (rem * 32.308).min(window.viewport_size().height - rem * 16.923).max(px(0.));
-        let active = self.active_ix();
         let list = if self.items.is_empty() {
             div()
                 .px(rems(0.923))
@@ -356,17 +425,26 @@ impl Render for QuickSearchDialog {
                 .child(t(cx, "quickSearch.noResults"))
                 .into_any_element()
         } else {
-            let rows: Vec<_> =
-                self.items.iter().enumerate().map(|(ix, item)| self.row(ix, item, ix == active, cx)).collect();
-            let list = v_flex()
-                .id("quick-search-list")
-                .max_h(max_height)
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .children(rows);
-            div().relative().child(list).hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical).into_any_element()
+            let sizes: Vec<Size<Pixels>> = self.rows.iter().map(|row| size(px(0.), row.height(window))).collect();
+            let height = sizes.iter().map(|size| size.height).sum::<Pixels>();
+            let rows = v_virtual_list(cx.entity(), "quick-search-rows", Rc::new(sizes), |this, range, window, cx| {
+                let active = this.active_ix();
+                range.map(|ix| this.list_row(this.rows[ix], active, window, cx)).collect::<Vec<_>>()
+            })
+            .track_scroll(&self.scroll);
+            // As tall as its rows until the dialog reaches its limit, then it shrinks and scrolls.
+            div()
+                .debug_selector(|| "quick-search-list".into())
+                .relative()
+                .h(height)
+                .min_h_0()
+                .child(rows)
+                .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical)
+                .into_any_element()
         };
         v_flex()
+            .debug_selector(|| "quick-search".into())
+            .max_h(window.viewport_size().height * 0.8)
             .key_context("QuickSearch")
             .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
                 cx.stop_propagation();
@@ -385,7 +463,28 @@ impl Render for QuickSearchDialog {
                     .child(Styled::h(form::input(&self.input, window, cx), rems(2.462))),
             )
             .child(list)
+            .child(legend(cx))
     }
+}
+
+// The keys that work here, as GPUI Kit's own pickers don't say.
+fn legend(cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let pair = |keys: Vec<&'static str>, label: SharedString| {
+        h_flex().gap(rems(0.308)).children(keys.into_iter().map(|key| form::keycap(key, cx))).child(label)
+    };
+    h_flex()
+        .debug_selector(|| "quick-search-legend".into())
+        .gap(rems(1.231))
+        .px(rems(0.923))
+        .py(rems(0.538))
+        .border_t_1()
+        .border_color(theme.border)
+        .text_size(TEXT_XS)
+        .text_color(theme.muted_foreground)
+        .child(pair(vec!["↑", "↓"], t(cx, "quickSearch.navigate")))
+        .child(pair(vec!["Enter"], t(cx, "quickSearch.open")))
+        .child(pair(vec!["Esc"], t(cx, "quickSearch.close")))
 }
 
 pub fn open(
@@ -407,7 +506,7 @@ pub fn open(
         let rem = window.rem_size();
         modal
             .w(rem * 55.385)
-            .margin_top(rem * 5.5)
+            .at_top(rem * 5.5, window)
             .p_0()
             .bg(cx.theme().sidebar)
             .rounded(RADIUS_LG)

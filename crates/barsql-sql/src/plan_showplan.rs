@@ -75,6 +75,7 @@ fn rel_op(node: Node) -> PlanNode {
         detail: operator.map(detail).unwrap_or_default(),
         cost_total: number(node, "EstimatedTotalSubtreeCost"),
         rows_planned: number(node, "EstimateRows"),
+        rows_read: number(node, "EstimatedRowsRead").or_else(|| number(node, "TableCardinality")),
         fields: fields(node),
         ..Default::default()
     };
@@ -113,6 +114,9 @@ fn measure(node: Node, n: &mut PlanNode) {
     let max = |attribute: &str| threads.iter().filter_map(|t| number(*t, attribute)).reduce(f64::max);
     let runs = sum("ActualExecutions");
     n.rows_actual = Some(sum("ActualRows"));
+    if threads.iter().any(|t| t.attribute("ActualRowsRead").is_some()) {
+        n.rows_read = Some(sum("ActualRowsRead"));
+    }
     n.loops = Some(runs);
     n.never_run = runs == 0.0;
     let batch = threads.iter().any(|t| t.attribute("ActualExecutionMode") == Some("Batch"));

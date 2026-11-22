@@ -3,19 +3,21 @@ use std::rc::Rc;
 use barsql_app::path_defaults;
 use barsql_core::capabilities::{DefaultSchema, Location};
 use barsql_core::config::path_parts;
+use barsql_core::conn_url::{UrlParts, connection_url, parse_connection_url};
 use barsql_core::{ConfigError, ConnectionConfig, DriverType, ExtensionFile, ExtensionsConfig, SshConfig};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputState, Paste};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Side, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::assets::engine_icon;
 use crate::connections_panel::parse_color;
 use crate::file_dialogs;
-use crate::form::{self, SelectMenu, ToolButton};
+use crate::form::{self, LargeButton as _, SelectMenu, ToolButton};
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::schema;
@@ -317,6 +319,93 @@ impl ConnectionForm {
         }
     }
 
+    fn paste_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match clipboard_url(cx) {
+            Some(parts) => self.fill_from_url(parts, window, cx),
+            None => toast::error(t(cx, "connection.clipboardNotUrl"), cx),
+        }
+    }
+
+    // Name has focus when the dialog opens, so a URL pasted there fills the form. Other text pastes as usual.
+    fn paste_into_name(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(parts) = clipboard_url(cx) else { return };
+        cx.stop_propagation();
+        self.fill_from_url(parts, window, cx);
+    }
+
+    // Another server or login keeps nothing the URL leaves out: not the old password, token, port, instance or TLS.
+    fn fill_from_url(&mut self, parts: UrlParts, window: &mut Window, cx: &mut Context<Self>) {
+        let other_server = parts.other_server(&self.config(cx));
+        let tls_given = parts.ssl_mode.is_some();
+        if parts.driver != self.driver {
+            self.set_driver(parts.driver.clone(), window, cx);
+        } else if other_server && self.driver.capabilities().location == Location::Network {
+            Self::set(&self.fields.port, &default_port(&self.driver).to_string(), window, cx);
+        }
+        if other_server {
+            for field in [&self.fields.password, &self.fields.auth_token, &self.fields.instance] {
+                Self::set(field, "", window, cx);
+            }
+        }
+        let name = parts.name();
+        let port_given = parts.port.is_some();
+        let database = parts.database.clone();
+        let mut config = self.config(cx);
+        parts.apply(&mut config);
+        let f = &self.fields;
+        for (field, value) in [
+            (&f.host, &config.host),
+            (&f.username, &config.username),
+            (&f.password, &config.password),
+            (&f.instance, &config.instance),
+            (&f.file_path, &config.file_path),
+            (&f.url, &config.url),
+            (&f.auth_token, &config.auth_token),
+        ] {
+            Self::set(field, value, window, cx);
+        }
+        Self::set(&f.port, &config.port.to_string(), window, cx);
+        if let Some(database) = database {
+            self.pick_database(&database, window, cx);
+        }
+        let caps = self.driver.capabilities();
+        let mode = if tls_given && caps.tls_modes.contains(&config.ssl_mode.as_str()) {
+            config.ssl_mode
+        } else if other_server && caps.location == Location::Network {
+            default_tls(&self.driver).into()
+        } else {
+            self.ssl_mode.clone()
+        };
+        match port_given {
+            true => self.ssl_mode = mode,
+            false => self.set_ssl_mode(mode, window, cx),
+        }
+        if let Some(name) = name
+            && Self::value(&self.fields.name, cx).trim().is_empty()
+        {
+            Self::set(&self.fields.name, &name, window, cx);
+        }
+        cx.notify();
+    }
+
+    // A port left at the default follows TLS on and off.
+    fn set_ssl_mode(&mut self, mode: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.ssl_mode = mode;
+        if let Some((plain, tls)) = tls_ports(&self.driver) {
+            let (from, to) = if self.ssl_mode == "disable" { (tls, plain) } else { (plain, tls) };
+            if Self::value(&self.fields.port, cx) == from.to_string() {
+                Self::set(&self.fields.port, &to.to_string(), window, cx);
+            }
+        }
+    }
+
+    fn copy_url(&self, cx: &mut Context<Self>) {
+        if let Some(url) = connection_url(&self.config(cx)) {
+            cx.write_to_clipboard(ClipboardItem::new_string(url));
+            toast::success(t(cx, "toast.copiedClipboard"), cx);
+        }
+    }
+
     fn value(state: &Entity<InputState>, cx: &App) -> String {
         state.read(cx).value().to_string()
     }
@@ -326,7 +415,7 @@ impl ConnectionForm {
         state.update(cx, |state, cx| state.set_value(value, window, cx));
     }
 
-    fn set_driver(&mut self, driver: DriverType, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn set_driver(&mut self, driver: DriverType, window: &mut Window, cx: &mut Context<Self>) {
         let caps = driver.capabilities();
         match caps.location {
             Location::Network => {
@@ -568,24 +657,36 @@ impl ConnectionForm {
         &self,
         id: &'static str,
         current: SharedString,
-        options: Vec<(SharedString, SharedString)>,
+        options: Vec<(SharedString, SharedString, Option<Icon>)>,
         pick: fn(&mut Self, SharedString, &mut Window, &mut Context<Self>),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let this = cx.entity().downgrade();
-        let label =
-            options.iter().find(|(value, _)| *value == current).map_or(current.clone(), |(_, label)| label.clone());
-        form::select(id, label, cx)
+        let chosen = options.iter().find(|(value, ..)| *value == current);
+        let label = chosen.map_or(current.clone(), |(_, label, _)| label.clone());
+        let button = match chosen.and_then(|(.., icon)| icon.clone()) {
+            Some(icon) => form::select_with_icon(id, icon, label, cx),
+            None => form::select(id, label, cx),
+        };
+        let icons = options.iter().any(|(.., icon)| icon.is_some());
+        button
             .debug_selector(move || id.into())
             .select_menu(window, cx, move |mut menu, _, _| {
-                for (value, label) in &options {
-                    let (this, value) = (this.clone(), value.clone());
-                    menu = menu.item(PopupMenuItem::new(label.clone()).checked(value == current).on_click(
-                        move |_, window, cx| {
-                            let _ = this.update(cx, |form, cx| pick(form, value.clone(), window, cx));
-                        },
-                    ));
+                // Icons take the left, so the check mark moves right.
+                if icons {
+                    menu = menu.check_side(Side::Right);
+                }
+                for (value, label, icon) in &options {
+                    let (this, picked) = (this.clone(), value.clone());
+                    let item =
+                        PopupMenuItem::new(label.clone()).checked(*value == current).on_click(move |_, window, cx| {
+                            let _ = this.update(cx, |form, cx| pick(form, picked.clone(), window, cx));
+                        });
+                    menu = menu.item(match icon {
+                        Some(icon) => item.icon(icon.clone()),
+                        None => item,
+                    });
                 }
                 menu
             })
@@ -623,8 +724,7 @@ impl ConnectionForm {
         cx: &mut Context<Self>,
     ) -> Div {
         h_flex().gap(rems(0.615)).child(form::input(input, window, cx).flex_1()).child(
-            Button::new(id)
-                .large()
+            form::field_button(id)
                 .debug_selector(move || id.into())
                 .label(t(cx, "common.browse"))
                 .on_click(cx.listener(move |form, _, window, cx| form.browse(target, window, cx))),
@@ -671,6 +771,10 @@ enum Browse {
     KnownHosts,
 }
 
+fn clipboard_url(cx: &App) -> Option<UrlParts> {
+    cx.read_from_clipboard().and_then(|item| item.text()).and_then(|text| parse_connection_url(&text))
+}
+
 // A selector for scenario tests and a scope for test lookups.
 fn labelled(selector: &'static str, input: Input) -> Stateful<Div> {
     div().id(selector).debug_selector(move || selector.into()).child(input)
@@ -684,7 +788,7 @@ impl Render for ConnectionForm {
         let drivers = DriverType::KNOWN
             .iter()
             .filter(|d| d.is_supported())
-            .map(|d| (d.as_str().to_string().into(), t(cx, copy(d).label)))
+            .map(|d| (d.as_str().to_string().into(), t(cx, copy(d).label), Some(engine_icon(d))))
             .collect();
         let driver_select = self.select(
             "conn-driver",
@@ -736,13 +840,34 @@ impl Render for ConnectionForm {
             |form| form.confirm_changes = !form.confirm_changes,
             cx,
         );
-        let mut body = modal::body()
-            .child(form::group(t(cx, "connection.name"), labelled("conn-name", form::input(&f.name, window, cx)), cx))
-            .child(form::group(t(cx, "connection.driver"), driver_select, cx))
-            .child(read_only)
-            .child(confirm_changes)
-            .child(form::group(t(cx, "connection.tabColor"), swatches, cx));
         let location = self.driver.capabilities().location;
+        let url_buttons = h_flex()
+            .flex_1()
+            .gap(rems(0.615))
+            .child(
+                form::icon_button("conn-paste-url", Icon::new(Lucide::ClipboardPaste), t(cx, "connection.pasteUrl"))
+                    .debug_selector(|| "conn-paste-url".into())
+                    .on_click(cx.listener(|form, _, window, cx| form.paste_url(window, cx))),
+            )
+            .when(location != Location::Url, |el| {
+                el.child(
+                    form::icon_button("conn-copy-url", Icon::new(Lucide::Copy), t(cx, "connection.copyUrl"))
+                        .debug_selector(|| "conn-copy-url".into())
+                        .disabled(connection_url(&self.config(cx)).is_none())
+                        .on_click(cx.listener(|form, _, _, cx| form.copy_url(cx))),
+                )
+            });
+        let mut body = modal::body()
+            .child(
+                form::group(t(cx, "connection.name"), labelled("conn-name", form::input(&f.name, window, cx)), cx)
+                    .capture_action(cx.listener(Self::paste_into_name)),
+            )
+            .child(form::group(t(cx, "connection.driver"), driver_select, cx));
+        let behaviour = form::section(cx).child(read_only).child(confirm_changes).child(form::group(
+            t(cx, "connection.tabColor"),
+            swatches,
+            cx,
+        ));
         if location == Location::LocalFile {
             let file_row = self.browse_row(&f.file_path, "browse-sqlite", Browse::Sqlite, window, cx);
             body = body.child(form::group(t(cx, "connection.file"), file_row, cx));
@@ -812,10 +937,14 @@ impl Render for ConnectionForm {
                 ))
                 .child(self.ssh_section(window, cx));
         }
-        let body = body.child(self.mcp_section(cx)).children(self.error.clone().map(|error| form::error(error, cx)));
+        let body = body
+            .child(behaviour)
+            .child(self.mcp_section(cx))
+            .children(self.error.clone().map(|error| form::error(error, cx)));
         let (testing, busy) = (self.testing, self.busy());
         modal::scroll_content().child(modal::scroll_body(body)).child(
             modal::footer(cx)
+                .child(url_buttons)
                 .child(
                     Button::new("connection-cancel")
                         .large()
@@ -824,9 +953,13 @@ impl Render for ConnectionForm {
                 )
                 .child(
                     Button::new("connection-test")
-                        .large()
                         .debug_selector(|| "connection-test".into())
-                        .label(t(cx, if testing { "common.testing" } else { "common.test" }))
+                        .map(|button| match testing {
+                            true => button
+                                .large_with_spinner(t(cx, "common.test"))
+                                .accessibility_label(t(cx, "common.testing")),
+                            false => button.large().label(t(cx, "common.test")),
+                        })
                         .disabled(busy)
                         .on_click(cx.listener(|form, _, window, cx| form.test(window, cx))),
                 )
@@ -835,7 +968,12 @@ impl Render for ConnectionForm {
                         .large()
                         .debug_selector(|| "connection-save".into())
                         .primary()
-                        .label(t(cx, "common.save"))
+                        .child(
+                            h_flex()
+                                .gap(rems(0.462))
+                                .child(t(cx, "common.save"))
+                                .child(form::key_chip("Enter", theme.primary_foreground)),
+                        )
                         .disabled(busy)
                         .on_click(cx.listener(|form, _, window, cx| form.save(window, cx))),
                 ),
@@ -850,21 +988,14 @@ impl ConnectionForm {
             .capabilities()
             .tls_modes
             .iter()
-            .map(|mode| (mode.to_string().into(), t(cx, ssl_label(mode))))
+            .map(|mode| (mode.to_string().into(), t(cx, ssl_label(mode)), None))
             .collect();
         self.select(
             "conn-ssl",
             self.ssl_mode.clone().into(),
             ssl,
             |form, value, window, cx| {
-                form.ssl_mode = value.to_string();
-                // A port left at the default follows TLS on and off.
-                if let Some((plain, tls)) = tls_ports(&form.driver) {
-                    let (from, to) = if form.ssl_mode == "disable" { (tls, plain) } else { (plain, tls) };
-                    if Self::value(&form.fields.port, cx) == from.to_string() {
-                        Self::set(&form.fields.port, &to.to_string(), window, cx);
-                    }
-                }
+                form.set_ssl_mode(value.to_string(), window, cx);
                 cx.notify();
             },
             window,
@@ -887,9 +1018,9 @@ impl ConnectionForm {
             return section.into_any_element();
         }
         let auth = vec![
-            ("key".into(), t(cx, "connection.sshAuthKey")),
-            ("password".into(), t(cx, "connection.sshAuthPassword")),
-            ("agent".into(), t(cx, "connection.sshAuthAgent")),
+            ("key".into(), t(cx, "connection.sshAuthKey"), None),
+            ("password".into(), t(cx, "connection.sshAuthPassword"), None),
+            ("agent".into(), t(cx, "connection.sshAuthAgent"), None),
         ];
         let auth_select = self.select(
             "conn-ssh-auth",
@@ -969,9 +1100,7 @@ impl ConnectionForm {
         });
         let copy = Button::new("conn-mcp-setup")
             .debug_selector(|| "conn-mcp-setup".into())
-            .large()
-            .icon(Icon::new(Lucide::Copy))
-            .label(t(cx, "connection.copyMcpSetup"))
+            .large_with_icon(Icon::new(Lucide::Copy), t(cx, "connection.copyMcpSetup"))
             .on_click(|_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(barsql_app::mcp::setup_json()));
                 toast::success(t(cx, "toast.copiedMcpSetup"), cx);
@@ -1188,11 +1317,12 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use gpui_kit::component::Root;
-    use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext};
+    use gpui_kit::component::{Root, WindowExt as _};
+    use gpui_kit::test::TestWindowExt as _;
+    use gpui_kit::{AppContext as _, ClipboardItem, Entity, TestAppContext, VisualTestContext};
 
     use crate::i18n::I18n;
-    use crate::test_support::{Env, settle};
+    use crate::test_support::{Env, chord, settle};
 
     struct Blank;
 
@@ -1231,7 +1361,7 @@ mod tests {
     }
 
     fn error(form: &Entity<ConnectionForm>, cx: &mut VisualTestContext) -> Option<String> {
-        cx.update(|_, cx| form.read(cx).error.as_ref().map(|e| e.to_string()))
+        cx.update(|_, cx| form.read(cx).error.clone().map(|e| e.to_string()))
     }
 
     #[gpui_kit::test]
@@ -1289,6 +1419,241 @@ mod tests {
         fill(&form, |f| &f.url, "ftp://db.local", cx);
         assert_eq!(save(cx), "Die Datenbank-URL muss mit libsql://, https://, http://, wss:// oder ws:// beginnen.");
         assert!(saved.borrow().is_empty());
+    }
+
+    fn paste(text: &str, cx: &mut VisualTestContext) {
+        cx.update(|window, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+            window.click("conn-paste-url", cx);
+        });
+    }
+
+    fn driver(form: &Entity<ConnectionForm>, cx: &mut VisualTestContext) -> DriverType {
+        form.read_with(cx, |form, _| form.driver.clone())
+    }
+
+    fn values(
+        form: &Entity<ConnectionForm>,
+        fields: &[fn(&Fields) -> &Entity<InputState>],
+        cx: &mut VisualTestContext,
+    ) -> Vec<String> {
+        cx.update(|_, cx| fields.iter().map(|field| ConnectionForm::value(field(&form.read(cx).fields), cx)).collect())
+    }
+
+    #[gpui_kit::test]
+    fn a_pasted_url_fills_the_form_and_the_form_copies_back_without_its_password(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, saved) = open_form(None, cx);
+        let login: [fn(&Fields) -> &Entity<InputState>; 5] =
+            [|f| &f.name, |f| &f.host, |f| &f.port, |f| &f.username, |f| &f.password];
+        paste("mysql://app:s3cret@db.local:3307/shop?ssl-mode=REQUIRED", cx);
+        assert_eq!(driver(&form, cx), DriverType::MySql);
+        assert_eq!(values(&form, &login, cx), ["shop", "db.local", "3307", "app", "s3cret"]);
+        assert_eq!(form.read_with(cx, |form, _| form.ssl_mode.clone()), "require");
+        cx.update(|window, cx| window.click("conn-copy-url", cx));
+        let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        assert_eq!(copied.as_deref(), Some("mysql://app@db.local:3307/shop?ssl-mode=REQUIRED"));
+        paste("mysql://bob@db2.local/hr", cx);
+        assert_eq!(
+            values(&form, &login, cx),
+            ["shop", "db2.local", "3306", "bob", ""],
+            "nothing of the old login stays"
+        );
+        assert_eq!(form.read_with(cx, |form, _| form.ssl_mode.clone()), "disable", "nor its TLS");
+        assert!(saved.borrow().is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn a_clipboard_without_a_url_fills_nothing_and_says_so(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
+        fill(&form, |f| &f.host, "db.local", cx);
+        for text in ["", "not a url", "https://mydb-org.turso.io"] {
+            paste(text, cx);
+            assert_eq!(values(&form, &[|f| &f.host], cx), ["db.local"], "{text}");
+        }
+        assert_eq!(driver(&form, cx), DriverType::Postgres);
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        let said = "The clipboard doesn't hold a connection URL BarSQL can read";
+        assert!(toasts.iter().any(|(_, text)| text == said), "{toasts:?}");
+        assert_eq!(error(&form, cx), None, "nothing inline");
+    }
+
+    #[gpui_kit::test]
+    fn copy_waits_for_something_to_copy(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let copy = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string("before".into()));
+                window.click("conn-copy-url", cx);
+                let disabled = window.find("conn-copy-url").disabled() == Some(true);
+                (cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default(), disabled)
+            })
+        };
+        assert_eq!(copy(cx), ("before".into(), true), "a SQLite form with no file yet");
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
+        fill(&form, |f| &f.host, "", cx);
+        assert_eq!(copy(cx), ("before".into(), true), "a server with no host");
+        fill(&form, |f| &f.host, "db.local", cx);
+        let (copied, disabled) = copy(cx);
+        assert!(copied.starts_with("postgres://postgres@db.local:5432") && !disabled, "{copied}");
+    }
+
+    #[gpui_kit::test]
+    fn a_running_test_says_so_to_screen_readers(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let name = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                window.render_frame(cx);
+                window.find("connection-test").label().map(str::to_string)
+            })
+        };
+        assert_eq!(name(cx).as_deref(), Some("Test"));
+        form.update(cx, |form, cx| {
+            form.testing = true;
+            cx.notify();
+        });
+        assert_eq!(name(cx).as_deref(), Some("Testing connection"));
+    }
+
+    #[gpui_kit::test]
+    fn the_url_buttons_have_names_for_screen_readers(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        open_form(None, cx);
+        cx.update(|window, cx| {
+            window.render_frame(cx);
+            for id in ["conn-paste-url", "conn-copy-url"] {
+                assert!(window.find(id).label().is_some_and(|label| !label.is_empty()), "{id}");
+            }
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_url_pasted_into_name_fills_the_form(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        let paste_into_name = |text: &str, cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                let name = form.read(cx).fields.name.clone();
+                name.update(cx, |state, cx| state.focus(window, cx));
+            });
+            cx.simulate_keystrokes(&format!("{} {}", chord("mod-a"), chord("mod-v")));
+        };
+        paste_into_name("postgres://app@db.local:5433/forum", cx);
+        assert_eq!(driver(&form, cx), DriverType::Postgres);
+        let login: [fn(&Fields) -> &Entity<InputState>; 4] = [|f| &f.name, |f| &f.host, |f| &f.port, |f| &f.username];
+        assert_eq!(values(&form, &login, cx), ["forum", "db.local", "5433", "app"]);
+        paste_into_name("Forum (prod)", cx);
+        assert_eq!(values(&form, &[|f| &f.name, |f| &f.host], cx), ["Forum (prod)", "db.local"], "text stays text");
+        paste_into_name("ftp://files.local", cx);
+        assert_eq!(values(&form, &[|f| &f.name], cx), ["ftp://files.local"], "so does a URL BarSQL doesn't read");
+        assert_eq!(driver(&form, cx), DriverType::Postgres);
+        let toasts = cx.update(|_, cx| crate::toast::messages(cx));
+        assert!(toasts.is_empty(), "{toasts:?}");
+    }
+
+    // German's labels are the longest, and its "Verbindung wird getestet" the longest of all.
+    #[gpui_kit::test]
+    fn the_footer_fits_in_german_while_a_test_runs(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        cx.update(|_, cx| cx.set_global(I18n::new("de")));
+        let shop = ConnectionConfig {
+            name: "Shop".into(),
+            driver: DriverType::Postgres,
+            host: "db.local".into(),
+            database: "shop".into(),
+            ..Default::default()
+        };
+        let (form, _) = open_form(Some(shop), cx);
+        form.update(cx, |form, cx| {
+            form.testing = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let mut bounds = |selector: &'static str| cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector}"));
+        let (paste, name) = (bounds("conn-paste-url"), bounds("conn-name"));
+        let (save, close) = (bounds("connection-save"), bounds("modal-close"));
+        assert!(paste.left() >= name.left() - gpui_kit::px(0.5), "{paste:?} vs {name:?}");
+        assert!(save.right() <= close.right() + gpui_kit::px(0.5), "{save:?} vs {close:?}");
+        assert_eq!(paste.size.height, save.size.height, "as tall as the buttons beside it");
+    }
+
+    #[gpui_kit::test]
+    fn turso_pastes_but_has_no_url_to_copy(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Turso, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("conn-copy-url").is_none());
+        assert!(cx.debug_bounds("conn-paste-url").is_some());
+        paste("libsql://mydb-org.turso.io?authToken=abc", cx);
+        assert_eq!(values(&form, &[|f| &f.url, |f| &f.auth_token], cx), ["libsql://mydb-org.turso.io", "abc"]);
+        paste("postgres://app@db9/x", cx);
+        assert_eq!(driver(&form, cx), DriverType::Postgres, "a URL for another engine leaves Turso");
+    }
+
+    #[gpui_kit::test]
+    fn a_pasted_url_follows_the_forms_own_rules(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let (form, _) = open_form(None, cx);
+        paste("sqlite:///Users/me/app.db", cx);
+        assert_eq!(values(&form, &[|f| &f.name, |f| &f.file_path], cx), ["app.db", "/Users/me/app.db"]);
+        paste("clickhouse://default:pw@ch.example.com/analytics?secure=true", cx);
+        assert_eq!(values(&form, &[|f| &f.port], cx), ["8443"], "TLS takes its port");
+        paste("clickhouse://default@ch2.example.com:8123/default", cx);
+        assert_eq!(values(&form, &[|f| &f.port], cx), ["8123"]);
+        assert_eq!(form.read_with(cx, |form, _| form.ssl_mode.clone()), "disable", "another server, TLS unsaid");
+        cx.update(|window, cx| window.close_dialog(cx));
+        let mysql = ConnectionConfig {
+            name: "Shop".into(),
+            driver: DriverType::MySql,
+            host: "db.local".into(),
+            username: "root".into(),
+            database: "shop".into(),
+            schema: "shop".into(),
+            ..Default::default()
+        };
+        let (form, _) = open_form(Some(mysql), cx);
+        paste("mysql://root@db.local/billing", cx);
+        assert_eq!(values(&form, &[|f| &f.database, |f| &f.schema], cx), ["billing", "billing"]);
+    }
+
+    #[gpui_kit::test]
+    fn a_paste_keeps_the_login_only_for_the_same_server(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let sales = ConnectionConfig {
+            name: "Sales".into(),
+            driver: DriverType::SqlServer,
+            host: "SQLPROD01".into(),
+            port: 14330,
+            instance: "INST1".into(),
+            username: "sa".into(),
+            password: "pw".into(),
+            ..Default::default()
+        };
+        let (form, _) = open_form(Some(sales), cx);
+        paste(r"jdbc:sqlserver://sqlprod01\INST1;databaseName=Reports", cx);
+        assert_eq!(
+            values(&form, &[|f| &f.password, |f| &f.port], cx),
+            ["pw", "14330"],
+            "the same server in other case"
+        );
+        paste("sqlserver://sa@sqlprod01%5CINST2/master", cx);
+        assert_eq!(values(&form, &[|f| &f.password, |f| &f.instance], cx), ["", "INST2"], "another instance");
     }
 
     #[gpui_kit::test]

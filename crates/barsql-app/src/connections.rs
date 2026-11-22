@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use barsql_core::{
     ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,
-    RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TriggerInfo,
+    ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TableSize, TriggerInfo,
 };
 use barsql_db::Engine;
 use barsql_storage::ConnectionFolder;
@@ -166,6 +166,12 @@ impl BarApp {
         Ok(SchemaBundle { status, schemas, loaded_tables })
     }
 
+    // One minimal request's round trip on an open connection. None for a local file.
+    pub(crate) async fn round_trip_inner(&self, id: &str) -> Result<Option<Duration>, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.round_trip()).await
+    }
+
     pub(crate) async fn list_schemas_inner(&self, id: &str) -> Result<Vec<SchemaInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_schemas()).await
@@ -174,6 +180,25 @@ impl BarApp {
     pub(crate) async fn list_tables_inner(&self, id: &str, schema: &str) -> Result<Vec<TableInfo>, QueryError> {
         let engine = self.engine(id).await?;
         within(SCHEMA_TIMEOUT, engine.list_tables(schema)).await
+    }
+
+    pub(crate) async fn referencing_keys_inner(
+        &self,
+        id: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ReferencingKey>, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.referencing_keys(schema, table)).await
+    }
+
+    pub(crate) async fn table_sizes_inner(
+        &self,
+        id: &str,
+        schema: &str,
+    ) -> Result<HashMap<String, TableSize>, QueryError> {
+        let engine = self.engine(id).await?;
+        within(SCHEMA_TIMEOUT, engine.table_sizes(schema)).await
     }
 
     pub(crate) async fn list_columns_inner(

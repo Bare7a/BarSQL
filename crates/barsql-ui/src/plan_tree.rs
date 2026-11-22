@@ -74,6 +74,25 @@ pub fn estimate_factor(node: &PlanNode) -> Option<f64> {
     }
 }
 
+// Below this a full scan is cheap, as on a lookup table.
+const FULL_SCAN_ROWS: f64 = 1000.;
+
+// Rows read before the filter where the engine says. SQLite and ClickHouse plans have no counts, so no chip.
+pub fn is_full_scan(node: &PlanNode) -> bool {
+    // Postgres names a CTE's or subplan's top node first, as in "CTE t: Seq Scan".
+    let label = node.label.rsplit_once(": ").map_or(node.label.as_str(), |(_, operator)| operator);
+    let label = label.strip_prefix("Parallel ").unwrap_or(label);
+    let full = label == "Seq Scan"
+        || label == "Table (ALL)"
+        || label.starts_with("Table scan on")
+        || label == "Table Scan"
+        || label == "Clustered Index Scan";
+    let rows = node.rows_read.or(node.rows_actual).or(node.rows_planned).unwrap_or(0.);
+    // MySQL's own temporary and derived tables, like <temporary>, take no index.
+    let internal = node.relation.starts_with('<');
+    full && !internal && !node.never_run && rows >= FULL_SCAN_ROWS
+}
+
 // A node the executor never reached produced no rows by definition, so its factor says nothing.
 pub fn is_estimate_off(factor: Option<f64>, never_run: bool) -> bool {
     match factor {
@@ -187,6 +206,35 @@ mod tests {
 
     fn plan(nodes: Vec<PlanNode>, analyzed: bool) -> QueryPlan {
         QueryPlan { analyzed, nodes, ..Default::default() }
+    }
+
+    #[test]
+    fn full_scans_are_flagged_by_the_rows_they_read() {
+        let scan = |label: &str, rows_read: Option<f64>, rows_planned: f64| PlanNode {
+            rows_read,
+            rows_planned: Some(rows_planned),
+            ..node(label)
+        };
+        for label in [
+            "Seq Scan",
+            "Parallel Seq Scan",
+            "Table (ALL)",
+            "Table scan on t",
+            "Table Scan",
+            "Clustered Index Scan",
+            "Parallel Clustered Index Scan",
+            "CTE t: Seq Scan",
+            "SubPlan 1: Seq Scan",
+            "InitPlan 1 (returns $0): Seq Scan",
+        ] {
+            assert!(is_full_scan(&scan(label, None, 5000.)), "{label}");
+        }
+        assert!(is_full_scan(&scan("Seq Scan", Some(5_000_000.), 3.)), "a selective filter still reads it all");
+        assert!(!is_full_scan(&scan("Seq Scan", None, 12.)), "a small table");
+        assert!(!is_full_scan(&scan("Index Scan", None, 5000.)));
+        assert!(!is_full_scan(&scan("SCAN", None, 0.)), "SQLite's plans have no counts");
+        let temporary = PlanNode { relation: "<temporary>".into(), ..scan("Table scan on <temporary>", None, 5000.) };
+        assert!(!is_full_scan(&temporary), "MySQL's own tables take no index");
     }
 
     // Three nodes. The Seq Scan child dominates time and cost.

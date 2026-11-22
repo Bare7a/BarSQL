@@ -443,7 +443,7 @@ fn a_restart_restores_the_table_views_sort_and_hidden_columns(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
-fn the_filter_suggests_columns_and_enter_takes_the_suggestion(cx: &mut TestAppContext) {
+fn the_filter_suggests_columns_and_tab_takes_the_suggestion(cx: &mut TestAppContext) {
     let mut app = prepared(
         cx,
         "CREATE TABLE e2e_sug (id INTEGER PRIMARY KEY, name VARCHAR(20));
@@ -455,13 +455,12 @@ fn the_filter_suggests_columns_and_enter_takes_the_suggestion(cx: &mut TestAppCo
     let completion = app.cx.update(|_, cx| tab.read(cx).completion());
     let labels = app.cx.update(|_, cx| completion.read(cx).labels(cx));
     assert_eq!(labels.first().map(String::as_str), Some("name"), "{labels:?}");
-    app.keys("enter");
+    app.keys("tab");
     let filter = |app: &mut Driver| {
         app.cx.update(|_, cx| (tab.read(cx).filter_text(cx), tab.read(cx).applied_filter().to_string()))
     };
-    assert_eq!(filter(&mut app), ("name".to_string(), String::new()), "Enter took the suggestion, not the filter");
+    assert_eq!(filter(&mut app), ("name".to_string(), String::new()), "Tab took the suggestion, not the filter");
     app.type_text(" = 'b'");
-    app.keys("escape");
     app.keys("enter");
     wait(&mut app);
     assert_eq!(filter(&mut app).1, "name = 'b'");

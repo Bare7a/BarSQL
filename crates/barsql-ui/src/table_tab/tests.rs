@@ -9,7 +9,7 @@ use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestCon
 use super::{TableTab, TableTabEvent};
 use crate::grid::GridEvent;
 use crate::query_tab::new_tab_id;
-use crate::test_support::{Env, settle};
+use crate::test_support::{Env, settle, type_slowly};
 
 fn seed(env: &Env, sql: &str) {
     for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
@@ -338,4 +338,58 @@ fn the_filter_placeholder_follows_the_language(cx: &mut TestAppContext) {
     let german = cx.update(|_, cx| crate::i18n::t(cx, "tableView.filterPlaceholder").to_string());
     assert_ne!(english, german);
     assert_eq!(placeholder(cx), german);
+}
+
+fn focus_filter(view: &Entity<TableTab>, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| gpui_kit::Focusable::focus_handle(view.read(cx).filter.read(cx), cx).focus(window, cx));
+}
+
+#[gpui_kit::test]
+fn enter_applies_the_filter_unless_a_suggestion_was_picked(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    cx.update(|cx| crate::state::set_setting_bool(cx, crate::completion::ENTER_KEY, false));
+    for line in ["name IS NULL", "id > 2990", "name = 'thing 2'"] {
+        let (view, cx) = open(&env, cx, "things");
+        focus_filter(&view, cx);
+        type_slowly(cx, line);
+        cx.simulate_keystrokes("enter");
+        settle(cx, idle(&view));
+        assert_eq!(cx.update(|_, cx| view.read(cx).applied_filter().to_string()), line);
+    }
+    let (view, cx) = open(&env, cx, "things");
+    focus_filter(&view, cx);
+    type_slowly(cx, "na");
+    cx.simulate_keystrokes("tab");
+    let state = cx.update(|_, cx| (view.read(cx).filter_text(cx), view.read(cx).applied_filter().to_string()));
+    assert_eq!(state, ("name".to_string(), String::new()));
+}
+
+#[gpui_kit::test]
+fn by_default_enter_in_the_filter_takes_a_suggestion_that_changes_it(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    focus_filter(&view, cx);
+    type_slowly(cx, "na");
+    cx.simulate_keystrokes("enter");
+    let state = cx.update(|_, cx| (view.read(cx).filter_text(cx), view.read(cx).applied_filter().to_string()));
+    assert_eq!(state, ("name".to_string(), String::new()), "Enter took the suggestion, not the filter");
+
+    let (view, cx) = open(&env, cx, "things");
+    focus_filter(&view, cx);
+    type_slowly(cx, "name IS NULL");
+    cx.simulate_keystrokes("enter");
+    settle(cx, idle(&view));
+    assert_eq!(cx.update(|_, cx| view.read(cx).applied_filter().to_string()), "name IS NULL");
+}
+
+#[gpui_kit::test]
+fn the_filter_suggests_nothing_until_a_name_starts(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    for line in ["id ", "id >", "id = 5 AND "] {
+        let (view, cx) = open(&env, cx, "things");
+        focus_filter(&view, cx);
+        type_slowly(cx, line);
+        let labels = cx.update(|_, cx| view.read(cx).completion.read(cx).labels(cx));
+        assert!(labels.is_empty(), "after {line:?}: {labels:?}");
+    }
 }

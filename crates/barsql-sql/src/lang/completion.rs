@@ -182,8 +182,13 @@ pub fn bindings_needing_columns(before: &str, parsed: &ParsedQuery, catalog: Opt
     needed
 }
 
+// Past a JOIN's ON and a space, where the list opens by itself for the foreign-key conditions.
+pub fn at_join_condition_start(before: &str, driver: Option<&DriverType>) -> bool {
+    before.ends_with(char::is_whitespace) && analyze_cursor(before, driver).shape.after_on_keyword
+}
+
 // Suggests `a.fk = b.pk` after ON from the joined tables' foreign keys, in both directions.
-fn fk_join_items(ctx: &CompletionContext, query_tables: &[QueryTableRef]) -> Vec<CompletionItem> {
+pub fn fk_join_items(ctx: &CompletionContext, query_tables: &[QueryTableRef]) -> Vec<CompletionItem> {
     let refs: Vec<&QueryTableRef> = query_tables
         .iter()
         .enumerate()
