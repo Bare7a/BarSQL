@@ -38,10 +38,6 @@ pub const OPEN_CONTEXT: &str = "completing";
 pub const ENTER_KEY: &str = "barsql-enter-accepts-suggestions";
 const VISIBLE_ROWS: usize = 12;
 const WIDTH: Pixels = px(430.);
-// A row's padding, icon and gap before its label. The list sits that far left of the word, plus its border.
-const ROW_PAD: f32 = 2.;
-const ICON_COLUMN: f32 = 16.;
-const ICON_GAP: f32 = 4.;
 
 // On: Enter takes the highlighted row whenever that changes the text. Off: only once a row was picked.
 pub fn enter_accepts_suggestions(cx: &App) -> bool {
@@ -417,9 +413,9 @@ impl<M: InputModeKind> Completion<M> {
             .id(ix)
             .w_full()
             .h(metrics.row_height)
-            .pl(px(ROW_PAD))
+            .pl(px(2.))
             .pr(px(10.))
-            .gap(px(ICON_GAP))
+            .gap(px(4.))
             .text_color(if selected { palette.selected_text } else { palette.text })
             .when(selected, |el| el.bg(palette.selected))
             .when(!selected, |el| el.hover(|style| style.bg(palette.hover)))
@@ -431,7 +427,7 @@ impl<M: InputModeKind> Completion<M> {
                 }),
             )
             .child(
-                div().flex_none().w(px(ICON_COLUMN)).flex().justify_center().child(
+                div().flex_none().w(px(16.)).flex().justify_center().child(
                     Icon::new(icon).size(px(14.)).text_color(if selected { palette.selected_text } else { color }),
                 ),
             )
@@ -618,19 +614,19 @@ impl<M: InputModeKind> Render for Completion<M> {
             .relative()
             .child(list)
             .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical);
-        let at_word = AtWord { editor: self.editor.clone(), start: self.start, list: Some(list.into_any_element()) };
-        deferred(at_word).with_priority(1).into_any_element()
+        let at_cursor = AtCursor { editor: self.editor.clone(), list: Some(list.into_any_element()) };
+        deferred(at_cursor).with_priority(1).into_any_element()
     }
 }
 
 // Placed in a deferred prepaint, which runs after the editor lays out the frame, so it's never a keystroke behind.
-struct AtWord<M: InputModeKind> {
+// It follows the cursor as each character is typed, as VS Code's list does.
+struct AtCursor<M: InputModeKind> {
     editor: Entity<InputBaseState<M>>,
-    start: usize,
     list: Option<AnyElement>,
 }
 
-impl<M: InputModeKind> IntoElement for AtWord<M> {
+impl<M: InputModeKind> IntoElement for AtCursor<M> {
     type Element = Self;
 
     fn into_element(self) -> Self {
@@ -638,7 +634,7 @@ impl<M: InputModeKind> IntoElement for AtWord<M> {
     }
 }
 
-impl<M: InputModeKind> Element for AtWord<M> {
+impl<M: InputModeKind> Element for AtCursor<M> {
     type RequestLayoutState = ();
     type PrepaintState = Option<AnyElement>;
 
@@ -669,8 +665,9 @@ impl<M: InputModeKind> Element for AtWord<M> {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
-        let word = self.editor.read(cx).range_to_bounds(&(self.start..self.start))?;
-        let at = point(word.left() - px(1. + ROW_PAD + ICON_COLUMN + ICON_GAP), word.bottom());
+        let state = self.editor.read(cx);
+        let caret = state.range_to_bounds(&(state.cursor()..state.cursor()))?;
+        let at = point(caret.left(), caret.bottom());
         #[cfg(test)]
         PLACED.with(|placed| placed.borrow_mut().push(at.x));
         let list = self.list.take()?;

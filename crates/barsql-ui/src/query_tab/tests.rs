@@ -731,18 +731,25 @@ fn a_preview_shows_its_suggestions(cx: &mut TestAppContext) {
     settle(cx, |cx| labels_of(&tab, cx) == ["things"]);
 }
 
+fn caret_left(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> f32 {
+    cx.update(|_, cx| {
+        let state = tab.read(cx).editor.read(cx);
+        f32::from(state.range_to_bounds(&(state.cursor()..state.cursor())).unwrap().left())
+    })
+}
+
 #[gpui_kit::test]
-fn the_list_stays_at_the_word_start(cx: &mut TestAppContext) {
+fn the_list_follows_the_cursor(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (tab, cx) = open(&env, cx, "");
     catalog_ready(&env, cx);
-    type_slowly(cx, "SELECT * FROM t");
     let left = |cx: &mut VisualTestContext| f32::from(cx.debug_bounds("completion").expect("list drawn").left());
-    let first = left(cx);
-    let word = cx.update(|_, cx| tab.read(cx).editor.read(cx).range_to_bounds(&(14..14))).unwrap();
-    assert!((first - (f32::from(word.left()) - 23.)).abs() < 1., "{first} vs word at {:?}", word.left());
+    type_slowly(cx, "SELECT * FROM t");
+    let (first, caret) = (left(cx), caret_left(&tab, cx));
+    assert!((first - caret).abs() < 1., "{first} vs caret at {caret}");
     type_slowly(cx, "hin");
-    assert_eq!(left(cx), first, "typing the word doesn't move it");
+    let (moved, caret) = (left(cx), caret_left(&tab, cx));
+    assert!((moved - caret).abs() < 1. && moved > first, "{moved} vs caret at {caret}, from {first}");
 }
 
 #[gpui_kit::test]
@@ -766,7 +773,7 @@ fn by_default_enter_takes_a_suggestion_that_changes_the_text(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
-fn every_frame_draws_the_list_at_the_word_start(cx: &mut TestAppContext) {
+fn every_frame_draws_the_list_at_the_cursor(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (tab, cx) = open(&env, cx, "");
     catalog_ready(&env, cx);
@@ -774,10 +781,12 @@ fn every_frame_draws_the_list_at_the_word_start(cx: &mut TestAppContext) {
     crate::completion::take_placements();
     cx.update(|window, cx| crate::theme::set_editor_font_size(18., window, cx));
     cx.run_until_parked();
-    let word = cx.update(|_, cx| tab.read(cx).editor.read(cx).range_to_bounds(&(14..14))).unwrap();
-    let want = f32::from(word.left()) - 23.;
+    let want = caret_left(&tab, cx);
     let placed: Vec<f32> = crate::completion::take_placements().into_iter().map(f32::from).collect();
-    assert!(!placed.is_empty() && placed.iter().all(|x| (x - want).abs() < 1.), "placed at {placed:?}, word at {want}");
+    assert!(
+        !placed.is_empty() && placed.iter().all(|x| (x - want).abs() < 1.),
+        "placed at {placed:?}, caret at {want}"
+    );
 }
 
 #[gpui_kit::test]
