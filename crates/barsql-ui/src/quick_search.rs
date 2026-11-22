@@ -12,7 +12,7 @@ use gpui_kit::*;
 
 use crate::assets::engine_icon;
 use crate::connections_panel::parse_color;
-use crate::fuzzy::rank_candidate;
+use crate::fuzzy::{fuzzy_match, rank_candidate};
 use crate::i18n::t;
 use crate::modal::AtTop as _;
 use crate::scrollbars::HoverScrollbar as _;
@@ -170,7 +170,7 @@ pub fn rank(query: &str, candidates: &Candidates) -> Vec<Item> {
                 if open {
                     continue;
                 }
-                let Some(m) = rank_candidate(&q, &table.name, &[&group.schema, &conn_name]) else { continue };
+                let Some(m) = fuzzy_match(&q, &table.name) else { continue };
                 items.push(Item {
                     kind: Kind::Table,
                     label: table.name.clone(),

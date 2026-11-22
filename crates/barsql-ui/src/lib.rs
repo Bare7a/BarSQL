@@ -14,6 +14,7 @@ mod editor_commands;
 mod er_diagram;
 mod export_dialog;
 mod file_dialogs;
+mod filter_syntax;
 mod form;
 mod fuzzy;
 mod grid;

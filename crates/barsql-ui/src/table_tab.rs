@@ -5,16 +5,18 @@ use std::sync::Arc;
 use barsql_app::{EditorTab, RunEvent, TableViewRef};
 use barsql_core::{ConnectionConfig, Row, RowDelete, RowUpdate, TableDataRequest};
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::input::Enter;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{InputEvent, InputMode, InputState};
+use gpui_kit::component::input::{EditorMode, EditorState, InputEvent};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::cell_viewer;
 use crate::completion::{self, Completion};
 use crate::dialogs;
+use crate::filter_syntax;
 use crate::form::{self, ToolButton};
 use crate::grid::{self, Choices, Grid, GridEvent, RowRef, TableOverlay};
 use crate::i18n::{I18n, count, t, t_count, t_with};
@@ -52,8 +54,8 @@ pub struct TableTab {
     pub connection: ConnectionConfig,
     pub schema: String,
     pub table: String,
-    filter: Entity<InputState>,
-    completion: Entity<Completion<InputMode>>,
+    filter: Entity<EditorState>,
+    completion: Entity<Completion<EditorMode>>,
     applied_filter: String,
     order_by: Option<String>,
     order_desc: bool,
@@ -81,10 +83,20 @@ impl EventEmitter<TableTabEvent> for TableTab {}
 impl TableTab {
     pub fn new(tab: EditorTab, connection: ConnectionConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let view = tab.table_view.unwrap_or_default();
+        // A one-line SQL editor, since only code editors color their text.
         let filter = cx.new(|cx| {
-            InputState::new(window, cx)
+            let mut state = EditorState::new(window, cx)
+                .language("sql")
+                .line_number(false)
+                .folding(false)
+                .soft_wrap(false)
+                .searchable(false)
+                .scroll_beyond_last_line(Some(0))
                 .placeholder(t(cx, "tableView.filterPlaceholder"))
-                .default_value(view.filter.clone())
+                .default_value(view.filter.clone());
+            state.set_highlighter_factory(filter_syntax::factory(connection.driver.clone()), cx);
+            state.set_scrollbar_renderer(Some(Rc::new(|_, _, _| div().into_any_element())));
+            state
         });
         let completion = cx.new(|cx| Completion::new(filter.clone(), None, window, cx).sized(TEXT_SM, rems(1.385)));
         let dialect = connection.driver.dialect();
@@ -95,7 +107,11 @@ impl TableTab {
         });
         let subscriptions = vec![
             cx.subscribe_in(&filter, window, |this, filter, event: &InputEvent, window, cx| match event {
-                InputEvent::PressEnter { .. } => this.apply_filter(window, cx),
+                // A paste joins its lines itself. This catches the rest, like a duplicated line.
+                InputEvent::Change if filter.read(cx).value().contains(['\n', '\r']) => {
+                    let joined = form::one_line(&filter.read(cx).value());
+                    filter.update(cx, |state, cx| state.set_value(joined, window, cx));
+                }
                 // Emptying the filter shows every row again, like the schema search does.
                 InputEvent::Change if filter.read(cx).value().is_empty() && !this.applied_filter.is_empty() => {
                     this.apply_filter(window, cx)
@@ -144,7 +160,7 @@ impl TableTab {
         this
     }
 
-    pub(crate) fn completion(&self) -> Entity<Completion<InputMode>> {
+    pub(crate) fn completion(&self) -> Entity<Completion<EditorMode>> {
         self.completion.clone()
     }
 
@@ -723,7 +739,17 @@ impl TableTab {
                     .flex_1()
                     .min_w_0()
                     .debug_selector(|| "table-filter".into())
-                    .child(form::filter_input(&self.filter, window, cx).cleanable(true))
+                    // Any Enter applies the filter here. Left to the editor, the key would also type a newline.
+                    .capture_action(cx.listener(|this, _: &Enter, window, cx| {
+                        cx.stop_propagation();
+                        this.apply_filter(window, cx);
+                    }))
+                    .child(
+                        form::filter_editor(&self.filter, window, cx)
+                            .when(!self.filter.read(cx).value().is_empty(), |frame| {
+                                frame.child(self.clear_filter_button(cx))
+                            }),
+                    )
                     .child(self.completion.clone()),
             )
             .child(
@@ -733,6 +759,23 @@ impl TableTab {
                     .disabled(self.loading.is_some())
                     .on_click(cx.listener(|this, _, window, cx| this.apply_filter(window, cx))),
             )
+    }
+
+    // As GPUI Kit's input draws its clear button.
+    fn clear_filter_button(&self, cx: &mut Context<Self>) -> Button {
+        Button::new("table-filter-clear")
+            .debug_selector(|| "table-filter-clear".into())
+            .icon(Icon::new(IconName::Close))
+            .accessibility_label(t(cx, "tableView.clearFilter"))
+            .text()
+            .xsmall()
+            .tab_stop(false)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.filter.update(cx, |state, cx| {
+                    state.clean(window, cx);
+                    state.focus_handle(cx).focus(window, cx);
+                })
+            }))
     }
 
     fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {

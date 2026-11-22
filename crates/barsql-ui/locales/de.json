@@ -255,6 +255,7 @@
     "showAllColumns": "Alle Spalten einblenden"
   },
   "tableView": {
+    "clearFilter": "Filter leeren",
     "structure": "Struktur",
     "markRows": "{{count}} Zeile zum Löschen markieren",
     "markRows_other": "{{count}} Zeilen zum Löschen markieren",

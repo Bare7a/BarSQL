@@ -528,6 +528,15 @@ fn nothing_is_suggested_until_a_name_starts(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn spread_out_letters_suggest_a_table(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thngs");
+    assert_eq!(labels_of(&tab, cx), ["things"]);
+}
+
+#[gpui_kit::test]
 fn a_caret_move_or_a_paste_closes_the_list(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (tab, cx) = open(&env, cx, "");

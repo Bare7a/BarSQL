@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Editor, EditorState, Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -42,6 +42,38 @@ fn field(state: &Entity<InputState>, text: Rems, padding: Rems, window: &Window,
     Styled::h(input, rems(2.308))
 }
 
+// filter_input's frame around a one-line SQL editor. Callers add buttons after the text.
+pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> Div {
+    let theme = cx.theme();
+    let focused = state.read(cx).focus_handle(cx).is_focused(window);
+    let padding = rems(0.615).to_pixels(window.rem_size());
+    let paste_into = state.clone();
+    // XSmall drops the editor's 8px top inset, so the frame centers the line.
+    let editor = Editor::new(state)
+        .xsmall()
+        .appearance(false)
+        .h(rems(1.385))
+        .flex_1()
+        .min_w_0()
+        .p_0()
+        .text_size(rems(0.923))
+        .context_menu(crate::context_menu::editor(state))
+        .on_paste(move |item, window, cx| {
+            let Some(text) = item.text().filter(|text| text.contains(['\n', '\r'])) else { return false };
+            paste_into.update(cx, |state, cx| state.replace(one_line(&text), window, cx));
+            true
+        });
+    let frame = h_flex().h(rems(2.308)).rounded(theme.radius).bg(theme.background).child(editor);
+    match focused {
+        true => frame.border_2().border_color(theme.ring).px(padding - px(1.)),
+        false => frame.border_1().border_color(theme.input).px(padding),
+    }
+}
+
+pub fn one_line(text: &str) -> String {
+    text.split(['\n', '\r']).map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
 pub fn filter_bar(field: impl IntoElement, cx: &App) -> Div {
     h_flex()
         .flex_none()
@@ -70,14 +102,6 @@ pub fn field_button(id: impl Into<ElementId>) -> Button {
 // and label go in as children, sized here.
 pub trait ToolButton {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self;
-    fn tool_keys(
-        self,
-        icon: impl Into<Icon>,
-        icon_size: Rems,
-        label: impl Into<SharedString>,
-        keys: String,
-        color: Hsla,
-    ) -> Self;
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self;
     fn tool_label(self, label: impl Into<SharedString>) -> Self;
 }
@@ -86,18 +110,6 @@ impl ToolButton for Button {
     fn tool(self, icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedString>) -> Self {
         let label = label.into();
         named(tool_frame(self), &label).child(tool_row(icon, icon_size, label))
-    }
-
-    fn tool_keys(
-        self,
-        icon: impl Into<Icon>,
-        icon_size: Rems,
-        label: impl Into<SharedString>,
-        keys: String,
-        color: Hsla,
-    ) -> Self {
-        let label = label.into();
-        named(tool_frame(self), &label).child(tool_row(icon, icon_size, label).child(key_chip(keys, color)))
     }
 
     fn tool_icon(self, icon: impl Into<Icon>, icon_size: Rems) -> Self {

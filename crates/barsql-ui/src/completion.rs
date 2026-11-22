@@ -403,9 +403,7 @@ impl<M: InputModeKind> Completion<M> {
         let selected = ix == self.selected;
         let palette = &metrics.palette;
         let (icon, color) = kind_icon(suggestion.item.kind, cx.theme());
-        let highlight = if selected { palette.selected_highlight } else { palette.highlight };
-        let style =
-            HighlightStyle { color: Some(highlight), font_weight: Some(FontWeight::BOLD), ..Default::default() };
+        let style = match_style(if selected { palette.selected_highlight } else { palette.highlight });
         let label = StyledText::new(suggestion.item.label.clone())
             .with_highlights(suggestion.matched.iter().map(|range| (range.clone(), style)));
         let args = suggestion.item.label_details.as_ref().and_then(|details| details.detail.clone());
@@ -489,6 +487,11 @@ fn palette(theme: &Theme) -> Palette {
         highlight: theme.primary,
         selected_highlight: theme.primary,
     }
+}
+
+// Color only. The bundled mono font stops at SemiBold, so bold matches read as another font.
+fn match_style(color: Hsla) -> HighlightStyle {
+    HighlightStyle { color: Some(color), ..Default::default() }
 }
 
 // The list's background and border, which the editor's hover card shares.
@@ -737,7 +740,14 @@ mod tests {
     use gpui_kit::component::{Theme, ThemeMode};
     use lsp_types::CompletionItemKind;
 
-    use super::{expand_snippet, fuzzy, kind_icon, palette};
+    use super::{expand_snippet, fuzzy, kind_icon, match_style, palette};
+
+    #[test]
+    fn matched_letters_keep_the_rows_font() {
+        let color = gpui_kit::hsla(0.6, 0.5, 0.5, 1.);
+        let style = match_style(color);
+        assert_eq!((style.color, style.font_weight), (Some(color), None));
+    }
 
     fn barsql(mode: ThemeMode) -> Theme {
         let mut theme = Theme::default();

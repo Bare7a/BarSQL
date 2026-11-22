@@ -101,6 +101,7 @@ const LITE: DialectSet = DialectSet::of(&[SqlDialect::Sqlite]);
 const PG_MY: DialectSet = DialectSet::of(&[SqlDialect::Postgres, SqlDialect::MySql]);
 const MY_LITE: DialectSet = DialectSet::of(&[SqlDialect::MySql, SqlDialect::Sqlite]);
 const PG_LITE: DialectSet = DialectSet::of(&[SqlDialect::Postgres, SqlDialect::Sqlite]);
+const PG_CH: DialectSet = DialectSet::of(&[SqlDialect::Postgres, SqlDialect::ClickHouse]);
 
 fn always(_: &StatementShape) -> bool {
     true
@@ -169,8 +170,8 @@ const KEYWORD_RULES: &[KeywordRule] = &[
     rule("NOT LIKE", ANY, true, |s| s.in_filter_clause),
     rule("NOT IN", ANY, true, |s| s.in_filter_clause),
     rule("NOT BETWEEN", ANY, true, |s| s.in_filter_clause),
-    rule("ILIKE", PG, true, |s| s.in_filter_clause),
-    rule("NOT ILIKE", PG, true, |s| s.in_filter_clause),
+    rule("ILIKE", PG_CH, true, |s| s.in_filter_clause),
+    rule("NOT ILIKE", PG_CH, true, |s| s.in_filter_clause),
     rule("SIMILAR TO", PG, true, |s| s.in_filter_clause),
     rule("IS DISTINCT FROM", PG, true, |s| s.in_filter_clause),
     rule("IS NOT DISTINCT FROM", PG, true, |s| s.in_filter_clause),
@@ -191,6 +192,15 @@ pub fn keywords_for_shape(shape: &StatementShape, driver: Option<&DriverType>) -
         .filter(|r| (r.gate)(shape))
         .map(|r| r.kw)
         .collect()
+}
+
+// A table view's WHERE filter: the WHERE keywords minus the clauses that would end it.
+pub fn filter_keywords(driver: Option<&DriverType>) -> Vec<&'static str> {
+    let shape = StatementShape { in_where: true, in_filter_clause: true, ..Default::default() };
+    let mut keywords: Vec<&'static str> =
+        keywords_for_shape(&shape, driver).into_iter().filter(|kw| !matches!(*kw, "LIMIT" | "OFFSET")).collect();
+    keywords.extend(["TRUE", "FALSE"]);
+    keywords
 }
 
 // None = no match, 0 = starts with, 1 = substring. A leading quote on the partial word is ignored.
@@ -216,6 +226,25 @@ pub fn match_score(label: &str, lc_prefix: &str) -> Option<u8> {
     } else {
         None
     }
+}
+
+// Names also match letters typed in order from a word start, as `uid` finds `user_id`. That scores 2.
+pub fn name_score(label: &str, lc_prefix: &str) -> Option<u8> {
+    match_score(label, lc_prefix).or_else(|| {
+        let needle = lc_prefix.strip_prefix(['"', '\'', '`']).unwrap_or(lc_prefix);
+        let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+        let chars: Vec<char> = label.chars().collect();
+        let starts_word = |at: usize| {
+            at == 0 || !chars[at - 1].is_alphanumeric() || (chars[at].is_uppercase() && !chars[at - 1].is_uppercase())
+        };
+        let mut wanted = needle.chars().peekable();
+        let first = *wanted.peek()?;
+        let at = (0..chars.len()).find(|&at| lower(chars[at]) == first && starts_word(at))?;
+        for &c in &chars[at..] {
+            wanted.next_if_eq(&lower(c));
+        }
+        wanted.peek().is_none().then_some(2)
+    })
 }
 
 // Tiers: 0 in-query columns/aliases, 1 all tables/columns, 2 user functions, 3 schemas, 4 keywords,
@@ -289,7 +318,7 @@ fn push_column_items(
         if seen.as_ref().is_some_and(|s| s.contains(&key)) {
             continue;
         }
-        let Some(score) = match_score(&c.name, lc_prefix) else { continue };
+        let Some(score) = name_score(&c.name, lc_prefix) else { continue };
         if let Some(seen) = seen.as_deref_mut() {
             seen.insert(key);
         }
@@ -325,7 +354,7 @@ pub fn suggest_virtual_columns(
         if seen.contains(&key) {
             continue;
         }
-        let Some(score) = match_score(name, lc_prefix) else { continue };
+        let Some(score) = name_score(name, lc_prefix) else { continue };
         seen.insert(key);
         items.push(CompletionItem {
             label: name.clone(),
@@ -349,7 +378,7 @@ pub fn suggest_cte_items(ctes: &[String], lc_prefix: &str, ctx: &CompletionConte
         if seen.contains(&key) {
             continue;
         }
-        let Some(score) = match_score(name, lc_prefix) else { continue };
+        let Some(score) = name_score(name, lc_prefix) else { continue };
         seen.insert(key);
         let insert = format_sql_identifier(name, ctx.driver());
         items.push(CompletionItem {
@@ -374,7 +403,7 @@ pub fn suggest_tables(ctx: &CompletionContext, lc_prefix: &str, schema_filter: O
     };
     let mut items = Vec::new();
     for t in source {
-        let Some(score) = match_score(&t.name, lc_prefix) else { continue };
+        let Some(score) = name_score(&t.name, lc_prefix) else { continue };
         let insert = format_sql_identifier(&t.name, ctx.driver());
         let kind = if schema_filter.is_some() { "table" } else { t.kind.as_str() };
         items.push(CompletionItem {
@@ -420,7 +449,7 @@ pub fn suggest_query_table_refs(
     for r in query_tables {
         let table_key = r.table.to_lowercase();
         if !seen_tables.contains(&table_key)
-            && let Some(score) = match_score(&r.table, lc_prefix)
+            && let Some(score) = name_score(&r.table, lc_prefix)
         {
             seen_tables.insert(table_key);
             let insert = format_sql_identifier(&r.table, ctx.driver());
@@ -443,7 +472,7 @@ pub fn suggest_query_table_refs(
         if let Some(alias) = &r.alias {
             let alias_key = alias.to_lowercase();
             if !seen_aliases.contains(&alias_key)
-                && let Some(score) = match_score(alias, lc_prefix)
+                && let Some(score) = name_score(alias, lc_prefix)
             {
                 seen_aliases.insert(alias_key);
                 let insert = format_sql_identifier(alias, ctx.driver());
@@ -500,7 +529,7 @@ pub fn suggest_columns_in_scope(
             if !emitted.insert(key.clone()) {
                 continue;
             }
-            let Some(score) = match_score(&c.name, lc_prefix) else { continue };
+            let Some(score) = name_score(&c.name, lc_prefix) else { continue };
             if name_count.as_ref().is_some_and(|n| n.get(&key).copied().unwrap_or(0) > 1) {
                 let qualifier = r.alias.as_deref().unwrap_or(&r.table);
                 let label = format!("{qualifier}.{}", c.name);

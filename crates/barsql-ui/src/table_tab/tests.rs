@@ -250,7 +250,10 @@ fn the_filter_completes_columns_then_where_keywords(cx: &mut TestAppContext) {
     assert_eq!(all[2].1, "\"user name\"", "inserted as a quoted identifier");
     assert_eq!(all[3].0, "AND");
     let matches = complete("id > 1 AND no", cx);
-    assert_eq!(matches.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(), ["note", "NOT", "IS NOT NULL"]);
+    let labels: Vec<&str> = matches.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(labels, ["note", "NOT", "NOT BETWEEN", "NOT IN", "NOT LIKE", "IS NOT NULL"], "SQLite's operators");
+    let spread: Vec<String> = complete("nt", cx).into_iter().map(|(label, _)| label).collect();
+    assert_eq!(spread, ["note"], "columns match spread out");
 }
 
 // A click on a SQLite boolean's checkbox stages its flip as 0 or 1, which applies to the row.
@@ -392,4 +395,55 @@ fn the_filter_suggests_nothing_until_a_name_starts(cx: &mut TestAppContext) {
         let labels = cx.update(|_, cx| view.read(cx).completion.read(cx).labels(cx));
         assert!(labels.is_empty(), "after {line:?}: {labels:?}");
     }
+}
+
+fn filter_state(view: &Entity<TableTab>, cx: &mut VisualTestContext) -> (String, String) {
+    cx.update(|_, cx| (view.read(cx).filter_text(cx), view.read(cx).applied_filter().to_string()))
+}
+
+#[gpui_kit::test]
+fn shift_enter_applies_the_filter_too(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    focus_filter(&view, cx);
+    type_slowly(cx, "id > 2990");
+    cx.simulate_keystrokes("shift-enter");
+    settle(cx, idle(&view));
+    assert_eq!(filter_state(&view, cx), ("id > 2990".to_string(), "id > 2990".to_string()));
+}
+
+#[gpui_kit::test]
+fn pasted_lines_join_into_one(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    focus_filter(&view, cx);
+    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("id > 1\r\n  AND id < 5".into()));
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-v" } else { "ctrl-v" });
+    assert_eq!(filter_state(&view, cx).0, "id > 1 AND id < 5");
+}
+
+#[gpui_kit::test]
+fn the_clear_button_lifts_the_filter(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    focus_filter(&view, cx);
+    type_slowly(cx, "id > 2990");
+    cx.simulate_keystrokes("enter");
+    settle(cx, idle(&view));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let clear = cx.debug_bounds("table-filter-clear").expect("a filled filter offers to clear it");
+    cx.simulate_click(clear.center(), Modifiers::none());
+    settle(cx, idle(&view));
+    assert_eq!(filter_state(&view, cx), (String::new(), String::new()));
+}
+
+#[gpui_kit::test]
+fn a_newline_from_elsewhere_joins_the_line(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    let filter = cx.update(|_, cx| view.read(cx).filter.clone());
+    let line = "id > 1\n  AND id < 5";
+    cx.update(|window, cx| filter.update(cx, |state, cx| state.insert(line, window, cx)));
+    cx.run_until_parked();
+    assert_eq!(filter_state(&view, cx).0, "id > 1 AND id < 5");
 }
