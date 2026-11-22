@@ -563,14 +563,9 @@ fn edit(item: &CompletionItem, word: Range<usize>, text: &str) -> (Range<usize>,
 
 impl<M: InputModeKind> Render for Completion<M> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.editor.read(cx);
-        let inset = px(1. + ROW_PAD + ICON_COLUMN + ICON_GAP);
-        let anchor = self
-            .is_open(cx)
-            .then(|| state.range_to_bounds(&(self.start..self.start)))
-            .flatten()
-            .map(|bounds| point(bounds.left() - inset, bounds.bottom()));
-        let Some(anchor) = anchor else { return div().absolute().into_any_element() };
+        if !self.is_open(cx) {
+            return div().absolute().into_any_element();
+        }
         // Match the editor's line height, 20px at the SQL editor's 13px.
         let (font_size, row_height) = match self.size {
             Some((font, row)) => (font.to_pixels(window.rem_size()), row.to_pixels(window.rem_size())),
@@ -593,25 +588,94 @@ impl<M: InputModeKind> Render for Completion<M> {
         )
         .track_scroll(&self.scroll)
         .h(height);
-        deferred(
-            anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(
-                div()
-                    .id("completion")
-                    .debug_selector(|| "completion".into())
-                    .occlude()
-                    .w(WIDTH)
-                    .bg(background)
-                    .border_1()
-                    .border_color(border)
-                    .font_family(mono)
-                    .text_size(font_size)
-                    .relative()
-                    .child(list)
-                    .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical),
-            ),
-        )
-        .with_priority(1)
-        .into_any_element()
+        let list = div()
+            .id("completion")
+            .debug_selector(|| "completion".into())
+            .occlude()
+            .w(WIDTH)
+            .bg(background)
+            .border_1()
+            .border_color(border)
+            .font_family(mono)
+            .text_size(font_size)
+            .relative()
+            .child(list)
+            .hover_scrollbar(&self.scroll, ScrollbarAxis::Vertical);
+        let at_word = AtWord { editor: self.editor.clone(), start: self.start, list: Some(list.into_any_element()) };
+        deferred(at_word).with_priority(1).into_any_element()
+    }
+}
+
+// Placed in a deferred prepaint, which runs after the editor lays out the frame, so it's never a keystroke behind.
+struct AtWord<M: InputModeKind> {
+    editor: Entity<InputBaseState<M>>,
+    start: usize,
+    list: Option<AnyElement>,
+}
+
+impl<M: InputModeKind> IntoElement for AtWord<M> {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl<M: InputModeKind> Element for AtWord<M> {
+    type RequestLayoutState = ();
+    type PrepaintState = Option<AnyElement>;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (window.request_layout(Style::default(), [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let word = self.editor.read(cx).range_to_bounds(&(self.start..self.start))?;
+        let at = point(word.left() - px(1. + ROW_PAD + ICON_COLUMN + ICON_GAP), word.bottom());
+        #[cfg(test)]
+        PLACED.with(|placed| placed.borrow_mut().push(at.x));
+        let list = self.list.take()?;
+        let mut list = anchored().position(at).snap_to_window_with_margin(px(8.)).child(list).into_any_element();
+        list.layout_as_root(window.viewport_size().map(AvailableSpace::Definite), window, cx);
+        list.prepaint_at(Point::default(), window, cx);
+        Some(list)
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        list: &mut Option<AnyElement>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(list) = list {
+            list.paint(window, cx);
+        }
     }
 }
 
@@ -626,6 +690,17 @@ impl<M: InputModeKind> Completion<M> {
         self.sync(cx);
         self.request(true, window, cx);
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    // The list's left edge each time a frame placed it.
+    static PLACED: std::cell::RefCell<Vec<Pixels>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_placements() -> Vec<Pixels> {
+    PLACED.with(|placed| std::mem::take(&mut *placed.borrow_mut()))
 }
 
 #[cfg(test)]

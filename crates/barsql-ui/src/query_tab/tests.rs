@@ -738,6 +738,21 @@ fn the_list_stays_at_the_word_start(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn every_frame_draws_the_list_at_the_word_start(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "");
+    catalog_ready(&env, cx);
+    type_slowly(cx, "SELECT * FROM thi");
+    crate::completion::take_placements();
+    cx.update(|window, cx| crate::theme::set_editor_font_size(18., window, cx));
+    cx.run_until_parked();
+    let word = cx.update(|_, cx| tab.read(cx).editor.read(cx).range_to_bounds(&(14..14))).unwrap();
+    let want = f32::from(word.left()) - 23.;
+    let placed: Vec<f32> = crate::completion::take_placements().into_iter().map(f32::from).collect();
+    assert!(!placed.is_empty() && placed.iter().all(|x| (x - want).abs() < 1.), "placed at {placed:?}, word at {want}");
+}
+
+#[gpui_kit::test]
 fn the_tab_hint_shows_until_enter_would_take_the_row(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (_tab, cx) = open(&env, cx, "");
