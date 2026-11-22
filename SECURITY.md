@@ -38,7 +38,7 @@ Anything that gets past what BarSQL means to allow, for example:
 - SQL loading a SQLite extension, which only a connection's extension list may do
 - The install script (`docs/install.sh`) installing anything but the release's own files
 - The updater installing anything but the release's own file, or its admin step running anything else
-- The release workflow, the macOS signing, the attestations and the Homebrew tap (`Bare7a/homebrew-tap`)
+- The release workflow, the macOS signing, the attestations, the Homebrew tap (`Bare7a/homebrew-tap`) and the Scoop bucket (`Bare7a/scoop-bucket`)
 - A dependency's vulnerability that reaches BarSQL
 
 ## Known Limits
@@ -53,6 +53,10 @@ These are known limits rather than vulnerabilities:
 - **Updates trust GitHub.** The updater checks each download against the release's `SHA256SUMS`, fetched from GitHub over HTTPS, and refuses a file it doesn't list. It doesn't check the attestations below.
 - **The install script trusts GitHub and the site.** It checks the package or the `.tar.gz` against the release's `SHA256SUMS`, but not the menu entry and icons it adds to a portable copy, and the script itself comes from barsql.bare7a.eu over HTTPS. It runs as you, with sudo or doas only for the package manager.
 - **Homebrew trusts the tap.** A Homebrew install checks the zip against the digest in the tap's cask, which the release workflow writes from `SHA256SUMS` with a deploy key. Homebrew runs the cask as code and doesn't check the attestations either.
+- **Scoop trusts the bucket.** Scoop checks the zip against the hash in the bucket, which the release workflow writes from `SHA256SUMS` with a deploy key, and runs any script a bucket's manifest names. It doesn't check the attestations either.
+  <!-- winget: once Microsoft approves Bare7a.BarSQL, this line replaces the Scoop one above.
+  - **winget and Scoop trust their manifests.** winget checks the installer against the SHA-256 in its manifest on microsoft/winget-pkgs, which the release workflow submits as a pull request. Scoop checks the zip against the hash in the bucket, which the workflow writes from `SHA256SUMS` with a deploy key, and runs any script a bucket's manifest names. Neither checks the attestations.
+  -->
 - **The Windows builds aren't code-signed yet**, so SmartScreen asks before the first launch.
 
 Attacks that need code already running as you, or admin rights, are out of scope too, as are problems in the database servers themselves; report those to their vendors.
