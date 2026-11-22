@@ -1,10 +1,11 @@
 // The catalog, from system.* with `{name:Type}` parameters. ClickHouse's databases are BarSQL's schemas.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use barsql_core::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,
-    IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TriggerInfo,
+    IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TableSize, TriggerInfo,
 };
 use barsql_core::{StructColumn, StructIndex, TableStructure};
 use barsql_sql::ddl::{terminate_statement, unsupported_ddl};
@@ -105,7 +106,7 @@ fn syntax_args(syntax: &str) -> Option<String> {
 
 impl ChEngine {
     pub async fn connection_info(self: &Arc<Self>) -> Result<ConnectionStatus, QueryError> {
-        let rows = self.rows("SELECT currentDatabase(), currentUser()", &[]).await?;
+        let rows = self.rows("SELECT currentDatabase(), currentUser(), version()", &[]).await?;
         let row = rows.first().ok_or_else(|| QueryError::message("no rows in result set"))?;
         Ok(ConnectionStatus {
             connected: true,
@@ -113,6 +114,7 @@ impl ChEngine {
             schema: text(row, 0),
             user: text(row, 1),
             host: self.options.host.clone(),
+            version: text(row, 2),
         })
     }
 
@@ -147,6 +149,20 @@ impl ChEngine {
             .iter()
             .map(|r| TableInfo { schema: schema.clone(), name: text(r, 0), kind: relation_kind(&text(r, 1)) })
             .collect())
+    }
+
+    // NULL for engines that keep no totals, such as views.
+    pub async fn table_sizes(self: &Arc<Self>, schema: &str) -> Result<HashMap<String, TableSize>, QueryError> {
+        let schema = self.schema_or(schema).to_string();
+        let rows = self
+            .rows(
+                "SELECT name, total_rows, total_bytes FROM system.tables
+                WHERE database = {db:String} AND NOT is_temporary",
+                &[("db", &schema)],
+            )
+            .await?;
+        let number = |r: &[Option<String>], i: usize| r.get(i).cloned().flatten().and_then(|v| v.parse().ok());
+        Ok(rows.iter().map(|r| (text(r, 0), TableSize { rows: number(r, 1), bytes: number(r, 2) })).collect())
     }
 
     // Keys aren't unique in ClickHouse, so no column counts as a primary key. The first row brings the DDL, the only

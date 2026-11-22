@@ -7,11 +7,14 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use barsql_app::update::{self, Stage};
+use barsql_app::update::{self, Asset, Release, Stage, Staged};
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::{AppContext as _, Context, Entity, IntoElement, Render, TestAppContext, VisualTestContext, Window, div};
 
-use super::{STARTUP_DELAY, Skipped, UpdateDialog, UpdateState, check_after, open_in};
+use super::{
+    STARTUP_DELAY, Skipped, Transfer, UpdateChip, UpdateDialog, UpdateState, check_after, chip, chip_for, flow,
+    open_in, remember, reopen,
+};
 use crate::test_support::{Env, settle};
 
 type Routes = Arc<Mutex<HashMap<String, (u16, String)>>>;
@@ -147,6 +150,119 @@ fn the_launch_check_turns_a_release_into_a_sticky_toast(cx: &mut TestAppContext)
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(toasts(cx), 1, "a skipped release stays quiet");
+}
+
+fn release_value(version: &str) -> Release {
+    Release {
+        version: version.into(),
+        name: format!("BarSQL v{version}"),
+        notes: String::new(),
+        html_url: String::new(),
+        asset: Asset { name: "BarSQL.zip".into(), size: 1, url: String::new() },
+        digest: None,
+    }
+}
+
+#[test]
+fn the_chip_follows_the_update_flow() {
+    let r = release_value("9.9.9");
+    let failed = |stage, release| UpdateState::Failed { stage, message: "x".into(), release };
+    assert_eq!(chip_for(&UpdateState::Checking, None), None);
+    assert_eq!(chip_for(&UpdateState::UpToDate, None), None);
+    assert_eq!(chip_for(&UpdateState::Available(r.clone()), None), Some(UpdateChip::Available("9.9.9".into())));
+    assert_eq!(chip_for(&UpdateState::Available(r.clone()), Some("9.9.9")), None, "skipped");
+    let half = Transfer { written: 42, total: 100, rate: 1 };
+    assert_eq!(
+        chip_for(&UpdateState::Downloading(r.clone(), Some(half)), None),
+        Some(UpdateChip::Downloading(Some(42)))
+    );
+    for busy in [
+        UpdateState::Downloading(r.clone(), None),
+        UpdateState::Verifying(r.clone()),
+        UpdateState::Installing(r.clone()),
+    ] {
+        assert_eq!(chip_for(&busy, None), Some(UpdateChip::Downloading(None)));
+    }
+    let staged = Staged { path: "BarSQL.app".into(), dir: std::env::temp_dir() };
+    assert_eq!(chip_for(&UpdateState::Ready(r.clone(), staged), None), Some(UpdateChip::Ready));
+    assert_eq!(chip_for(&failed(Stage::Check, None), None), None, "a failed check stays quiet");
+    assert_eq!(chip_for(&failed(Stage::Download, Some(r)), None), Some(UpdateChip::Failed));
+}
+
+// The launch check leaves a chip behind its toast, and the chip reopens the dialog on that release without checking
+// again.
+#[gpui_kit::test]
+fn the_launch_check_leaves_an_update_chip(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (base, routes) = server();
+    routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (200, release(&base, "v9.9.9")));
+    let cx = window(cx);
+    cx.update(|_, cx| check_after(base.clone(), Duration::ZERO, cx));
+    cx.executor().advance_clock(Duration::from_millis(1));
+    settle(cx, |cx| cx.update(|_, cx| chip(cx).is_some()));
+    assert_eq!(cx.update(|_, cx| chip(cx)), Some(UpdateChip::Available("9.9.9".into())));
+    routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (502, "down".into()));
+    let dialog = cx.update(reopen);
+    assert!(matches!(state(&dialog, cx), UpdateState::Available(_)), "no new check");
+}
+
+// Check for Updates opened before the launch check answers stays the flow's dialog, so a download started in it keeps
+// the chip in step and survives Close.
+#[gpui_kit::test]
+fn the_launch_check_joins_a_dialog_already_open(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (base, routes) = server();
+    routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (200, release(&base, "v9.9.9")));
+    let cx = window(cx);
+    let dialog = open(&base, cx);
+    cx.update(|_, cx| check_after(base.clone(), Duration::ZERO, cx));
+    cx.executor().advance_clock(Duration::from_millis(1));
+    settle(cx, |cx| toasts(cx) == 1);
+    assert_eq!(cx.update(|_, cx| flow(cx)), Some(dialog.clone()));
+    assert!(matches!(state(&dialog, cx), UpdateState::Available(_)));
+}
+
+// The toast's Update opens the release the launch check found, without checking again.
+#[gpui_kit::test]
+fn the_toast_reopens_the_release_it_found(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (base, routes) = server();
+    routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (200, release(&base, "v9.9.9")));
+    let cx = window(cx);
+    cx.update(|_, cx| check_after(base.clone(), Duration::ZERO, cx));
+    cx.executor().advance_clock(Duration::from_millis(1));
+    settle(cx, |cx| toasts(cx) == 1);
+    let update = cx.update(|_, cx| crate::toast::action(0, cx)).expect("the toast's Update button");
+    cx.update(|window, cx| (update.on_click)(window, cx));
+    let dialog = cx.update(|_, cx| flow(cx)).expect("the update flow");
+    assert!(matches!(state(&dialog, cx), UpdateState::Available(_)), "no new check");
+}
+
+#[gpui_kit::test]
+fn skipping_the_release_hides_the_chip(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (base, routes) = server();
+    routes.lock().unwrap().insert("/repos/Bare7a/BarSQL/releases/latest".into(), (200, release(&base, "v9.9.9")));
+    let cx = window(cx);
+    cx.update(|_, cx| check_after(base.clone(), Duration::ZERO, cx));
+    cx.executor().advance_clock(Duration::from_millis(1));
+    settle(cx, |cx| cx.update(|_, cx| chip(cx).is_some()));
+    let dialog = cx.update(reopen);
+    dialog.update_in(cx, |dialog, window, cx| dialog.skip(window, cx));
+    assert_eq!(cx.update(|_, cx| chip(cx)), None);
+}
+
+// A launch check that answers during an install, or with one staged, leaves it be.
+#[gpui_kit::test]
+fn the_launch_check_leaves_an_install_alone(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let cx = window(cx);
+    let staged = Staged { path: "BarSQL.app".into(), dir: std::env::temp_dir() };
+    let ready = UpdateState::Ready(release_value("9.9.9"), staged);
+    let dialog = cx.update(|window, cx| open_in(String::new(), Some(ready.clone()), window, cx));
+    cx.update(|_, cx| remember(String::new(), release_value("9.9.10"), cx));
+    assert_eq!(cx.update(|_, cx| flow(cx)), Some(dialog.clone()));
+    assert_eq!(state(&dialog, cx), ready);
 }
 
 const BUILD: &str = "BarSQL 9.9.9 build";

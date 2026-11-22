@@ -8,6 +8,7 @@ mod values;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use barsql_core::config::named_instance;
 use barsql_core::{ConnectionConfig, QueryError};
 use tiberius::{AuthMethod, Client, Config, EncryptionLevel, SqlBrowser};
 use tokio::net::TcpStream;
@@ -62,12 +63,8 @@ pub struct MsOptions {
 
 impl MsOptions {
     pub fn from_config(cfg: &ConnectionConfig) -> Result<Self, QueryError> {
-        // `host\INSTANCE`, as SQL Server's own tools write it.
-        let (host, named) = match cfg.host.split_once('\\') {
-            Some((host, instance)) => (host.to_string(), Some(instance.to_string())),
-            None => (cfg.host.clone(), None),
-        };
-        let instance = Some(cfg.instance.clone()).filter(|i| !i.is_empty()).or(named).filter(|i| !i.is_empty());
+        let (host, instance) = named_instance(&cfg.host, &cfg.instance);
+        let (host, instance) = (host.to_string(), Some(instance.to_string()).filter(|i| !i.is_empty()));
         let ssh = if cfg.ssh.enabled { Some(SshOptions::from_config(&cfg.ssh)?) } else { None };
         if instance.is_some() && ssh.is_some() {
             return Err(QueryError::message(

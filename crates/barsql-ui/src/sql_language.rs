@@ -147,7 +147,7 @@ impl CompletionProvider for SqlLanguage {
         &self,
         text: &Rope,
         offset: usize,
-        _: TriggerContext,
+        trigger: TriggerContext,
         _: &mut Window,
         cx: &mut App,
     ) -> Task<Result<CompletionResponse>> {
@@ -157,6 +157,11 @@ impl CompletionProvider for SqlLanguage {
         let range = lang::current_statement_range(&statements, offset, sql.len());
         // Quick suggestions stay quiet inside strings and comments.
         if in_string_or_comment(&sql[range.clone()], offset - range.start, &self.driver) {
+            return Task::ready(Ok(CompletionResponse::Array(Vec::new())));
+        }
+        // A space only brings up the foreign-key conditions right after a JOIN's ON.
+        let joins_only = trigger.trigger_character.as_deref() == Some(" ");
+        if joins_only && !lang::at_join_condition_start(&sql[range.start..offset], Some(&self.driver)) {
             return Task::ready(Ok(CompletionResponse::Array(Vec::new())));
         }
         let catalog = self.catalog(cx);
@@ -176,7 +181,10 @@ impl CompletionProvider for SqlLanguage {
             }
             let ctx =
                 CompletionContext { catalog: &catalog, columns_by_table: &columns, columns: &[], labels: &labels };
-            let mut items = lang::build_completion_items(&ctx, &sql, offset, &parsed, range.start);
+            let mut items = match joins_only {
+                true => lang::fk_join_items(&ctx, &parsed.query_tables),
+                false => lang::build_completion_items(&ctx, &sql, offset, &parsed, range.start),
+            };
             items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text).then_with(|| a.label.cmp(&b.label)));
             let before = &sql[range.start..offset];
             let replace =
@@ -189,7 +197,7 @@ impl CompletionProvider for SqlLanguage {
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
         let mut chars = new_text.chars();
         match (chars.next(), chars.next()) {
-            (Some(c), None) => c.is_alphanumeric() || matches!(c, '_' | '.' | ' ' | ',' | '='),
+            (Some(c), None) => c.is_alphabetic() || matches!(c, '_' | '.' | ' '),
             _ => false,
         }
     }
@@ -252,7 +260,7 @@ impl CompletionProvider for FilterCompletion {
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
         let mut chars = new_text.chars();
         match (chars.next(), chars.next()) {
-            (Some(c), None) => c.is_alphanumeric() || matches!(c, '_' | '.' | ' ' | '=' | '<' | '>' | '!'),
+            (Some(c), None) => c.is_alphabetic() || c == '_',
             _ => false,
         }
     }
@@ -293,12 +301,11 @@ fn lsp_completion(item: lang::CompletionItem, range: LspRange) -> lsp_types::Com
 }
 
 pub fn word_start(text: &str, offset: usize) -> usize {
-    text[..offset]
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| !c.is_whitespace() && !WORD_SEPARATORS.contains(*c))
-        .last()
-        .map_or(offset, |(i, _)| i)
+    text[..offset].char_indices().rev().take_while(|(_, c)| continues_word(*c)).last().map_or(offset, |(i, _)| i)
+}
+
+pub fn continues_word(c: char) -> bool {
+    !c.is_whitespace() && !WORD_SEPARATORS.contains(c)
 }
 
 // A line comment runs to the end of its line, so a caret at that end is still inside it.

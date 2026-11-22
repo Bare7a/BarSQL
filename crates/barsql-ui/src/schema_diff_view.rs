@@ -9,6 +9,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Sty
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::form::LargeButton as _;
 use crate::i18n::{t, t_count, t_with};
 use crate::modal::{self, Modal};
 use crate::schema::{self, Schemas};
@@ -320,9 +321,7 @@ impl Render for SchemaDiffView {
             modal::footer(cx)
                 .child(
                     Button::new("diff-copy-script")
-                        .large()
-                        .icon(Icon::new(IconName::Copy))
-                        .label(t(cx, "schemaDiff.copyScript"))
+                        .large_with_icon(Icon::new(IconName::Copy), t(cx, "schemaDiff.copyScript"))
                         .disabled(copy.is_none())
                         .on_click(move |_, _, cx| {
                             if let Some(script) = &copy {

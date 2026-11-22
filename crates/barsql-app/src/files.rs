@@ -21,30 +21,7 @@ pub fn find_sqlite_arg<S: AsRef<str>>(args: &[S]) -> Option<String> {
     args.iter().map(AsRef::as_ref).find(|a| is_sqlite_file(a) && Path::new(a).exists()).map(str::to_string)
 }
 
-// macOS hands Finder opens over as file:// URLs.
-pub fn path_from_file_url(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("file://")?;
-    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    let bytes = rest.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        match (bytes[i], bytes.get(i + 1).copied().and_then(hex), bytes.get(i + 2).copied().and_then(hex)) {
-            (b'%', Some(high), Some(low)) => {
-                decoded.push((high * 16 + low) as u8);
-                i += 3;
-            }
-            (b, _, _) => {
-                decoded.push(b);
-                i += 1;
-            }
-        }
-    }
-    let path = String::from_utf8(decoded).ok()?;
-    let drive = path.len() > 2 && path.as_bytes()[2] == b':' && path.starts_with('/');
-    Some(if drive { path[1..].to_string() } else { path })
-}
+pub use barsql_core::conn_url::path_from_file_url;
 
 // (path, file name without extension)
 pub fn sqlite_file_payload(path: &str) -> (String, String) {
@@ -107,18 +84,6 @@ impl BarApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn finder_urls_become_paths() {
-        assert_eq!(
-            path_from_file_url("file:///Users/me/My%20Notes.sqlite").as_deref(),
-            Some("/Users/me/My Notes.sqlite")
-        );
-        assert_eq!(path_from_file_url("file://localhost/tmp/a.db").as_deref(), Some("/tmp/a.db"));
-        assert_eq!(path_from_file_url("file:///C:/data/b%C3%A4r.db").as_deref(), Some("C:/data/bär.db"));
-        assert_eq!(path_from_file_url("file:///tmp/100%.db").as_deref(), Some("/tmp/100%.db"));
-        assert_eq!(path_from_file_url("https://example.com/a.db"), None);
-    }
 
     #[test]
     fn detects_sqlite_files() {

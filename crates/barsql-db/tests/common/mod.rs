@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError, SqlDialect};
+use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef, QueryError, ReferencingKey, SqlDialect};
 use barsql_db::{Cancel, Cell, Engine, ScriptEvent, Session};
 use barsql_sql::Dialect;
 use barsql_sql::split_statement_texts;
@@ -284,6 +284,41 @@ pub async fn run_error(session: &mut Session, statements: &[String]) -> Option<Q
     drop(tx);
     while rx.try_recv().is_ok() {}
     result.err()
+}
+
+pub const REF_TABLES: [&str; 3] = [
+    "CREATE TABLE ref_orders (id INTEGER, rev INTEGER, PRIMARY KEY (id, rev))",
+    "CREATE TABLE ref_users (id INTEGER PRIMARY KEY)",
+    "CREATE TABLE ref_lines (order_id INTEGER, order_rev INTEGER,
+        FOREIGN KEY (order_id, order_rev) REFERENCES ref_orders (id, rev),
+        FOREIGN KEY (order_rev) REFERENCES ref_users (id))",
+];
+
+// ref_lines.order_rev is in two keys, ref_orders' and ref_users' (id). Either may show, but all of one.
+pub fn assert_ref_keys(
+    label: &str,
+    keys: &[ReferencingKey],
+    columns: &[barsql_core::ColumnInfo],
+    schema: &str,
+    tables: &[&str],
+) {
+    let found: Vec<(&str, &str, &str, &str)> = keys
+        .iter()
+        .map(|k| (k.schema.as_str(), k.table.as_str(), k.column.as_str(), k.referenced_column.as_str()))
+        .collect();
+    let expected: Vec<(&str, &str, &str, &str)> = tables
+        .iter()
+        .flat_map(|&table| [(schema, table, "order_id", "id"), (schema, table, "order_rev", "rev")])
+        .collect();
+    assert_eq!(found, expected, "{label}");
+    assert!(keys.chunks(2).all(|pair| pair[0].key == pair[1].key), "{label}: {keys:?}");
+    let order_key = keys[0].key.as_str();
+    let shown: Vec<(&str, &str, &str)> =
+        columns.iter().map(|c| (c.foreign_table.as_str(), c.foreign_column.as_str(), c.foreign_key.as_str())).collect();
+    assert_eq!(shown[0], ("ref_orders", "id", order_key), "{label}");
+    let rev = shown[1];
+    let user_key = (rev.0, rev.1) == ("ref_users", "id") && !["", order_key].contains(&rev.2);
+    assert!(rev == ("ref_orders", "rev", order_key) || user_key, "{label}: {rev:?}");
 }
 
 // One entry per result set, in stream order.

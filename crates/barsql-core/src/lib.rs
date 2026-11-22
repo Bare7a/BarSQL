@@ -1,6 +1,7 @@
 pub mod capabilities;
 pub mod clock;
 pub mod config;
+pub mod conn_url;
 pub mod dialect;
 pub mod paths;
 pub mod query;
@@ -16,7 +17,8 @@ pub use query::{
 };
 pub use schema::{
     ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,
-    IndexInfo, ObjectKind, ObjectRef, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TriggerInfo,
+    IndexInfo, ObjectKind, ObjectRef, ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo,
+    TableSize, TriggerInfo,
 };
 pub use structure::{
     Check, Dependent, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure,

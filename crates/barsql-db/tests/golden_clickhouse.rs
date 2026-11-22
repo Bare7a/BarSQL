@@ -18,6 +18,29 @@ async fn connect() -> Engine {
 }
 
 #[tokio::test]
+async fn clickhouse_reports_its_server_version() {
+    let version = connect().await.connection_info().await.unwrap().version;
+    assert!(version.starts_with(|c: char| c.is_ascii_digit()), "{version}");
+}
+
+#[tokio::test]
+async fn clickhouse_table_sizes_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    let engine = connect().await;
+    let mut session = engine.session().await.unwrap();
+    let setup = [
+        "DROP TABLE IF EXISTS sized_probe",
+        "CREATE TABLE sized_probe (id UInt32) ENGINE = MergeTree ORDER BY id",
+        "INSERT INTO sized_probe SELECT number FROM numbers(100)",
+    ];
+    run_all(&mut session, &setup.map(String::from)).await;
+    let sized = engine.table_sizes("barsql_test").await.unwrap()["sized_probe"];
+    run_all(&mut session, &["DROP TABLE sized_probe".to_string()]).await;
+    assert_eq!(sized.rows, Some(100));
+    assert!(sized.bytes.is_some_and(|bytes| bytes > 0), "{sized:?}");
+}
+
+#[tokio::test]
 async fn clickhouse_values_and_errors_match_the_fixtures() {
     let _serial = common::serial().await;
     let engine = connect().await;

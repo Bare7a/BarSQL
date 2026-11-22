@@ -19,7 +19,9 @@ pub mod transaction;
 pub mod unknown;
 
 pub use catalog::{Catalog, ColumnMap, OrderedMap, TableBinding};
-pub use completion::{bindings_needing_columns, build_completion_items, completion_replace_range};
+pub use completion::{
+    at_join_condition_start, bindings_needing_columns, build_completion_items, completion_replace_range, fk_join_items,
+};
 pub use context::{Clause, CursorSlot, SqlCursor, StatementShape, analyze_cursor};
 pub use definition::{Definition, analyze_definition};
 pub use diagnostics::{SqlDiagnostic, collect_schema_diagnostics};

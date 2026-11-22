@@ -24,6 +24,45 @@ async fn connect(prefix: &str, port: &str) -> Engine {
     })
 }
 
+#[tokio::test]
+async fn mysql_and_mariadb_report_their_server_versions() {
+    let mysql = connect("MYSQL", "33306").await.connection_info().await.unwrap().version;
+    assert!(mysql.starts_with(|c: char| c.is_ascii_digit()) && !mysql.contains("MariaDB"), "{mysql}");
+    let mariadb = connect("MARIADB", "33307").await.connection_info().await.unwrap().version;
+    assert!(mariadb.contains("MariaDB"), "{mariadb}");
+}
+
+// Only the size is pinned: the row estimate is cached.
+#[tokio::test]
+async fn mysql_and_mariadb_table_sizes_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    for (prefix, port) in [("MYSQL", "33306"), ("MARIADB", "33307")] {
+        let engine = connect(prefix, port).await;
+        let mut session = engine.session().await.unwrap();
+        let setup = ["DROP TABLE IF EXISTS sized_probe", "CREATE TABLE sized_probe (id INT PRIMARY KEY)"];
+        run_all(&mut session, &setup.map(String::from)).await;
+        let sizes = engine.table_sizes("barsql_test").await.unwrap();
+        run_all(&mut session, &["DROP TABLE sized_probe".to_string()]).await;
+        let sized = sizes.get("sized_probe").copied().unwrap_or_else(|| panic!("{prefix}: {sizes:?}"));
+        assert!(sized.rows.is_some() && sized.bytes.is_some_and(|bytes| bytes > 0), "{prefix}: {sized:?}");
+    }
+}
+
+#[tokio::test]
+async fn mysql_and_mariadb_keys_pointing_at_a_table_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    for (prefix, port) in [("MYSQL", "33306"), ("MARIADB", "33307")] {
+        let engine = connect(prefix, port).await;
+        let mut session = engine.session().await.unwrap();
+        run_all(&mut session, &["DROP TABLE IF EXISTS ref_lines, ref_orders, ref_users".into()]).await;
+        run_all(&mut session, &common::REF_TABLES.map(String::from)).await;
+        let keys = engine.referencing_keys("barsql_test", "ref_orders").await.unwrap();
+        let columns = engine.list_columns("barsql_test", "ref_lines").await.unwrap();
+        run_all(&mut session, &["DROP TABLE ref_lines, ref_orders, ref_users".to_string()]).await;
+        common::assert_ref_keys(prefix, &keys, &columns, "barsql_test", &["ref_lines"]);
+    }
+}
+
 async fn text(session: &mut Session, sql: &str) -> String {
     let res = session.buffered(sql, &Cancel::new()).await.unwrap_or_else(|err| panic!("{sql}: {err:?}"));
     res.text(0, 0).unwrap_or_default().to_string()

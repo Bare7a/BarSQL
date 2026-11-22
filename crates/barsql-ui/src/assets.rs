@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use gpui_kit::assets::{Assets, icon_assets};
+use barsql_core::DriverType;
+use gpui_kit::assets::{Assets, IconName as Lucide, icon_assets};
+use gpui_kit::component::Icon;
 use gpui_kit::{
     App, AssetSource, Bounds, Canvas, Corners, DevicePixels, Global, Length, Pixels, RenderImage, Result, SharedString,
     Size, Styled, SvgSize, canvas, size,
@@ -27,6 +29,7 @@ icon_assets!(
         CirclePlay,
         CircleQuestionMark,
         ClipboardCopy,
+        ClipboardPaste,
         CodeXml,
         Clock,
         Columns3,
@@ -93,6 +96,34 @@ pub fn load_fonts(cx: &mut gpui_kit::App) {
     let _ = cx.text_system().add_fonts(FONTS.iter().map(|bytes| Cow::Borrowed(*bytes)).collect());
 }
 
+// The landing page's engine marks: Simple Icons (CC0), and MySQL's dolphin from Devicon (MIT, beside it).
+const ENGINES: [(&str, &[u8]); 6] = [
+    ("engines/postgresql.svg", include_bytes!("../images/engines/postgresql.svg")),
+    ("engines/mysql.svg", include_bytes!("../images/engines/mysql.svg")),
+    ("engines/sqlserver.svg", include_bytes!("../images/engines/sqlserver.svg")),
+    ("engines/clickhouse.svg", include_bytes!("../images/engines/clickhouse.svg")),
+    ("engines/turso.svg", include_bytes!("../images/engines/turso.svg")),
+    ("engines/sqlite.svg", include_bytes!("../images/engines/sqlite.svg")),
+];
+
+fn engine_path(driver: &DriverType) -> Option<&'static str> {
+    let ix = match driver {
+        DriverType::Postgres => 0,
+        DriverType::MySql => 1,
+        DriverType::SqlServer => 2,
+        DriverType::ClickHouse => 3,
+        DriverType::Turso => 4,
+        DriverType::Sqlite => 5,
+        DriverType::Other(_) | DriverType::Unset => return None,
+    };
+    Some(ENGINES[ix].0)
+}
+
+// A connection's engine as a mask icon, so it takes the connection's colour like any other.
+pub fn engine_icon(driver: &DriverType) -> Icon {
+    engine_path(driver).map_or_else(|| Icon::new(Lucide::Database), |path| Icon::empty().path(path))
+}
+
 // The app icon, and the title bar's tile-less marks for dark and light: packaging/icon.svg and its variants.
 pub const LOGO: &[u8] = include_bytes!("../images/barsql-icon.svg");
 pub const MARK_DARK: &[u8] = include_bytes!("../images/barsql-mark-dark.svg");
@@ -148,6 +179,9 @@ pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if let Some((_, bytes)) = ENGINES.iter().find(|(at, _)| *at == path) {
+            return Ok(Some(Cow::Borrowed(*bytes)));
+        }
         match ExtraIcons.load(path)? {
             Some(bytes) => Ok(Some(bytes)),
             None => Assets.load(path),
@@ -171,7 +205,9 @@ mod tests {
     use gpui_kit::assets::{Assets, IconName as Lucide};
     use gpui_kit::{Bounds, DevicePixels, TestAppContext, point, px, size};
 
-    use super::{AppAssets, ExtraIcons, LOGO, MARK_DARK, MARK_LIGHT, device_size, raster};
+    use barsql_core::DriverType;
+
+    use super::{AppAssets, ExtraIcons, LOGO, MARK_DARK, MARK_LIGHT, device_size, engine_path, raster};
 
     // A raster a pixel off the snapped bounds gets resampled. Each edge snaps on its own, ties toward zero.
     #[test]
@@ -207,6 +243,15 @@ mod tests {
         });
     }
 
+    #[test]
+    fn every_engine_has_its_mark() {
+        for driver in DriverType::KNOWN {
+            let path = engine_path(&driver).unwrap_or_else(|| panic!("{driver}"));
+            assert!(AppAssets.load(path).ok().flatten().is_some(), "{path}");
+        }
+        assert_eq!(engine_path(&DriverType::Unset), None);
+    }
+
     // An icon the app uses but doesn't ship draws as nothing at all.
     #[test]
     fn the_icons_the_status_bar_and_toolbars_use_are_shipped() {
@@ -219,6 +264,10 @@ mod tests {
             Lucide::ChevronsDownUp,
             Lucide::Copy,
             Lucide::EyeOff,
+            Lucide::PanelLeft,
+            Lucide::PanelRight,
+            Lucide::Bot,
+            Lucide::ArrowUp,
         ] {
             let path = icon.path();
             assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");

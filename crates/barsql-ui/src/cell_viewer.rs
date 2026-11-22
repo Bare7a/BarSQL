@@ -10,13 +10,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::cell_content::{self, Kind, Mode, SELECTABLE};
-use crate::form;
+use crate::form::{self, LargeButton as _, ToolButton as _};
 use crate::i18n::t;
 use crate::modal::{self, Modal};
 use crate::occurrences::OccurrenceMarks;
 use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::theme;
 use crate::toast;
+use crate::tokens::ICON_XS;
 
 // `None` sets the cell to NULL.
 pub type OnSave = Rc<dyn Fn(Option<String>, &mut Window, &mut App)>;
@@ -177,9 +178,7 @@ impl CellViewer {
             |id: &'static str, icon: Lucide, key: &str, tooltip: &str, mode: Mode, cx: &mut Context<Self>| {
                 Button::new(id)
                     .debug_selector(move || id.into())
-                    .small()
-                    .icon(Icon::new(icon))
-                    .label(t(cx, key))
+                    .tool(Icon::new(icon), ICON_XS, t(cx, key))
                     .tooltip(t(cx, tooltip))
                     .on_click(cx.listener(move |viewer, _, window, cx| viewer.format(mode, window, cx)))
             };
@@ -208,9 +207,7 @@ impl CellViewer {
             })
             .child(
                 Button::new("cell-viewer-copy")
-                    .small()
-                    .icon(Icon::new(Lucide::Copy))
-                    .label(t(cx, "common.copy"))
+                    .tool(Icon::new(Lucide::Copy), ICON_XS, t(cx, "common.copy"))
                     .on_click(cx.listener(|viewer, _, _, cx| viewer.copy(cx))),
             );
         let right = h_flex()
@@ -220,18 +217,16 @@ impl CellViewer {
                 el.child(
                     Button::new("cell-viewer-set-null")
                         .debug_selector(|| "cell-viewer-set-null".into())
-                        .small()
                         .danger()
                         .outline()
-                        .icon(Icon::new(Lucide::Ban))
-                        .label(t(cx, "cellViewer.setNull"))
+                        .large_with_icon(Icon::new(Lucide::Ban), t(cx, "cellViewer.setNull"))
                         .on_click(cx.listener(|viewer, _, window, cx| viewer.save(None, window, cx))),
                 )
             })
             .child(
                 Button::new("cell-viewer-close")
                     .debug_selector(|| "cell-viewer-close".into())
-                    .small()
+                    .large()
                     .when(!editable, |button| button.primary())
                     .label(t(cx, if editable { "common.cancel" } else { "common.close" }))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
@@ -240,7 +235,7 @@ impl CellViewer {
                 el.child(
                     Button::new("cell-viewer-save")
                         .debug_selector(|| "cell-viewer-save".into())
-                        .small()
+                        .large()
                         .primary()
                         .label(t(cx, "common.save"))
                         .disabled(self.kind == Kind::Array)

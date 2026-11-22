@@ -19,6 +19,45 @@ async fn connect() -> Option<Engine> {
 }
 
 #[tokio::test]
+async fn sqlserver_reports_its_server_version() {
+    let Some(engine) = connect().await else { return };
+    let version = engine.connection_info().await.unwrap().version;
+    assert!(version.starts_with("Microsoft") && !version.contains('\n'), "{version}");
+}
+
+#[tokio::test]
+async fn sqlserver_table_sizes_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    let Some(engine) = connect().await else { return };
+    let mut session = engine.session().await.unwrap();
+    let setup = [
+        "DROP TABLE IF EXISTS sized_probe",
+        "CREATE TABLE sized_probe (id int PRIMARY KEY)",
+        "INSERT INTO sized_probe SELECT TOP (100) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) FROM sys.all_objects",
+    ];
+    run_all(&mut session, &setup.map(String::from)).await;
+    let sized = engine.table_sizes("dbo").await.unwrap()["sized_probe"];
+    run_all(&mut session, &["DROP TABLE sized_probe".to_string()]).await;
+    assert_eq!(sized.rows, Some(100));
+    assert!(sized.bytes.is_some_and(|bytes| bytes >= 8192), "{sized:?}");
+}
+
+#[tokio::test]
+async fn sqlserver_keys_pointing_at_a_table_come_from_the_catalog() {
+    let _serial = common::serial().await;
+    let Some(engine) = connect().await else { return };
+    let mut session = engine.session().await.unwrap();
+    let stale = ["DROP TABLE IF EXISTS ref_lines", "DROP TABLE IF EXISTS ref_orders", "DROP TABLE IF EXISTS ref_users"];
+    run_all(&mut session, &stale.map(String::from)).await;
+    run_all(&mut session, &common::REF_TABLES.map(String::from)).await;
+    let keys = engine.referencing_keys("dbo", "ref_orders").await.unwrap();
+    let columns = engine.list_columns("dbo", "ref_lines").await.unwrap();
+    let drop = ["DROP TABLE ref_lines", "DROP TABLE ref_orders", "DROP TABLE ref_users"];
+    run_all(&mut session, &drop.map(String::from)).await;
+    common::assert_ref_keys("sqlserver", &keys, &columns, "dbo", &["ref_lines"]);
+}
+
+#[tokio::test]
 async fn sqlserver_values_and_errors_match_the_fixtures() {
     let _serial = common::serial().await;
     let Some(engine) = connect().await else { return };

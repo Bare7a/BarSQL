@@ -1,9 +1,11 @@
 mod layout;
+mod svg;
 #[cfg(test)]
 mod tests;
 mod zoom;
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use barsql_app::{DiagramRef, EditorTab};
@@ -17,12 +19,14 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use self::layout::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, arrange, find};
+use self::layout::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, Spot, arrange, find, key_count};
+use crate::assets::AppAssets;
 use crate::form;
-use crate::i18n::{I18n, t, t_with};
+use crate::i18n::{I18n, compact, t, t_count, t_with};
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
+use crate::{file_dialogs, theme, toast};
 
 // Tables a diagram loads.
 pub const MAX_TABLES: usize = 200;
@@ -75,6 +79,10 @@ pub struct ErDiagram {
     // enough to be a pan rather than a click.
     pan: Option<(Point<Pixels>, Point<Pixels>)>,
     panned: bool,
+    // So only the row estimates' arrival redraws it, not every schema change.
+    sized: bool,
+    // Empty until the next frame builds it again, as the tables or the language changed.
+    placeholder_shown: SharedString,
     on_open: OnOpen,
     _load: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -103,9 +111,20 @@ impl ErDiagram {
                 InputEvent::PressEnter { shift, .. } => this.step_hit(if *shift { -1 } else { 1 }, window, cx),
                 _ => {}
             }),
-            cx.observe_global_in::<I18n>(window, |this, window, cx| {
-                let placeholder = t(cx, "erDiagram.search");
-                this.search.update(cx, |search, cx| search.set_placeholder(placeholder, window, cx));
+            cx.observe_global_in::<I18n>(window, |this, _, cx| {
+                this.placeholder_shown = SharedString::default();
+                cx.notify();
+            }),
+            cx.observe_global::<schema::Schemas>(|this, cx| {
+                // Estimates come back once a reload's schemas do, so a disconnected connection doesn't reconnect.
+                if schema::get(cx, &this.connection.id).is_some_and(|entry| entry.schemas().is_some()) {
+                    schema::load_sizes(&this.connection.id, &this.schema, cx);
+                }
+                let sized = schema::get(cx, &this.connection.id).is_some_and(|entry| entry.sizes_loaded(&this.schema));
+                if sized != this.sized {
+                    this.sized = sized;
+                    cx.notify();
+                }
             }),
         ];
         Self {
@@ -128,6 +147,8 @@ impl ErDiagram {
             scroll: ScrollHandle::new(),
             pan: None,
             panned: false,
+            sized: false,
+            placeholder_shown: SharedString::default(),
             on_open,
             _load: Task::ready(()),
             _subscriptions: subscriptions,
@@ -135,6 +156,7 @@ impl ErDiagram {
     }
 
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
+        schema::load_sizes(&self.connection.id, &self.schema, cx);
         let load = schema::load_schema_columns(&self.connection.id, &self.schema, MAX_TABLES, cx);
         self._load = cx.spawn(async move |this, cx| {
             let loaded = load.await;
@@ -171,6 +193,7 @@ impl ErDiagram {
             })
             .collect();
         self.total = total;
+        self.placeholder_shown = SharedString::default();
         self.state = State::Ready(Rc::new(tables));
         self.fitted = false;
         self.relayout();
@@ -373,11 +396,78 @@ impl ErDiagram {
                     .on_click(cx.listener(|this, _, window, cx| this.fit(window, cx))),
             )
             .child(
+                form::filter_button("er-export", Icon::new(Lucide::Download))
+                    .debug_selector(|| "er-export".into())
+                    .disabled(!ready)
+                    .tooltip(t(cx, "erDiagram.exportSvg"))
+                    .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
+            )
+            .child(
                 form::filter_button("er-help", Icon::new(Lucide::CircleQuestionMark))
                     .debug_selector(|| "er-help".into())
                     .ghost()
                     .tooltip(hint),
             )
+    }
+
+    fn rows_estimate(&self, table: &str, cx: &App) -> Option<String> {
+        let rows = schema::get(cx, &self.connection.id)?.size(&self.schema, table)?.rows?;
+        Some(compact(cx, rows))
+    }
+
+    // As shown, keys-only and theme colours included.
+    fn export(&mut self, cx: &mut Context<Self>) {
+        let State::Ready(tables) = &self.state else { return };
+        let theme = cx.theme();
+        let palette = svg::Palette {
+            background: theme::opaque(theme.background),
+            header: theme.secondary,
+            border: theme.border,
+            text: theme.foreground,
+            muted: theme.muted_foreground,
+            key: theme.warning,
+            link: theme.primary,
+            edge: theme.muted_foreground.opacity(0.6),
+        };
+        let icon = |name: Lucide| {
+            AppAssets.load(&name.path()).ok().flatten().map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        };
+        let (key, link) = (icon(Lucide::KeyRound).unwrap_or_default(), icon(Lucide::Link).unwrap_or_default());
+        let text_system = cx.text_system().clone();
+        let regular = text_system.resolve_font(&font(theme.font_family.clone()));
+        let bold = text_system.resolve_font(&Font { weight: FontWeight::SEMIBOLD, ..font(theme.font_family.clone()) });
+        // Shaped with fallback fonts, as the canvas is, so a character Inter lacks still has a width.
+        let widths = RefCell::new(HashMap::new());
+        let measure = |text: &str, size: f32, heavy: bool| {
+            let id = if heavy { bold } else { regular };
+            let mut widths = widths.borrow_mut();
+            let width = |ch| f32::from(text_system.layout_width(id, px(size), ch));
+            text.chars().map(|ch| *widths.entry((ch, heavy, size.to_bits())).or_insert_with(|| width(ch))).sum()
+        };
+        let look = svg::Look { palette, icons: [&key, &link], measure: &measure };
+        let rows = |table: &str| self.rows_estimate(table, cx);
+        let text = svg::render(tables, &self.layout, self.keys_only, self.connection.driver.dialect(), &look, rows);
+        let picked = file_dialogs::pick_save_path(&format!("{}.svg", self.schema), cx);
+        cx.spawn(async move |_, cx| {
+            let Some(path) = picked.await else { return };
+            let file_name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            let written = std::fs::write(&path, text);
+            cx.update(|cx| match written {
+                Ok(()) => toast::success(t_with(cx, "toast.savedFile", &[("fileName", &file_name)]), cx),
+                Err(error) => toast::error(format!("{}: {error}", t(cx, "errors.exportFailed")), cx),
+            });
+        })
+        .detach();
+    }
+
+    // The counts ride in the placeholder, so they never crowd what's typed.
+    fn placeholder(&self, cx: &App) -> SharedString {
+        let find = t(cx, "erDiagram.search");
+        let State::Ready(tables) = &self.state else { return find };
+        let keys = key_count(tables);
+        let tables = t_count(cx, "erDiagram.tables", tables.len() as i64, &[("count", &tables.len().to_string())]);
+        let keys = t_count(cx, "erDiagram.foreignKeys", keys as i64, &[("count", &keys.to_string())]);
+        format!("{find} ({tables} · {keys})").into()
     }
 
     // Joined as Explain and its menu are. The zoom keeps one width, so nothing shifts as it changes.
@@ -508,6 +598,7 @@ impl ErDiagram {
             _ if marked => theme.primary.opacity(0.5),
             _ => theme.border,
         };
+        let rows_estimate = self.rows_estimate(&table.name, cx);
         let header = h_flex()
             .h(rems(HEADER_H))
             .flex_none()
@@ -521,6 +612,14 @@ impl ErDiagram {
                 false => Icon::new(Lucide::Table2).size(ICON_XS).text_color(theme.muted_foreground),
             })
             .child(div().flex_1().min_w_0().truncate().font_semibold().child(table.name.clone()))
+            .children(rows_estimate.map(|rows| {
+                div()
+                    .debug_selector(move || format!("er-rows-{ix}"))
+                    .flex_none()
+                    .text_size(TEXT_XS)
+                    .text_color(theme.muted_foreground)
+                    .child(rows)
+            }))
             .when(focused, |el| {
                 el.child(
                     Button::new(("er-open", ix))
@@ -548,7 +647,7 @@ impl ErDiagram {
             .border_1()
             .border_color(border)
             .when(table.view, |el| el.border_dashed())
-            .bg(theme.background)
+            .bg(theme::opaque(theme.background))
             .when(faded, |el| el.opacity(FADED))
             .text_size(TEXT_SM)
             .cursor_pointer()
@@ -577,73 +676,71 @@ impl ErDiagram {
     }
 }
 
-// From the side facing the other box, with horizontal tangents. Both ends in the same column loop out on the right.
+// Doubling the spacing keeps zoomed-out dots from crowding.
+fn paint_dots(bounds: Bounds<Pixels>, offset: Point<Pixels>, zoom: f32, color: Hsla, window: &mut Window) {
+    let mut step = 20. * zoom;
+    while step < 12. {
+        step *= 2.;
+    }
+    let side = px(1.5);
+    let phase = |offset: Pixels| f32::from(offset).rem_euclid(step);
+    let (first_x, first_y) = (phase(offset.x), phase(offset.y));
+    let (width, height) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+    let mut y = first_y;
+    while y < height {
+        let mut x = first_x;
+        while x < width {
+            let at = point(bounds.left() + px(x), bounds.top() + px(y));
+            window.paint_quad(fill(Bounds::new(at, size(side, side)), color));
+            x += step;
+        }
+        y += step;
+    }
+}
+
 // A crow's foot marks the referencing column, the many end, and a bar the referenced one. `only` draws just those
 // edges, thicker and with arrowheads where they arrive.
 fn paint_edges(layout: &Layout, only: Option<&[usize]>, bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
     let rem = window.rem_size();
-    let at = |x: f32, y: f32| point(bounds.left() + rem * x, bounds.top() + rem * y);
-    let row_y = |placed: layout::Placed, row: Option<usize>| match row {
-        Some(row) => placed.y + HEADER_H + ROW_H * (row as f32 + 0.5),
-        None => placed.y + HEADER_H / 2.,
-    };
+    let at = |(x, y): Spot| point(bounds.left() + rem * x, bounds.top() + rem * y);
     let width = if only.is_some() { px(2.) } else { px(1.5) };
     for (ix, edge) in layout.edges.iter().enumerate() {
         if only.is_some_and(|only| !only.contains(&ix)) {
             continue;
         }
-        let (from, to) = (layout.boxes[edge.from.0], layout.boxes[edge.to.0]);
-        let (y1, y2) = (row_y(from, edge.from.1), row_y(to, edge.to.1));
-        // `inward` is the way the line arrives: +1 into a box's left side, -1 into its right.
-        let (x1, x2, bend, inward) = if to.x + BOX_W <= from.x {
-            (from.x, to.x + BOX_W, -1., -1.)
-        } else if to.x >= from.x + BOX_W {
-            (from.x + BOX_W, to.x, 1., 1.)
-        } else {
-            (from.x + BOX_W, to.x + BOX_W, 0., -1.)
-        };
-        let reach = ((x2 - x1).abs() / 2.).max(2.308);
-        let (c1, c2) = match bend {
-            0. => (x1 + reach, x2 + reach),
-            _ => (x1 + reach * bend, x2 - reach * bend),
-        };
-        let mut path = PathBuilder::stroke(width);
-        path.move_to(at(x1, y1));
-        path.cubic_bezier_to(at(x2, y2), at(c1, y1), at(c2, y2));
-        if let Ok(path) = path.build() {
-            window.paint_path(path, color);
+        let path = layout.path(edge);
+        let mut line = PathBuilder::stroke(width);
+        line.move_to(at(path.from));
+        line.cubic_bezier_to(at(path.to), at(path.controls.0), at(path.controls.1));
+        if let Ok(line) = line.build() {
+            window.paint_path(line, color);
         }
-        // The prongs meet outside the box and spread to its side. A loop leaves to the right.
-        let (out, foot, half) = (if bend == 0. { 1. } else { bend }, 0.692, 0.346);
         let mut crow = PathBuilder::stroke(width);
-        for dy in [-half, 0., half] {
-            crow.move_to(at(x1 + out * foot, y1));
-            crow.line_to(at(x1, y1 + dy));
+        for (start, end) in path.prongs {
+            crow.move_to(at(start));
+            crow.line_to(at(end));
         }
         if let Ok(crow) = crow.build() {
             window.paint_path(crow, color);
         }
-        match only {
+        let end = match only {
             Some(_) => {
-                let (back, half) = (x2 - inward * 0.692, 0.346);
                 let mut head = PathBuilder::fill();
-                head.move_to(at(x2, y2));
-                head.line_to(at(back, y2 - half));
-                head.line_to(at(back, y2 + half));
+                head.move_to(at(path.head[0]));
+                head.line_to(at(path.head[1]));
+                head.line_to(at(path.head[2]));
                 head.close();
-                if let Ok(head) = head.build() {
-                    window.paint_path(head, color);
-                }
+                head.build()
             }
             None => {
-                let x = x2 - inward * 0.462;
                 let mut bar = PathBuilder::stroke(width);
-                bar.move_to(at(x, y2 - half));
-                bar.line_to(at(x, y2 + half));
-                if let Ok(bar) = bar.build() {
-                    window.paint_path(bar, color);
-                }
+                bar.move_to(at(path.bar.0));
+                bar.line_to(at(path.bar.1));
+                bar.build()
             }
+        };
+        if let Ok(end) = end {
+            window.paint_path(end, color);
         }
     }
 }
@@ -680,6 +777,11 @@ impl ErDiagram {
 impl Render for ErDiagram {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        if self.placeholder_shown.is_empty() {
+            self.placeholder_shown = self.placeholder(cx);
+            let placeholder = self.placeholder_shown.clone();
+            self.search.update(cx, |search, cx| search.set_placeholder(placeholder, window, cx));
+        }
         // Opens with all of it in view, unless that would make it too small to read.
         if matches!(self.state, State::Ready(_)) && !self.fitted {
             let view = self.scroll.bounds().size;
@@ -750,11 +852,17 @@ impl Render for ErDiagram {
         )
         .absolute()
         .inset_0();
+        let (scroll, zoom, dot) = (self.scroll.clone(), self.zoom, theme.border);
+        let dots =
+            canvas(|_, _, _| {}, move |bounds, _, window, _| paint_dots(bounds, scroll.offset(), zoom, dot, window))
+                .absolute()
+                .inset_0();
         v_flex().size_full().track_focus(&self.focus).bg(theme.background).child(self.toolbar(window, cx)).child(
             div()
                 .relative()
                 .flex_1()
                 .min_h_0()
+                .child(dots)
                 .child(viewport)
                 .child(wheel)
                 .hover_scrollbar(&self.scroll, ScrollbarAxis::Both),

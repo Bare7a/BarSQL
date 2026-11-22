@@ -157,6 +157,10 @@ pub fn themes(cx: &App) -> &Themes {
     cx.global::<Themes>()
 }
 
+pub fn blurred(entry: &ThemeEntry) -> bool {
+    entry.json.get("window").and_then(Value::as_str) == Some("blurred")
+}
+
 pub fn parse_set(text: &str, source: Source) -> anyhow::Result<Vec<ThemeEntry>> {
     let set: ThemeSet = serde_json::from_str(text)?;
     let raw: Value = serde_json::from_str(text)?;
@@ -375,6 +379,12 @@ fn clean_theme(
             "highlight" => {
                 clean.insert(key.into(), clean_highlight(value, &name, problems));
             }
+            "window" => match value.as_str() {
+                Some("opaque" | "blurred") => {
+                    clean.insert(key.into(), value.clone());
+                }
+                _ => problems.push(Problem::BadValue { theme: name.clone(), key: key.clone() }),
+            },
             _ => problems.push(Problem::UnknownKey { theme: name.clone(), key: key.clone() }),
         }
     }
@@ -559,8 +569,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        BUILT_IN, FolderLoad, KNOWN, MAX_FILE_BYTES, Problem, Source, built_in, keep_last_good, load_folder, parse_set,
-        slug, stamp,
+        BUILT_IN, FolderLoad, KNOWN, MAX_FILE_BYTES, Problem, Source, blurred, built_in, keep_last_good, load_folder,
+        parse_set, slug, stamp,
     };
 
     fn keys(value: &Value) -> HashSet<String> {
@@ -587,6 +597,7 @@ mod tests {
         let names: Vec<String> = built_in().all().map(|entry| entry.config.name.to_string()).collect();
         let expected = [
             "BarSQL Dark",
+            "BarSQL Dark Glass",
             "BarSQL Light",
             "Catppuccin Latte",
             "Catppuccin Frappé",
@@ -608,6 +619,20 @@ mod tests {
             "VS Code Light+",
         ];
         assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn a_window_key_asks_for_a_blurred_window() {
+        let themes = built_in();
+        let glass: Vec<&str> =
+            themes.all().filter(|entry| blurred(entry)).map(|entry| entry.config.name.as_ref()).collect();
+        assert_eq!(glass, ["BarSQL Dark Glass"]);
+        let theme = r#"{"name": "Mine", "themes": [{"name": "Frost", "mode": "dark", "window": "blurred"},
+            {"name": "Fog", "mode": "dark", "window": "foggy"}]}"#;
+        let dir = folder(&[("frost.json", theme)]);
+        let load = load(dir.path());
+        assert!(blurred(&load.entries[0]));
+        assert_eq!(problems(&load, "frost.json"), [Problem::BadValue { theme: "Fog".into(), key: "window".into() }]);
     }
 
     #[test]
@@ -667,15 +692,9 @@ mod tests {
         [mix(0), mix(1), mix(2), 1.]
     }
 
-    // WCAG 2 relative luminance and contrast ratio.
-    fn luminance(color: [f32; 4]) -> f32 {
-        let channel = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
-        0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
-    }
-
     fn ratio(text: [f32; 4], background: [f32; 4]) -> f32 {
-        let (a, b) = (luminance(over(text, background)), luminance(background));
-        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        let hsla = |[r, g, b, a]: [f32; 4]| gpui_kit::Hsla::from(gpui_kit::Rgba { r, g, b, a });
+        crate::theme::contrast(hsla(text), hsla(background))
     }
 
     const SURFACES: [&str; 3] = ["background", "sidebar.background", "popover.background"];
@@ -802,7 +821,7 @@ mod tests {
     // GPUI Kit caps some opacities and fills in what a theme leaves out, so this reads what it resolves.
     #[test]
     fn resolved_themes_keep_selections_and_button_states_readable() {
-        use crate::test_support::contrast;
+        use crate::theme::contrast;
         for entry in built_in().all() {
             let mut theme = Theme::default();
             theme.apply_config(&entry.config);

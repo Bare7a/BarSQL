@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 use barsql_core::{
     Check, ColumnInfo, ConstraintInfo, Dependent, DriverType, ForeignKey, FunctionInfo, FunctionKind, FunctionList,
-    Identity, IndexInfo, ObjectKind, ObjectRef, PrimaryKey, QueryError, RefAction, StructColumn, StructIndex,
-    TableInfo, TableStructure, TriggerInfo,
+    Identity, IndexInfo, ObjectKind, ObjectRef, PrimaryKey, QueryError, RefAction, ReferencingKey, StructColumn,
+    StructIndex, TableInfo, TableStructure, TriggerInfo,
 };
 use barsql_sql::ddl::{join_ddl, render_create_index, terminate_statement, unsupported_ddl};
 use barsql_sql::enum_values;
@@ -23,6 +23,34 @@ const LITE: DriverType = DriverType::Sqlite;
 
 fn text(value: &str) -> LiteValue {
     LiteValue::Text(value.to_string())
+}
+
+// The column as the table spells it. A key naming no column takes a one-column primary key, or is left out.
+pub(crate) fn referencing_keys(src: &mut dyn LiteSource, table: &str) -> Result<Vec<ReferencingKey>, QueryError> {
+    let rows = src.query(
+        "SELECT m.name, f.id, f.\"from\", COALESCE(
+                (SELECT name FROM pragma_table_info(?1) WHERE name = f.\"to\" COLLATE NOCASE),
+                f.\"to\",
+                (SELECT name FROM pragma_table_info(?1) WHERE pk = 1
+                    AND (SELECT count(*) FROM pragma_table_info(?1) WHERE pk > 0) = 1))
+        FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f
+        WHERE m.type = 'table' AND f.\"table\" = ?1 COLLATE NOCASE
+        ORDER BY m.name, f.id, f.seq",
+        &[text(table)],
+    )?;
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|r| {
+            Some(ReferencingKey {
+                schema: "main".into(),
+                table: r.text(0),
+                key: r.int(1).to_string(),
+                column: r.text(2),
+                referenced_column: r.opt_text(3)?,
+            })
+        })
+        .collect())
 }
 
 pub(crate) fn tables(src: &mut dyn LiteSource) -> Result<Vec<TableInfo>, QueryError> {
@@ -40,7 +68,7 @@ pub(crate) fn tables(src: &mut dyn LiteSource) -> Result<Vec<TableInfo>, QueryEr
 // lists the CHECKs, so the first row brings the table's DDL for them.
 pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<ColumnInfo>, QueryError> {
     let rows = src.query(
-        "SELECT x.name, x.type, x.\"notnull\", x.dflt_value, x.pk, x.hidden, f.\"table\", f.\"to\",
+        "SELECT x.name, x.type, x.\"notnull\", x.dflt_value, x.pk, x.hidden, f.\"table\", f.\"to\", f.id,
             EXISTS (SELECT 1 FROM pragma_index_list(?1) WHERE origin = 'pk'),
             CASE WHEN x.cid = 0 THEN (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1) END
         FROM pragma_table_xinfo(?1) x
@@ -48,7 +76,7 @@ pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Colum
         ORDER BY x.cid, f.id, f.seq",
         &[text(table)],
     )?;
-    let ddl = rows.rows.first().and_then(|r| r.opt_text(9)).unwrap_or_default();
+    let ddl = rows.rows.first().and_then(|r| r.opt_text(10)).unwrap_or_default();
     let checks = enum_values::ddl_checks(&ddl, &LITE);
     let mut out: Vec<ColumnInfo> = Vec::new();
     for r in &rows.rows {
@@ -66,6 +94,7 @@ pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Colum
             is_primary: r.int(4) > 0,
             is_foreign: !foreign_table.is_empty(),
             foreign_column: if foreign_table.is_empty() { String::new() } else { r.text(7) },
+            foreign_key: r.text(8),
             foreign_table,
             default_val: r.text(3),
             is_computed: matches!(hidden, 2 | 3),
@@ -74,7 +103,7 @@ pub(crate) fn columns(src: &mut dyn LiteSource, table: &str) -> Result<Vec<Colum
     }
     // A lone INTEGER PRIMARY KEY is an alias for the rowid, which SQLite fills in. In a WITHOUT ROWID table, or
     // declared INTEGER PRIMARY KEY DESC, it's an ordinary column that SQLite keeps in an index of origin "pk".
-    let key_index = rows.rows.first().is_some_and(|r| r.int(8) == 1);
+    let key_index = rows.rows.first().is_some_and(|r| r.int(9) == 1);
     if !key_index && let [key] = out.iter_mut().filter(|c| c.is_primary).collect::<Vec<_>>().as_mut_slice() {
         key.is_identity = key.data_type.eq_ignore_ascii_case("integer");
     }

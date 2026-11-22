@@ -1,6 +1,10 @@
+use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
+use barsql_core::SqlDialect;
 use barsql_db::{Cell, ResultSet};
+use barsql_sql::{TypeFamily, type_family};
 use regex::{Regex, RegexBuilder};
 use serde_json::Value as Json;
 
@@ -24,11 +28,71 @@ fn parse_value(cell: Cell<'_>, type_name: &str) -> JsonValue {
     JsonValue::from_cell(cell)
 }
 
+// A table view's unsaved edits by (row, column). None is a staged NULL.
+pub type StagedCells = HashMap<(usize, usize), Option<String>>;
+
+// A staged value wins over the loaded one.
+pub fn shown_cell<'a>(
+    set: &'a ResultSet,
+    staged: Option<&'a StagedCells>,
+    row: usize,
+    column: usize,
+    dialect: Option<SqlDialect>,
+) -> Cell<'a> {
+    let loaded = set.cell(row, column);
+    let Some(value) = staged.and_then(|staged| staged.get(&(row, column))) else { return loaded };
+    match value.as_deref() {
+        Some(text) => typed(loaded, text, &set.columns[column].type_name, dialect),
+        None => Cell::Null,
+    }
+}
+
+// An edit takes its cell's kind where it spells one, or over a NULL its column type's, so a number stays a number
+// and a boolean a boolean. Numbers are JSON's, as JSON copies them bare.
+pub fn typed<'a>(loaded: Cell<'_>, text: &'a str, type_name: &str, dialect: Option<SqlDialect>) -> Cell<'a> {
+    let family = match loaded {
+        Cell::Null => type_family(dialect, type_name),
+        Cell::Number(_) => TypeFamily::Number,
+        Cell::Bool(_) => TypeFamily::Boolean,
+        Cell::Text(_) => TypeFamily::Text,
+    };
+    let as_flag = |type_name: &str| flag(Cell::Text(text), type_name).map_or(Cell::Text(text), Cell::Bool);
+    match family {
+        TypeFamily::Number if serde_json::from_str::<serde_json::Number>(text).is_ok() => Cell::Number(text.trim()),
+        TypeFamily::Boolean => as_flag("boolean"),
+        _ => as_flag(type_name),
+    }
+}
+
+// The engine's own booleans, plus 1/0 and true/false in a column declared boolean, as SQLite and staged edits hold them.
+pub fn flag(cell: Cell, type_name: &str) -> Option<bool> {
+    let boolean = || ["boolean", "bool"].iter().any(|name| type_name.trim().eq_ignore_ascii_case(name));
+    let spelled = |text: &str, words: [&str; 3]| words.iter().any(|word| text.eq_ignore_ascii_case(word));
+    match cell {
+        Cell::Bool(on) => Some(on),
+        Cell::Number(text) | Cell::Text(text) if boolean() => {
+            if spelled(text, ["1", "true", "t"]) {
+                Some(true)
+            } else {
+                spelled(text, ["0", "false", "f"]).then_some(false)
+            }
+        }
+        _ => None,
+    }
+}
+
 // Visible columns in display order. A repeated name keeps its first position but its last value.
-fn row_object(set: &ResultSet, row: usize, columns: &[usize], hide_nulls: bool) -> JsonValue {
+fn row_object(
+    set: &ResultSet,
+    staged: Option<&StagedCells>,
+    row: usize,
+    columns: &[usize],
+    hide_nulls: bool,
+    dialect: Option<SqlDialect>,
+) -> JsonValue {
     let mut object = JsonObject::default();
     for &column in columns {
-        let cell = set.cell(row, column);
+        let cell = shown_cell(set, staged, row, column, dialect);
         if hide_nulls && matches!(cell, Cell::Null) {
             continue;
         }
@@ -108,13 +172,70 @@ fn filter(value: &JsonValue, matcher: &Matcher) -> Option<JsonValue> {
 }
 
 // Pretty-printed. None when nothing matches `query`.
-pub fn row_json(set: &ResultSet, row: usize, columns: &[usize], query: &str, hide_nulls: bool) -> Option<String> {
-    let value = row_object(set, row, columns, hide_nulls);
+pub fn row_json(
+    set: &ResultSet,
+    staged: Option<&StagedCells>,
+    row: usize,
+    columns: &[usize],
+    query: &str,
+    hide_nulls: bool,
+    dialect: Option<SqlDialect>,
+) -> Option<String> {
+    let value = row_object(set, staged, row, columns, hide_nulls, dialect);
     let matcher = Matcher::new(query);
     let shown = if matches!(matcher, Matcher::All) { Some(value) } else { filter(&value, &matcher) }?;
     let mut out = String::new();
     shown.write(&mut out, "");
     Some(out)
+}
+
+// `value` is None for NULL; JSON, arrays and maps come pretty-printed. Shared, as each frame draws it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowField {
+    pub column: usize,
+    pub value: Option<Arc<str>>,
+    pub json: bool,
+}
+
+// Filters as `row_json` does, but a nested match keeps its whole value.
+pub fn row_fields(
+    set: &ResultSet,
+    staged: Option<&StagedCells>,
+    row: usize,
+    columns: &[usize],
+    query: &str,
+    hide_nulls: bool,
+    dialect: Option<SqlDialect>,
+) -> Vec<RowField> {
+    let matcher = Matcher::new(query);
+    let mut fields = Vec::new();
+    for &column in columns {
+        let cell = shown_cell(set, staged, row, column, dialect);
+        if hide_nulls && matches!(cell, Cell::Null) {
+            continue;
+        }
+        let meta = &set.columns[column];
+        let value = parse_value(cell, &meta.type_name);
+        let hit = matcher.matches(&meta.name)
+            || match &value {
+                JsonValue::Object(_) => filter(&value, &matcher).is_some(),
+                _ => matcher.matches(&match_text(&value)),
+            };
+        if !hit {
+            continue;
+        }
+        let json = matches!(value, JsonValue::Object(_) | JsonValue::Array(_));
+        let shown = match json {
+            true => {
+                let mut out = String::new();
+                value.write(&mut out, "");
+                Some(out.into())
+            }
+            false => cell.display().map(Into::into),
+        };
+        fields.push(RowField { column, value: shown, json });
+    }
+    fields
 }
 
 // Caps what a broad filter like /./ marks.
@@ -213,7 +334,73 @@ mod tests {
     }
 
     fn shown(set: &ResultSet, columns: &[usize], query: &str, hide_nulls: bool) -> Option<Json> {
-        row_json(set, 0, columns, query, hide_nulls).map(|text| serde_json::from_str(&text).unwrap())
+        row_json(set, None, 0, columns, query, hide_nulls, None).map(|text| serde_json::from_str(&text).unwrap())
+    }
+
+    #[test]
+    fn staged_edits_show_over_the_loaded_values() {
+        let row = set(&["id", "name", "note"], &[Some("7"), Some("ann"), Some("hi")]);
+        let typed = StagedCells::from([((0, 0), Some("8".to_string()))]);
+        assert_eq!(
+            row_json(&row, Some(&typed), 0, &[0], "", false, None).unwrap(),
+            "{\n  \"id\": 8\n}",
+            "a number stays one"
+        );
+        let staged = StagedCells::from([((0, 1), Some("bob".to_string())), ((0, 2), None)]);
+        let fields = row_fields(&row, Some(&staged), 0, &[1, 2], "", false, None);
+        let values: Vec<_> = fields.iter().map(|f| f.value.as_deref()).collect();
+        assert_eq!(values, [Some("bob"), None]);
+        let json = row_json(&row, Some(&staged), 0, &[0, 1], "", false, None).unwrap();
+        assert_eq!(json, "{\n  \"id\": 7,\n  \"name\": \"bob\"\n}");
+    }
+
+    #[test]
+    fn an_edit_over_a_null_takes_its_column_types_kind() {
+        let row = typed_set(&[("qty", "int"), ("paid", "bit"), ("note", "nvarchar")], &[None, None, None]);
+        let staged = StagedCells::from([
+            ((0, 0), Some("8".to_string())),
+            ((0, 1), Some("1".to_string())),
+            ((0, 2), Some("8".to_string())),
+        ]);
+        let shown = |column| shown_cell(&row, Some(&staged), 0, column, Some(SqlDialect::TSql));
+        assert_eq!((shown(0), shown(1), shown(2)), (Cell::Number("8"), Cell::Bool(true), Cell::Text("8")));
+        assert_eq!(typed(Cell::Null, ".5", "int", None), Cell::Text(".5"), "JSON's numbers only");
+    }
+
+    #[test]
+    fn fields_keep_display_text_and_pretty_json() {
+        let columns = [("id", "INT"), ("name", "TEXT"), ("meta", "JSON"), ("tags", "_TEXT"), ("gone", "TEXT")];
+        let row = typed_set(&columns, &[Some("7"), Some("ann"), Some("{\"a\":1}"), Some("{x,y}"), None]);
+        let fields = row_fields(&row, None, 0, &[1, 0, 2, 3, 4], "", false, None);
+        let shown: Vec<_> =
+            fields.iter().map(|f| (row.columns[f.column].name.as_str(), f.value.as_deref(), f.json)).collect();
+        assert_eq!(
+            shown,
+            [
+                ("name", Some("ann"), false),
+                ("id", Some("7"), false),
+                ("meta", Some("{\n  \"a\": 1\n}"), true),
+                ("tags", Some("[\n  \"x\",\n  \"y\"\n]"), true),
+                ("gone", None, false),
+            ]
+        );
+        assert_eq!(fields[2].column, 2);
+        assert_eq!(row_fields(&row, None, 0, &[4, 1], "", true, None).len(), 1);
+    }
+
+    #[test]
+    fn fields_filter_by_name_or_value_like_the_json() {
+        let columns = [("id", "INT"), ("email", "TEXT"), ("meta", "JSON")];
+        let row = typed_set(&columns, &[Some("7"), Some("ann@example.com"), Some("{\"plan\":\"pro\"}")]);
+        let names = |query: &str| -> Vec<String> {
+            let fields = row_fields(&row, None, 0, &[0, 1, 2], query, false, None);
+            fields.into_iter().map(|f| row.columns[f.column].name.clone()).collect()
+        };
+        assert_eq!(names("EXAMPLE"), ["email"]);
+        assert_eq!(names("pro"), ["meta"]);
+        assert_eq!(names("id"), ["id"]);
+        assert_eq!(names("/^e/"), ["email"]);
+        assert!(names("nothing").is_empty());
     }
 
     #[test]
@@ -229,7 +416,10 @@ mod tests {
     #[test]
     fn rows_become_objects_of_their_visible_columns() {
         let people = set(&["id", "name", "note"], &[Some("1"), Some("alice"), Some("hi")]);
-        assert_eq!(row_json(&people, 0, &[2, 0], "", false).unwrap(), "{\n  \"note\": \"hi\",\n  \"id\": 1\n}");
+        assert_eq!(
+            row_json(&people, None, 0, &[2, 0], "", false, None).unwrap(),
+            "{\n  \"note\": \"hi\",\n  \"id\": 1\n}"
+        );
         let nulls = set(&["id", "name", "note"], &[Some("1"), None, Some("")]);
         assert_eq!(object(&nulls, &[1], ""), Some(serde_json::json!({ "name": null })));
         let payload = set(&["payload"], &[Some("{\"a\":1,\"b\":[2,3]}")]);
@@ -238,7 +428,7 @@ mod tests {
         assert_eq!(object(&broken, &[0], ""), Some(serde_json::json!({ "payload": "{not valid json}" })));
         let numbered = set(&["b", "10", "2"], &[Some("x"), Some("y"), Some("z")]);
         assert_eq!(
-            row_json(&numbered, 0, &[0, 1, 2], "", false).unwrap(),
+            row_json(&numbered, None, 0, &[0, 1, 2], "", false, None).unwrap(),
             "{\n  \"2\": \"z\",\n  \"10\": \"y\",\n  \"b\": \"x\"\n}"
         );
     }

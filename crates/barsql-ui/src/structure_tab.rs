@@ -666,7 +666,7 @@ impl StructureTab {
                     .debug_selector(move || format!("structure:section-dot:{ix}"))
             });
             group.child(
-                form::toggle(("structure-section", ix), label, self.section == section)
+                form::toggle_small(("structure-section", ix), label, self.section == section)
                     .debug_selector(move || format!("structure-section:{ix}"))
                     .children(dot)
                     .on_click(cx.listener(move |this, _, window, cx| {
