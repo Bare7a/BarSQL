@@ -56,6 +56,7 @@ fn catalog(cx: &App) -> Vec<(String, Box<dyn Action>)> {
         (item("shortcuts.items.toggleJsonPanel"), Box::new(ToggleJsonPanel)),
         (item("menu.stripedRows"), Box::new(ToggleGridStripes)),
         (item("menu.typeColors"), Box::new(ToggleGridTypeColors)),
+        (item("menu.enterAcceptsSuggestions"), Box::new(ToggleEnterAcceptsSuggestions)),
         (item("shortcuts.items.toggleFullscreen"), Box::new(ToggleFullscreen)),
         (item("shortcuts.items.zoomIn"), Box::new(ZoomIn)),
         (item("shortcuts.items.zoomOut"), Box::new(ZoomOut)),

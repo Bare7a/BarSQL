@@ -42,6 +42,7 @@ actions!(
         IncreaseEditorFontSize,
         DecreaseEditorFontSize,
         ResetEditorFontSize,
+        ToggleEnterAcceptsSuggestions,
         ToggleSidebar,
         ToggleJsonPanel,
         ToggleGridStripes,
@@ -200,6 +201,7 @@ fn menus(cx: &App) -> Vec<Menu> {
         (setting_bool(cx, "barsql-sidebar-open", true), setting_bool(cx, "barsql-json-open", false));
     let stripes = setting_bool(cx, crate::grid::STRIPES_KEY, false);
     let type_colors = setting_bool(cx, crate::grid::TYPE_COLORS_KEY, false);
+    let enter_accepts = crate::completion::enter_accepts_suggestions(cx);
     let view = vec![
         MenuItem::action(t(cx, "menu.commandPalette"), CommandPalette),
         MenuItem::separator(),
@@ -213,6 +215,7 @@ fn menus(cx: &App) -> Vec<Menu> {
         MenuItem::action(t(cx, "editor.increaseFontSize"), IncreaseEditorFontSize),
         MenuItem::action(t(cx, "editor.decreaseFontSize"), DecreaseEditorFontSize),
         MenuItem::action(t(cx, "editor.resetFontSize"), ResetEditorFontSize),
+        MenuItem::action(t(cx, "menu.enterAcceptsSuggestions"), ToggleEnterAcceptsSuggestions).checked(enter_accepts),
         MenuItem::separator(),
         MenuItem::action(t(cx, "menu.toggleSidebar"), ToggleSidebar).checked(sidebar_open),
         MenuItem::action(t(cx, "menu.toggleJsonPanel"), ToggleJsonPanel).checked(json_open),

@@ -10,7 +10,7 @@ use gpui_kit::{
 };
 
 use super::Workspace;
-use crate::actions::{ToggleJsonPanel, ToggleSidebar};
+use crate::actions::{ToggleEnterAcceptsSuggestions, ToggleJsonPanel, ToggleSidebar};
 use crate::query_tab::QueryTab;
 use crate::saved_queries;
 use crate::schema_tree::TableChange;
@@ -555,4 +555,16 @@ fn a_closed_table_view_reopens_with_its_filter_and_sort(cx: &mut TestAppContext)
     workspace.update_in(cx, |ws, window, cx| ws.reopen_closed_tab(window, cx));
     let reopened = cx.update(|_, cx| workspace.read(cx).tabs.last().unwrap().view.stored(cx).table_view.unwrap());
     assert_eq!(reopened, before);
+}
+
+#[gpui_kit::test]
+fn the_view_menu_toggles_whether_enter_accepts_suggestions(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (workspace, cx) = open(cx);
+    let on = |cx: &mut VisualTestContext| cx.update(|_, cx| crate::completion::enter_accepts_suggestions(cx));
+    assert!(on(cx), "on until switched off");
+    workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(ToggleEnterAcceptsSuggestions), cx));
+    assert!(!on(cx));
+    workspace.update_in(cx, |_, window, cx| window.dispatch_action(Box::new(ToggleEnterAcceptsSuggestions), cx));
+    assert!(on(cx));
 }

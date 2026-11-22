@@ -337,6 +337,7 @@
     "bringAllToFront": "Traer todo al frente",
     "stripedRows": "Filas alternadas",
     "typeColors": "Colorear valores por tipo",
+    "enterAcceptsSuggestions": "Aceptar sugerencias con Enter",
     "commandPalette": "Paleta de comandos…"
   },
   "errors": {

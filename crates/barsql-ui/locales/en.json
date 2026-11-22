@@ -337,6 +337,7 @@
     "bringAllToFront": "Bring All to Front",
     "stripedRows": "Striped rows",
     "typeColors": "Color values by type",
+    "enterAcceptsSuggestions": "Accept suggestions with Enter",
     "commandPalette": "Command Palette…"
   },
   "errors": {

@@ -499,6 +499,10 @@ fn hovering_a_function_shows_its_calls_and_docs(cx: &mut TestAppContext) {
     );
 }
 
+fn enter_after_picking(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::state::set_setting_bool(cx, crate::completion::ENTER_KEY, false));
+}
+
 fn catalog_ready(env: &Env, cx: &mut VisualTestContext) {
     let id = env.connection.id.clone();
     settle(cx, |cx| cx.update(|_, cx| schema::catalog(cx, &id).is_some()));
@@ -598,6 +602,7 @@ fn columns_cached(env: &Env, tables: &[&str], cx: &mut VisualTestContext) {
 #[gpui_kit::test]
 fn a_space_after_join_on_offers_the_foreign_key_join(cx: &mut TestAppContext) {
     let env = Env::new(cx);
+    enter_after_picking(cx);
     join_tables(&env);
     let line = "SELECT * FROM kids k JOIN parents p ON ";
     let (tab, cx) = open(&env, cx, "");
@@ -624,6 +629,7 @@ fn a_space_after_join_on_offers_the_foreign_key_join(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn enter_ends_the_line_unless_a_row_was_picked(cx: &mut TestAppContext) {
     let env = Env::new(cx);
+    enter_after_picking(cx);
     for line in [
         "SELECT * FROM things",
         "SELECT * FROM thin",
@@ -642,6 +648,7 @@ fn enter_ends_the_line_unless_a_row_was_picked(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn tab_arrows_or_ctrl_space_take_the_suggestion(cx: &mut TestAppContext) {
     let env = Env::new(cx);
+    enter_after_picking(cx);
     let (tab, cx) = open(&env, cx, "");
     catalog_ready(&env, cx);
     type_slowly(cx, "SELECT * FROM thin");
@@ -674,6 +681,7 @@ fn tab_arrows_or_ctrl_space_take_the_suggestion(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn keys_the_list_cant_use_reach_the_editor(cx: &mut TestAppContext) {
     let env = Env::new(cx);
+    enter_after_picking(cx);
     let (tab, cx) = open(&env, cx, "");
     catalog_ready(&env, cx);
     type_slowly(cx, "SELECT * FROM thi");
@@ -738,6 +746,26 @@ fn the_list_stays_at_the_word_start(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn by_default_enter_takes_a_suggestion_that_changes_the_text(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    join_tables(&env);
+    for (line, after) in [
+        ("SELECT * FROM thin", "SELECT * FROM things"),
+        ("SELECT * FROM things", "SELECT * FROM things\n"),
+        ("select * from things order by id desc", "select * from things order by id desc\n"),
+        ("SELECT * FROM kids k JOIN parents p ON ", "SELECT * FROM kids k JOIN parents p ON k.parent_id = p.id"),
+    ] {
+        let (tab, cx) = open(&env, cx, "");
+        wait_for_table(&env, "kids", cx);
+        type_slowly(cx, line);
+        settle(cx, |cx| !labels_of(&tab, cx).is_empty());
+        assert!(cx.debug_bounds("completion-tab-hint").is_none(), "no Tab hint after {line:?}");
+        cx.simulate_keystrokes("enter");
+        assert_eq!(text(&tab, cx), after, "Enter after {line:?}");
+    }
+}
+
+#[gpui_kit::test]
 fn every_frame_draws_the_list_at_the_word_start(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (tab, cx) = open(&env, cx, "");
@@ -755,6 +783,7 @@ fn every_frame_draws_the_list_at_the_word_start(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_tab_hint_shows_until_enter_would_take_the_row(cx: &mut TestAppContext) {
     let env = Env::new(cx);
+    enter_after_picking(cx);
     let (_tab, cx) = open(&env, cx, "");
     catalog_ready(&env, cx);
     type_slowly(cx, "SELECT * FROM thin");

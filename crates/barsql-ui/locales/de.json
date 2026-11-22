@@ -337,6 +337,7 @@
     "bringAllToFront": "Alle nach vorne bringen",
     "stripedRows": "Gestreifte Zeilen",
     "typeColors": "Werte nach Typ einfärben",
+    "enterAcceptsSuggestions": "Vorschläge mit Enter übernehmen",
     "commandPalette": "Befehlspalette…"
   },
   "errors": {

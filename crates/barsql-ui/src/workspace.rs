@@ -2540,6 +2540,12 @@ impl Render for Workspace {
                 set_menus(cx);
                 window.refresh();
             }))
+            .on_action(cx.listener(|_, _: &ToggleEnterAcceptsSuggestions, window, cx| {
+                let on = crate::completion::enter_accepts_suggestions(cx);
+                set_setting_bool(cx, crate::completion::ENTER_KEY, !on);
+                set_menus(cx);
+                window.refresh();
+            }))
             .on_action(cx.listener(|_, _: &ToggleGridTypeColors, window, cx| {
                 set_setting_bool(cx, grid::TYPE_COLORS_KEY, !setting_bool(cx, grid::TYPE_COLORS_KEY, false));
                 set_menus(cx);

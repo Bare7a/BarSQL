@@ -35,12 +35,18 @@ actions!(
 
 // Set on the editor's parent while the list is open, so the list gets these keys.
 pub const OPEN_CONTEXT: &str = "completing";
+pub const ENTER_KEY: &str = "barsql-enter-accepts-suggestions";
 const VISIBLE_ROWS: usize = 12;
 const WIDTH: Pixels = px(430.);
 // A row's padding, icon and gap before its label. The list sits that far left of the word, plus its border.
 const ROW_PAD: f32 = 2.;
 const ICON_COLUMN: f32 = 16.;
 const ICON_GAP: f32 = 4.;
+
+// On: Enter takes the highlighted row whenever that changes the text. Off: only once a row was picked.
+pub fn enter_accepts_suggestions(cx: &App) -> bool {
+    crate::state::setting_bool(cx, ENTER_KEY, true)
+}
 
 pub fn init(cx: &mut App) {
     let context = Some("completing > Input");
@@ -108,7 +114,7 @@ pub fn handlers<E: InteractiveElement, M: InputModeKind>(el: E, completion: &Ent
         let completion = on();
         move |_: &ConfirmSuggestion, window, cx| {
             when_open(&completion, window, cx, |this, window, cx| {
-                let take = this.enter_accepts();
+                let take = this.enter_accepts(cx);
                 if take {
                     this.accept(this.selected, window, cx);
                 }
@@ -215,8 +221,15 @@ impl<M: InputModeKind> Completion<M> {
         self.provider = Some(provider);
     }
 
-    fn enter_accepts(&self) -> bool {
-        self.picked || self.invoked
+    // With the setting on, also a row that changes the text. Case alone isn't a change, so `desc` Enter ends the line.
+    fn enter_accepts(&self, cx: &App) -> bool {
+        self.picked || self.invoked || (enter_accepts_suggestions(cx) && self.changes_text(cx))
+    }
+
+    fn changes_text(&self, cx: &App) -> bool {
+        let Some((range, new_text, _)) = self.replacement(self.selected, cx) else { return false };
+        let text = self.editor.read(cx).value();
+        text.get(range).is_none_or(|old| old.to_lowercase() != new_text.to_lowercase())
     }
 
     // False as soon as the text or caret changes without this list seeing it.
@@ -354,13 +367,12 @@ impl<M: InputModeKind> Completion<M> {
         cx.notify();
     }
 
-    fn accept(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.items.get(ix).map(|suggestion| suggestion.item.clone()) else { return };
-        let (text, cursor) = {
-            let state = self.editor.read(cx);
-            (state.value(), state.cursor())
-        };
-        let (range, new_text) = edit(&item, self.start.min(cursor)..cursor, &text);
+    // The range row `ix` replaces, its text, and where the caret lands in that text.
+    fn replacement(&self, ix: usize, cx: &App) -> Option<(Range<usize>, String, usize)> {
+        let item = &self.items.get(ix)?.item;
+        let state = self.editor.read(cx);
+        let (text, cursor) = (state.value(), state.cursor());
+        let (range, new_text) = edit(item, self.start.min(cursor)..cursor, &text);
         // Items a key behind end where they were asked for, so the word now runs to the caret.
         let range = range.start.min(cursor)..if range.end == self.shown_at { cursor } else { range.end };
         let (new_text, caret) = if item.insert_text_format == Some(InsertTextFormat::SNIPPET) {
@@ -369,6 +381,11 @@ impl<M: InputModeKind> Completion<M> {
             let end = new_text.len();
             (new_text, end)
         };
+        Some((range, new_text, caret))
+    }
+
+    fn accept(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((range, new_text, caret)) = self.replacement(ix, cx) else { return };
         self.hide(cx);
         let at = range.start + caret;
         self.editor.update(cx, |state, cx| {
@@ -435,8 +452,8 @@ impl<M: InputModeKind> Completion<M> {
                 let size = metrics.font_size * 0.85;
                 div().flex_none().max_w(px(170.)).truncate().ml_auto().pl(size * 1.1).text_size(size).child(detail)
             }))
-            // Until a row is picked, only Tab takes it, so say so.
-            .when(selected && !self.enter_accepts(), |row| {
+            // With the setting off, only Tab takes a row until one is picked, so say so.
+            .when(selected && !enter_accepts_suggestions(cx) && !self.picked && !self.invoked, |row| {
                 let hint = form::key_chip(metrics.tab.clone(), palette.selected_text)
                     .debug_selector(|| "completion-tab-hint".into());
                 row.child(hint.when(suggestion.item.detail.is_none(), |hint| hint.ml_auto()))

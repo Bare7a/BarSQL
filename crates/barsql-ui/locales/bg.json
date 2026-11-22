@@ -337,6 +337,7 @@
     "bringAllToFront": "Изнеси всички отпред",
     "stripedRows": "Редове на ивици",
     "typeColors": "Оцветяване на стойностите по тип",
+    "enterAcceptsSuggestions": "Приемане на предложенията с Enter",
     "commandPalette": "Палитра с команди…"
   },
   "errors": {
