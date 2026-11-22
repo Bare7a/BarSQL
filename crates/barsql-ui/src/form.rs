@@ -454,8 +454,9 @@ fn key_parts(shortcut: &str) -> Vec<&str> {
 pub fn shortcut_hints(hints: impl IntoIterator<Item = (String, SharedString)>, cx: &App) -> Div {
     let hints: Vec<(String, SharedString)> = hints.into_iter().filter(|(keys, _)| !keys.is_empty()).collect();
     let muted = cx.theme().muted_foreground;
-    // Both columns share a row height, so each label stays level with its keys.
+    // Both columns share a row height and gap, so each label stays level with its keys.
     let row = || h_flex().h(rems(1.846));
+    let column = || v_flex().gap(rems(0.462));
     let keys = |shortcut: &str| {
         row().gap(rems(0.308)).children(key_parts(shortcut).into_iter().enumerate().flat_map(|(ix, key)| {
             let plus = (ix > 0).then(|| div().child("+").into_any_element());
@@ -467,8 +468,8 @@ pub fn shortcut_hints(hints: impl IntoIterator<Item = (String, SharedString)>, c
         .gap(rems(1.231))
         .text_size(TEXT_SM)
         .text_color(muted)
-        .child(v_flex().items_end().children(hints.iter().map(|(_, label)| row().child(label.clone()))))
-        .child(v_flex().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut))))
+        .child(column().items_end().children(hints.iter().map(|(_, label)| row().child(label.clone()))))
+        .child(column().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut))))
 }
 
 pub fn empty_state(icon: Option<Icon>, text: impl Into<SharedString>, cx: &App) -> Div {
