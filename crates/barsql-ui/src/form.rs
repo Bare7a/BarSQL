@@ -46,9 +46,12 @@ fn field(state: &Entity<InputState>, text: Rems, padding: Rems, window: &Window,
 pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> Div {
     let theme = cx.theme();
     let focused = state.read(cx).focus_handle(cx).is_focused(window);
-    let padding = rems(0.615).to_pixels(window.rem_size());
+    let rem = window.rem_size();
+    // Focus thickens the border to 2px, so the insets drop 1px to keep the text still.
+    let thicker = if focused { px(1.) } else { px(0.) };
     let paste_into = state.clone();
-    // XSmall drops the editor's 8px top inset, so the frame centers the line.
+    // XSmall drops the editor's 8px top inset, so the frame centers the line. Its text still starts 10px in (padding
+    // and gutter), so the margin evens the first letter's gap with the 10.4px above the capitals.
     let editor = Editor::new(state)
         .xsmall()
         .appearance(false)
@@ -56,6 +59,7 @@ pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> 
         .flex_1()
         .min_w_0()
         .p_0()
+        .ml(rems(0.708).to_pixels(rem) - px(10.) - thicker)
         .text_size(rems(0.923))
         .context_menu(crate::context_menu::editor(state))
         .on_paste(move |item, window, cx| {
@@ -63,10 +67,15 @@ pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> 
             paste_into.update(cx, |state, cx| state.replace(one_line(&text), window, cx));
             true
         });
-    let frame = h_flex().h(rems(2.308)).rounded(theme.radius).bg(theme.background).child(editor);
+    let frame = h_flex()
+        .h(rems(2.308))
+        .pr(rems(0.677).to_pixels(rem) - thicker)
+        .rounded(theme.radius)
+        .bg(theme.background)
+        .child(editor);
     match focused {
-        true => frame.border_2().border_color(theme.ring).px(padding - px(1.)),
-        false => frame.border_1().border_color(theme.input).px(padding),
+        true => frame.border_2().border_color(theme.ring),
+        false => frame.border_1().border_color(theme.input),
     }
 }
 
