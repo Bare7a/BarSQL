@@ -132,15 +132,15 @@
           "string": { "color": "#f1fa8c" },
           "string.special": { "color": "#ff79c6" },
           "number": { "color": "#bd93f9" },
-          "comment": { "color": "#6a79a9", "font_style": "italic" },
-          "comment_doc": { "color": "#6a79a9", "font_style": "italic" },
+          "comment": { "color": "#6a79a9" },
+          "comment_doc": { "color": "#6a79a9" },
           "punctuation": { "color": "#f8f8f2" },
           "punctuation.delimiter": { "color": "#f8f8f2" },
           "punctuation.bracket": { "color": "#f8f8f2" },
           "variable": { "color": "#f8f8f2" },
           "property": { "color": "#f8f8f2" },
           "function": { "color": "#50fa7b" },
-          "type": { "color": "#8be9fd", "font_style": "italic" },
+          "type": { "color": "#8be9fd" },
           "attribute": { "color": "#50fa7b" },
           "tag": { "color": "#ff79c6" }
         }

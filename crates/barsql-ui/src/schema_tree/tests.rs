@@ -8,7 +8,7 @@ use gpui_kit::{Entity, Modifiers, MouseButton, MouseDownEvent, TestAppContext, V
 
 use super::{
     SchemaTree, SchemaTreeEvent, column_details, column_icon, column_matches, group_icon, match_ranges, relation_look,
-    table_matches, type_label, type_needle,
+    search_mark, table_matches, type_label, type_needle,
 };
 use crate::assets::AppAssets;
 use crate::i18n::I18n;
@@ -141,6 +141,14 @@ fn matches_are_marked_wherever_they_fall_in_any_case() {
     assert_eq!(match_ranges("id_paid", "id"), vec![0..2, 5..7]);
     assert!(match_ranges("users", "id").is_empty());
     assert!(match_ranges("users", "").is_empty());
+}
+
+#[test]
+fn search_marks_keep_the_rows_font() {
+    let color = gpui_kit::hsla(0.6, 0.5, 0.5, 1.);
+    let mark = search_mark(color);
+    assert_eq!((mark.color, mark.font_weight), (Some(color), None));
+    assert_eq!(mark.background_color, Some(color.opacity(crate::tokens::TINT)));
 }
 
 // A column found by its name doesn't light up its type too, as `user_id uuid` would for "id". One found by its type,

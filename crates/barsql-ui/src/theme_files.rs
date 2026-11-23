@@ -653,6 +653,16 @@ mod tests {
     }
 
     #[test]
+    fn built_in_themes_draw_code_upright() {
+        for entry in built_in().all() {
+            let syntax = entry.json["highlight"]["syntax"].as_object().expect("syntax colors");
+            for (key, style) in syntax {
+                assert!(style.get("font_style").is_none(), "{}: {key}", entry.config.name);
+            }
+        }
+    }
+
+    #[test]
     fn built_in_themes_only_use_keys_gpui_kit_reads() {
         for entry in built_in().all() {
             let unknown = |section: &Value, known: &HashSet<String>| {

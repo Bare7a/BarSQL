@@ -1320,12 +1320,7 @@ impl SchemaTree {
         let badge = |text: SharedString, color: Hsla| form::badge(text, color);
         let count = |text: String| div().flex_none().text_size(TEXT_2XS).text_color(muted).child(text);
         // A search marks what it matched in names and types, so the rows it keeps read as they do unsearched.
-        let highlight = HighlightStyle {
-            color: Some(theme.primary),
-            background_color: Some(theme.primary.opacity(TINT)),
-            font_weight: Some(FontWeight::MEDIUM),
-            ..Default::default()
-        };
+        let highlight = search_mark(theme.primary);
         let marked = |text: SharedString, needle: &str| {
             let ranges = match_ranges(&text, needle);
             StyledText::new(text).with_highlights(ranges.into_iter().map(|range| (range, highlight)))
@@ -1676,6 +1671,11 @@ fn column_tip(column: &ColumnInfo, cx: &App) -> Div {
                 .into_iter()
                 .map(|line| div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(line)),
         )
+}
+
+// Color and tint only, as the suggestion list marks matches. A heavier weight inside a name reads as another font.
+fn search_mark(color: Hsla) -> HighlightStyle {
+    HighlightStyle { color: Some(color), background_color: Some(color.opacity(TINT)), ..Default::default() }
 }
 
 // Each place a search's needle shows up in `text`, as byte ranges of `text`. The needle comes lowercased, and a
