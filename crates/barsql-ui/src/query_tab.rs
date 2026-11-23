@@ -1034,13 +1034,7 @@ impl QueryTab {
                     Button::new("run")
                         .debug_selector(|| "run".into())
                         .primary()
-                        .tool_keys(
-                            Icon::new(Lucide::Play),
-                            ICON_XS,
-                            t(cx, "editor.run"),
-                            shortcuts::shown("runSelection", cx),
-                            theme.primary_foreground,
-                        )
+                        .tool(Icon::new(Lucide::Play), ICON_XS, t(cx, "editor.run"))
                         .tooltip(hint(run, "runSelection", cx))
                         .on_click(cx.listener(|this, _, window, cx| this.run_selection(window, cx))),
                 )

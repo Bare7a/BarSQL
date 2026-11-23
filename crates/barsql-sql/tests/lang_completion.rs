@@ -839,3 +839,53 @@ fn a_join_condition_starts_after_on_and_a_space() {
     assert!(!on("SELECT * FROM users u JOIN orders o "));
     assert!(!on("SELECT * FROM users WHERE "));
 }
+
+#[test]
+fn filter_keywords_follow_the_dialect() {
+    use barsql_sql::lang::suggestions::filter_keywords;
+    let offers = |driver: DriverType, kw: &str| filter_keywords(Some(&driver)).contains(&kw);
+    for kw in ["AND", "NOT LIKE", "NOT IN", "ILIKE", "NOT ILIKE", "SIMILAR TO", "IS DISTINCT FROM", "TRUE", "FALSE"] {
+        assert!(offers(DriverType::Postgres, kw), "Postgres lacks {kw}");
+    }
+    assert!(offers(DriverType::ClickHouse, "ILIKE") && offers(DriverType::ClickHouse, "NOT ILIKE"));
+    assert!(offers(DriverType::MySql, "REGEXP") && offers(DriverType::MySql, "RLIKE"));
+    assert!(!offers(DriverType::MySql, "ILIKE"), "MySQL has no ILIKE");
+    assert!(offers(DriverType::Sqlite, "GLOB") && offers(DriverType::Sqlite, "MATCH"));
+    for driver in [DriverType::Postgres, DriverType::MySql, DriverType::Sqlite, DriverType::ClickHouse] {
+        for clause in ["LIMIT", "OFFSET", "ORDER BY", "GROUP BY", "RETURNING"] {
+            assert!(!offers(driver.clone(), clause), "{driver:?} offers {clause}");
+        }
+    }
+}
+
+#[test]
+fn names_match_letters_in_order_from_a_word_start() {
+    use barsql_sql::lang::suggestions::name_score;
+    let cases = [
+        ("user_id", "uid", Some(2)),
+        ("users", "usr", Some(2)),
+        ("parent_id", "pid", Some(2)),
+        ("createdAt", "cat", Some(2)),
+        ("user name", "\"un", Some(2)),
+        ("posts", "po", Some(0)),
+        ("post_reactions", "re", Some(1)),
+        ("is_locked", "sl", None),
+        ("users", "x", None),
+    ];
+    for (label, typed, want) in cases {
+        assert_eq!(name_score(label, typed), want, "{typed:?} in {label:?}");
+    }
+}
+
+#[test]
+fn spread_out_letters_find_tables_and_columns() {
+    let setup = Setup::standard(PG);
+    let offered = |sql: &str| setup.loaded_items(sql).into_iter().map(|i| i.label).collect::<Vec<_>>();
+    assert!(has(&offered("SELECT * FROM usr"), "users"));
+    assert!(has(&offered("SELECT * FROM users WHERE eml"), "email"));
+    assert!(!has(&offered("SELECT * FROM users WHERE ad"), "AND"), "keywords stay prefix and substring");
+    let mut items = Setup::new(PG, tables(&["user_roles", "url_map"]), ColumnMap::new()).items("SELECT * FROM ur");
+    items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
+    let order: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(order, ["url_map", "user_roles"], "a prefix outranks spread letters");
+}

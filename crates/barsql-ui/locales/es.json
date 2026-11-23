@@ -255,6 +255,7 @@
     "showAllColumns": "Mostrar todas las columnas"
   },
   "tableView": {
+    "clearFilter": "Borrar el filtro",
     "structure": "Estructura",
     "markRows": "Marcar {{count}} fila para eliminarla",
     "markRows_other": "Marcar {{count}} filas para eliminarlas",

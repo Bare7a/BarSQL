@@ -255,6 +255,7 @@
     "showAllColumns": "Show all columns"
   },
   "tableView": {
+    "clearFilter": "Clear filter",
     "structure": "Structure",
     "markRows": "Mark {{count}} row for delete",
     "markRows_other": "Mark {{count}} rows for delete",

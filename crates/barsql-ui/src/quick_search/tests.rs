@@ -121,17 +121,21 @@ fn categories_break_ties_and_every_match_is_listed() {
 }
 
 #[test]
-fn secondary_fields_find_a_table_by_schema_or_connection() {
+fn tables_match_their_own_name_only() {
     let candidates = Candidates {
+        tabs: vec![tab("t", "Query 1", "pg")],
         connections: vec![connection("pg", "Warehouse", "")],
         tables: vec![tables("pg", "sales", &["orders"]), tables("pg", "public", &["monthly_sales"])],
-        ..Default::default()
+        saved: vec![saved("s", "Top orders", "pg")],
     };
-    let items = rank("sales", &candidates);
-    let order: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-    assert_eq!(order, ["monthly_sales", "orders"]);
-    assert!(items[1].ranges.is_empty());
-    assert_eq!(rank("wareh", &candidates).len(), 3, "the connection and both tables by connection name");
+    assert_eq!(labels("sales", &candidates), [(Kind::Table, "monthly_sales".into())], "not by schema");
+    assert!(labels("public", &candidates).is_empty());
+    let by_connection = [
+        (Kind::Connection, "Warehouse".to_string()),
+        (Kind::Tab, "Query 1".to_string()),
+        (Kind::Saved, "Top orders".to_string()),
+    ];
+    assert_eq!(labels("wareh", &candidates), by_connection, "tabs and saved queries still match their connection");
 }
 
 fn open(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {

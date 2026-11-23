@@ -6,7 +6,7 @@ use anyhow::Result;
 use barsql_core::DriverType;
 use barsql_sql::display_type;
 use barsql_sql::lang::quoting::{column_cache_key, format_sql_identifier};
-use barsql_sql::lang::suggestions::{match_score, rank};
+use barsql_sql::lang::suggestions::{filter_keywords, match_score, name_score, rank};
 use barsql_sql::lang::{
     self, Catalog, ColumnMap, CompletionContext, Definition, HoverSubject, ItemKind, SqlDiagnostic, SqlLabels,
     TokenKind,
@@ -209,9 +209,6 @@ pub struct FilterCompletion {
     pub driver: DriverType,
 }
 
-const WHERE_KEYWORDS: [&str; 12] =
-    ["AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL", "EXISTS", "NULL", "TRUE", "FALSE"];
-
 impl CompletionProvider for FilterCompletion {
     fn completions(
         &self,
@@ -240,7 +237,7 @@ impl CompletionProvider for FilterCompletion {
             .columns
             .iter()
             .filter_map(|(name, data_type)| {
-                let score = match_score(name, &prefix)?;
+                let score = name_score(name, &prefix)?;
                 let detail = match data_type.is_empty() {
                     true => labels.column.clone(),
                     false => display_type(self.driver.dialect(), data_type),
@@ -249,7 +246,7 @@ impl CompletionProvider for FilterCompletion {
                 Some(item(name, CompletionItemKind::FIELD, Some(detail), rank(0, score, name), insert))
             })
             .collect();
-        items.extend(WHERE_KEYWORDS.iter().filter_map(|keyword| {
+        items.extend(filter_keywords(Some(&self.driver)).into_iter().filter_map(|keyword| {
             let score = match_score(keyword, &prefix)?;
             Some(item(keyword, CompletionItemKind::KEYWORD, None, rank(1, score, keyword), keyword.to_string()))
         }));

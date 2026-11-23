@@ -255,6 +255,7 @@
     "showAllColumns": "Покажи всички колони"
   },
   "tableView": {
+    "clearFilter": "Изчисти филтъра",
     "structure": "Структура",
     "markRows": "Маркирай {{count}} ред за изтриване",
     "markRows_other": "Маркирай {{count}} реда за изтриване",
