@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use barsql_core::{ColumnInfo, ObjectKind, ObjectRef, TableInfo};
+use barsql_core::{ColumnInfo, ConnectionConfig, ObjectKind, ObjectRef, TableInfo};
 use barsql_sql::split_statement_texts;
 
 use crate::harness::{E2e, Kind, run, unique_table};
@@ -62,6 +62,28 @@ each_engine!(async fn views(e) {
     let found = tables.iter().find(|t| t.name == view).unwrap_or_else(|| panic!("{view} not in {:?}", table_names(&tables)));
     assert_eq!(found.kind, "view");
 });
+
+// A role's own schema comes first on Postgres' default search path, so its unqualified names resolve there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_preloads_the_schema_the_search_path_picks() {
+    run(Kind::Postgres, |e| async move {
+        let role = unique_table("own_schema");
+        e.exec(&format!("CREATE ROLE {role} LOGIN PASSWORD 'own'")).await;
+        e.defer(format!("DROP ROLE IF EXISTS {role}"));
+        e.exec(&format!("CREATE SCHEMA {role} AUTHORIZATION {role}")).await;
+        e.defer(format!("DROP SCHEMA IF EXISTS {role} CASCADE"));
+        e.exec(&format!("CREATE TABLE {role}.orders (id INT)")).await;
+        let config = ConnectionConfig { username: role.clone(), password: "own".into(), ..Kind::Postgres.config() };
+        let id = e.app.save_connection(config).await.unwrap().id;
+        let bundle = e.app.load_schema_data(&id).await.unwrap();
+        assert_eq!(bundle.status.schema, role);
+        let loaded =
+            |schema: &str| bundle.loaded_tables.iter().find(|st| st.schema == schema).map(|st| table_names(&st.tables));
+        assert_eq!(loaded(&role), Some(vec!["orders"]), "{:?}", bundle.loaded_tables);
+        assert!(loaded("public").is_some(), "public still loads: {:?}", bundle.loaded_tables);
+    })
+    .await
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn turso_marks_only_the_rowid_alias_as_an_identity() {

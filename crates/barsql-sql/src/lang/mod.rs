@@ -28,7 +28,9 @@ pub use diagnostics::{SqlDiagnostic, collect_schema_diagnostics};
 pub use functions::{CallForm, FunctionCatalog, FunctionDoc, KindMask};
 pub use hover::{ColumnLookup, HoverQuery, HoverSubject, analyze_hover};
 pub use labels::SqlLabels;
-pub use query::{ParsedQuery, QueryTableRef, parse_query, resolve_dot_completion, resolve_qualifier_to_table};
+pub use query::{
+    ParsedQuery, QueryTableRef, parse_query, qualifiers, resolve_dot_completion, resolve_qualifier_to_table,
+};
 pub use statements::{
     EditorStatement, current_statement_range, current_statement_start, parse_statements, statement_at_offset,
     statement_at_run_line,

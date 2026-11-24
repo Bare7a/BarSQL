@@ -577,6 +577,7 @@ mod postgres_only {
 
     use super::{Engine, analyzed, drop_item, label, open_on, plan_rows, ran_in_new_tab, temp, tree_row, unique};
     use crate::scenarios::driver::{Driver, selector};
+    use crate::scenarios::editor::suggestions;
 
     fn seeded(cx: &mut TestAppContext) -> (Driver<'_>, String) {
         let mut app = open_on(cx, Engine::Postgres);
@@ -729,6 +730,56 @@ mod postgres_only {
         app.click(selector("tree:g:public:routines".into()));
         let wanted = function.clone();
         app.settle(|cx| cx.update(|_, cx| tree.read(cx).listed().iter().any(|(_, label, _)| label.contains(&wanted))));
+    }
+
+    fn other_schema(app: &mut Driver) -> String {
+        let schema = unique("other_pg");
+        app.defer(format!("DROP SCHEMA IF EXISTS {schema} CASCADE"));
+        app.seed(&format!("CREATE SCHEMA {schema}; CREATE TABLE {schema}.invoices (id INT)"));
+        app.connect();
+        app.wait_schema();
+        schema
+    }
+
+    // Pauses advance the clock, for the debounces and the waits on a schema's tables.
+    fn eventually(app: &mut Driver, mut done: impl FnMut(&mut Driver) -> bool) {
+        for _ in 0..500 {
+            app.pause();
+            if done(app) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("never happened");
+    }
+
+    fn warnings(app: &mut Driver) -> Vec<String> {
+        let tab = app.tab();
+        app.cx.update(|_, cx| {
+            let editor = tab.read(cx).editor();
+            editor.update(cx, |state, _| {
+                let set = state.diagnostics_mut();
+                set.map(|set| set.iter().map(|d| d.message.to_string()).collect()).unwrap_or_default()
+            })
+        })
+    }
+
+    #[gpui_kit::test]
+    fn tables_of_a_schema_the_editor_names_arent_flagged(cx: &mut TestAppContext) {
+        let mut app = open_on(cx, Engine::Postgres);
+        let schema = other_schema(&mut app);
+        app.set_sql(&format!("SELECT * FROM {schema}.invoices;\nSELECT * FROM {schema}.nope;"));
+        eventually(&mut app, |app| warnings(app) == ["Unknown table \"nope\""]);
+    }
+
+    #[gpui_kit::test]
+    fn a_dot_after_another_schema_suggests_its_tables(cx: &mut TestAppContext) {
+        let mut app = open_on(cx, Engine::Postgres);
+        let schema = other_schema(&mut app);
+        app.set_sql("");
+        app.type_text(&format!("SELECT * FROM {schema}"));
+        crate::test_support::type_slowly(app.cx, ".");
+        eventually(&mut app, |app| suggestions(app).iter().any(|label| label == "invoices"));
     }
 }
 

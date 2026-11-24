@@ -486,8 +486,11 @@ impl QueryTab {
         });
     }
 
+    // A schema the text names loads its tables, and no table is flagged until they're in.
     fn refresh_diagnostics(&mut self, cx: &mut Context<Self>) {
-        let catalog = schema::catalog(cx, &self.connection.id);
+        let named = lang::qualifiers(&self.sql(cx), Some(&self.connection.driver));
+        let loading = !schema::load_named_schemas(&self.connection.id, &named, cx).is_empty();
+        let catalog = schema::catalog(cx, &self.connection.id).filter(|_| !loading);
         let labels = cx.global::<I18n>().sql_labels();
         let query_error = self.query_error.clone();
         self.editor.update(cx, |state, cx| {

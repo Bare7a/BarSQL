@@ -38,8 +38,8 @@ impl<T> Load<T> {
     }
 }
 
-// Shared by the sidebar tree and the editors. Tables load per schema, columns on first use, and failed loads
-// aren't cached, so the next use retries.
+// Shared by the sidebar tree and the editors. Tables load per schema once something opens, names or searches it,
+// columns on first use, and failed loads aren't cached, so the next use retries.
 #[derive(Default)]
 pub struct Schemas {
     connections: HashMap<String, ConnectionSchema>,
@@ -56,6 +56,8 @@ pub struct ConnectionSchema {
     schemas: Option<Vec<SchemaInfo>>,
     tables: HashMap<String, Vec<TableInfo>>,
     tables_loading: HashSet<String>,
+    // The editor asks for these again only after a reload. The tree's own loads still retry.
+    tables_failed: HashSet<String>,
     // A failed load is kept empty, so the tree doesn't ask again on every frame.
     sizes: HashMap<String, Load<HashMap<String, TableSize>>>,
     // A failed load is kept as None until the row viewer comes back to its table.
@@ -429,11 +431,12 @@ pub fn load_schema_columns(
     })
 }
 
+// Checked before `entry`, since borrowing the global mutably wakes all its observers.
 pub fn load_tables(connection_id: &str, schema: &str, cx: &mut App) {
-    let entry = entry(cx, connection_id);
-    if entry.tables.contains_key(schema) || entry.tables_loading.contains(schema) {
+    if get(cx, connection_id).is_some_and(|e| e.tables.contains_key(schema) || e.tables_loading.contains(schema)) {
         return;
     }
+    let entry = entry(cx, connection_id);
     entry.tables_loading.insert(schema.to_string());
     let generation = entry.generation;
     let bar = state::bar(cx);
@@ -446,15 +449,48 @@ pub fn load_tables(connection_id: &str, schema: &str, cx: &mut App) {
             entry.tables_loading.remove(&name);
             match tables {
                 Some(Ok(tables)) => {
+                    entry.tables_failed.remove(&name);
                     entry.tables.insert(name, tables);
                     entry.rebuild_catalog();
                 }
-                Some(Err(error)) => entry.error = Some(error.message),
+                Some(Err(error)) => {
+                    entry.tables_failed.insert(name);
+                    entry.error = Some(error.message);
+                }
                 None => {}
             }
         });
     })
     .detach();
+}
+
+// Loads the tables of the listed schemas `names` name in any case, like `sales` in `sales.orders`, and returns the
+// ones still loading.
+pub fn load_named_schemas(connection_id: &str, names: &[String], cx: &mut App) -> Vec<String> {
+    let Some(entry) = get(cx, connection_id) else { return Vec::new() };
+    let named: Vec<String> = entry
+        .schemas()
+        .unwrap_or_default()
+        .iter()
+        .filter(|s| names.iter().any(|name| s.name.eq_ignore_ascii_case(name)))
+        .filter(|s| entry.tables(&s.name).is_none() && !entry.tables_failed.contains(&s.name))
+        .map(|s| s.name.clone())
+        .collect();
+    for name in &named {
+        load_tables(connection_id, name, cx);
+    }
+    named
+}
+
+// Done once none of `schemas` is loading, whether their tables came in or not.
+pub fn tables_loaded(connection_id: &str, schemas: Vec<String>, cx: &mut App) -> Task<()> {
+    let id = connection_id.to_string();
+    cx.spawn(async move |cx| {
+        let loading = |cx: &App| get(cx, &id).is_some_and(|entry| schemas.iter().any(|s| entry.tables_loading(s)));
+        while cx.update(|cx| loading(cx)) {
+            cx.background_executor().timer(std::time::Duration::from_millis(30)).await;
+        }
+    })
 }
 
 // After a rename or drop, which can change any table's references. Also forgets the schema's columns and sizes.
@@ -520,9 +556,11 @@ pub fn columns(connection_id: &str, schema: &str, table: &str, cx: &mut App) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
     use std::sync::{Arc, Barrier};
 
-    use barsql_core::{DriverType, ReferencingKey};
+    use barsql_core::{DriverType, ReferencingKey, SchemaInfo};
     use gpui_kit::TestAppContext;
 
     use super::{Columns, Reference, group_keys};
@@ -604,6 +642,44 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         panic!("the retried load never finished");
+    }
+
+    // SQLite lists only main, so another schema is listed by hand. Its load lists main's tables.
+    #[gpui_kit::test]
+    fn a_schema_the_editor_names_loads_its_tables_once(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let id = env.connection.id.clone();
+        cx.update(|cx| super::ensure_loaded(&id, DriverType::Sqlite, cx));
+        let loaded = |cx: &mut TestAppContext, schema: &str| {
+            cx.update(|cx| super::get(cx, &id).is_some_and(|entry| entry.tables(schema).is_some()))
+        };
+        for _ in 0..1000 {
+            cx.run_until_parked();
+            if loaded(cx, "main") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        cx.update(|cx| super::entry(cx, &id).schemas.as_mut().unwrap().push(SchemaInfo { name: "Other".into() }));
+        let named = |cx: &mut TestAppContext, names: &[&str]| {
+            let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+            cx.update(|cx| super::load_named_schemas(&id, &names, cx))
+        };
+        assert_eq!(named(cx, &["o", "main", "other", "OTHER"]), ["Other"], "listed, not loaded yet, any case, once");
+        let woken = Rc::new(Cell::new(0));
+        let counter = woken.clone();
+        let _watch = cx.update(|cx| cx.observe_global::<super::Schemas>(move |_| counter.set(counter.get() + 1)));
+        assert_eq!(named(cx, &["other", "main"]), ["Other"], "still loading");
+        assert_eq!(woken.get(), 0, "asking again changed nothing, so no observer woke");
+        for _ in 0..1000 {
+            cx.run_until_parked();
+            if loaded(cx, "Other") {
+                assert!(named(cx, &["other"]).is_empty(), "already in");
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the named schema never loaded");
     }
 
     #[gpui_kit::test]

@@ -172,6 +172,18 @@ async fn postgres_lists_callable_functions() {
     assert!(elapsed < Duration::from_secs(2), "{} functions took {elapsed:?}", list.functions.len());
 }
 
+// Only the pg_ prefix is reserved for system schemas, so one like pg-boss's is the user's.
+#[tokio::test]
+async fn schemas_named_like_pg_but_not_pg_underscore_are_listed() {
+    let engine = connect(TimeZone::UTC).await;
+    let mut session = engine.session().await.unwrap();
+    run_all(&mut session, &["DROP SCHEMA IF EXISTS pgprobe".into(), "CREATE SCHEMA pgprobe".into()]).await;
+    let listed: Vec<String> = engine.list_schemas().await.unwrap().into_iter().map(|s| s.name).collect();
+    run_all(&mut session, &["DROP SCHEMA pgprobe".into()]).await;
+    assert!(listed.iter().any(|name| name == "pgprobe"), "{listed:?}");
+    assert!(!listed.iter().any(|name| name.starts_with("pg_") || name == "information_schema"), "{listed:?}");
+}
+
 #[tokio::test]
 async fn a_cancel_keeps_the_rows_already_fetched() {
     let _serial = common::serial().await;

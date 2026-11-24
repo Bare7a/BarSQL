@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use barsql_core::{DriverType, SchemaInfo, TableInfo};
 use barsql_sql::lang::{
-    Catalog, SqlLabels, TxnControl, collect_schema_diagnostics, detect_transaction_control, parse_query,
+    Catalog, SqlLabels, TxnControl, collect_schema_diagnostics, detect_transaction_control, parse_query, qualifiers,
 };
 
 fn table(name: &str) -> TableInfo {
@@ -168,4 +168,12 @@ fn labels_come_from_the_locale_files() {
     let german = SqlLabels::from_locale(&locale("de"));
     assert_eq!((german.table.as_str(), german.not_null.as_str()), ("Tabelle", "nicht null"));
     assert_eq!(SqlLabels::from_locale(&serde_json::json!({})), SqlLabels::default());
+}
+
+#[test]
+fn qualifiers_are_the_names_right_before_a_dot() {
+    let pg = Some(&DriverType::Postgres);
+    assert_eq!(qualifiers("SELECT o.id FROM sales.orders o JOIN \"Hr\".people p ON ", pg), ["o", "sales", "Hr"]);
+    assert_eq!(qualifiers("SELECT 1.5, 'a.b' -- c.d\nFROM x", pg), Vec::<String>::new());
+    assert_eq!(qualifiers("SELECT * FROM shop.dbo.items", Some(&DriverType::SqlServer)), ["shop", "dbo"]);
 }

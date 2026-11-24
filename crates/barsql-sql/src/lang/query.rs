@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use barsql_core::DriverType;
+
 use super::catalog::{Catalog, OrderedMap, TableBinding};
 use super::quoting::{is_alias_stop_word, unquote_ident};
 use super::tokens::{Token, TokenKind, is_keyword, is_punct, next_code_token, prev_code_token, tokenize};
@@ -334,6 +336,16 @@ fn parse_uncached(sql: &str, catalog: &Catalog) -> ParsedQuery {
 
     let ctes = collect_ctes(&tokens, &mut virtual_columns);
     ParsedQuery { query_tables: deduped, bindings, ctes, virtual_columns }
+}
+
+// The names right before a dot, unquoted: `sales` and `o` in `sales.orders o WHERE o.id`.
+pub fn qualifiers(sql: &str, driver: Option<&DriverType>) -> Vec<String> {
+    let tokens = tokenize(sql, driver);
+    tokens
+        .windows(2)
+        .filter(|pair| pair[0].is_ident_like() && pair[1].is_punct("."))
+        .map(|pair| pair[0].ident_text())
+        .collect()
 }
 
 pub fn resolve_qualifier_to_table(qualifier: &str, parsed: &ParsedQuery, catalog: &Catalog) -> Option<TableBinding> {
