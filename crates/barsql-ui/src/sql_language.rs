@@ -164,6 +164,39 @@ impl CompletionProvider for SqlLanguage {
         if joins_only && !lang::at_join_condition_start(&sql[range.start..offset], Some(&self.driver)) {
             return Task::ready(Ok(CompletionResponse::Array(Vec::new())));
         }
+        // So `sales.` lists the tables of a schema that hasn't loaded yet.
+        let named = lang::qualifiers(&sql[range.clone()], Some(&self.driver));
+        let loading = schema::load_named_schemas(&self.connection_id, &named, cx);
+        if !loading.is_empty() {
+            let loaded = schema::tables_loaded(&self.connection_id, loading, cx);
+            let (language, rope) = (self.clone(), text.clone());
+            return cx.spawn(async move |cx| {
+                loaded.await;
+                cx.update(|cx| language.complete(&rope, sql, offset, range, joins_only, cx)).await
+            });
+        }
+        self.complete(text, sql, offset, range, joins_only, cx)
+    }
+
+    fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
+        let mut chars = new_text.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => c.is_alphabetic() || matches!(c, '_' | '.' | ' '),
+            _ => false,
+        }
+    }
+}
+
+impl SqlLanguage {
+    fn complete(
+        &self,
+        text: &Rope,
+        sql: String,
+        offset: usize,
+        range: Range<usize>,
+        joins_only: bool,
+        cx: &mut App,
+    ) -> Task<Result<CompletionResponse>> {
         let catalog = self.catalog(cx);
         let parsed = lang::parse_query(&sql[range.clone()], &catalog);
         let loads: Vec<_> = lang::bindings_needing_columns(&sql[range.start..offset], &parsed, Some(&catalog))
@@ -192,14 +225,6 @@ impl CompletionProvider for SqlLanguage {
             let edit = lsp_range(&rope, replace);
             Ok(CompletionResponse::Array(items.into_iter().map(|item| lsp_completion(item, edit)).collect()))
         })
-    }
-
-    fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
-        let mut chars = new_text.chars();
-        match (chars.next(), chars.next()) {
-            (Some(c), None) => c.is_alphabetic() || matches!(c, '_' | '.' | ' '),
-            _ => false,
-        }
     }
 }
 

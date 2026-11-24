@@ -154,12 +154,13 @@ impl PgEngine {
             .collect()
     }
 
-    // Fully qualified to pg_catalog, so search_path is irrelevant here.
+    // Fully qualified to pg_catalog, so search_path is irrelevant here. Only pg_ itself is reserved for system
+    // schemas, and in a LIKE its _ would match any letter, hiding pgboss and the like.
     pub async fn list_schemas(self: &Arc<Self>) -> Result<Vec<SchemaInfo>, QueryError> {
         let rows = self
             .rows(
                 "SELECT nspname FROM pg_catalog.pg_namespace
-                WHERE nspname NOT LIKE 'pg_%'
+                WHERE nspname !~ '^pg_'
                   AND nspname NOT IN ('information_schema')
                 ORDER BY CASE WHEN nspname = 'public' THEN 0 ELSE 1 END, nspname",
                 &[],

@@ -147,8 +147,8 @@ impl BarApp {
         Ok(status)
     }
 
-    // Postgres also preloads "public" (SQL Server "dbo") so the browser isn't empty when the default schema is a
-    // custom one.
+    // Also preloads the server's current schema, where unqualified names resolve, and Postgres "public" (SQL Server
+    // "dbo") so the browser isn't empty when the default schema is a custom one.
     pub(crate) async fn load_schema_data_inner(&self, id: &str) -> Result<SchemaBundle, QueryError> {
         let cfg = self.config(id)?;
         let engine = self.engine(id).await?;
@@ -156,7 +156,7 @@ impl BarApp {
         status.connected = true;
         let schemas = within(SCHEMA_TIMEOUT, engine.list_schemas()).await?;
         let browse = cfg.default_browse_schema();
-        let mut preload: HashSet<String> = HashSet::from([browse.clone()]);
+        let mut preload: HashSet<String> = HashSet::from([browse.clone(), status.schema.clone()]);
         preload.extend(cfg.driver.capabilities().preload_schemas.iter().map(|s| s.to_string()));
         let mut loaded_tables = Vec::new();
         for schema in schemas.iter().filter(|s| preload.contains(&s.name)) {
