@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use barsql_app::{EditorTab, TableViewRef};
 use barsql_core::Value;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, px, rems};
 
@@ -63,6 +64,79 @@ fn grid_event(view: &Entity<TableTab>, event: GridEvent, cx: &mut VisualTestCont
 
 const PEOPLE: &str = "CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT, note TEXT);
     INSERT INTO people VALUES (1, 'ann', 'a'), (2, 'bob', NULL), (3, 'cy', 'c')";
+
+const BOOKS: &str = "CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+    CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER REFERENCES authors(id), title TEXT);
+    INSERT INTO authors VALUES (7, 'ann');
+    INSERT INTO books VALUES (1, 7, 'x')";
+
+// A page brings its table's keys ahead of its rows, and the first page shows once its rows are in, so the first frame
+// that shows the grid has both.
+#[gpui_kit::test]
+fn a_tables_first_page_shows_with_its_rows_and_keys(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    seed(&env, BOOKS);
+    let frames = Rc::new(RefCell::new(Vec::new()));
+    let sink = frames.clone();
+    cx.update(|cx| {
+        cx.observe_new(move |_: &mut TableTab, _, cx| {
+            let sink = sink.clone();
+            cx.observe_self(move |tab, cx| {
+                if tab.shown {
+                    let grid = tab.grid.read(cx);
+                    sink.borrow_mut().push((grid.key_icons(), grid.rows_shown()));
+                }
+            })
+            .detach();
+        })
+        .detach()
+    });
+    let (_view, _cx) = open(&env, cx, "books");
+    let keys = vec![Some(Lucide::KeyRound), Some(Lucide::Link), None];
+    assert_eq!(frames.borrow().first(), Some(&(keys, 1)));
+}
+
+// While the first page loads, the body shows the progress line a query tab does. Another tab's transaction holds
+// SQLite's one connection, so the page waits until it ends.
+#[gpui_kit::test]
+fn a_first_page_loads_under_the_progress_line(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    env.runtime.block_on(env.bar.begin_transaction(&env.connection.id, "holder")).unwrap();
+    let table_view = TableViewRef { schema: "main".into(), table: "things".into(), ..Default::default() };
+    let tab = EditorTab {
+        id: new_tab_id(),
+        connection_id: env.connection.id.clone(),
+        table_view: Some(table_view),
+        ..Default::default()
+    };
+    let connection = env.connection.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| TableTab::new(tab, connection, window, cx));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.debug_bounds("run-progress").is_some(), "before its rows");
+    env.runtime.block_on(env.bar.rollback_transaction("holder")).unwrap();
+    settle(cx, idle(&view));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.debug_bounds("run-progress").is_none());
+    assert_eq!(rows(&view, cx), 100);
+}
+
+// Each page brings the catalog anew, so a foreign key added since the tab opened shows on a refresh.
+#[gpui_kit::test]
+fn a_refresh_shows_a_foreign_key_added_since(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    seed(&env, BOOKS);
+    let (view, cx) = open(&env, cx, "books");
+    seed(
+        &env,
+        "DROP TABLE books;
+         CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER REFERENCES authors(id), editor INTEGER REFERENCES authors(id));
+         INSERT INTO books VALUES (1, 7, 7)",
+    );
+    grid_event(&view, GridEvent::Refresh, cx);
+    settle(cx, idle(&view));
+    let icons = cx.update(|_, cx| view.read(cx).grid.read(cx).key_icons());
+    assert_eq!(icons, [Some(Lucide::KeyRound), Some(Lucide::Link), Some(Lucide::Link)]);
+}
 
 #[gpui_kit::test]
 fn tables_load_a_page_then_more_on_request(cx: &mut TestAppContext) {

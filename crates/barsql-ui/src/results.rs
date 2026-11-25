@@ -1,6 +1,7 @@
 use std::rc::Rc;
+use std::time::Duration;
 
-use barsql_app::{ApplyError, ResultTable, RunEvent};
+use barsql_app::{ApplyError, ResultTable, RunEvent, traced_beside_run, traced_select};
 use barsql_core::{ConnectionConfig, DriverType, QueryError, ResultSummary, SqlDialect};
 use barsql_db::{Cancel, ResultSet};
 use barsql_io::EXPORT_FORMATS;
@@ -33,6 +34,9 @@ use crate::table_edits::{Outcome, OwnedCell};
 use crate::table_tab::referenced_row;
 use crate::toast;
 use crate::tokens::{ICON_SM, ICON_XS, TEXT_MD, TEXT_SM, TEXT_XS};
+
+// How long a result's rows wait for its keys before they show without them.
+const KEYS_WAIT: Duration = Duration::from_secs(3);
 
 // A cancelled run shows only a message, without error details.
 #[derive(Debug, Clone)]
@@ -186,6 +190,7 @@ struct ResultSetView {
     charting: bool,
     _subscriptions: Vec<Subscription>,
     streaming: bool,
+    rows_in: bool,
     summary: Option<ResultSummary>,
     plan: Option<Entity<PlanView>>,
     error: Option<ShownError>,
@@ -196,13 +201,15 @@ struct ResultSetView {
     editor: Option<ResultEditor>,
     // Rows that may be one table's, looked up once the result shows: most of a long script's never do.
     lookup_due: bool,
-    _resolving: Option<Lookup>,
+    resolving: Option<Lookup>,
 }
 
 // Cancelled when its result goes, so the lookup leaves the tab's queue instead of holding up the next run.
 struct Lookup {
     _task: Task<()>,
     cancel: Cancel,
+    // While set, the rows wait for their keys so the icons don't pop in after them, KEYS_WAIT at most.
+    hold: Option<Task<()>>,
 }
 
 impl Drop for Lookup {
@@ -216,7 +223,16 @@ impl ResultSetView {
     fn drop_grid(&mut self) {
         self.grid = None;
         self._subscriptions.clear();
-        (self.lookup_due, self._resolving, self.table, self.editor) = (false, None, None, None);
+        (self.lookup_due, self.resolving, self.table, self.editor) = (false, None, None, None);
+    }
+
+    fn awaits_keys(&self) -> bool {
+        self.resolving.as_ref().is_some_and(|lookup| lookup.hold.is_some())
+    }
+
+    // A grid shows with its rows and their keys, never as headers alone.
+    fn grid_waits(&self) -> bool {
+        self.awaits_keys() || self.streaming && !self.rows_in
     }
 
     fn rows(&self, cx: &App) -> usize {
@@ -308,12 +324,14 @@ impl ResultsPanel {
     // Anything else leaves the overlays as they are.
     pub fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
         if self.connection.as_ref().is_some_and(|old| old.fingerprint() != connection.fingerprint()) {
+            let shown = self.shown_grid().cloned();
             for set in &mut self.sets {
-                (set.lookup_due, set._resolving, set.editor) = (false, None, None);
+                (set.lookup_due, set.resolving, set.editor) = (false, None, None);
                 if let (Some(_), Some(grid)) = (set.table.take(), &set.grid) {
                     grid.update(cx, |grid, cx| grid.clear_overlay(cx));
                 }
             }
+            self.shown_changed(shown, cx);
         }
         self.connection = Some(connection);
     }
@@ -422,9 +440,9 @@ impl ResultsPanel {
         self.shown_grid()?.read(cx).focused_row()
     }
 
-    // The active result's grid, unless the Messages tab covers it.
+    // The active result's grid, unless the Messages tab covers it or its rows wait for their keys.
     pub(crate) fn shown_grid(&self) -> Option<&Entity<Grid>> {
-        self.sets.get(self.active).filter(|_| !self.messages_open)?.grid.as_ref()
+        self.sets.get(self.active).filter(|set| !self.messages_open && !set.grid_waits())?.grid.as_ref()
     }
 
     fn is_active(&self, grid: &Entity<Grid>) -> bool {
@@ -483,13 +501,16 @@ impl ResultsPanel {
                     lookup_due: first,
                     ..Default::default()
                 };
-                // While the rows stream, so their keys show from the start.
+                // While the rows stream, so their keys can show with them.
                 if result_index == self.active {
                     self.resolve_table(result_index, cx);
                 }
             }
             RunEvent::Rows { result_index, chunk } => {
-                if let Some(grid) = self.sets.get(result_index).filter(|s| s.streaming).and_then(|s| s.grid.clone()) {
+                if let Some(set) = self.sets.get_mut(result_index).filter(|s| s.streaming)
+                    && let Some(grid) = set.grid.clone()
+                {
+                    set.rows_in |= chunk.rows() > 0;
                     grid.update(cx, |grid, cx| grid.push(chunk, cx));
                 }
             }
@@ -551,10 +572,7 @@ impl ResultsPanel {
                 }
             }
         }
-        if self.shown_grid().cloned() != before {
-            cx.emit(ResultsEvent::FocusedRowChanged);
-        }
-        cx.notify();
+        self.shown_changed(before, cx);
         failed
     }
 
@@ -609,7 +627,11 @@ impl ResultsPanel {
     }
 
     pub(crate) fn active_grid(&self) -> Option<Entity<Grid>> {
-        self.sets.get(self.active)?.grid.clone()
+        self.sets.get(self.active).filter(|set| !set.grid_waits())?.grid.clone()
+    }
+
+    pub(crate) fn awaits_keys(&self) -> bool {
+        self.sets.get(self.active).is_some_and(ResultSetView::awaits_keys)
     }
 
     #[cfg(any(test, feature = "snapshot"))]
@@ -1070,23 +1092,54 @@ impl ResultsPanel {
 
     // On a read-only connection too, for the keys and foreign-key jumps.
     fn resolve_table(&mut self, index: usize, cx: &mut Context<Self>) {
-        let traced = |c: &ConnectionConfig| c.driver.capabilities().row_editing;
-        let Some(connection) = self.connection.clone().filter(traced) else { return };
+        let Some(connection) = self.connection.clone() else { return };
         let tab = self.tab_id.clone();
         let Some(set) = self.sets.get_mut(index).filter(|set| set.lookup_due) else { return };
         let (Some(grid), Some(statement)) = (set.grid.clone(), set.statement.clone()) else { return };
         set.lookup_due = false;
+        if traced_select(&connection.driver, &statement).is_none() {
+            return;
+        }
         let columns = grid.read(cx).set().columns.clone();
         let (bar, id, cancel) = (state::bar(cx), connection.id.clone(), Cancel::new());
         let lookup = state::spawn(cx, {
             let cancel = cancel.clone();
             async move { bar.result_table(&id, &tab, &statement, &columns, &cancel).await }
         });
+        let found = grid.clone();
         let task = cx.spawn(async move |this, cx| {
-            let Some(Ok(Some(table))) = lookup.await else { return };
-            let _ = this.update(cx, |this, cx| this.install_table(index, &grid, table, cx));
+            let table = lookup.await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(Ok(Some(table))) = table {
+                    this.install_table(index, &found, table, cx);
+                }
+                this.show_rows(index, &found, cx);
+            });
         });
-        set._resolving = Some(Lookup { _task: task, cancel });
+        // A lookup that must wait for the run to end would hold the rows for all of it.
+        let hold = traced_beside_run(&connection.driver).then(|| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(KEYS_WAIT).await;
+                let _ = this.update(cx, |this, cx| this.show_rows(index, &grid, cx));
+            })
+        });
+        set.resolving = Some(Lookup { _task: task, cancel, hold });
+    }
+
+    fn show_rows(&mut self, index: usize, grid: &Entity<Grid>, cx: &mut Context<Self>) {
+        let shown = self.shown_grid().cloned();
+        let set = self.sets.get_mut(index).filter(|set| set.grid.as_ref() == Some(grid));
+        if set.and_then(|set| set.resolving.as_mut()).and_then(|lookup| lookup.hold.take()).is_some() {
+            self.shown_changed(shown, cx);
+        }
+    }
+
+    // The row viewer follows the grid that shows.
+    fn shown_changed(&self, before: Option<Entity<Grid>>, cx: &mut Context<Self>) {
+        if self.shown_grid().cloned() != before {
+            cx.emit(ResultsEvent::FocusedRowChanged);
+        }
+        cx.notify();
     }
 
     fn install_table(&mut self, index: usize, grid: &Entity<Grid>, table: ResultTable, cx: &mut Context<Self>) {
@@ -1341,6 +1394,8 @@ impl Render for ResultsPanel {
             Some(set) => match (&set.error, &set.plan, &set.grid) {
                 (Some(error), ..) => self.error(error, set.statement.as_deref(), cx),
                 (None, Some(plan), _) => plan.clone().into_any_element(),
+                // As before any result, while the tab's progress line says more is coming.
+                (None, None, Some(_)) if set.grid_waits() => self.empty(None, cx),
                 (None, None, Some(grid)) => self.grid(set, grid, cx),
                 (None, None, None) => self.empty(Some(set), cx),
             },
@@ -1478,13 +1533,7 @@ mod messages_tests {
         rows.push_number(|s| s.push('1'));
         rows.end_row();
         let events = vec![
-            RunEvent::Meta {
-                result_index: 0,
-                columns,
-                statement: "SELECT 1".into(),
-                schema_name: String::new(),
-                table_name: String::new(),
-            },
+            RunEvent::Meta { result_index: 0, columns, statement: "SELECT 1".into(), catalog: Default::default() },
             RunEvent::Rows { result_index: 0, chunk: Arc::new(rows.finish()) },
             done(0, "SELECT 1", 1),
             messages(0, vec![ServerMessage::new(MessageLevel::Warning, "1292: truncated")]),
@@ -1522,19 +1571,21 @@ mod messages_tests {
 #[cfg(test)]
 mod editor_tests {
     use std::cell::RefCell;
+    use std::net::TcpListener;
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use barsql_app::{ResultTable, RunEvent, RunResult};
+    use barsql_app::{EditorTab, ResultTable, RunEvent, RunResult};
     use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, QueryError};
     use barsql_db::{ChunkBuilder, ColumnMeta};
-    use gpui_kit::TestAppContext;
     use gpui_kit::assets::IconName as Lucide;
+    use gpui_kit::{TestAppContext, VisualTestContext};
 
     use super::messages_tests::{apply, done, panel};
     use super::{ResultsEvent, ResultsPanel, ShownError};
     use crate::grid::GridEvent;
     use crate::i18n::I18n;
+    use crate::query_tab::{QueryTab, new_tab_id};
     use crate::test_support::{Env, settle};
 
     #[gpui_kit::test]
@@ -1563,20 +1614,36 @@ mod editor_tests {
         rows.push_text(|s| s.push_str("ann"));
         rows.end_row();
         vec![
-            RunEvent::Meta {
-                result_index: index,
-                columns,
-                statement: statement.into(),
-                schema_name: String::new(),
-                table_name: String::new(),
-            },
+            RunEvent::Meta { result_index: index, columns, statement: statement.into(), catalog: Default::default() },
             RunEvent::Rows { result_index: index, chunk: Arc::new(rows.finish()) },
             done(index, statement, 1),
         ]
     }
 
+    // A grid shows with its first rows, or once its result ends without any, never as headers waiting for rows.
+    #[gpui_kit::test]
+    fn a_grid_shows_with_its_first_rows(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let shown = |cx: &mut VisualTestContext| panel.read_with(cx, |panel, _| panel.shown_grid().is_some());
+        let mut events = people(0, "SELECT id, name FROM people");
+        let rest = events.split_off(1);
+        apply(&panel, events, cx);
+        assert!(!shown(cx) && cx.debug_bounds("results-empty").is_some(), "its columns alone");
+        apply(&panel, rest, cx);
+        assert!(shown(cx));
+
+        panel.update(cx, |panel, cx| panel.clear(cx));
+        let statement = "SELECT id, name FROM people WHERE false";
+        let meta = people(0, statement).into_iter().next().expect("its columns");
+        apply(&panel, vec![meta], cx);
+        assert!(!shown(cx));
+        apply(&panel, vec![done(0, statement, 0)], cx);
+        assert!(shown(cx), "no rows, once that's sure");
+    }
+
     fn looked_up(panel: &ResultsPanel) -> Vec<bool> {
-        panel.sets.iter().map(|set| set._resolving.is_some()).collect()
+        panel.sets.iter().map(|set| set.resolving.is_some()).collect()
     }
 
     // A SQL Server batch's results all carry its text, and only the first can be traced from it. A result that isn't
@@ -1636,10 +1703,11 @@ mod editor_tests {
         (events, rest)
     }
 
-    // The keys show while the rows stream, and edits wait for the last of them. A foreign key's jump finds its row,
-    // through the target's primary key where SQLite leaves the referenced column out.
+    // SQLite's one connection is the run's until it ends, so the rows show at once and their keys follow. Edits wait for
+    // the last row. A foreign key's jump finds its row, through the target's primary key where SQLite leaves the
+    // referenced column out.
     #[gpui_kit::test]
-    fn a_results_keys_show_as_it_streams_and_its_foreign_keys_jump(cx: &mut TestAppContext) {
+    fn a_sqlite_results_rows_show_at_once_and_its_foreign_keys_jump(cx: &mut TestAppContext) {
         let env = Env::new(cx);
         seed(
             &env,
@@ -1653,14 +1721,15 @@ mod editor_tests {
             panel.set_connection(env.connection.clone(), cx);
             panel.set_tab("results-tab".into());
         });
-        let (mut streaming, rest) = run(&env, "results-tab", "SELECT * FROM books");
-        let rows = streaming.split_off(1);
-        apply(&panel, streaming, cx);
-        let grid = panel.read_with(cx, |panel, _| panel.sets[0].grid.clone()).expect("a grid");
+        let (streaming, rest) = run(&env, "results-tab", "SELECT * FROM books");
+        // Without a turn of the executor, so the lookup can't have answered yet.
+        for event in streaming {
+            panel.update_in(cx, |panel, window, cx| panel.apply(event, window, cx));
+        }
+        let grid = panel.read_with(cx, |panel, _| panel.shown_grid().cloned()).expect("its rows show at once");
         settle(cx, |cx| cx.update(|_, cx| grid.read(cx).key_icons().iter().all(Option::is_some)));
-        apply(&panel, rows, cx);
-        let keys = cx.update(|_, cx| (grid.read(cx).key_icons(), grid.read(cx).rows_shown()));
-        assert_eq!(keys, (vec![Some(Lucide::KeyRound), Some(Lucide::Link), Some(Lucide::Link)], 1), "before any row");
+        let keys = vec![Some(Lucide::KeyRound), Some(Lucide::Link), Some(Lucide::Link)];
+        assert_eq!(cx.update(|_, cx| (grid.read(cx).key_icons(), grid.read(cx).rows_shown())), (keys, 1));
         assert!(!cx.update(|_, cx| grid.read(cx).takes_edits()), "not while rows may still come");
         apply(&panel, rest, cx);
         assert!(cx.update(|_, cx| grid.read(cx).takes_edits()));
@@ -1680,6 +1749,45 @@ mod editor_tests {
         }
         settle(cx, |_| opened.borrow().len() == 2);
         assert_eq!(*opened.borrow(), ["main.authors id = 7", "main.authors id = 7"]);
+    }
+
+    // A lookup that fails doesn't hold the rows. One that doesn't come back holds them only so long, the tab's hints
+    // staying and its progress line running meanwhile. This server takes the connection and never answers.
+    #[gpui_kit::test]
+    fn rows_wait_for_their_keys_only_while_they_may_come(cx: &mut TestAppContext) {
+        let env = Env::new(cx);
+        let tab = EditorTab { id: new_tab_id(), connection_id: env.connection.id.clone(), ..Default::default() };
+        let connection = env.connection.clone();
+        let (tab, cx) = cx.add_window_view(|window, cx| QueryTab::new(tab, connection, window, cx));
+        let panel = cx.update(|_, cx| tab.read(cx).results());
+        let unsaved = ConnectionConfig { driver: DriverType::Postgres, ..Default::default() };
+        panel.update(cx, |panel, cx| panel.set_connection(unsaved, cx));
+        apply(&panel, people(0, "SELECT id, name FROM people"), cx);
+        settle(cx, |cx| panel.read_with(cx, |panel, _| panel.shown_grid().is_some()));
+
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        let config = ConnectionConfig {
+            name: "Silent".into(),
+            driver: DriverType::Postgres,
+            host: "127.0.0.1".into(),
+            port: silent.local_addr().unwrap().port().into(),
+            database: "shop".into(),
+            username: "ann".into(),
+            ..Default::default()
+        };
+        let connection = env.runtime.block_on(env.bar.save_connection(config)).unwrap();
+        panel.update(cx, |panel, cx| {
+            panel.clear(cx);
+            panel.set_connection(connection, cx);
+        });
+        apply(&panel, people(0, "SELECT id, name FROM people"), cx);
+        assert!(panel.read_with(cx, |panel, _| panel.shown_grid().is_none()), "the keys may still come");
+        assert!(cx.debug_bounds("results-empty").is_some() && cx.debug_bounds("run-progress").is_some());
+        cx.executor().advance_clock(super::KEYS_WAIT);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(panel.read_with(cx, |panel, _| panel.shown_grid().is_some()));
+        assert!(cx.debug_bounds("run-progress").is_none());
     }
 
     // Edits staged against one server don't follow the tab to another, though a rename keeps them.

@@ -404,8 +404,8 @@ ORDER BY 1;";
         }
     }
 
-    fn query_running(workspace: &Entity<Workspace>, cx: &App) -> bool {
-        workspace.read(cx).query_tab().is_some_and(|tab| tab.read(cx).is_running())
+    fn query_busy(workspace: &Entity<Workspace>, cx: &App) -> bool {
+        workspace.read(cx).query_tab().is_some_and(|tab| !tab.read(cx).idle(cx))
     }
 
     // Area averaging: a 2x render comes down in exact 2 × 2 blocks, a 125% one weighs pixels by overlap.
@@ -495,7 +495,7 @@ ORDER BY 1;";
         })?;
         robot
             .settle(cx, "the posts", |workspace, _, cx| {
-                !query_running(workspace, cx)
+                !query_busy(workspace, cx)
                     && workspace.read(cx).active_grid(cx).is_some_and(|grid| grid.read(cx).rows_shown() == 500)
             })
             .await?;
@@ -543,7 +543,7 @@ ORDER BY 1;";
         })?;
         robot
             .settle(cx, "both results", |workspace, _, cx| {
-                !query_running(workspace, cx)
+                !query_busy(workspace, cx)
                     && workspace
                         .read(cx)
                         .query_tab()
@@ -738,7 +738,7 @@ ORDER BY 1;";
         })?;
         robot
             .settle(cx, "the plan", |workspace, _, cx| {
-                !query_running(workspace, cx)
+                !query_busy(workspace, cx)
                     && workspace
                         .read(cx)
                         .query_tab()
@@ -839,7 +839,7 @@ ORDER BY 1;";
         })?;
         robot
             .settle(cx, "the monthly posts", |workspace, _, cx| {
-                !query_running(workspace, cx)
+                !query_busy(workspace, cx)
                     && workspace.read(cx).active_grid(cx).is_some_and(|grid| grid.read(cx).rows_shown() == 17)
             })
             .await?;

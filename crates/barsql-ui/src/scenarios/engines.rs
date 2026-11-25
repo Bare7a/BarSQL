@@ -1,6 +1,6 @@
 // Needs the compose databases. Start them with `cargo xtask e2e up`, then run
 // `cargo test -p barsql-ui --features e2e engines`.
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,6 +9,7 @@ use barsql_core::{ConnectionConfig, DriverType};
 use barsql_sql::plan::NOTE_NO_METRICS;
 use barsql_sql::quote_literal_in;
 use barsql_sql::system_views::{SystemView, ViewScope, views};
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::{Entity, Modifiers, TestAppContext};
 
 use super::driver::{Driver, open_with, selector};
@@ -365,26 +366,54 @@ fn array_cells(cx: &mut TestAppContext, engine: Engine) {
     assert_eq!(app.cx.update(|_, cx| viewer.read(cx).shown(cx)), (Kind::Array, json.to_string()));
 }
 
-fn foreign_key(cx: &mut TestAppContext, engine: Engine) {
-    // ClickHouse parses FOREIGN KEY and keeps nothing of it.
-    if !engine.driver().capabilities().catalog.constraints {
-        return;
-    }
-    let mut app = open_on(cx, engine);
-    // Drops run newest first, so the child goes before the parent its key points at.
-    let (parent, child) = (temp(&app, "TABLE", "e2e_fk_parent"), temp(&app, "TABLE", "e2e_fk_child"));
+// Drops run newest first, so the child goes before the parent its key points at.
+fn parent_and_child(app: &Driver, prefix: &str) -> (String, String) {
+    let (parent, child) =
+        (temp(app, "TABLE", &format!("{prefix}_parent")), temp(app, "TABLE", &format!("{prefix}_child")));
     app.seed(&format!(
         "CREATE TABLE {parent} (id INTEGER PRIMARY KEY, name VARCHAR(50));
          INSERT INTO {parent} VALUES (1, 'Alice'), (2, 'Bob');
          CREATE TABLE {child} (id INTEGER PRIMARY KEY, parent_id INTEGER, FOREIGN KEY (parent_id) REFERENCES {parent} (id));
          INSERT INTO {child} VALUES (1, 2), (2, NULL)"
     ));
+    (parent, child)
+}
+
+// Where the key lookup runs beside the run, the rows show with their key icons from the first frame.
+fn keyed_rows(cx: &mut TestAppContext, engine: Engine) {
+    let driver = engine.driver();
+    if !driver.capabilities().row_editing || !barsql_app::traced_beside_run(&driver) {
+        return;
+    }
+    let mut app = open_on(cx, engine);
+    let (_, child) = parent_and_child(&app, "e2e_keyed");
+    app.connect();
+    let results = app.results();
+    let frames = Rc::new(RefCell::new(Vec::new()));
+    let sink = frames.clone();
+    app.cx.update(|_, cx| {
+        cx.observe(&results, move |results, cx| {
+            if let Some(grid) = results.read(cx).shown_grid() {
+                sink.borrow_mut().push(grid.read(cx).key_icons());
+            }
+        })
+        .detach()
+    });
+    app.run(&format!("SELECT * FROM {child}"));
+    assert_eq!(frames.borrow().first(), Some(&vec![Some(Lucide::KeyRound), Some(Lucide::Link)]));
+}
+
+fn foreign_key(cx: &mut TestAppContext, engine: Engine) {
+    // ClickHouse parses FOREIGN KEY and keeps nothing of it.
+    if !engine.driver().capabilities().catalog.constraints {
+        return;
+    }
+    let mut app = open_on(cx, engine);
+    let (parent, child) = parent_and_child(&app, "e2e_fk");
     app.connect();
     app.refresh_schema();
     browse(&mut app, &child);
     let grid = grid(&mut app);
-    // Where the key leads comes in a load of its own, after the rows.
-    app.settle(|cx| cx.update(|_, cx| grid.read(cx).jumps_at(0, 1)));
     let at = app.grid_point(&grid, |grid| grid.jump_point(0, 1));
     let buttons = app.cx.update(|_, cx| {
         let grid = grid.read(cx);
@@ -562,6 +591,7 @@ per_engine! {
     the_toolbar_rolls_back_and_commits => transactions;
     a_created_table_shows_in_the_schema_browser => created_table;
     browsing_a_table_shows_its_rows => browse_rows;
+    a_tables_rows_show_with_their_keys => keyed_rows;
     a_foreign_key_cell_jumps_to_the_referenced_row => foreign_key;
     a_text_foreign_key_with_a_backslash_finds_its_row => text_foreign_key;
     a_server_view_opens_in_a_tab_and_runs => server_views;
