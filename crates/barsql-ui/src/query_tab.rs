@@ -1321,7 +1321,7 @@ impl Render for QueryTab {
                                 cx.notify();
                             })),
                     )
-                    .when(self.running.is_some(), |el| el.child(ProgressLine))
+                    .when(!self.idle(cx), |el| el.child(ProgressLine))
                     .test_support(),
             )
     }
@@ -1361,6 +1361,11 @@ impl QueryTab {
 impl QueryTab {
     pub(crate) fn is_running(&self) -> bool {
         self.running.is_some()
+    }
+
+    // The run is over and its rows show.
+    pub(crate) fn idle(&self, cx: &App) -> bool {
+        self.running.is_none() && !self.results.read(cx).awaits_keys()
     }
 }
 

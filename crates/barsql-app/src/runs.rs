@@ -156,13 +156,9 @@ impl BarApp {
             let mut reported = false;
             while let Ok(event) = inner_rx.recv().await {
                 let event = match event {
-                    ScriptEvent::Meta { result_index, columns, statement } => RunEvent::Meta {
-                        result_index,
-                        columns,
-                        statement,
-                        schema_name: String::new(),
-                        table_name: String::new(),
-                    },
+                    ScriptEvent::Meta { result_index, columns, statement } => {
+                        RunEvent::Meta { result_index, columns, statement, catalog: Default::default() }
+                    }
                     ScriptEvent::Rows { result_index, chunk } => RunEvent::Rows { result_index, chunk },
                     ScriptEvent::Messages { result_index, messages, dropped } => {
                         RunEvent::Messages { result_index, messages, dropped }
@@ -257,13 +253,9 @@ impl BarApp {
         let forward = async {
             while let Ok(event) = inner_rx.recv().await {
                 let event = match event {
-                    ScriptEvent::Meta { result_index, columns, statement } => RunEvent::Meta {
-                        result_index,
-                        columns,
-                        statement,
-                        schema_name: req.schema.clone(),
-                        table_name: req.table.clone(),
-                    },
+                    ScriptEvent::Meta { result_index, columns, statement } => {
+                        RunEvent::Meta { result_index, columns, statement, catalog: query.columns.clone().into() }
+                    }
                     ScriptEvent::Rows { result_index, chunk } => RunEvent::Rows { result_index, chunk },
                     // Pages are the app's own SQL.
                     ScriptEvent::Messages { .. } => continue,

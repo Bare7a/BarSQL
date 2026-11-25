@@ -316,7 +316,7 @@ impl Driver<'_> {
 
     pub fn wait_idle(&mut self) {
         let tab = self.tab();
-        settle(self.cx, |cx| cx.update(|_, cx| !tab.read(cx).is_running()));
+        settle(self.cx, |cx| cx.update(|_, cx| tab.read(cx).idle(cx)));
     }
 
     pub fn run(&mut self, sql: &str) {
@@ -375,8 +375,12 @@ impl Driver<'_> {
         toasts.into_iter().filter(|(kind, _)| *kind == ToastKind::Info).map(|(_, text)| text).collect()
     }
 
+    // A result picked from the tabs shows once its keys are known.
     pub fn grid(&mut self) -> Option<Entity<Grid>> {
         let results = self.results();
+        if self.cx.update(|_, cx| results.read(cx).awaits_keys()) {
+            settle(self.cx, |cx| cx.update(|_, cx| !results.read(cx).awaits_keys()));
+        }
         self.cx.update(|_, cx| results.read(cx).active_grid())
     }
 

@@ -1027,7 +1027,7 @@ fn blend(from: &RgbaImage, to: &RgbaImage, amount: f32) -> RgbaImage {
 // Loading states the camera doesn't film.
 fn loading(workspace: &Entity<Workspace>, _: &mut Window, cx: &mut App) -> bool {
     let workspace = workspace.read(cx);
-    workspace.query_tab().is_some_and(|tab| tab.read(cx).is_running())
+    workspace.query_tab().is_some_and(|tab| !tab.read(cx).idle(cx))
         || workspace.table_tab().is_some_and(|tab| !tab.read(cx).idle())
         || workspace.diagram_tab().is_some_and(|diagram| !diagram.read(cx).fitted())
         || workspace.structure_tab().is_some_and(|tab| !tab.read(cx).editable())

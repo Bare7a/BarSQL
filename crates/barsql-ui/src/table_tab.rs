@@ -3,7 +3,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use barsql_app::{EditorTab, RunEvent, TableViewRef};
-use barsql_core::{ConnectionConfig, Row, RowDelete, RowUpdate, TableDataRequest};
+use barsql_core::schema::primary_keys;
+use barsql_core::{ColumnInfo, ConnectionConfig, Row, RowDelete, RowUpdate, TableDataRequest};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::Enter;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -22,6 +23,7 @@ use crate::grid::{self, Choices, Grid, GridEvent, RowRef, TableOverlay};
 use crate::i18n::{I18n, count, t, t_count, t_with};
 use crate::results::ShownError;
 use crate::schema;
+use crate::spinner::ProgressLine;
 use crate::sql_language::FilterCompletion;
 use crate::state;
 use crate::table_edits::{Keys, Outcome, OwnedCell, Staging, changes_row, foreign_key_filter, key_row};
@@ -69,6 +71,7 @@ pub struct TableTab {
     total: Total,
     replace: bool,
     loaded: bool,
+    shown: bool,
     loading: Option<Task<()>>,
     applying: bool,
     error: Option<ShownError>,
@@ -146,6 +149,7 @@ impl TableTab {
             total: Total::Unknown,
             replace: true,
             loaded: false,
+            shown: false,
             loading: None,
             applying: false,
             error: None,
@@ -155,7 +159,6 @@ impl TableTab {
         };
         // Like a query tab, so the sidebar tree fills when the app starts on a table view.
         schema::ensure_loaded(&this.connection.id, this.connection.driver.clone(), cx);
-        this.load_columns(cx);
         this.fetch(0, true, window, cx);
         this
     }
@@ -320,32 +323,22 @@ impl TableTab {
         !self.connection.read_only && !self.primary_keys.is_empty()
     }
 
-    // The catalog's word on each column: where its foreign key leads, and the values it takes from a list.
-    fn load_columns(&mut self, cx: &mut Context<Self>) {
-        let load = schema::columns(&self.connection.id, &self.schema, &self.table, cx);
-        cx.spawn(async move |this, cx| {
-            let Ok(columns) = load.await else { return };
-            this.update(cx, |this, cx| {
-                this.foreign = columns
-                    .iter()
-                    .filter(|c| c.is_foreign && !c.foreign_table.is_empty())
-                    .map(|c| (c.name.clone(), (c.foreign_table.clone(), c.foreign_column.clone())))
-                    .collect();
-                this.choices = columns
-                    .iter()
-                    .filter(|c| !c.enum_values.is_empty())
-                    .map(|c| {
-                        (
-                            c.name.clone(),
-                            Choices { values: c.enum_values.clone().into(), nullable: c.is_nullable, open: false },
-                        )
-                    })
-                    .collect();
-                this.sync_overlay(cx);
+    // The catalog's word on each column, which comes with every page: its primary key, where its foreign key leads,
+    // and the values it takes from a list.
+    fn take_catalog(&mut self, catalog: &[ColumnInfo]) {
+        self.primary_keys = primary_keys(catalog);
+        self.foreign = catalog
+            .iter()
+            .filter(|c| c.is_foreign && !c.foreign_table.is_empty())
+            .map(|c| (c.name.clone(), (c.foreign_table.clone(), c.foreign_column.clone())))
+            .collect();
+        self.choices = catalog
+            .iter()
+            .filter(|c| !c.enum_values.is_empty())
+            .map(|c| {
+                (c.name.clone(), Choices { values: c.enum_values.clone().into(), nullable: c.is_nullable, open: false })
             })
-            .ok();
-        })
-        .detach();
+            .collect();
     }
 
     fn request(&self, offset: usize) -> TableDataRequest {
@@ -395,7 +388,7 @@ impl TableTab {
 
     fn apply_event(&mut self, event: RunEvent, cx: &mut Context<Self>) {
         match event {
-            RunEvent::Meta { columns, .. } => {
+            RunEvent::Meta { columns, catalog, .. } => {
                 let completion = FilterCompletion {
                     columns: columns.iter().map(|c| (c.name.clone(), c.type_name.clone())).collect(),
                     driver: self.connection.driver.clone(),
@@ -409,19 +402,19 @@ impl TableTab {
                     }
                 }
                 self.loaded = true;
+                self.take_catalog(&catalog);
+                self.sync_overlay(cx);
             }
             RunEvent::Rows { chunk, .. } => {
                 self.page_rows += chunk.rows();
+                self.shown |= chunk.rows() > 0;
                 self.grid.update(cx, |grid, cx| grid.push(chunk, cx));
             }
-            RunEvent::Result(result) => match result.error {
-                Some(error) => self.error = Some(ShownError::new(error, cx)),
-                None => {
-                    if let Some(summary) = result.summary {
-                        self.primary_keys = summary.primary_keys;
-                    }
+            RunEvent::Result(result) => {
+                if let Some(error) = result.error {
+                    self.error = Some(ShownError::new(error, cx));
                 }
-            },
+            }
             // Pages are the app's own SQL, which says nothing worth showing.
             RunEvent::Messages { .. } => {}
             RunEvent::Done { error: Some(error), .. } => self.error = Some(ShownError::new(error, cx)),
@@ -432,6 +425,7 @@ impl TableTab {
 
     fn finish_fetch(&mut self, cx: &mut Context<Self>) {
         self.loading = None;
+        self.shown |= self.loaded;
         self.applying = false;
         self.has_more = self.page_rows >= PAGE_SIZE;
         self.keys = Keys::new(self.grid.read(cx).set(), &self.primary_keys);
@@ -887,9 +881,16 @@ impl TableTab {
         if let Some(error) = &self.error {
             return error.card(None, None, cx).into_any_element();
         }
-        if !self.loaded {
-            let key = if self.loading.is_some() { "tableView.loading" } else { "results.noResults" };
-            return div().p_4().text_color(cx.theme().muted_foreground).child(t(cx, key)).into_any_element();
+        // The first page shows once its rows are in, as a query's results do.
+        if !self.shown && self.loading.is_some() {
+            return div().size_full().relative().child(ProgressLine).into_any_element();
+        }
+        if !self.shown {
+            return div()
+                .p_4()
+                .text_color(cx.theme().muted_foreground)
+                .child(t(cx, "results.noResults"))
+                .into_any_element();
         }
         let mut meta = self.rows_label(cx).to_string();
         if matches!(self.total, Total::Counting { .. }) {

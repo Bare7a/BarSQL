@@ -97,11 +97,7 @@ impl BarApp {
         cancel: &Cancel,
     ) -> Result<Option<ResultTable>, QueryError> {
         let config = self.config(connection_id)?;
-        let Some(select) =
-            select_source(&config.driver, statement).filter(|_| config.driver.capabilities().row_editing)
-        else {
-            return Ok(None);
-        };
+        let Some(select) = traced_select(&config.driver, statement) else { return Ok(None) };
         let tab = Origin { connection_id, tab_id, slot: self.inner.tabs.existing(tab_id), cancel };
         let engine = self.engine_unless_cancelled(connection_id, cancel).await?;
         let table = self.trace(&engine, &tab, &select, statement, columns).await?;
@@ -234,6 +230,16 @@ impl BarApp {
         self.sync_transaction(tab_id, &mut slot);
         result
     }
+}
+
+// The only results a lookup can find the table of.
+pub fn traced_select(driver: &DriverType, statement: &str) -> Option<SelectSource> {
+    driver.capabilities().row_editing.then(|| select_source(driver, statement)).flatten()
+}
+
+// SQL Server describes the statement on the tab's session and SQLite has one connection, both the run's until it ends.
+pub fn traced_beside_run(driver: &DriverType) -> bool {
+    !matches!(driver, DriverType::SqlServer | DriverType::Sqlite)
 }
 
 async fn apply_in(session: &mut Session, edits: &ResultEdits) -> Result<i64, ApplyError> {

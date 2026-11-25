@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
-use barsql_core::{QueryError, ResultSummary, ServerMessage};
+use barsql_core::{ColumnInfo, QueryError, ResultSummary, ServerMessage};
 use barsql_db::{ColumnMeta, ResultChunk};
 use barsql_sql::QueryPlan;
 use serde::Serialize;
 
 use crate::import::ImportResult;
 
-// Arrives in order and already filtered to one run.
+// Arrives in order and already filtered to one run. A table page's Meta carries the table's columns as the catalog has
+// them, so its keys come before its rows.
 #[derive(Debug)]
 pub enum RunEvent {
-    Meta { result_index: usize, columns: Arc<[ColumnMeta]>, statement: String, schema_name: String, table_name: String },
+    Meta { result_index: usize, columns: Arc<[ColumnMeta]>, statement: String, catalog: Arc<[ColumnInfo]> },
     Rows { result_index: usize, chunk: Arc<ResultChunk> },
     // Before or after the statement's Result. `dropped` counts the ones not kept.
     Messages { result_index: usize, messages: Vec<ServerMessage>, dropped: usize },

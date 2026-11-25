@@ -57,7 +57,7 @@ fn the_squiggle_covers_the_word_at_the_position() {
 }
 
 fn idle(tab: &Entity<QueryTab>) -> impl FnMut(&mut VisualTestContext) -> bool + '_ {
-    move |cx| cx.update(|_, cx| tab.read(cx).running.is_none())
+    move |cx| cx.update(|_, cx| tab.read(cx).idle(cx))
 }
 
 fn status(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> (usize, ResultStatus) {

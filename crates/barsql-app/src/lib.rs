@@ -31,7 +31,7 @@ pub use barsql_io::{CsvOptions, ImportPreview};
 pub use barsql_storage::{
     ConnectionFolder, DiagramRef, EditorSession, EditorTab, HISTORY_LIMIT, StructureRef, TableViewRef,
 };
-pub use edits::{ApplyError, ResultEdits, ResultTable};
+pub use edits::{ApplyError, ResultEdits, ResultTable, traced_beside_run, traced_select};
 pub use events::{
     AppEvent, ImportDone, ImportEvent, ImportHandle, ImportProgress, RunEvent, RunHandle, RunResult, Unsaved,
 };
