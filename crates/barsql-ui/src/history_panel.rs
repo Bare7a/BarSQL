@@ -13,7 +13,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use jiff::civil::Date;
-use jiff::{Timestamp, Zoned};
+use jiff::{Timestamp, ZonedDateTime};
 
 use crate::dialogs::{self, Confirm};
 use crate::form;
@@ -96,7 +96,7 @@ impl HistoryPanel {
             failed_only: false,
             entries: Vec::new(),
             rows: Vec::new(),
-            day: Zoned::now().date(),
+            day: ZonedDateTime::now().date(),
             filter,
             needle: String::new(),
             filter_task: Task::ready(()),
@@ -138,10 +138,10 @@ impl HistoryPanel {
 
     // Rebuilds the rows, keeping the scroll position.
     fn rebuild(&mut self) {
-        self.rebuild_as_of(Zoned::now());
+        self.rebuild_as_of(ZonedDateTime::now());
     }
 
-    fn rebuild_as_of(&mut self, now: Zoned) {
+    fn rebuild_as_of(&mut self, now: ZonedDateTime) {
         self.day = now.date();
         let (needle, failed_only) = (&self.needle, self.failed_only);
         let shown = self.entries.iter().enumerate().filter(|(_, e)| {
@@ -489,7 +489,7 @@ impl Render for HistoryPanel {
             .child(form::filter_input(&self.filter, window, cx).cleanable(true));
         let filter_bar = form::filter_bar(field, cx).child(self.options_menu(cx));
         // The captions go by today's date, so rows laid out before midnight are laid out again.
-        if Zoned::now().date() != self.day {
+        if ZonedDateTime::now().date() != self.day {
             self.rebuild();
         }
         let body = if self.entries.is_empty() {
@@ -538,7 +538,7 @@ impl Render for HistoryPanel {
 mod tests {
     use barsql_core::HistoryEntry;
     use gpui_kit::{App, TestAppContext};
-    use jiff::{SignedDuration, Timestamp, Zoned};
+    use jiff::{SignedDuration, Timestamp, ZonedDateTime};
 
     use super::{HistoryPanel, Row, meta};
     use crate::relative_time::TimeBucket;
@@ -606,7 +606,7 @@ mod tests {
     fn the_day_captions_move_on_at_midnight(cx: &mut TestAppContext) {
         let env = Env::new(cx);
         let (panel, cx) = in_root(cx, HistoryPanel::new);
-        let yesterday = Zoned::now().yesterday().unwrap();
+        let yesterday = ZonedDateTime::now().yesterday().unwrap();
         let entry = HistoryEntry {
             id: "h1".into(),
             connection_id: env.connection.id.clone(),

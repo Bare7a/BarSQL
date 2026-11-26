@@ -705,23 +705,6 @@ impl Workspace {
         }
         let active = self.tabs.iter().position(|tab| tab.view.id(cx) == session.active_tab).unwrap_or(0);
         self.activate(active, window, cx);
-        if !self.tabs.is_empty() {
-            self.reveal_active_tab(window, cx);
-        }
-    }
-
-    // GPUI drops a scroll request made before the strip's first layout, so a restored session asks again
-    // once the strip has been laid out.
-    fn reveal_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tab_scroll.bounds().size.width > px(0.) {
-            self.tab_scroll.scroll_to_item(self.active);
-            cx.notify();
-            return;
-        }
-        let this = cx.weak_entity();
-        window.on_next_frame(move |window, cx| {
-            let _ = this.update(cx, |this, cx| this.reveal_active_tab(window, cx));
-        });
     }
 
     fn session(&self, cx: &App) -> EditorSession {

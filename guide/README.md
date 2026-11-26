@@ -1,9 +1,10 @@
 # 📖 BarSQL User Guide
 
-Everything BarSQL does, one area per page. For downloads and screenshots, see the [README](../README.md) or [barsql.bare7a.eu](https://barsql.bare7a.eu).
+Everything BarSQL does, one area per page. For screenshots, see the [README](../README.md) or [barsql.bare7a.eu](https://barsql.bare7a.eu).
 
 | Page | What it covers |
 | ---- | -------------- |
+| [⬇️ Installing](install.md) | Which file to pick, Homebrew, Scoop, the Linux install script, the first launch, uninstalling |
 | [🔌 Connections](connections.md) | Folders, read-only mode, SSL and TLS, SSH tunnels, SQLite extensions, engine notes |
 | [🧠 SQL Editor](editor.md) | Autocomplete, multiple cursors, scripts, transactions, the query plan viewer, saved queries and history |
 | [🗃️ Schema Explorer](schema.md) | The schema tree, ER diagrams, schema compare, Copy DDL, schema changes, the structure editor, table backups |

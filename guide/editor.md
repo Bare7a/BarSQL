@@ -9,7 +9,7 @@
 - **VS Code-style multiple cursors** - `Ctrl/⌘+D` adds a cursor at the next occurrence of the word or selection, `Ctrl/⌘+Shift+L` at every one, `Ctrl/⌘+K Ctrl/⌘+D` skips one and `Ctrl/⌘+U` takes the last back
 - **Occurrence highlighting** - the word at the caret, or the selected text, is marked wherever else it appears
 - **VS Code-style line commands** - copy, cut and paste whole lines, move and duplicate lines, toggle comments
-- **Run selection** (`Ctrl+Enter`) - with nothing selected it runs the statement under the caret, briefly highlighting it / **run all** (`Ctrl+Shift+Enter`) / **stop** long-running queries
+- **Run selection** (`Ctrl/⌘+Enter`) - with nothing selected it runs the statement under the caret, briefly highlighting it / **run all** (`Ctrl/⌘+Shift+Enter`) / **stop** long-running queries
 - **Query parameters** - `:name` placeholders ask for their values before a run (values are SQL, so quote text; empty means `NULL`) and the last values come back next time. Casts like `::int`, strings and comments are left alone
 - **Every-row guard** - an `UPDATE` or `DELETE` without a `WHERE` asks before it runs
 - **Go to definition** (`F12` or `⌘/Ctrl`-click) - an alias or CTE jumps to where the query declares it, and a table (or a column's table) opens in the grid
@@ -20,7 +20,7 @@
 - **Messages tab** - PostgreSQL notices, MySQL warnings, SQL Server `PRINT` and `RAISERROR` output, grouped under the statement that raised them, with levels and codes; it opens by itself when a run returns nothing else
 - **Multiple result outputs** - a script or stored procedure that returns several result sets shows each in its own switchable result tab, query plans included; a failing statement reports its error and stops the run
 - **Pinned transactions** per tab - run `BEGIN` / `COMMIT` / `ROLLBACK` as SQL or from the toolbar; queries run inside the open transaction until you commit or roll back (on every engine that holds one: not ClickHouse or Turso). Closing the tab, quitting or restarting for an update asks before rolling it back. On macOS so do the Dock's Quit, logging out and shutting down, which BarSQL cancels to ask. Renaming a connection or moving it to a folder keeps it open; disconnecting, or changing how it connects, rolls its tabs' transactions back and says so. Savepoints you make last until the transaction ends, across runs
-- **Query plan viewer** (`Ctrl+Shift+E`) - see below
+- **Query plan viewer** (`Ctrl/⌘+Shift+E`) - see below
 - `UPDATE` / `DELETE` / `INSERT` with **`RETURNING`** flow back to the Results Grid
 - Gutter icons to run individual statements
 - Right-click menu with run, explain, go to definition, **change all occurrences**, toggle comment and **format SQL**
@@ -28,7 +28,7 @@
 
 ## 🧭 Query Plan Viewer
 
-**Explain** (`Ctrl+Shift+E`) plans the statement under the cursor and shows the engine's plan as one tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates. **Explain analyze** (`Ctrl+Shift+A`, or the menu on the toolbar's Explain button) _executes_ the statement instead and reports what really happened: measured rows, real timings, loop counts.
+**Explain** (`Ctrl/⌘+Shift+E`) plans the statement under the cursor and shows the engine's plan as one tree, whichever database you're on. Nothing runs - the numbers are the planner's estimates. **Explain analyze** (`Ctrl/⌘+Shift+A`, or the menu on the toolbar's Explain button) _executes_ the statement instead and reports what really happened: measured rows, real timings, loop counts.
 
 Typing `EXPLAIN` yourself works the same way - **Run** recognises it and opens the plan viewer instead of dumping the engine's raw rows into the grid. Statements whose output already carries structure (any `FORMAT JSON`, MySQL's `EXPLAIN ANALYZE`, `EXPLAIN QUERY PLAN`) run exactly as typed; the rest are asked again in JSON. Name a format on purpose (`EXPLAIN (FORMAT TEXT)`, `FORMAT=TRADITIONAL`) or use SQLite's bytecode `EXPLAIN` and you get the raw rows, as asked.
 

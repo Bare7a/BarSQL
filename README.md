@@ -18,91 +18,53 @@ https://github.com/user-attachments/assets/e7f8e5f6-a1ed-4855-9994-59a6f382c84f
 
 ## ⬇️ Download
 
-Grab the latest build for **Windows**, **macOS**, or **Linux** from the [**Releases**](../../releases/latest) page.
+Get the latest build for Windows, macOS or Linux from **[barsql.bare7a.eu](https://barsql.bare7a.eu/#download)** or the **[Releases](../../releases/latest)** page. No account needed, and every build updates itself.
 
-### Recommended assets:
-
-- **Windows**: `BarSQL-windows-amd64.zip` (portable) **or** `BarSQL-amd64-installer.exe` (installer)
-- **Linux**: `BarSQL-linux-amd64.tar.gz` (x86-64) **or** `BarSQL-linux-arm64.tar.gz` (ARM64), both portable
-- **macOS**: `BarSQL-darwin-arm64.zip` (Apple Silicon) **or** `BarSQL-darwin-amd64.zip` (Intel)
-
-### Additional options:
-
-- **Windows**: `BarSQL.exe` (standalone)
-- **Linux**: `BarSQL-x86_64.AppImage` and `BarSQL-aarch64.AppImage` (ARM64), plus `BarSQL.deb`, `BarSQL.rpm`, `BarSQL.pkg.tar.zst` and `BarSQL` (standalone) for x86-64
-- **macOS**: `BarSQL-macos-universal.dmg`
-
-No account required - just download and run.
-
-Every build above updates itself. The installer, the Linux packages and copies in protected folders ask for admin rights first.
-
-### Linux install script
-
-One command picks the build for your distro and chip, checks it against `SHA256SUMS` and installs it:
-
-```bash
-curl -fsSL https://barsql.bare7a.eu/install.sh | sh
-```
-
-On x86-64 with apt, dnf, zypper or pacman, that's the package, which asks for your password once. Anywhere else, ARM64 included, it's the portable build in `~/.local/share/barsql`, with a `BarSQL` command and an app menu entry. End the command with `sh -s -- --portable` instead to get the portable build anywhere. Run it again to update, though the app updates itself either way.
-
-To uninstall, remove the package with `sudo apt remove barsql`, `sudo dnf remove barsql`, `sudo zypper remove barsql` or `sudo pacman -R barsql`. The portable build keeps your `BarSQL-data` folder in `~/.local/share/barsql`, so move that out first to keep your connections, then:
-
-```bash
-rm -r ~/.local/share/barsql ~/.local/bin/BarSQL ~/.local/share/applications/BarSQL.desktop ~/.local/share/icons/hicolor/*/apps/BarSQL.png
-```
-
-### Homebrew
-
-On macOS, [Homebrew](https://brew.sh) installs it too, and the app keeps updating itself:
+**macOS**, with [Homebrew](https://brew.sh):
 
 ```bash
 brew install bare7a/tap/barsql
 ```
 
-Already have BarSQL in Applications? Add `--adopt` to take over that copy.
-
-<!-- winget: uncomment once Microsoft approves Bare7a.BarSQL, and drop the Scoop heading below.
-### winget and Scoop
-
-On Windows, [winget](https://learn.microsoft.com/windows/package-manager/) runs the installer for you:
+<!-- winget: uncomment once Microsoft approves Bare7a.BarSQL.
+**Windows**, with [winget](https://learn.microsoft.com/windows/package-manager/):
 
 ```powershell
 winget install Bare7a.BarSQL
 ```
--->
-### Scoop
 
-[Scoop](https://scoop.sh) installs the portable build and keeps its `BarSQL-data` folder from one version to the next:
+-->
+**Windows**, with [Scoop](https://scoop.sh):
 
 ```powershell
 scoop bucket add bare7a https://github.com/Bare7a/scoop-bucket
 scoop install bare7a/barsql
 ```
 
-The app keeps updating itself. Scoop's own list catches up at the next `scoop update barsql`.
+**Linux**, with the [install script](guide/install.md#linux-install-script):
 
-### First launch
+```bash
+curl -fsSL https://barsql.bare7a.eu/install.sh | sh
+```
 
-The macOS app is signed with a Developer ID and notarized by Apple, so it opens like any other app.
+The macOS app is signed and notarized. The Windows build isn't code-signed yet, so SmartScreen asks once before the first launch: click **More info → Run anyway**.
 
-The Windows build isn't code-signed yet, so Windows asks once before BarSQL first opens: when SmartScreen says *Windows protected your PC*, click **More info → Run anyway**. Smart App Control, where it's turned on, blocks unsigned apps without an exception, so BarSQL can't run there until it's signed.
-
-Every release lists each file's SHA-256 in `SHA256SUMS`, which the updater checks its downloads against, and every file carries a signed [build provenance attestation](../../attestations) from the GitHub Actions run that built it.
-
-Prefer to build it yourself? See **Build from source** below.
+Which file to pick, the install script's options, uninstalling and verifying a download: **[Installing BarSQL](guide/install.md)**.
 
 ---
 
 ## ⚡ SQL tools are usually overkill. BarSQL isn’t.
 
-Work with **SQLite**, **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **ClickHouse** and **Turso / libSQL** in a single fast desktop app that runs entirely on your machine.
+Most are slow to start and heavy on memory, cloud-connected by default, tied to subscriptions or accounts, and overloaded with features you don’t use. BarSQL is built for developers who want speed, clarity and control, and it runs entirely on your machine.
 
-🧳 Portable  
-⚡ Fast startup  
-🔒 Local-first  
-🧠 Developer-focused  
-🔄 Auto-updating
+🧳 Portable · ⚡ Fast startup · 🔒 Local-first · 🧠 Developer-focused · 🔄 Auto-updating
+
+Under the hood:
+
+- 🦀 Rust from the database drivers up to the window
+- 🖥️ [GPUI](https://www.gpui.rs/), the GPU-accelerated UI framework behind the Zed editor
+- 🧩 [GPUI Kit](https://gpui-kit.com/) components, including a code editor with tree-sitter highlighting
+- 🔌 Native drivers for each engine: `tokio-postgres`, `mysql_async`, a bundled SQLite, `tiberius` for SQL Server, and BarSQL's own HTTP clients for ClickHouse and Turso
 
 ---
 
@@ -134,59 +96,31 @@ Work with **SQLite**, **PostgreSQL**, **MySQL / MariaDB**, **SQL Server**, **Cli
 
 <table>
   <tr>
-    <td align="center"><a href="docs/screenshots/1.webp"><img src="docs/screenshots/1-800.webp" width="100%"></a><br><sub><b>Editor</b></sub></td>
-    <td align="center"><a href="docs/screenshots/2.webp"><img src="docs/screenshots/2-800.webp" width="100%"></a><br><sub><b>Transactions & multiple results</b></sub></td>
-    <td align="center"><a href="docs/screenshots/3.webp"><img src="docs/screenshots/3-800.webp" width="100%"></a><br><sub><b>Table data</b></sub></td>
+    <td align="center"><a href="docs/screenshots/1.webp"><img alt="Editor" src="docs/screenshots/1-800.webp" width="100%"></a><br><sub><b>Editor</b></sub></td>
+    <td align="center"><a href="docs/screenshots/2.webp"><img alt="Transactions & multiple results" src="docs/screenshots/2-800.webp" width="100%"></a><br><sub><b>Transactions & multiple results</b></sub></td>
+    <td align="center"><a href="docs/screenshots/3.webp"><img alt="Table data" src="docs/screenshots/3-800.webp" width="100%"></a><br><sub><b>Table data</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/screenshots/4.webp"><img src="docs/screenshots/4-800.webp" width="100%"></a><br><sub><b>Cell editor</b></sub></td>
-    <td align="center"><a href="docs/screenshots/5.webp"><img src="docs/screenshots/5-800.webp" width="100%"></a><br><sub><b>Grid</b></sub></td>
-    <td align="center"><a href="docs/screenshots/6.webp"><img src="docs/screenshots/6-800.webp" width="100%"></a><br><sub><b>Export</b></sub></td>
+    <td align="center"><a href="docs/screenshots/4.webp"><img alt="Cell editor" src="docs/screenshots/4-800.webp" width="100%"></a><br><sub><b>Cell editor</b></sub></td>
+    <td align="center"><a href="docs/screenshots/5.webp"><img alt="Grid" src="docs/screenshots/5-800.webp" width="100%"></a><br><sub><b>Grid</b></sub></td>
+    <td align="center"><a href="docs/screenshots/6.webp"><img alt="Export" src="docs/screenshots/6-800.webp" width="100%"></a><br><sub><b>Export</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/screenshots/7.webp"><img src="docs/screenshots/7-800.webp" width="100%"></a><br><sub><b>Connections</b></sub></td>
-    <td align="center"><a href="docs/screenshots/8.webp"><img src="docs/screenshots/8-800.webp" width="100%"></a><br><sub><b>Quick Search</b></sub></td>
-    <td align="center"><a href="docs/screenshots/9.webp"><img src="docs/screenshots/9-800.webp" width="100%"></a><br><sub><b>DDL viewer</b></sub></td>
+    <td align="center"><a href="docs/screenshots/7.webp"><img alt="Connections" src="docs/screenshots/7-800.webp" width="100%"></a><br><sub><b>Connections</b></sub></td>
+    <td align="center"><a href="docs/screenshots/8.webp"><img alt="Quick Search" src="docs/screenshots/8-800.webp" width="100%"></a><br><sub><b>Quick Search</b></sub></td>
+    <td align="center"><a href="docs/screenshots/9.webp"><img alt="DDL viewer" src="docs/screenshots/9-800.webp" width="100%"></a><br><sub><b>DDL viewer</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/screenshots/10.webp"><img src="docs/screenshots/10-800.webp" width="100%"></a><br><sub><b>Plan viewer</b></sub></td>
-    <td align="center"><a href="docs/screenshots/11.webp"><img src="docs/screenshots/11-800.webp" width="100%"></a><br><sub><b>CSV & SQL import</b></sub></td>
-    <td align="center"><a href="docs/screenshots/12.webp"><img src="docs/screenshots/12-800.webp" width="100%"></a><br><sub><b>Structure editor</b></sub></td>
+    <td align="center"><a href="docs/screenshots/10.webp"><img alt="Plan viewer" src="docs/screenshots/10-800.webp" width="100%"></a><br><sub><b>Plan viewer</b></sub></td>
+    <td align="center"><a href="docs/screenshots/11.webp"><img alt="CSV & SQL import" src="docs/screenshots/11-800.webp" width="100%"></a><br><sub><b>CSV & SQL import</b></sub></td>
+    <td align="center"><a href="docs/screenshots/12.webp"><img alt="Structure editor" src="docs/screenshots/12-800.webp" width="100%"></a><br><sub><b>Structure editor</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/screenshots/13.webp"><img src="docs/screenshots/13-800.webp" width="100%"></a><br><sub><b>ER diagram</b></sub></td>
-    <td align="center"><a href="docs/screenshots/14.webp"><img src="docs/screenshots/14-800.webp" width="100%"></a><br><sub><b>Quick charts</b></sub></td>
-    <td align="center"><a href="docs/screenshots/15.webp"><img src="docs/screenshots/15-800.webp" width="100%"></a><br><sub><b>Appearance</b></sub></td>
+    <td align="center"><a href="docs/screenshots/13.webp"><img alt="ER diagram" src="docs/screenshots/13-800.webp" width="100%"></a><br><sub><b>ER diagram</b></sub></td>
+    <td align="center"><a href="docs/screenshots/14.webp"><img alt="Quick charts" src="docs/screenshots/14-800.webp" width="100%"></a><br><sub><b>Quick charts</b></sub></td>
+    <td align="center"><a href="docs/screenshots/15.webp"><img alt="Appearance" src="docs/screenshots/15-800.webp" width="100%"></a><br><sub><b>Appearance</b></sub></td>
   </tr>
 </table>
-
----
-
-## ⚡ What BarSQL is
-
-BarSQL is a **desktop SQL client built for developers who want speed, clarity and control**.
-
-It combines:
-
-- 🦀 Rust from the database drivers up to the window
-- 🖥️ [GPUI](https://www.gpui.rs/), the GPU-accelerated UI framework behind the Zed editor
-- 🧩 [GPUI Kit](https://gpui-kit.com/) components, including a code editor with tree-sitter highlighting
-- 🔌 Native drivers for each engine: `tokio-postgres`, `mysql_async`, a bundled SQLite, `tiberius` for SQL Server, and BarSQL's own HTTP clients for ClickHouse and Turso
-
----
-
-## 🚨 Why it exists
-
-Most SQL tools today are:
-
-- slow to start and heavy on memory
-- cloud-connected by default
-- tied to subscriptions or accounts
-- overloaded with features you don’t use
-
-BarSQL focuses on one thing:
-
-> **A fast, local environment for working with databases.**
 
 ---
 
@@ -195,8 +129,8 @@ BarSQL focuses on one thing:
 | Database       | Read & write | Read-only mode | Secure transport                            | SSH tunnel |
 | -------------- | :----------: | :------------: | :------------------------------------------ | :--------: |
 | **PostgreSQL** |      ✅      |       ✅       | SSL - `disable` / `require` / `verify-full` |     ✅     |
-| **MySQL**      |      ✅      |       ✅       | TLS                                         |     ✅     |
-| **MariaDB**    |      ✅      |       ✅       | TLS                                         |     ✅     |
+| **MySQL**      |      ✅      |       ✅       | TLS - `disable` / `require` / `verify-full` |     ✅     |
+| **MariaDB**    |      ✅      |       ✅       | TLS - `disable` / `require` / `verify-full` |     ✅     |
 | **SQLite**     |      ✅      |       ✅       | local file                                  |    n/a     |
 | **SQL Server** |      ✅      |       ✅       | TLS - `disable` / `require` / `verify-full` / `strict` (TDS 8.0) | ✅ |
 | **ClickHouse** |      ✅      |       ✅       | HTTP or HTTPS - `disable` / `require` / `verify-full` | ✅ |
@@ -212,6 +146,7 @@ Every feature in detail, one area per page:
 
 | Page | What it covers |
 | ---- | -------------- |
+| [⬇️ Installing](guide/install.md) | Which file to pick, Homebrew, Scoop, the Linux install script, the first launch, uninstalling |
 | [🔌 Connections](guide/connections.md) | Folders, read-only mode, SSL and TLS, SSH tunnels, SQLite extensions, engine notes |
 | [🧠 SQL Editor](guide/editor.md) | Autocomplete, multiple cursors, scripts, transactions, the query plan viewer, saved queries and history |
 | [🗃️ Schema Explorer](guide/schema.md) | The schema tree, ER diagrams, schema compare, Copy DDL, schema changes, the structure editor, table backups |

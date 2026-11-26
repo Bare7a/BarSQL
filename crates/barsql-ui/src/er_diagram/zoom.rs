@@ -60,14 +60,6 @@ pub fn zoomed(zoom: f32, child: impl IntoElement) -> Zoomed {
     Zoomed { zoom, rem: px(0.), child: child.into_any_element() }
 }
 
-impl IntoElement for Zoomed {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for Zoomed {
     type RequestLayoutState = ();
     type PrepaintState = ();

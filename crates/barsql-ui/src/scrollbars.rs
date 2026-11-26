@@ -26,7 +26,7 @@ impl<E: IntoElement> ScrollbarsOnHover for E {}
 
 pub trait HoverScrollbar: ScrollableElement {
     // `.scrollbar(handle, axis)` with its bars shown on hover. Knowing where they are, the area also keeps a press of
-    // another button on a shown bar from scrolling, since GPUI Kit's bar takes every button.
+    // another button on a shown bar from what's under it, since GPUI Kit's bar takes only the primary button.
     #[track_caller]
     fn hover_scrollbar<H: ScrollbarHandle + Clone>(self, handle: &H, axis: ScrollbarAxis) -> HoverArea {
         let bars = Bars { handle: Rc::new(handle.clone()), axis };
@@ -71,14 +71,6 @@ impl Bars {
         let horizontal =
             self.axis.has_horizontal() && content.width > area.size.width && position.y >= area.bottom() - width;
         area.contains(&position) && (vertical || horizontal)
-    }
-}
-
-impl IntoElement for HoverArea {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
     }
 }
 
@@ -319,17 +311,21 @@ mod tests {
         shifted: bool,
         // Draws the outer area from another call site, so as an area with no hover state yet.
         late: bool,
+        // Right-clicks the outer area's content got.
+        pressed: Rc<Cell<usize>>,
     }
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let inner =
                 div().id("inner").size_full().overflow_y_scroll().track_scroll(&self.inner).child(div().h(px(1000.)));
+            let pressed = self.pressed.clone();
             let outer = div()
                 .id("outer")
                 .size_full()
                 .overflow_y_scroll()
                 .track_scroll(&self.outer)
+                .on_mouse_down(MouseButton::Right, move |_, _, _| pressed.set(pressed.get() + 1))
                 .child(
                     div()
                         .relative()
@@ -359,7 +355,8 @@ mod tests {
         let env = Env::new(cx);
         cx.update(|cx| Theme::set_scrollbar_mode(ScrollbarMode::Scrolling, cx));
         let (outer, inner) = (ScrollHandle::new(), ScrollHandle::new());
-        let host = Host { outer: outer.clone(), inner: inner.clone(), shifted: false, late: false };
+        let host =
+            Host { outer: outer.clone(), inner: inner.clone(), shifted: false, late: false, pressed: Rc::default() };
         let (host, cx) = cx.add_window_view(|_, _| host);
         // The pointer starts at the window's corner, over the inner area.
         hover(cx, point(px(300.), px(300.)));
@@ -494,13 +491,16 @@ mod tests {
         assert!(jumps(cx, &outer, outer_track()));
     }
 
-    // GPUI Kit's bar takes every button, so a right-click on it would scroll.
+    // GPUI Kit's bar takes only the primary button, so a right-click on it would reach the content under it.
     #[gpui_kit::test]
-    fn a_right_click_on_a_shown_bar_doesnt_scroll(cx: &mut TestAppContext) {
-        let (_env, _, outer, _, cx) = open(cx);
+    fn a_right_click_on_a_shown_bar_neither_scrolls_nor_reaches_the_content(cx: &mut TestAppContext) {
+        let (_env, host, outer, _, cx) = open(cx);
         hover(cx, point(px(150.), px(150.)));
         assert!(!jumps_with(cx, &outer, outer_track(), MouseButton::Right));
         assert!(!jumps_with(cx, &outer, outer_track(), MouseButton::Middle));
+        assert_eq!(host.read_with(cx, |host, _| host.pressed.get()), 0);
+        assert!(!jumps_with(cx, &outer, point(px(150.), px(180.)), MouseButton::Right));
+        assert_eq!(host.read_with(cx, |host, _| host.pressed.get()), 1, "off the bar the content gets it");
         assert!(jumps(cx, &outer, outer_track()), "a primary click still scrolls");
     }
 

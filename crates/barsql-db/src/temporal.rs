@@ -23,7 +23,7 @@ impl Timestamp {
     pub(crate) fn in_zone(self, zone: &TimeZone) -> Option<(Timestamp, i32)> {
         let civil = self.civil()?;
         let instant = Offset::from_seconds(self.offset.unwrap_or(0)).ok()?.to_timestamp(civil).ok()?;
-        let zoned = instant.to_zoned(zone.clone());
+        let zoned = instant.to_zoned_datetime(zone.clone());
         let local = zoned.datetime();
         let converted = Timestamp {
             year: i32::from(local.year()),

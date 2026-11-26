@@ -19,3 +19,5 @@ To set it up, tick the box, click **Copy MCP setup** and paste it into your AI a
 ```bash
 claude mcp add BarSQL -- /Applications/BarSQL.app/Contents/MacOS/BarSQL --mcp
 ```
+
+That's the macOS path. On Windows, the installer's copy is `"C:\Program Files\BarSQL\BarSQL.exe"`, quotes included, and a Linux package's is `/usr/bin/BarSQL`. **Copy MCP setup** shows the path of any other copy.

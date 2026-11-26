@@ -40,15 +40,19 @@ pub fn render(
             .child(div().text_size(TEXT_SM).text_color(theme.muted_foreground).child(title)),
     };
     let on_close = Rc::new(on_close);
+    let inset = menu_bar.map_or(px(12.), |_| px(9.));
     let bar = TitleBar::new()
         .on_close_window({
             let on_close = on_close.clone();
             move |event, window, cx| on_close(event, window, cx)
         })
-        .when(menu_bar.is_some(), |bar| bar.pl(px(9.)))
+        .when(menu_bar.is_some(), |bar| bar.pl(inset))
         .child(content);
     let fullscreen = window.is_fullscreen() && draws_window_controls(window);
-    div().flex_shrink_0().child(bar).when(fullscreen, |bar| bar.child(fullscreen_controls(window, on_close)))
+    div()
+        .flex_shrink_0()
+        .child(bar)
+        .when(fullscreen, |bar| bar.children(fullscreen_controls(window, inset, on_close, cx)))
 }
 
 fn draws_window_controls(window: &Window) -> bool {
@@ -57,34 +61,43 @@ fn draws_window_controls(window: &Window) -> bool {
 }
 
 // In fullscreen GPUI stops hit testing the window controls on Windows, which leaves GPUI Kit's buttons without a click
-// handler, and on Linux its maximise can't leave fullscreen. These sit over its buttons and take their clicks.
+// handler, and on Linux its maximise can't leave fullscreen. These sit over its buttons and take their clicks. Only
+// Linux reports a layout, the desktop's, which GPUI Kit's buttons follow too.
 fn fullscreen_controls(
     window: &Window,
+    inset: Pixels,
     on_close: Rc<impl Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
-) -> impl IntoElement {
+    cx: &App,
+) -> [Div; 2] {
     let supported = window.window_controls();
-    let control = |id: &'static str| div().id(id).debug_selector(move || id.into()).w(TITLE_BAR_HEIGHT).h_full();
-    h_flex()
-        .absolute()
-        .top_0()
-        .right_0()
-        .h(TITLE_BAR_HEIGHT)
-        .when(supported.minimize, |controls| {
-            controls.child(control("fullscreen-minimize").on_click(|_, window, cx| {
-                cx.stop_propagation();
-                window.minimize_window();
-            }))
+    let layout = cx.button_layout().unwrap_or(WindowButtonLayout {
+        left: [None; MAX_BUTTONS_PER_SIDE],
+        right: [Some(WindowButton::Minimize), Some(WindowButton::Maximize), Some(WindowButton::Close)],
+    });
+    let control = |button: WindowButton| {
+        let (id, shown) = match button {
+            WindowButton::Minimize => ("fullscreen-minimize", supported.minimize),
+            WindowButton::Maximize => ("fullscreen-exit", supported.maximize),
+            WindowButton::Close => ("fullscreen-close", true),
+        };
+        let on_close = on_close.clone();
+        shown.then(|| {
+            div().id(id).debug_selector(move || id.into()).w(TITLE_BAR_HEIGHT).h_full().on_click(
+                move |event, window, cx| {
+                    cx.stop_propagation();
+                    match button {
+                        WindowButton::Minimize => window.minimize_window(),
+                        WindowButton::Maximize => window.toggle_fullscreen(),
+                        WindowButton::Close => on_close(event, window, cx),
+                    }
+                },
+            )
         })
-        .when(supported.maximize, |controls| {
-            controls.child(control("fullscreen-exit").on_click(|_, window, cx| {
-                cx.stop_propagation();
-                window.toggle_fullscreen();
-            }))
-        })
-        .child(control("fullscreen-close").on_click(move |event, window, cx| {
-            cx.stop_propagation();
-            on_close(event, window, cx);
-        }))
+    };
+    let side = |buttons: [Option<WindowButton>; MAX_BUTTONS_PER_SIDE]| {
+        h_flex().absolute().top_0().h(TITLE_BAR_HEIGHT).children(buttons.into_iter().flatten().filter_map(&control))
+    };
+    [side(layout.left).left(inset), side(layout.right).right_0()]
 }
 
 fn window_controls(cx: &App) -> impl IntoElement {
@@ -112,7 +125,7 @@ mod tests {
     use gpui_kit::component::menu::AppMenuBar;
     use gpui_kit::{
         App, ClickEvent, Context, Entity, IntoElement, Modifiers, ParentElement as _, Render, Styled as _,
-        TestAppContext, VisualTestContext, Window, div,
+        TestAppContext, VisualTestContext, Window, div, px,
     };
 
     use crate::test_support::Env;
@@ -120,10 +133,10 @@ mod tests {
     struct Bar(Rc<Cell<bool>>);
 
     impl Render for Bar {
-        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let closed = self.0.clone();
             let on_close = move |_: &ClickEvent, _: &mut Window, _: &mut App| closed.set(true);
-            div().size_full().child(super::fullscreen_controls(window, Rc::new(on_close)))
+            div().size_full().children(super::fullscreen_controls(window, px(9.), Rc::new(on_close), cx))
         }
     }
 
