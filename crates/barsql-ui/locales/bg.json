@@ -47,6 +47,8 @@
     "columnCount_other": "{{count}} колони"
   },
   "editor": {
+    "moveToDatabase": "Смяна на базата данни",
+    "databaseBusy": "Първо приключете транзакцията или промените",
     "sql": {
       "columnsCount_one": "{{count}} колона",
       "columnsCount_other": "{{count}} колони",
@@ -80,6 +82,9 @@
     "contextGoToDefinition": "Към дефиницията"
   },
   "connection": {
+    "showAllDatabases": "Показване на всички бази данни",
+    "showAllDatabasesHint": "Показва базите данни на сървъра в страничната лента.",
+    "defaultDatabase": "База данни по подразбиране",
     "pasteUrl": "Попълване на полетата от URL адрес на връзка в клипборда",
     "copyUrl": "Копиране като URL адрес, без паролата",
     "clipboardNotUrl": "В клипборда няма URL адрес на връзка, който BarSQL може да прочете",
@@ -165,6 +170,15 @@
     "discardConfirm": "Отхвърли и изпълни"
   },
   "sidebar": {
+    "newDatabase": "Нова база данни…",
+    "databaseInUse": "„{{tab}}“ има незавършена работа в тази база данни.",
+    "databaseOptions": "Опции за базите данни",
+    "databases": "Бази данни",
+    "databaseDefault": "по подразбиране",
+    "showSystemDatabases": "Системни бази данни",
+    "filterDatabases": "Филтриране на бази данни",
+    "databaseNoAccess": "без достъп",
+    "connectToListDatabases": "Свържете се, за да ги видите",
     "newTable": "Нова таблица…",
     "editStructure": "Редактиране на структурата…",
     "viewStructure": "Преглед на структурата",
@@ -514,6 +528,14 @@
     "zoomReset": "Обратно на 100%",
     "fitTooltip": "Покажи цялата диаграма",
     "open": "Отвори таблицата"
+  },
+  "schemaChange": {
+    "createDatabase": "Нова база данни",
+    "renameDatabase": "Преименуване на база данни",
+    "dropDatabase": "Изтриване на база данни",
+    "dropDatabaseDescription": "Изтриване на „{{name}}“ и всичките ѝ данни? Това не може да бъде отменено.",
+    "name": "Име",
+    "created": "„{{name}}“ е създадено"
   },
   "schemaDiff": {
     "menu": "Сравни схемата…",

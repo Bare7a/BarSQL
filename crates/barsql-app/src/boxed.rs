@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use barsql_core::{
-    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,
-    ReferencingKey, RoutineInfo, Row, RowDelete, RowUpdate, SchemaBundle, SchemaInfo, TableDataRequest, TableInfo,
-    TableSize, TableStructure, TriggerInfo,
+    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DatabaseInfo, FunctionList, IndexInfo, ObjectRef,
+    QueryError, ReferencingKey, RoutineInfo, Row, RowDelete, RowUpdate, SchemaBundle, SchemaInfo, TableDataRequest,
+    TableInfo, TableSize, TableStructure, TriggerInfo,
 };
 use barsql_db::{Cancel, ColumnMeta};
 use barsql_sql::QueryPlan;
@@ -44,6 +44,14 @@ impl BarApp {
 
     pub fn list_databases(&self, cfg: ConnectionConfig) -> BoxFuture<'_, Result<Vec<String>, QueryError>> {
         Box::pin(self.list_databases_inner(cfg))
+    }
+
+    pub fn database_list<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Vec<DatabaseInfo>, QueryError>> {
+        Box::pin(self.database_list_inner(id))
+    }
+
+    pub fn database_sizes<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<HashMap<String, u64>, QueryError>> {
+        Box::pin(self.database_sizes_inner(id))
     }
 
     pub fn connect<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<(), QueryError>> {

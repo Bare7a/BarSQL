@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use barsql_core::HistoryEntry;
 use barsql_core::clock::now_rfc3339;
+use barsql_core::scope::{base_id, same_connection};
 
 use crate::{load_json_file, save_json_file, update};
 
@@ -59,18 +60,19 @@ impl HistoryStore {
         self.lock()
             .iter()
             .rev()
-            .filter(|e| connection_id.is_empty() || e.connection_id == connection_id)
+            .filter(|e| connection_id.is_empty() || same_connection(&e.connection_id, connection_id))
             .take(limit)
             .cloned()
             .collect()
     }
 
-    // Each connection's last run, newest first, without copying the SQL.
+    // Each connection's last run on any of its databases, newest first, without copying the SQL.
     pub fn last_runs(&self) -> Vec<(String, String)> {
         let mut last: Vec<(String, String)> = Vec::new();
         for entry in self.lock().iter().rev() {
-            if !last.iter().any(|(id, _)| *id == entry.connection_id) {
-                last.push((entry.connection_id.clone(), entry.executed_at.clone()));
+            let id = base_id(&entry.connection_id);
+            if !last.iter().any(|(seen, _)| seen == id) {
+                last.push((id.to_string(), entry.executed_at.clone()));
             }
         }
         last
@@ -100,7 +102,7 @@ impl HistoryStore {
 
     pub fn clear(&self, connection_id: &str) -> io::Result<()> {
         update(&self.path, &mut *self.lock(), |next| {
-            next.retain(|e| !connection_id.is_empty() && e.connection_id != connection_id)
+            next.retain(|e| !connection_id.is_empty() && !same_connection(&e.connection_id, connection_id))
         })
     }
 
@@ -122,6 +124,22 @@ mod tests {
 
     fn entry(connection_id: &str, sql: &str) -> HistoryEntry {
         HistoryEntry { connection_id: connection_id.into(), sql: sql.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_connection_s_databases_share_its_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = HistoryStore::open(dir.path()).unwrap();
+        for (id, sql) in [("c1", "SELECT 1"), ("c1/sales", "SELECT 2"), ("c2", "SELECT 3")] {
+            h.add(entry(id, sql)).unwrap();
+        }
+        let sql = |id: &str| h.list(id, 0).into_iter().map(|e| e.sql).collect::<Vec<_>>();
+        assert_eq!(sql("c1"), ["SELECT 2", "SELECT 1"]);
+        assert_eq!(sql("c1/sales"), sql("c1"));
+        let ids: Vec<String> = h.last_runs().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(ids, ["c2", "c1"]);
+        h.clear("c1").unwrap();
+        assert_eq!(sql(""), ["SELECT 3"]);
     }
 
     #[test]

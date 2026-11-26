@@ -8,9 +8,12 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, px, rems};
 
 use super::{TableTab, TableTabEvent};
+use crate::form::DIGIT_NUDGE;
 use crate::grid::GridEvent;
 use crate::query_tab::new_tab_id;
+use crate::schema_tree::ROW_PADDING;
 use crate::test_support::{Env, settle, type_slowly};
+use crate::tokens::ICON_SM;
 
 fn seed(env: &Env, sql: &str) {
     for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
@@ -542,10 +545,11 @@ fn the_filter_text_stays_put_as_focus_comes_and_goes(cx: &mut TestAppContext) {
     assert_eq!((focused, left), (resting, resting));
 }
 
-// The first letter and the clear button sit as far from the sides as the capitals sit from the top: 10.4px at 13px.
-// Layout lands on whole pixels, so half a pixel either way.
+// The funnel sits as far in as a search field's icon, and the first letter follows it by an input's 6px. The clear
+// button sits as far from the right as the capitals sit from the top. Layout lands on whole pixels, so half a pixel
+// either way.
 #[gpui_kit::test]
-fn the_filter_text_is_inset_as_far_as_from_the_top(cx: &mut TestAppContext) {
+fn the_filter_text_follows_its_icon_and_the_clear_button_keeps_its_inset(cx: &mut TestAppContext) {
     let env = Env::new(cx);
     let (view, cx) = open(&env, cx, "things");
     let filter = cx.update(|_, cx| view.read(cx).filter.clone());
@@ -554,17 +558,30 @@ fn the_filter_text_is_inset_as_far_as_from_the_top(cx: &mut TestAppContext) {
     let field = cx.debug_bounds("table-filter").expect("the filter");
     let clear = cx.debug_bounds("table-filter-clear").expect("the clear button");
     let text = cx.update(|_, cx| filter.read(cx).range_to_bounds(&(0..1)).expect("laid out"));
-    let (left, right) =
-        cx.update(|window, _| (rems(0.708).to_pixels(window.rem_size()), rems(0.677).to_pixels(window.rem_size())));
+    let (left, right) = cx.update(|window, _| {
+        let rem = window.rem_size();
+        ((ROW_PADDING + ICON_SM).to_pixels(rem) + px(6.), rems(0.677).to_pixels(rem))
+    });
     let border = px(1.);
-    assert!(
-        (text.left() - field.left() - border - left).abs() < px(0.5),
-        "text starts {:?} in",
-        text.left() - field.left()
-    );
+    assert!((text.left() - field.left() - left).abs() < px(0.5), "text starts {:?} in", text.left() - field.left());
     assert!(
         (field.right() - border - clear.right() - right).abs() < px(0.5),
         "clear button {:?} in",
         field.right() - clear.right()
     );
+}
+
+// The row count's icon sits under the filter's, so its digits line up with the filter's text.
+#[gpui_kit::test]
+fn the_row_count_starts_where_the_filter_text_does(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (view, cx) = open(&env, cx, "things");
+    let filter = cx.update(|_, cx| view.read(cx).filter.clone());
+    cx.update(|window, cx| filter.update(cx, |state, cx| state.set_value("id > 5", window, cx)));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let count = cx.debug_bounds("results-meta").expect("the row count");
+    let text = cx.update(|_, cx| filter.read(cx).range_to_bounds(&(0..1)).expect("laid out"));
+    let nudge = cx.update(|window, _| DIGIT_NUDGE.to_pixels(window.rem_size()));
+    let off = count.left() - text.left() - nudge;
+    assert!(off.abs() < px(0.25), "the count starts {off:?} off");
 }

@@ -85,6 +85,10 @@ impl Tabs {
         tabs.into_iter().filter_map(|tab| slots.get(&tab).cloned().map(|slot| (tab, slot))).collect()
     }
 
+    pub(crate) fn has_connection(&self, connection_id: &str) -> bool {
+        lock(&self.connections).values().any(|on| on == connection_id)
+    }
+
     pub(crate) fn mark(&self, tab_id: &str, in_transaction: bool) {
         let mut tabs = lock(&self.in_transaction);
         if in_transaction {

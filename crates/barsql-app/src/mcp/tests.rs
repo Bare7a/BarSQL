@@ -134,6 +134,18 @@ fn initialize_answers_with_the_clients_version_or_the_newest() {
 }
 
 #[test]
+fn another_database_is_reachable_only_where_the_connection_lists_them_all() {
+    let s = setup();
+    let (text, failed) = s.call("list_databases", json!({ "connection": s.shared.id }));
+    assert!(failed && text.contains("Show all databases"), "{text}");
+    let args = json!({ "connection": s.shared.id, "database": "other", "sql": "SELECT 1" });
+    let (text, failed) = s.call("run_query", args);
+    assert!(failed && text.contains("shares only its own database"), "{text}");
+    let (text, failed) = s.call("list_connections", json!({}));
+    assert!(!failed && text.contains(r#""allDatabases":false"#), "{text}");
+}
+
+#[test]
 fn every_tool_is_listed_and_only_run_change_writes() {
     let s = setup();
     let tools = s.request(1, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().clone();
@@ -146,7 +158,7 @@ fn every_tool_is_listed_and_only_run_change_writes() {
         assert_eq!(tool["annotations"]["openWorldHint"], false, "{tool}");
         assert_eq!(tool["title"], tool["annotations"]["title"], "{tool}");
     }
-    assert_eq!(tools[3]["title"], "Show DDL");
+    assert_eq!(tools[4]["title"], "Show DDL");
 }
 
 #[test]
@@ -169,7 +181,8 @@ fn only_shared_connections_are_listed_and_without_secrets() {
     let (text, failed) = s.call("list_connections", json!({}));
     assert!(!failed);
     let expected = json!([{
-        "id": s.shared.id, "name": "shop", "engine": "sqlite", "database": "shop.db", "defaultSchema": "main", "canChange": false,
+        "id": s.shared.id, "name": "shop", "engine": "sqlite", "database": "shop.db", "defaultSchema": "main",
+        "allDatabases": false, "canChange": false,
     }]);
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), expected);
     assert!(!text.contains("hunter2") && !text.contains(s.dir.path().to_str().unwrap()), "{text}");

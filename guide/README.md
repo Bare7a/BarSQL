@@ -5,9 +5,9 @@ Everything BarSQL does, one area per page. For screenshots, see the [README](../
 | Page | What it covers |
 | ---- | -------------- |
 | [⬇️ Installing](install.md) | Which file to pick, Homebrew, Scoop, the Linux install script, the first launch, uninstalling |
-| [🔌 Connections](connections.md) | Folders, read-only mode, SSL and TLS, SSH tunnels, SQLite extensions, engine notes |
+| [🔌 Connections](connections.md) | Folders, read-only mode, every database on a server, SSL and TLS, SSH tunnels, SQLite extensions, engine notes |
 | [🧠 SQL Editor](editor.md) | Autocomplete, multiple cursors, scripts, transactions, the query plan viewer, saved queries and history |
-| [🗃️ Schema Explorer](schema.md) | The schema tree, ER diagrams, schema compare, Copy DDL, schema changes, the structure editor, table backups |
+| [🗃️ Schema Explorer](schema.md) | The databases list, the schema tree, ER diagrams, schema compare, Copy DDL, schema changes, the structure editor, table backups |
 | [📊 Results Grid](results.md) | Sorting, selection stats, quick charts, the cell and JSON viewers, editing data |
 | [📥 Import & Export](import-export.md) | CSV and SQL import, export formats |
 | [🤖 AI Assistants (MCP)](ai-assistants.md) | Letting AI apps read your databases, and change them only where you allow it |

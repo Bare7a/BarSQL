@@ -262,6 +262,17 @@ pub struct SchemaInfo {
     pub name: String,
 }
 
+// A database on the server, for connections that list them all.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseInfo {
+    pub name: String,
+    // The login may connect. Postgres lists databases it can't open.
+    pub can_connect: bool,
+    // Created by the server, like Postgres' postgres or SQL Server's master. Hidden unless asked for.
+    pub system: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchemaTables {
     pub schema: String,

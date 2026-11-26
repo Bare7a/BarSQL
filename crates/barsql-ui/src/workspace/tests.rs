@@ -2,17 +2,18 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use barsql_app::{DiagramRef, EditorSession, EditorTab, TableViewRef};
-use barsql_core::{ConnectionConfig, DriverType, HistoryEntry, SavedQuery};
+use barsql_core::{ConnectionConfig, DatabaseInfo, DriverType, HistoryEntry, SavedQuery};
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::{
-    AppContext as _, Entity, ExternalPaths, FileDropEvent, Modifiers, MouseButton, Pixels, TestAppContext,
-    VisualTestContext, point, px, size,
+    AppContext as _, Entity, ExternalPaths, FileDropEvent, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
+    Pixels, TestAppContext, VisualTestContext, point, px, size,
 };
 
 use super::Workspace;
 use crate::actions::{ToggleEnterAcceptsSuggestions, ToggleJsonPanel, ToggleSidebar};
-use crate::query_tab::QueryTab;
+use crate::query_tab::{QueryTab, TxnState};
 use crate::saved_queries;
+use crate::schema_actions::{Applied, Change, Options};
 use crate::schema_tree::TableChange;
 use crate::test_support::{Env, settle};
 use crate::window_state;
@@ -81,6 +82,163 @@ fn the_er_diagram_is_a_tab_that_the_session_keeps(cx: &mut TestAppContext) {
     workspace.update(cx, |ws, cx| ws.save_session(cx));
     let saved = env.bar.editor_session();
     assert_eq!(saved.tabs[1].diagram.as_ref().map(|d| d.schema.as_str()), Some("main"));
+}
+
+// A tab on another database of a connection comes back with the session, follows its connection's settings, stays on
+// its database when the connection's own changes, and Edit connection opens the saved connection.
+#[gpui_kit::test]
+fn a_tab_on_another_database_follows_its_connection(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let server = ConnectionConfig {
+        name: "Server".into(),
+        driver: DriverType::Postgres,
+        host: "127.0.0.1".into(),
+        database: "forum".into(),
+        username: "u".into(),
+        show_all_databases: true,
+        ..Default::default()
+    };
+    let server = env.runtime.block_on(env.bar.save_connection(server)).unwrap();
+    let sales = format!("{}/sales", server.id);
+    let tabs = vec![tab("a", &sales, "SELECT 1"), tab("b", &server.id, "SELECT 2")];
+    env.bar.save_editor_session(EditorSession { tabs, active_tab: "a".into() }).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    let on = |cx: &mut VisualTestContext| -> Vec<(String, bool)> {
+        cx.update(|_, cx| {
+            let ws = workspace.read(cx);
+            ws.tabs.iter().map(|t| (t.view.connection(cx).id.clone(), t.view.connection(cx).read_only)).collect()
+        })
+    };
+    assert_eq!(on(cx), [(sales.clone(), false), (server.id.clone(), false)], "both tabs come back");
+    let shown = cx.update(|_, cx| workspace.read(cx).sidebar().read(cx).selected().map(|c| c.id));
+    assert_eq!(shown, Some(sales.clone()), "the tree shows the active tab's database");
+
+    let form = workspace.update_in(cx, |ws, window, cx| {
+        let connection = ws.active_tab().unwrap().connection(cx).clone();
+        ws.sidebar().update(cx, |sidebar, cx| sidebar.edit_connection(Some(connection), window, cx))
+    });
+    assert_eq!(cx.update(|_, cx| form.read(cx).editing_id().to_string()), server.id, "Edit opens the saved connection");
+    cx.update(|window, cx| window.close_dialog(cx));
+
+    let read_only = ConnectionConfig { read_only: true, ..server.clone() };
+    env.runtime.block_on(env.bar.save_connection(read_only.clone())).unwrap();
+    workspace.update(cx, |ws, cx| ws.sidebar().update(cx, |sidebar, cx| sidebar.reload_connections(cx)));
+    cx.run_until_parked();
+    assert_eq!(on(cx), [(sales.clone(), true), (server.id.clone(), true)], "both take the connection's settings");
+
+    let moved = ConnectionConfig { database: "sales".into(), ..read_only };
+    env.runtime.block_on(env.bar.save_connection(moved)).unwrap();
+    workspace.update(cx, |ws, cx| ws.sidebar().update(cx, |sidebar, cx| sidebar.reload_connections(cx)));
+    cx.run_until_parked();
+    let forum = format!("{}/forum", server.id);
+    assert_eq!(on(cx), [(server.id.clone(), true), (forum, true)], "each tab stays on its database");
+}
+
+// After a rename the tab and the tree follow the database. After a drop the tab stays, and the tree goes back to the
+// connection's own database.
+#[gpui_kit::test]
+fn tabs_follow_a_renamed_database_and_stay_on_a_dropped_one(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let server = ConnectionConfig {
+        name: "Server".into(),
+        driver: DriverType::Postgres,
+        host: "127.0.0.1".into(),
+        port: 9,
+        database: "forum".into(),
+        username: "u".into(),
+        show_all_databases: true,
+        ..Default::default()
+    };
+    let server = env.runtime.block_on(env.bar.save_connection(server)).unwrap();
+    let sales = format!("{}/sales", server.id);
+    let tabs = vec![tab("a", &sales, "SELECT 1"), tab("b", &server.id, "SELECT 2")];
+    env.bar.save_editor_session(EditorSession { tabs, active_tab: "a".into() }).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    let on = |cx: &mut VisualTestContext| -> (Vec<String>, Option<String>) {
+        cx.update(|_, cx| {
+            let ws = workspace.read(cx);
+            let tabs = ws.tabs.iter().map(|t| t.view.connection(cx).id.clone()).collect();
+            (tabs, ws.sidebar().read(cx).selected().map(|c| c.id))
+        })
+    };
+    let applied = |change: Change, new_name: &str| Applied {
+        connection_id: server.id.clone(),
+        driver: DriverType::Postgres,
+        change,
+        new_name: new_name.into(),
+        options: Options::default(),
+    };
+    let archive = format!("{}/archive", server.id);
+    let rename = applied(Change::RenameDatabase { database: "sales".into() }, "archive");
+    workspace.update(cx, |ws, cx| ws.database_changed(&rename, cx));
+    assert_eq!(on(cx), (vec![archive.clone(), server.id.clone()], Some(archive.clone())));
+    let drop = applied(Change::DropDatabase { database: "archive".into() }, "");
+    workspace.update(cx, |ws, cx| ws.database_changed(&drop, cx));
+    assert_eq!(on(cx), (vec![archive, server.id.clone()], Some(server.id.clone())));
+}
+
+// A rename or drop closes the database's pool, so a tab in a transaction there holds it back, named by its title.
+#[gpui_kit::test]
+fn a_tab_in_a_transaction_holds_back_its_database(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let id = env.connection.id.clone();
+    env.bar.save_editor_session(EditorSession { tabs: vec![tab("a", &id, "BEGIN;")], active_tab: "a".into() }).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    let busy = |cx: &mut VisualTestContext| cx.update(|_, cx| workspace.read(cx).busy_tab(&id, cx).map(String::from));
+    assert_eq!(busy(cx), None);
+    let tab = active(&workspace, cx);
+    tab.update_in(cx, |tab, window, cx| tab.run_all(window, cx));
+    settle(cx, |cx| cx.update(|_, cx| tab.read(cx).txn_state() == TxnState::Active));
+    assert_eq!(busy(cx).as_deref(), Some("a"));
+}
+
+// A click on a database shows it in the tree without a tab; a double-click opens a query tab on it.
+#[gpui_kit::test]
+fn the_databases_list_browses_on_a_click_and_opens_on_a_double_click(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let server = ConnectionConfig {
+        name: "Server".into(),
+        driver: DriverType::Postgres,
+        host: "127.0.0.1".into(),
+        port: 9,
+        database: "forum".into(),
+        username: "u".into(),
+        show_all_databases: true,
+        ..Default::default()
+    };
+    let server = env.runtime.block_on(env.bar.save_connection(server)).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.run_until_parked();
+    let sidebar = cx.update(|_, cx| workspace.read(cx).sidebar());
+    sidebar.update(cx, |sidebar, cx| sidebar.set_selected(&server.id, cx));
+    let listed = ["forum", "sales"].map(|name| DatabaseInfo { name: name.into(), can_connect: true, system: false });
+    let locked = DatabaseInfo { name: "payroll".into(), can_connect: false, system: false };
+    let pane = cx.update(|_, cx| sidebar.read(cx).database_pane());
+    pane.update(cx, |pane, cx| pane.show_list(listed.into_iter().chain([locked]).collect(), cx));
+    let click = |selector: &'static str, click_count: usize, cx: &mut VisualTestContext| {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let position = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is not drawn")).center();
+        let (button, modifiers) = (MouseButton::Left, Modifiers::none());
+        cx.simulate_event(MouseDownEvent { button, position, modifiers, click_count, first_mouse: false });
+        cx.simulate_event(MouseUpEvent { button, position, modifiers, click_count });
+        cx.run_until_parked();
+    };
+    let tabs = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| workspace.read(cx).tabs.iter().map(|t| t.view.connection(cx).id.clone()).collect::<Vec<_>>())
+    };
+    let shown = |cx: &mut VisualTestContext| cx.update(|_, cx| sidebar.read(cx).selected().map(|c| c.id));
+    let sales = format!("{}/sales", server.id);
+
+    click("database:sales", 1, cx);
+    assert_eq!(shown(cx), Some(sales.clone()), "the tree shows sales");
+    assert!(tabs(cx).is_empty(), "browsing opens no tab");
+    click("database:payroll", 1, cx);
+    assert_eq!(shown(cx), Some(sales.clone()), "a database this login can't open stays shut");
+    click("database:sales", 2, cx);
+    assert_eq!(tabs(cx), [sales], "a double-click opens a query tab on it");
 }
 
 // With no tab open, the main area is the way in: with a connection there, that's a query tab on it.

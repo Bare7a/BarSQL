@@ -20,6 +20,7 @@
 - **Messages tab** - PostgreSQL notices, MySQL warnings, SQL Server `PRINT` and `RAISERROR` output, grouped under the statement that raised them, with levels and codes; it opens by itself when a run returns nothing else
 - **Multiple result outputs** - a script or stored procedure that returns several result sets shows each in its own switchable result tab, query plans included; a failing statement reports its error and stops the run
 - **Pinned transactions** per tab - run `BEGIN` / `COMMIT` / `ROLLBACK` as SQL or from the toolbar; queries run inside the open transaction until you commit or roll back (on every engine that holds one: not ClickHouse or Turso). Closing the tab, quitting or restarting for an update asks before rolling it back. On macOS so do the Dock's Quit, logging out and shutting down, which BarSQL cancels to ask. Renaming a connection or moving it to a folder keeps it open; disconnecting, or changing how it connects, rolls its tabs' transactions back and says so. Savepoints you make last until the transaction ends, across runs
+- **Another database for the tab** - on a connection with **Show all databases** on, the database button in the toolbar moves the tab to another of the server's databases, and suggestions follow it there. It waits while the tab has an open transaction or staged edits
 - **Query plan viewer** (`Ctrl/⌘+Shift+E`) - see below
 - `UPDATE` / `DELETE` / `INSERT` with **`RETURNING`** flow back to the Results Grid
 - Gutter icons to run individual statements

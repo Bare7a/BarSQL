@@ -370,7 +370,7 @@ ORDER BY 1;";
 
         async fn open_query(&self, cx: &mut AsyncApp, title: &str, sql: &str) -> Res<()> {
             self.workspace(cx, |workspace, window, cx| {
-                let forum = workspace.sidebar().read(cx).connection("forum").cloned().ok_or("no forum connection")?;
+                let forum = workspace.sidebar().read(cx).connection("forum").ok_or("no forum connection")?;
                 workspace.open_query(forum, title, sql, window, cx);
                 Ok::<(), String>(())
             })??;
@@ -782,7 +782,7 @@ ORDER BY 1;";
         robot.workspace(cx, |workspace, window, cx| workspace.set_json_open(false, window, cx))?;
         robot.panel_widths(cx).await?;
         robot.workspace(cx, |workspace, window, cx| {
-            let forum = workspace.sidebar().read(cx).connection("forum").cloned().ok_or("no forum connection")?;
+            let forum = workspace.sidebar().read(cx).connection("forum").ok_or("no forum connection")?;
             workspace.open_structure(forum, "public".into(), Some("posts".into()), window, cx);
             Ok::<(), String>(())
         })??;

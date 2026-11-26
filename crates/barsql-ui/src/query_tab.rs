@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use barsql_app::{EditorTab, RunEvent};
-use barsql_core::{ConnectionConfig, SavedQuery};
+use barsql_core::{ConnectionConfig, DatabaseInfo, SavedQuery, scope};
 use barsql_sql::lang::{self, TxnControl, detect_transaction_control};
 use barsql_sql::params::{find_params, param_names, substitute};
 use barsql_sql::{is_read_only, split_statements, unbounded_writes};
@@ -14,7 +14,7 @@ use gpui_kit::component::input::{
     Editor, EditorMode, EditorState, GoToDefinition, InputEvent, RangeDecoration, RangeDecorationCollection,
     RangeDecorationStyle, Replace, Search, SelectAll,
 };
-use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt as _, RopeExt, h_flex, v_flex,
@@ -29,6 +29,7 @@ use crate::actions::{
 };
 use crate::completion::{self, Completion};
 use crate::context_menu::{self, Entry};
+use crate::database_pane;
 use crate::dialogs::{self, Confirm, Prompt};
 use crate::editor_commands::{self, CopyLine, CutLine, PasteLine, SelectAllOccurrences, ToggleComment};
 use crate::form::ToolButton;
@@ -145,6 +146,8 @@ pub enum QueryTabEvent {
     FocusedRowChanged,
     // Go to Definition on a table, or on a column of it, or a foreign key's jump to the row it references.
     OpenTable { schema: String, table: String, filter: Option<String> },
+    // Now runs on another database of its connection.
+    Moved,
 }
 
 pub struct QueryTab {
@@ -158,6 +161,7 @@ pub struct QueryTab {
     editor: Entity<EditorState>,
     completion: Entity<Completion<EditorMode>>,
     hover: Entity<HoverCard>,
+    language: Rc<SqlLanguage>,
     _occurrences: Entity<OccurrenceMarks>,
     flash: RangeDecorationCollection,
     flash_task: Task<()>,
@@ -218,7 +222,7 @@ impl QueryTab {
                 this.update(cx, |_, cx| cx.emit(QueryTabEvent::OpenTable { schema, table, filter: None })).is_ok()
             }));
         });
-        let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language), window, cx));
+        let completion = cx.new(|cx| Completion::new(editor.clone(), Some(language.clone()), window, cx));
         let occurrences = cx.new(|cx| OccurrenceMarks::new(&editor, cx));
         let flash = editor.update(cx, |state, cx| state.create_range_decorations_collection(Vec::new(), cx));
         let dialect = connection.driver.dialect();
@@ -274,6 +278,7 @@ impl QueryTab {
             editor,
             completion,
             hover,
+            language,
             _occurrences: occurrences,
             flash,
             flash_task: Task::ready(()),
@@ -364,12 +369,74 @@ impl QueryTab {
     }
 
     // Takes edits like name, colour or read-only. A changed driver is ignored, though the results drop their edits.
+    // Another id is another database of the same connection, so suggestions follow it.
     pub fn set_connection(&mut self, connection: ConnectionConfig, cx: &mut Context<Self>) {
         self.results.update(cx, |results, cx| results.set_connection(connection.clone(), cx));
         if connection.driver == self.connection.driver {
+            if connection.id != self.connection.id {
+                self.language.set_connection_id(connection.id.clone());
+                schema::ensure_loaded(&connection.id, connection.driver.clone(), cx);
+            }
             self.connection = connection;
         }
         cx.notify();
+    }
+
+    // An open transaction or staged edits keep the tab where it is.
+    pub(crate) fn movable(&self, cx: &App) -> bool {
+        self.txn == TxnState::Idle && !self.has_result_edits(cx) && self.running.is_none()
+    }
+
+    pub(crate) fn move_to_database(&mut self, name: &str, cx: &mut Context<Self>) {
+        let connections = state::bar(cx).list_connections();
+        let Some(base) = connections.iter().find(|c| c.id == scope::base_id(&self.connection.id)) else { return };
+        let target = base.in_database(name);
+        if target.id == self.connection.id || !self.movable(cx) {
+            return;
+        }
+        self.set_connection(target, cx);
+        self.results.update(cx, |results, cx| results.clear(cx));
+        cx.emit(QueryTabEvent::Moved);
+        cx.emit(QueryTabEvent::Edited);
+    }
+
+    fn database_picker(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.connection.shows_all_databases() {
+            return None;
+        }
+        let current = self.connection.scoped_database().unwrap_or_else(|| self.connection.default_database());
+        let base = scope::base_id(&self.connection.id).to_string();
+        let listed: Option<Vec<DatabaseInfo>> = database_pane::listed(cx, &base).map(<[_]>::to_vec);
+        if listed.is_none() {
+            database_pane::ensure_listed(&base, cx);
+        }
+        let movable = self.movable(cx);
+        let tab = cx.entity().downgrade();
+        let picker = Button::new("tab-database")
+            .debug_selector(|| "tab-database".into())
+            .ghost()
+            .tool(Icon::new(Lucide::Database), ICON_XS, current.clone())
+            .tooltip(t(cx, if movable { "editor.moveToDatabase" } else { "editor.databaseBusy" }))
+            .disabled(!movable)
+            .dropdown_menu(move |mut menu, _, cx| {
+                let Some(listed) = listed.as_ref().filter(|listed| !listed.is_empty()) else {
+                    let key = if listed.is_some() { "connection.noDatabases" } else { "connection.loadingDatabases" };
+                    return menu.item(PopupMenuItem::new(t(cx, key)).disabled(true));
+                };
+                for db in listed.iter().filter(|db| !db.system || db.name == current) {
+                    let (tab, name) = (tab.clone(), db.name.clone());
+                    menu = menu.item(
+                        PopupMenuItem::new(db.name.clone())
+                            .checked(db.name == current)
+                            .disabled(!db.can_connect)
+                            .on_click(move |_, _, cx| {
+                                let _ = tab.update(cx, |tab, cx| tab.move_to_database(&name, cx));
+                            }),
+                    );
+                }
+                menu
+            });
+        Some(picker.into_any_element())
     }
 
     pub fn has_result_edits(&self, cx: &App) -> bool {
@@ -835,7 +902,8 @@ impl QueryTab {
         let (title, description) = match every_row {
             Some(description) => (t(cx, "safety.everyRowTitle"), description),
             None if connection.confirm_changes && !is_read_only(&connection.driver, sql) => {
-                let name = [("name", connection.name.as_str())];
+                let label = connection.label();
+                let name = [("name", label.as_str())];
                 (t_with(cx, "safety.changesTitle", &name), t_with(cx, "safety.changesDescription", &name))
             }
             None => return None,
@@ -1118,7 +1186,7 @@ impl QueryTab {
             .border_b_1()
             .border_color(theme.border)
             .child(left)
-            .child(self.transaction_controls(cx))
+            .child(h_flex().gap(rems(0.462)).children(self.database_picker(cx)).child(self.transaction_controls(cx)))
     }
 
     // Explain, and a caret for Explain analyze where the engine has one. Without it the caret would only repeat the

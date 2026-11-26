@@ -177,6 +177,30 @@ pub fn drop_object(
     Some(sql)
 }
 
+// The Databases list's New, Rename and Drop, on the engines that list every database.
+pub fn create_database(driver: &DriverType, name: &str) -> Option<String> {
+    lists_databases(driver).then(|| format!("CREATE DATABASE {}", quote_ident(driver, name)))
+}
+
+// MySQL and MariaDB have no statement that renames a database.
+pub fn rename_database(driver: &DriverType, name: &str, new_name: &str) -> Option<String> {
+    let (from, to) = (quote_ident(driver, name), quote_ident(driver, new_name));
+    match Dialect::for_driver(driver).id {
+        Some(SqlDialect::Postgres) => Some(format!("ALTER DATABASE {from} RENAME TO {to}")),
+        Some(SqlDialect::TSql) => Some(format!("ALTER DATABASE {from} MODIFY NAME = {to}")),
+        Some(SqlDialect::ClickHouse) => Some(format!("RENAME DATABASE {from} TO {to}")),
+        Some(SqlDialect::MySql | SqlDialect::Sqlite) | None => None,
+    }
+}
+
+pub fn drop_database(driver: &DriverType, name: &str) -> Option<String> {
+    lists_databases(driver).then(|| format!("DROP DATABASE {}", quote_ident(driver, name)))
+}
+
+fn lists_databases(driver: &DriverType) -> bool {
+    driver.capabilities().all_databases
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +343,22 @@ mod tests {
         );
         let turso = DriverType::Turso;
         assert_eq!(rename_relation(&turso, &ObjectKind::View, "main", "v", "w"), None);
+    }
+
+    #[test]
+    fn databases_are_made_renamed_and_dropped_per_engine() {
+        let (mssql, ch) = (DriverType::SqlServer, DriverType::ClickHouse);
+        assert_eq!(create_database(&PG, "Sales 2").unwrap(), r#"CREATE DATABASE "Sales 2""#);
+        assert_eq!(create_database(&MY, "a`b").unwrap(), "CREATE DATABASE `a``b`");
+        assert_eq!(create_database(&mssql, "a]b").unwrap(), "CREATE DATABASE [a]]b]");
+        assert_eq!(create_database(&LITE, "x"), None);
+        assert_eq!(rename_database(&PG, "sales", "old").unwrap(), r#"ALTER DATABASE "sales" RENAME TO "old""#);
+        assert_eq!(rename_database(&mssql, "sales", "old").unwrap(), "ALTER DATABASE [sales] MODIFY NAME = [old]");
+        assert_eq!(rename_database(&ch, "sales", "old").unwrap(), "RENAME DATABASE `sales` TO `old`");
+        assert_eq!(rename_database(&MY, "sales", "old"), None);
+        assert_eq!(drop_database(&PG, "a\"b").unwrap(), r#"DROP DATABASE "a""b""#);
+        assert_eq!(drop_database(&ch, "sales").unwrap(), "DROP DATABASE `sales`");
+        assert_eq!(drop_database(&DriverType::Turso, "x"), None);
     }
 
     #[test]

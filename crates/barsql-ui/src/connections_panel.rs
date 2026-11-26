@@ -194,7 +194,7 @@ impl ConnectionsPanel {
         cx.spawn(async move |this, cx| {
             task.await;
             let _ = this.update(cx, |_, cx| {
-                schema::forget(&id, cx);
+                schema::forget_family(&id, cx);
                 cx.emit(ConnectionsEvent::Changed);
             });
         })
@@ -227,7 +227,7 @@ impl ConnectionsPanel {
                 if let Some(Err(error)) = result {
                     failed(error.message, "errors.deleteConnectionFailed", window, cx);
                 }
-                schema::forget(&id, cx);
+                schema::forget_family(&id, cx);
                 cx.emit(ConnectionsEvent::Changed);
             });
         })

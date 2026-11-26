@@ -10,11 +10,16 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_fle
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::list_nav::LIST_INSET;
+use crate::schema_tree::ROW_PADDING;
 use crate::spinner::Spinner;
 use crate::tokens::{
     DIMMED, ICON_2XS, ICON_MD, ICON_SM, ICON_XL, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_BASE, TEXT_SM, TEXT_XS,
     TINT, TINT_BORDER,
 };
+
+// A toolbar's buttons, toggles and selects.
+pub const TOOL_REM: f32 = 1.692;
 
 // 30px tall with body-size text.
 pub fn input(state: &Entity<InputState>, window: &Window, cx: &App) -> Input {
@@ -42,16 +47,17 @@ fn field(state: &Entity<InputState>, text: Rems, padding: Rems, window: &Window,
     Styled::h(input, rems(2.308))
 }
 
-// filter_input's frame around a one-line SQL editor. Callers add buttons after the text.
-pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> Div {
+// filter_input's frame around a one-line SQL editor, with `icon` inside as search_input has its own. Callers add
+// buttons after the text.
+pub fn filter_editor(state: &Entity<EditorState>, icon: impl Into<Icon>, window: &Window, cx: &App) -> Div {
     let theme = cx.theme();
     let focused = state.read(cx).focus_handle(cx).is_focused(window);
     let rem = window.rem_size();
-    // Focus thickens the border to 2px, so the insets drop 1px to keep the text still.
+    // Focus thickens the border to 2px, so the insets drop 1px to keep the icon and text still.
     let thicker = if focused { px(1.) } else { px(0.) };
     let paste_into = state.clone();
     // XSmall drops the editor's 8px top inset, so the frame centers the line. Its text still starts 10px in (padding
-    // and gutter), so the margin evens the first letter's gap with the 10.4px above the capitals.
+    // and gutter), so the margin leaves the 6px an input puts after its icon.
     let editor = Editor::new(state)
         .xsmall()
         .appearance(false)
@@ -59,7 +65,7 @@ pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> 
         .flex_1()
         .min_w_0()
         .p_0()
-        .ml(rems(0.708).to_pixels(rem) - px(10.) - thicker)
+        .ml(ICON_GAP - px(10.))
         .text_size(rems(0.923))
         .context_menu(crate::context_menu::editor(state))
         .on_paste(move |item, window, cx| {
@@ -69,9 +75,11 @@ pub fn filter_editor(state: &Entity<EditorState>, window: &Window, cx: &App) -> 
         });
     let frame = h_flex()
         .h(rems(2.308))
+        .pl(ICON_INSET.to_pixels(rem) - px(1.) - thicker)
         .pr(rems(0.677).to_pixels(rem) - thicker)
         .rounded(theme.radius)
         .bg(theme.background)
+        .child(icon.into().size(ICON_SM).text_color(theme.muted_foreground))
         .child(editor);
     match focused {
         true => frame.border_2().border_color(theme.ring),
@@ -83,13 +91,24 @@ pub fn one_line(text: &str) -> String {
     text.split(['\n', '\r']).map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
-pub fn filter_bar(field: impl IntoElement, cx: &App) -> Div {
-    h_flex()
-        .flex_none()
-        .gap(rems(0.615))
-        .p(rems(0.615))
-        .child(Icon::new(IconName::Search).size(ICON_SM).text_color(cx.theme().muted_foreground))
-        .child(div().flex_1().min_w_0().child(field))
+// A sidebar list's filter row. Its field starts where the list's rows do.
+pub fn filter_bar(field: impl IntoElement) -> Div {
+    h_flex().flex_none().gap(rems(0.615)).p(LIST_INSET).child(div().flex_1().min_w_0().child(field))
+}
+
+// How far in from a field's edge its icon sits. Under a sidebar filter bar, that's on the rows' chevrons.
+pub const ICON_INSET: Rems = ROW_PADDING;
+// The space an input leaves after its icon.
+pub const ICON_GAP: Pixels = px(6.);
+// Fira Code's capitals sit about 1px further into their cells than Inter's digits, which start a grid's row count.
+pub const DIGIT_NUDGE: Rems = rems(0.076);
+
+// filter_input with the search icon inside. Focus thickens the border, so the inset drops 1px to keep the icon still.
+pub fn search_input(state: &Entity<InputState>, window: &Window, cx: &App) -> Input {
+    let border = if state.read(cx).focus_handle(cx).is_focused(window) { px(2.) } else { px(1.) };
+    filter_input(state, window, cx)
+        .pl(ICON_INSET.to_pixels(window.rem_size()) - border)
+        .prefix(Icon::new(IconName::Search).size(ICON_SM).text_color(cx.theme().muted_foreground))
 }
 
 pub fn filter_button(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Button {
@@ -161,7 +180,7 @@ fn tool_row(icon: impl Into<Icon>, icon_size: Rems, label: impl Into<SharedStrin
 }
 
 fn tool_frame(button: Button) -> Button {
-    button.small().h(rems(1.692)).px(rems(0.615))
+    button.small().h(rems(TOOL_REM)).px(rems(0.615))
 }
 
 pub fn label(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -194,7 +213,7 @@ pub fn toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, active: 
 }
 
 pub fn toggle_small(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
-    segment(Button::new(id).small().h(rems(1.692)), label, TEXT_SM, active)
+    segment(Button::new(id).small().h(rems(TOOL_REM)), label, TEXT_SM, active)
 }
 
 fn segment(button: Button, label: impl Into<SharedString>, size: Rems, active: bool) -> Button {
@@ -286,7 +305,7 @@ pub fn select_small(id: impl Into<ElementId>, label: impl Into<SharedString>, cx
     let theme = cx.theme();
     Button::new(id)
         .outline()
-        .h(rems(1.692))
+        .h(rems(TOOL_REM))
         .min_w(rems(5.385))
         .pl(rems(0.615))
         .pr(rems(0.462))

@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
 
-use barsql_core::{ConnectionConfig, SavedQuery};
+use barsql_core::{ConnectionConfig, SavedQuery, scope};
 use gpui_kit::{App, Global, Window};
 use jiff::Timestamp;
 use unicode_normalization::UnicodeNormalization;
@@ -136,6 +136,12 @@ fn date_ms(iso: &str) -> i64 {
     iso.parse::<Timestamp>().map_or(0, |t| t.as_millisecond())
 }
 
+// The connection a query runs on: named with its database in the All scope, otherwise only another database.
+pub fn where_it_runs(connections: &[ConnectionConfig], connection_id: &str, all: bool) -> Option<String> {
+    let cfg = scope::resolve(connections, connection_id)?;
+    if all { Some(cfg.label()) } else { cfg.scoped_database() }
+}
+
 // Connection-less queries show in every scope. Pinned ones go first, keeping the sort order.
 pub fn visible<'a>(
     list: &'a [SavedQuery],
@@ -147,11 +153,13 @@ pub fn visible<'a>(
 ) -> Vec<&'a SavedQuery> {
     let needle = needle.trim().to_lowercase();
     let connection_name = |q: &SavedQuery| {
-        connections.iter().find(|c| c.id == q.connection_id).map_or(String::new(), |c| c.name.to_lowercase())
+        scope::resolve(connections, &q.connection_id).map_or(String::new(), |c| c.label().to_lowercase())
     };
     let mut items: Vec<&SavedQuery> = list
         .iter()
-        .filter(|q| connection_id.is_none_or(|id| q.connection_id.is_empty() || q.connection_id == id))
+        .filter(|q| {
+            connection_id.is_none_or(|id| q.connection_id.is_empty() || scope::same_connection(&q.connection_id, id))
+        })
         .filter(|q| {
             needle.is_empty()
                 || q.name.to_lowercase().contains(&needle)

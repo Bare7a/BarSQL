@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use barsql_core::scope;
 use barsql_core::{
-    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, FunctionList, IndexInfo, ObjectRef, QueryError,
-    ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TableSize, TriggerInfo,
+    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DatabaseInfo, FunctionList, IndexInfo, ObjectRef,
+    QueryError, ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo, TableSize, TriggerInfo,
 };
 use barsql_db::Engine;
 use barsql_storage::ConnectionFolder;
@@ -59,6 +60,9 @@ impl BarApp {
         cfg.normalize();
         cfg.validate().map_err(QueryError::message)?;
         let before = self.inner.stores.connections.get(&cfg.id);
+        if before.is_none() && scope::split_id(&cfg.id).1.is_some() {
+            return Err(QueryError::message("a database of a connection can't be saved as a connection"));
+        }
         let saved = self.inner.stores.connections.save(cfg).map_err(storage_error)?;
         if before.is_some_and(|before| !before.connects_like(&saved)) {
             self.disconnect(&saved.id).await;
@@ -85,13 +89,30 @@ impl BarApp {
         Engine::databases(&cfg).await
     }
 
+    // Through the connection's own pool, or through a database every server has once its own is gone.
+    pub(crate) async fn database_list_inner(&self, id: &str) -> Result<Vec<DatabaseInfo>, QueryError> {
+        let listed = within(SCHEMA_TIMEOUT, async { self.engine(id).await?.database_list().await }).await;
+        match listed {
+            Err(error) if barsql_db::is_missing_database(&error) => {
+                let names = Engine::databases(&self.config(id)?).await?;
+                Ok(names.into_iter().map(|name| DatabaseInfo { name, can_connect: true, system: false }).collect())
+            }
+            listed => listed,
+        }
+    }
+
+    pub(crate) async fn database_sizes_inner(&self, id: &str) -> Result<HashMap<String, u64>, QueryError> {
+        within(SCHEMA_TIMEOUT, async { self.engine(id).await?.database_sizes().await }).await
+    }
+
     pub(crate) async fn connect_inner(&self, id: &str) -> Result<(), QueryError> {
         self.engine(id).await.map(|_| ())
     }
 
     pub(crate) async fn engine(&self, id: &str) -> Result<Engine, QueryError> {
         let cfg = self.config(id)?;
-        self.pooled_engine(id, cfg).await
+        let key = cfg.id.clone();
+        self.pooled_engine(&key, cfg).await
     }
 
     // Reconnects when the connection's settings changed since the engine was opened. `key` may be a CHANGE_ENGINE one.
@@ -101,7 +122,10 @@ impl BarApp {
         let fingerprint = cfg.fingerprint();
         let flight = self.connect_lock(key);
         let _flight = flight.lock().await;
-        let existing = lock(&self.inner.engines).get(key).cloned();
+        let existing = lock(&self.inner.engines).get_mut(key).map(|pooled| {
+            pooled.last_used = Instant::now();
+            pooled.clone()
+        });
         if let Some(pooled) = existing {
             if pooled.fingerprint == fingerprint {
                 return Ok(pooled.engine);
@@ -109,7 +133,8 @@ impl BarApp {
             self.close_engine(key).await;
         }
         let engine = Engine::connect(&cfg).await?;
-        lock(&self.inner.engines).insert(key.to_string(), PooledEngine { engine: engine.clone(), fingerprint });
+        let pooled = PooledEngine { engine: engine.clone(), fingerprint, last_used: Instant::now() };
+        lock(&self.inner.engines).insert(key.to_string(), pooled);
         Ok(engine)
     }
 
@@ -117,11 +142,44 @@ impl BarApp {
         lock(&self.inner.connect_locks).entry(id.to_string()).or_default().clone()
     }
 
-    // Cancels running work and rolls back tab transactions before the pool closes.
+    // Cancels running work and rolls back tab transactions before the pool closes. A saved connection takes its
+    // databases' pools with it.
     pub(crate) async fn disconnect_inner(&self, id: &str) {
-        let flight = self.connect_lock(id);
-        let _flight = flight.lock().await;
-        self.close_engine(id).await;
+        for key in self.pool_keys(id) {
+            let flight = self.connect_lock(&key);
+            let _flight = flight.lock().await;
+            self.close_engine(&key).await;
+        }
+    }
+
+    fn pool_keys(&self, id: &str) -> Vec<String> {
+        if scope::split_id(id).1.is_some() || id.ends_with(CHANGE_ENGINE) {
+            return vec![id.to_string()];
+        }
+        let mut keys: Vec<String> = lock(&self.inner.engines)
+            .keys()
+            .filter(|key| key.as_str() != id && scope::base_id(key.strip_suffix(CHANGE_ENGINE).unwrap_or(key)) == id)
+            .cloned()
+            .collect();
+        keys.push(id.to_string());
+        keys
+    }
+
+    // Another database's pool closes once no tab or job has used it for `idle`. The connection's own stays open.
+    pub(crate) async fn close_idle_databases(&self, idle: Duration) {
+        let candidates: Vec<String> = lock(&self.inner.engines)
+            .iter()
+            .filter(|(key, pooled)| scope::split_id(key).1.is_some() && pooled.last_used.elapsed() >= idle)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in candidates {
+            let flight = self.connect_lock(&key);
+            let _flight = flight.lock().await;
+            let idle_now = lock(&self.inner.engines).get(&key).is_some_and(|pooled| pooled.last_used.elapsed() >= idle);
+            if idle_now && !self.inner.tabs.has_connection(&key) && !self.inner.jobs.has_connection(&key) {
+                self.close_engine(&key).await;
+            }
+        }
     }
 
     async fn close_engine(&self, id: &str) {
@@ -304,6 +362,7 @@ impl BarApp {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use barsql_core::{ConnectionConfig, DriverType, Value};
     use barsql_db::Engine;
@@ -422,7 +481,8 @@ pub(crate) mod tests {
         // Stand in for the in-flight connect storing its engine.
         let cfg = app.config(&id).unwrap();
         let engine = Engine::connect(&cfg).await.unwrap();
-        lock(&app.inner.engines).insert(id.clone(), PooledEngine { engine, fingerprint: cfg.fingerprint() });
+        lock(&app.inner.engines)
+            .insert(id.clone(), PooledEngine { engine, fingerprint: cfg.fingerprint(), last_used: Instant::now() });
         drop(flight);
         disconnect.await.unwrap();
         assert!(!app.is_connected(&id));
@@ -503,5 +563,75 @@ pub(crate) mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert!(!mcp.is_connected(&change_engine), "the reload closed the writable engine");
+    }
+
+    #[tokio::test]
+    async fn another_database_resolves_from_the_saved_connection() {
+        let (app, _, _dir) = setup().await;
+        let pg = ConnectionConfig {
+            name: "Forum".into(),
+            driver: DriverType::Postgres,
+            host: "localhost".into(),
+            database: "forum".into(),
+            username: "u".into(),
+            schema: "app".into(),
+            show_all_databases: true,
+            ..Default::default()
+        };
+        let id = app.save_connection(pg).await.unwrap().id;
+        let sales = app.config(&format!("{id}/sales")).unwrap();
+        assert_eq!((sales.id, sales.database, sales.schema), (format!("{id}/sales"), "sales".into(), String::new()));
+        assert_eq!(app.config(&format!("{id}/forum")).unwrap().id, id, "its own database is the connection");
+        assert!(app.config("missing/sales").is_err());
+
+        let ghost = ConnectionConfig { id: format!("{id}/sales"), ..app.config(&id).unwrap() };
+        assert!(app.save_connection(ghost).await.is_err(), "a database isn't saved as a connection");
+        assert_eq!(app.list_connections().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_connection_closes_with_its_databases_and_idle_databases_close_alone() {
+        let (app, id, _dir) = setup().await;
+        let (a, b) = (format!("{id}/a"), format!("{id}/b"));
+        for key in [&id, &a, &b] {
+            app.connect(key).await.unwrap();
+        }
+        app.disconnect(&a).await;
+        assert!(app.is_connected(&id) && !app.is_connected(&a) && app.is_connected(&b), "a database closes alone");
+        app.disconnect(&id).await;
+        assert!(!app.is_connected(&id) && !app.is_connected(&b), "the connection takes its databases along");
+
+        for key in [&id, &a, &b] {
+            app.connect(key).await.unwrap();
+        }
+        assert_eq!(run_error(&app, &b, "tab", "SELECT 1").await, None);
+        let long_ago = Instant::now().checked_sub(Duration::from_secs(700)).unwrap();
+        for pooled in lock(&app.inner.engines).values_mut() {
+            pooled.last_used = long_ago;
+        }
+        app.close_idle_databases(Duration::from_secs(600)).await;
+        assert!(app.is_connected(&id), "the connection's own pool stays");
+        assert!(!app.is_connected(&a), "an idle database closes");
+        assert!(app.is_connected(&b), "a tab still holds this one");
+        app.cleanup_tab("tab").await;
+        app.close_idle_databases(Duration::from_secs(600)).await;
+        assert!(!app.is_connected(&b));
+    }
+
+    #[tokio::test]
+    async fn mcp_mode_reaches_other_databases_only_where_the_connection_lists_them() {
+        let (app, _, dir) = setup().await;
+        let shared = ConnectionConfig {
+            name: "shared".into(),
+            driver: DriverType::Sqlite,
+            file_path: dir.path().join("s.db").display().to_string(),
+            mcp: true,
+            ..Default::default()
+        };
+        let id = app.save_connection(shared).await.unwrap().id;
+        let mcp = BarApp::open_for_mcp(&dir.path().join("data"), tokio::runtime::Handle::current()).unwrap();
+        assert!(mcp.config(&id).is_ok());
+        assert!(mcp.config(&format!("{id}/other")).is_err(), "SQLite lists no databases");
+        assert!(app.config(&format!("{id}/other")).is_ok(), "the app resolves it regardless");
     }
 }

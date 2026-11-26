@@ -4,8 +4,9 @@ use std::time::{Duration, Instant};
 
 use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionList, FunctionSignature, IndexInfo,
-    ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo, TableInfo, TableSize, TriggerInfo,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DatabaseInfo, DriverType, FunctionInfo, FunctionList,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo,
+    TableInfo, TableSize, TriggerInfo,
 };
 use barsql_sql::ddl::{render_constraint, render_create_index, terminate_statement, unsupported_ddl};
 use barsql_sql::structure::check_body;
@@ -79,6 +80,26 @@ impl MyEngine {
             .filter(|name| !SYSTEM_SCHEMAS.contains(&name.to_lowercase().as_str()))
             .map(|name| SchemaInfo { name })
             .collect())
+    }
+
+    // SHOW DATABASES lists only what the login may use.
+    pub async fn database_list(self: &Arc<Self>) -> Result<Vec<DatabaseInfo>, QueryError> {
+        let (_, rows) = self.text_rows("SHOW DATABASES").await?;
+        let info = |name: String| {
+            let system = SYSTEM_SCHEMAS.contains(&name.to_lowercase().as_str());
+            DatabaseInfo { name, can_connect: true, system }
+        };
+        Ok(rows.iter().map(|r| info(string(r, 0))).collect())
+    }
+
+    pub async fn database_sizes(self: &Arc<Self>) -> Result<HashMap<String, u64>, QueryError> {
+        let (_, rows) = self
+            .text_rows(
+                "SELECT TABLE_SCHEMA, CAST(SUM(DATA_LENGTH + INDEX_LENGTH) AS CHAR)
+                FROM information_schema.TABLES GROUP BY TABLE_SCHEMA",
+            )
+            .await?;
+        Ok(rows.iter().filter_map(|r| Some((string(r, 0), string(r, 1).parse().ok()?))).collect())
     }
 
     pub(crate) async fn dump_columns(

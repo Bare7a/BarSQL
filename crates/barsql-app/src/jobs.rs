@@ -72,6 +72,10 @@ impl Jobs {
         }
     }
 
+    pub(crate) fn has_connection(&self, connection_id: &str) -> bool {
+        lock(&self.state).running.values().any(|job| job.connection_id == connection_id)
+    }
+
     pub(crate) fn cancel_all(&self) {
         for (_, job) in lock(&self.state).running.drain() {
             job.cancel.cancel();

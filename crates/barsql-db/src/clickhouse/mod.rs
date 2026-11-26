@@ -92,7 +92,7 @@ struct Call<'a> {
 
 impl ChEngine {
     pub async fn connect(options: ChOptions) -> Result<Arc<Self>, QueryError> {
-        let tunnel = options.ssh.clone().map(TunnelSlot::new);
+        let tunnel = options.ssh.clone().map(TunnelSlot::shared);
         let tls = match options.tls {
             Some(mode) => Some(
                 http_client_config(mode)

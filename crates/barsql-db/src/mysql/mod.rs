@@ -79,7 +79,7 @@ pub struct MyEngine {
 impl MyEngine {
     pub async fn connect(options: MyConnectOptions) -> Result<Arc<Self>, QueryError> {
         let forward = match &options.ssh {
-            Some(ssh) => Some(TunnelSlot::new(ssh.clone()).forward(&options.host, options.port).await?),
+            Some(ssh) => Some(TunnelSlot::shared(ssh.clone()).forward(&options.host, options.port).await?),
             None => None,
         };
         let (host, port) = match &forward {

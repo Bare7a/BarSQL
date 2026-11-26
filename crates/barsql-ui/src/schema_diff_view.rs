@@ -45,12 +45,12 @@ pub struct SchemaDiffView {
 
 impl SchemaDiffView {
     fn new(source: ConnectionConfig, source_schema: String, on_script: OnScript, cx: &mut Context<Self>) -> Self {
-        // The source's own connection first, so another schema of it is one pick away.
-        let mut targets: Vec<ConnectionConfig> = state::bar(cx)
-            .list_connections()
-            .into_iter()
-            .filter(|c| c.driver == source.driver && c.id != source.id)
-            .collect();
+        // The source's own connection first, so another schema of it is one pick away. Databases opened under a
+        // connection count as targets too.
+        let saved = state::bar(cx).list_connections();
+        let opened = schema::opened_databases(&saved, cx);
+        let mut targets: Vec<ConnectionConfig> =
+            saved.into_iter().chain(opened).filter(|c| c.driver == source.driver && c.id != source.id).collect();
         targets.insert(0, source.clone());
         let mut this = Self {
             source,
@@ -159,13 +159,13 @@ impl SchemaDiffView {
     fn pickers(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let this = cx.entity().downgrade();
         let connections: Vec<(usize, SharedString)> =
-            self.targets.iter().enumerate().map(|(ix, c)| (ix, SharedString::from(c.name.clone()))).collect();
+            self.targets.iter().enumerate().map(|(ix, c)| (ix, SharedString::from(c.label()))).collect();
         let current = self.target;
         let connection = Button::new("diff-target-connection")
             .debug_selector(|| "diff-target-connection".into())
             .small()
             .outline()
-            .label(self.target().name.clone())
+            .label(self.target().label())
             .dropdown_caret(true)
             .dropdown_menu({
                 let this = this.clone();
@@ -214,7 +214,7 @@ impl SchemaDiffView {
             .border_b_1()
             .border_color(theme.border)
             .text_size(TEXT_SM)
-            .child(div().font_semibold().child(format!("{} · {}", self.source.name, self.source_schema)))
+            .child(div().font_semibold().child(format!("{} · {}", self.source.label(), self.source_schema)))
             .child(div().text_color(theme.muted_foreground).child(t(cx, "schemaDiff.with")))
             .child(connection)
             .child(schema)

@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use barsql_core::{ConnectionConfig, DriverType};
+use barsql_core::capabilities::DefaultSchema;
+use barsql_core::{ConnectionConfig, DriverType, scope};
 use barsql_sql::plan::NOTE_NO_METRICS;
 use barsql_sql::quote_literal_in;
 use barsql_sql::system_views::{SystemView, ViewScope, views};
@@ -18,6 +19,7 @@ use crate::cell_viewer::Opened;
 use crate::file_dialogs::Stub;
 use crate::grid::Grid;
 use crate::i18n::t;
+use crate::schema_actions::Change;
 use crate::status_bar::server::Detail;
 use crate::table_tab::TableTab;
 
@@ -554,6 +556,149 @@ fn round_trip(cx: &mut TestAppContext, engine: Engine) {
     assert!(details.iter().any(|d| matches!(d, Detail::Latency(_))), "{details:?}");
 }
 
+// Made once and kept, as the app's end-to-end tests do.
+fn second_database(app: &Driver, engine: Engine) -> String {
+    let name = "barsql_test_b";
+    let sql = match engine {
+        Engine::Postgres => format!("CREATE DATABASE {name} TEMPLATE template0"),
+        Engine::SqlServer => format!("IF DB_ID(N'{name}') IS NULL CREATE DATABASE [{name}]"),
+        _ => format!("CREATE DATABASE IF NOT EXISTS {name}"),
+    };
+    if let Err(error) = app.env.runtime.block_on(app.env.bar.execute_query(&app.connection.id, &sql)) {
+        // Another suite made it first.
+        assert!(matches!(error.code.as_str(), "42P04" | "23505" | "1801"), "{sql}: {error:?}");
+    }
+    name.into()
+}
+
+fn current_database(engine: Engine) -> &'static str {
+    match engine.driver() {
+        DriverType::Postgres => "SELECT current_database()",
+        DriverType::SqlServer => "SELECT DB_NAME()",
+        DriverType::ClickHouse => "SELECT currentDatabase()",
+        _ => "SELECT DATABASE()",
+    }
+}
+
+// With every database listed: a click shows another database's tables without a tab, a double-click opens a tab
+// that runs there, and the toolbar moves that tab back to the connection's own database.
+fn databases_list(cx: &mut TestAppContext, engine: Engine) {
+    if !engine.driver().capabilities().all_databases {
+        return;
+    }
+    let config = ConnectionConfig { show_all_databases: true, ..engine.config() };
+    let mut app = open_with(cx, |env| env.runtime.block_on(env.bar.save_connection(config)).unwrap());
+    let second = second_database(&app, engine);
+    let scoped = scope::scoped_id(&app.connection.id, &second);
+    let name = unique("in_second");
+    let run_there = |app: &Driver, sql: String| {
+        app.env.runtime.block_on(app.env.bar.execute_query(&scoped, &sql)).unwrap_or_else(|e| panic!("{sql}: {e:?}"));
+    };
+    run_there(&app, format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name VARCHAR(50))"));
+    app.connect();
+    let pane = app.sidebar().read_with(app.cx, |sidebar, _| sidebar.database_pane());
+    app.settle(|cx| pane.read_with(cx, |pane, _| pane.listed().contains(&second)));
+    // A server with many databases lists it below the rows in view.
+    pane.update(app.cx, |pane, _| pane.reveal(&second));
+    app.cx.run_until_parked();
+    let tabs = app.titles().len();
+
+    app.click(selector(format!("database:{second}")));
+    let schema = match engine.driver().capabilities().default_schema {
+        DefaultSchema::Named(schema) => schema.to_string(),
+        DefaultSchema::Database => second.clone(),
+    };
+    tree_row(&mut app, &format!("t:{schema}.{name}"));
+    assert_eq!(app.titles().len(), tabs, "browsing opens no tab");
+
+    let at = app.bounds(selector(format!("database:{second}"))).expect("the row is drawn").center();
+    app.double_click_at(at);
+    assert_eq!(app.titles().len(), tabs + 1, "a double-click opens a tab");
+    app.run(current_database(engine));
+    assert_eq!(app.cell(0, 0), Some(second.clone()), "the tab runs on that database");
+
+    let own = engine.config().default_database();
+    let tab = app.tab();
+    tab.update(app.cx, |tab, cx| tab.move_to_database(&own, cx));
+    app.run(current_database(engine));
+    assert_eq!(app.cell(0, 0), Some(own), "the moved tab runs on the connection's own database");
+    run_there(&app, format!("DROP TABLE {name}"));
+}
+
+fn drop_database(engine: Engine, name: &str) -> String {
+    match engine {
+        Engine::SqlServer => format!("IF DB_ID(N'{name}') IS NOT NULL DROP DATABASE [{name}]"),
+        _ => format!("DROP DATABASE IF EXISTS {name}"),
+    }
+}
+
+// New, Rename and Drop from the Databases list, each through its dialog. A tab follows its database's rename, and
+// one in a transaction holds back the drop.
+fn database_changes(cx: &mut TestAppContext, engine: Engine) {
+    if !engine.driver().capabilities().all_databases {
+        return;
+    }
+    let config = ConnectionConfig { show_all_databases: true, ..engine.config() };
+    let mut app = open_with(cx, |env| env.runtime.block_on(env.bar.save_connection(config)).unwrap());
+    let (made, renamed) = (unique("made"), unique("renamed"));
+    for name in [&made, &renamed] {
+        app.defer(drop_database(engine, name));
+    }
+    let base = app.connection.id.clone();
+    app.connect();
+    let pane = app.sidebar().read_with(app.cx, |sidebar, _| sidebar.database_pane());
+    let listed = |app: &mut Driver, name: &str, expected: bool| {
+        app.settle(|cx| pane.read_with(cx, |pane, _| pane.listed().iter().any(|db| db == name) == expected));
+        pane.update(app.cx, |pane, _| pane.reveal(name));
+        app.cx.run_until_parked();
+    };
+    let shown = |app: &mut Driver| app.sidebar().read_with(app.cx, |sidebar, _| sidebar.selected().map(|c| c.id));
+    listed(&mut app, &engine.config().default_database(), true);
+
+    app.menu_pick("database-options", 0);
+    app.type_text(&made);
+    app.keys("enter");
+    app.settle_dialog_closed();
+    listed(&mut app, &made, true);
+    assert_eq!(shown(&mut app), Some(scope::scoped_id(&base, &made)), "the tree shows the new database");
+    let at = app.bounds(selector(format!("database:{made}"))).expect("the row is drawn").center();
+    app.double_click_at(at);
+    app.run(current_database(engine));
+    assert_eq!(app.cell(0, 0), Some(made.clone()), "a tab runs there");
+
+    let mut current = made.clone();
+    if (Change::RenameDatabase { database: made.clone() }).supported(&engine.driver()) {
+        app.context_menu_from_end(selector(format!("database:{made}")), 1);
+        app.type_text(&renamed);
+        app.keys("enter");
+        app.settle_dialog_closed();
+        listed(&mut app, &made, false);
+        listed(&mut app, &renamed, true);
+        app.run(current_database(engine));
+        assert_eq!(app.cell(0, 0), Some(renamed.clone()), "the tab followed the rename");
+        current = renamed.clone();
+    }
+
+    let row = selector(format!("database:{current}"));
+    if engine.driver().capabilities().interactive_transactions {
+        let tab = app.tab();
+        app.click("begin-txn");
+        app.settle(|cx| cx.update(|_, cx| tab.read(cx).in_transaction()));
+        app.context_menu_from_end(row, 0);
+        app.click("change-confirm");
+        assert!(app.shown("change-error"), "the dialog names the tab in a transaction");
+        app.keys("escape");
+        app.click("rollback-txn");
+        app.settle(|cx| cx.update(|_, cx| !tab.read(cx).in_transaction()));
+        listed(&mut app, &current, true);
+    }
+    app.context_menu_from_end(row, 0);
+    app.click("change-confirm");
+    app.settle_dialog_closed();
+    listed(&mut app, &current, false);
+    assert_eq!(shown(&mut app), Some(base), "the tree goes back to the connection's own database");
+}
+
 macro_rules! per_engine {
     ($($test:ident => $body:ident;)*) => {
         mod postgres {
@@ -597,6 +742,8 @@ per_engine! {
     a_server_view_opens_in_a_tab_and_runs => server_views;
     a_tables_system_view_opens_in_a_tab_and_runs => table_views;
     an_array_cell_opens_as_json => array_cells;
+    the_databases_list_browses_and_opens_another_database => databases_list;
+    databases_are_made_renamed_and_dropped_from_the_list => database_changes;
 }
 
 mod postgres_only {

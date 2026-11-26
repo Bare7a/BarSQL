@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DatabaseInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
     FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo,
     TableInfo, TableSize, TriggerInfo,
 };
@@ -114,6 +114,33 @@ impl MsEngine {
             .rows("SELECT name FROM sys.databases WHERE HAS_DBACCESS(name) = 1 AND state = 0 ORDER BY name", &[])
             .await?;
         Ok(rows.iter().map(|r| string(r, 0)).collect())
+    }
+
+    // Every online database, including the ones this login can't open.
+    pub async fn database_list(self: &Arc<Self>) -> Result<Vec<DatabaseInfo>, QueryError> {
+        let rows = self
+            .rows(
+                "SELECT name, HAS_DBACCESS(name), IIF(database_id <= 4, 1, 0) FROM sys.databases
+                WHERE state = 0 ORDER BY name",
+                &[],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|r| DatabaseInfo { name: string(r, 0), can_connect: flag(r, 1), system: flag(r, 2) })
+            .collect())
+    }
+
+    // sys.master_files is empty without VIEW ANY DEFINITION, and missing on Azure SQL Database.
+    pub async fn database_sizes(self: &Arc<Self>) -> Result<HashMap<String, u64>, QueryError> {
+        let rows = self
+            .rows(
+                "SELECT DB_NAME(database_id), CAST(SUM(CAST(size AS bigint)) * 8192 AS varchar(20))
+                FROM sys.master_files GROUP BY database_id",
+                &[],
+            )
+            .await?;
+        Ok(rows.iter().filter_map(|r| Some((string(r, 0), string(r, 1).parse().ok()?))).collect())
     }
 
     // Without the system schemas and the fixed roles' own, which every database has.

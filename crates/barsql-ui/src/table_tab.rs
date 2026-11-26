@@ -726,7 +726,6 @@ impl TableTab {
             .gap(rems(0.615))
             .border_b_1()
             .border_color(theme.border)
-            .child(Icon::new(Lucide::Funnel).size(ICON_SM).text_color(theme.muted_foreground))
             .child(
                 completion::handlers(div().id("table-filter"), &self.completion)
                     .when(self.completion.read(cx).is_open(cx), |el| el.key_context(completion::OPEN_CONTEXT))
@@ -739,7 +738,7 @@ impl TableTab {
                         this.apply_filter(window, cx);
                     }))
                     .child(
-                        form::filter_editor(&self.filter, window, cx)
+                        form::filter_editor(&self.filter, Icon::new(Lucide::Funnel), window, cx)
                             .when(!self.filter.read(cx).value().is_empty(), |frame| {
                                 frame.child(self.clear_filter_button(cx))
                             }),
@@ -782,7 +781,8 @@ impl TableTab {
         h_flex()
             .flex_none()
             .justify_between()
-            .px(rems(0.923))
+            // Its buttons line up with the filter bar's field and button at the top.
+            .px(rems(0.769))
             .py(rems(0.615))
             .gap(rems(0.923))
             .border_t_1()
@@ -921,7 +921,7 @@ impl TableTab {
         });
         v_flex()
             .size_full()
-            .child(grid::toolbar(&self.grid, meta.into(), count_link, None, true, cx))
+            .child(grid::toolbar(&self.grid, meta.into(), count_link, None, true, grid::CountAlign::UnderFilter, cx))
             .child(div().flex_1().min_h_0().child(self.grid.clone()))
             .into_any_element()
     }

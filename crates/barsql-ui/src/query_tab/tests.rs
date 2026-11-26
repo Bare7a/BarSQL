@@ -176,6 +176,34 @@ fn lone_transaction_statements_drive_the_tab_transaction(cx: &mut TestAppContext
     assert_eq!(count.rows[0][0], barsql_core::Value::Int(3000), "the rollback kept every row");
 }
 
+// A SQLite file stands in for another database: the move is the tab's connection id, its suggestions and its
+// results, and an open transaction keeps the tab where it is.
+#[gpui_kit::test]
+fn a_tab_moves_to_another_database_unless_a_transaction_is_open(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let (tab, cx) = open(&env, cx, "SELECT count(*) FROM things");
+    tab.update_in(cx, |tab, window, cx| tab.run_all(window, cx));
+    settle(cx, idle(&tab));
+    let other = format!("{}/other", env.connection.id);
+    let on = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let tab = tab.read(cx);
+            (tab.connection.id.clone(), tab.language.connection_id(), tab.results.read(cx).result_count())
+        })
+    };
+    tab.update(cx, |tab, cx| tab.move_to_database("other", cx));
+    assert_eq!(on(cx), (other.clone(), other.clone(), 0), "the tab, its suggestions and its results moved");
+    tab.update_in(cx, |tab, window, cx| tab.run_all(window, cx));
+    settle(cx, idle(&tab));
+    assert!(env.bar.is_connected(&other), "it ran on the other database's pool");
+
+    set_text(&tab, "BEGIN;", cx);
+    tab.update_in(cx, |tab, window, cx| tab.run_all(window, cx));
+    settle(cx, |cx| cx.update(|_, cx| tab.read(cx).txn == TxnState::Active));
+    tab.update(cx, |tab, cx| tab.move_to_database("third", cx));
+    assert_eq!(on(cx).0, other, "an open transaction keeps the tab where it is");
+}
+
 #[gpui_kit::test]
 fn mod_enter_runs_without_typing_a_newline(cx: &mut TestAppContext) {
     let env = Env::new(cx);

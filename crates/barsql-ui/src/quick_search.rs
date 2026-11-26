@@ -1,7 +1,8 @@
 use std::ops::Range;
 use std::rc::Rc;
 
-use barsql_core::{ConnectionConfig, SavedQuery, TableInfo};
+use barsql_core::capabilities::DefaultSchema;
+use barsql_core::{ConnectionConfig, SavedQuery, TableInfo, scope};
 use barsql_io::is_space;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{Enter, InputEvent, InputState, MoveDown, MoveUp};
@@ -117,9 +118,9 @@ fn relation_icon(kind: &str) -> Lucide {
 // as tabs are skipped.
 pub fn rank(query: &str, candidates: &Candidates) -> Vec<Item> {
     let q = query.trim_matches(is_space).to_lowercase();
-    let connection = |id: &str| candidates.connections.iter().find(|c| c.id == id);
-    let name = |id: &str| connection(id).map(|c| c.name.clone());
-    let color = |id: &str| connection(id).map(|c| c.color.clone());
+    let connection = |id: &str| scope::resolve(&candidates.connections, id);
+    let name = |id: &str| connection(id).map(|c| c.label());
+    let color = |id: &str| connection(id).map(|c| c.color);
     let mut items = Vec::new();
 
     for tab in &candidates.tabs {
@@ -219,16 +220,28 @@ pub fn rank(query: &str, candidates: &Candidates) -> Vec<Item> {
     items
 }
 
+// Also the databases opened under a connection. A MySQL or ClickHouse one lists only its own tables, so the same
+// table doesn't show under two of them.
 fn loaded_tables(connections: &[ConnectionConfig], cx: &App) -> Vec<SchemaTables> {
+    let opened = schema::opened_databases(connections, cx);
     connections
         .iter()
+        .chain(&opened)
         .filter_map(|conn| schema::get(cx, &conn.id).map(|entry| (conn, entry)))
         .flat_map(|(conn, entry)| {
-            entry.loaded_tables().into_iter().map(|(schema, tables)| SchemaTables {
-                connection_id: conn.id.clone(),
-                schema: schema.to_string(),
-                tables: tables.to_vec(),
-            })
+            let single =
+                conn.shows_all_databases() && conn.driver.capabilities().default_schema == DefaultSchema::Database;
+            let own = single.then(|| conn.default_browse_schema());
+            entry
+                .loaded_tables()
+                .into_iter()
+                .filter(|(schema, _)| own.as_deref().is_none_or(|own| own == *schema))
+                .map(|(schema, tables)| SchemaTables {
+                    connection_id: conn.id.clone(),
+                    schema: schema.to_string(),
+                    tables: tables.to_vec(),
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }

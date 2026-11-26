@@ -8,7 +8,7 @@
 - Custom shortcuts editor + keyboard tips
 - Native title bar and menu bar on macOS; one compact title bar with **File / Edit / View / Help** menus on Windows and Linux
 - Tab menu: close others, to the right or all, **pin**, duplicate, rename, copy SQL
-- **Status bar** - the tab's connection (click to switch it), the caret's line and column (click to go to a line), cursor count, the open transaction, and a running query with its **Stop** button. Read-only, ask-before-changes and extension chips open the connection's settings, and a guarded connection with a tab color tints the whole bar with it. The connection's tooltip has the server's version, address, database, SSH and TLS, and the round trip measured when it connected
+- **Status bar** - the tab's connection, with its database when it's another one of the server's (click to switch it), the caret's line and column (click to go to a line), cursor count, the open transaction, and a running query with its **Stop** button. Read-only, ask-before-changes and extension chips open the connection's settings, and a guarded connection with a tab color tints the whole bar with it. The connection's tooltip has the server's version, address, database, SSH and TLS, and the round trip measured when it connected
 - Everything opens instantly - no animations
 - **Window state persistence** - size, position and maximized state restored between sessions
 

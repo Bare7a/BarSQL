@@ -392,7 +392,7 @@ fn named_card(span: Range<usize>, subject: HoverSubject, labels: &SqlLabels, lan
         }
         HoverSubject::Schema { name } => {
             let tables =
-                schema::get(cx, language.connection_id()).and_then(|entry| entry.tables(&name)).map(<[_]>::len);
+                schema::get(cx, &language.connection_id()).and_then(|entry| entry.tables(&name)).map(<[_]>::len);
             let count = tables.map(|n| t_count(cx, "editor.sql.tablesCount", n as i64, &[]));
             (header(Lucide::FolderOpen, name, labels.schema.clone(), count), Vec::new())
         }

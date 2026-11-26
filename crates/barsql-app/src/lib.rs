@@ -20,8 +20,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use barsql_core::{ConnectionConfig, QueryError};
+use barsql_core::{ConnectionConfig, QueryError, scope};
 use barsql_db::Engine;
 use barsql_storage::Stores;
 
@@ -75,6 +76,7 @@ struct Inner {
 struct PooledEngine {
     engine: Engine,
     fingerprint: String,
+    last_used: Instant,
 }
 
 impl BarApp {
@@ -117,7 +119,9 @@ impl BarApp {
             loop {
                 tick.tick().await;
                 let Some(inner) = inner.upgrade() else { return };
-                BarApp { inner }.release_idle_tabs(tabs::TAB_IDLE_TIMEOUT);
+                let app = BarApp { inner };
+                app.release_idle_tabs(tabs::TAB_IDLE_TIMEOUT);
+                app.close_idle_databases(tabs::TAB_IDLE_TIMEOUT).await;
             }
         });
     }
@@ -138,14 +142,12 @@ impl BarApp {
         let _ = self.inner.events.0.try_send(event);
     }
 
-    // Every connect and run goes through here, so MCP mode's limits can't be bypassed.
+    // Every connect and run goes through here, so MCP mode's limits can't be bypassed. An assistant reaches another
+    // database only where the connection lists them all.
     pub(crate) fn config(&self, connection_id: &str) -> Result<ConnectionConfig, QueryError> {
-        let cfg = self
-            .inner
-            .stores
-            .connections
-            .get(connection_id)
-            .filter(|cfg| cfg.mcp || !self.inner.mcp)
+        let connections = &self.inner.stores.connections;
+        let cfg = scope::resolve_with(connection_id, |id| connections.get(id))
+            .filter(|cfg| !self.inner.mcp || cfg.mcp && (cfg.scoped_database().is_none() || cfg.shows_all_databases()))
             .ok_or_else(|| QueryError::message("connection not found"))?;
         Ok(if self.inner.mcp { for_mcp(cfg) } else { cfg })
     }

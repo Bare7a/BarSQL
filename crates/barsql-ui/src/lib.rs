@@ -9,6 +9,7 @@ mod completion;
 mod connection_dialog;
 mod connections_panel;
 mod context_menu;
+mod database_pane;
 mod dialogs;
 mod editor_commands;
 mod er_diagram;

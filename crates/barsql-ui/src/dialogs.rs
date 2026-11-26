@@ -128,7 +128,8 @@ pub struct Confirm {
 
 impl Confirm {
     pub fn save_rows(connection: &barsql_core::ConnectionConfig, rows: usize, cx: &App) -> Self {
-        let name = [("name", connection.name.as_str())];
+        let label = connection.label();
+        let name = [("name", label.as_str())];
         Self {
             title: t_with(cx, "safety.changesTitle", &name),
             description: t_count(cx, "safety.saveRows", rows as i64, &name),

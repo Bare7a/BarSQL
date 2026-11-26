@@ -96,7 +96,7 @@ fn statement_error(error: HError, stmt: &str) -> QueryError {
 
 impl TursoEngine {
     pub async fn connect(options: TursoOptions) -> Result<Arc<Self>, QueryError> {
-        let tunnel = options.ssh.clone().map(TunnelSlot::new);
+        let tunnel = options.ssh.clone().map(TunnelSlot::shared);
         let client = client_for(&options, &options.endpoint, tunnel.clone())?;
         let protocol = detect(&client, &options).await?;
         let engine = Arc::new(Self { options, client, tunnel, protocol });

@@ -381,11 +381,9 @@ impl HistoryPanel {
         let ring = self.nav.ringed(&entry.id, window);
         let theme = cx.theme().clone();
         let lang = cx.global::<I18n>().lang();
-        let connection = (self.scope == Scope::All)
-            .then(|| self.connections.iter().find(|c| c.id == entry.connection_id))
-            .flatten()
-            .map(|c| c.name.as_str());
-        let meta = meta(entry, connection, lang, now_ms);
+        let connection =
+            saved_queries::where_it_runs(&self.connections, &entry.connection_id, self.scope == Scope::All);
+        let meta = meta(entry, connection.as_deref(), lang, now_ms);
         let error = (!entry.success && !entry.error.is_empty()).then(|| one_line_preview(&entry.error, 100));
         let (open_conn, open_sql) = (entry.connection_id.clone(), entry.sql.clone());
         let (save_conn, save_sql) = (entry.connection_id.clone(), entry.sql.clone());
@@ -486,8 +484,8 @@ impl Render for HistoryPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let field = div()
             .debug_selector(|| "history-filter".into())
-            .child(form::filter_input(&self.filter, window, cx).cleanable(true));
-        let filter_bar = form::filter_bar(field, cx).child(self.options_menu(cx));
+            .child(form::search_input(&self.filter, window, cx).cleanable(true));
+        let filter_bar = form::filter_bar(field).child(self.options_menu(cx));
         // The captions go by today's date, so rows laid out before midnight are laid out again.
         if ZonedDateTime::now().date() != self.day {
             self.rebuild();

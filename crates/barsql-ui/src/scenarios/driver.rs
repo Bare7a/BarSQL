@@ -183,6 +183,21 @@ impl Driver<'_> {
     }
 
     pub fn context_menu_at(&mut self, position: Point<Pixels>, downs: usize) {
+        self.right_click(position);
+        self.keys(&format!("{}enter", "down ".repeat(downs + 1)));
+        self.pause();
+    }
+
+    // Counts up from the menu's last item, where a Drop sits whatever comes before it.
+    #[cfg(feature = "e2e")]
+    pub fn context_menu_from_end(&mut self, selector: &'static str, ups: usize) {
+        let position = self.center(selector);
+        self.right_click(position);
+        self.keys(&format!("{}enter", "up ".repeat(ups + 1)));
+        self.pause();
+    }
+
+    fn right_click(&mut self, position: Point<Pixels>) {
         let down = MouseDownEvent {
             button: MouseButton::Right,
             position,
@@ -193,8 +208,6 @@ impl Driver<'_> {
         self.cx.simulate_event(down);
         self.cx.run_until_parked();
         self.cx.update(|window, cx| window.draw(cx).clear(cx));
-        self.keys(&format!("{}enter", "down ".repeat(downs + 1)));
-        self.pause();
     }
 
     // Opens the submenu at item `downs` and picks its item `pick`. A submenu shows once its item is selected, and
