@@ -169,7 +169,7 @@ impl BarApp {
         let written = async {
             // A line break in the name would end the SQL comment.
             let name = table_ref(&engine.driver(), &req.schema, &req.table).replace(['\r', '\n'], " ");
-            let now = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S %:z");
+            let now = jiff::ZonedDateTime::now().strftime("%Y-%m-%d %H:%M:%S %:z");
             out.text.push_str(&format!("-- BarSQL backup of {name}\n-- {now}\n\n"));
             let separator = query.batch_separator;
             push_statements(&mut out.text, &query.prologue, separator);

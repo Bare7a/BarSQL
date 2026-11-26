@@ -1318,8 +1318,8 @@ fn lane_bar(bar: Scrollbar) -> Scrollbar {
     bar.mode(ScrollbarMode::Always).styles(|styles| styles.track(|track| track.width(LANE)))
 }
 
-// GPUI Kit's bars take a press of any button on their track. This runs first and lets through only a primary
-// press, so a right-click on a lane doesn't scroll it.
+// GPUI Kit's bars take only a primary press. Any other on a lane would reach the grid and open the menu of the focused
+// cell, so this runs first and stops it.
 fn lane_guard(scroll: GridScroll) -> impl IntoElement {
     canvas(
         |_, _, _| {},

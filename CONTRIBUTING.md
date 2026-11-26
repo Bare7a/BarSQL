@@ -81,8 +81,8 @@ Plurals have only two forms, `key_one` and `key_other`. A language that needs mo
 
 ## Docs
 
-- `README.md` - the front page on GitHub: the pitch, downloads, screenshots and the engines table
-- `guide/` - the user guide, one page per area
+- `README.md` - the front page on GitHub: the pitch, one install command per OS, screenshots and the engines table
+- `guide/` - the user guide, one page per area, installing included
 - `docs/` - the landing page at [barsql.bare7a.eu](https://barsql.bare7a.eu), served by GitHub Pages
 
 A change users can see updates its guide page; the README and the landing page follow headline features only. Preview the landing page over HTTP, since Chrome doesn't load its icons and logos on a `file://` page:
@@ -107,7 +107,7 @@ python3 -m http.server 8765 --directory docs   # then open http://localhost:8765
 │   ├── barsql-sql/        # statement splitting, quoting, the read-only check, DDL and ALTER scripts, schema diffs, the SQL language service
 │   ├── barsql-storage/    # the JSON files in BarSQL-data
 │   └── barsql-ui/         # the GPUI views, locales and whole-window scenarios
-├── xtask/                 # cargo xtask: lint, e2e, screenshots, docs-images, icons, package, bump-version
+├── xtask/                 # cargo xtask: lint, e2e, screenshots, demo-video, docs-images, icons, package, version, bump-version
 ├── docs/                  # the landing page at barsql.bare7a.eu (GitHub Pages) and the README's images
 ├── guide/                 # the user guide, one page per area
 ├── fixtures/

@@ -337,6 +337,10 @@ impl Grid {
 
     pub(super) fn start_edit(&mut self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
         let held = self.shown(row, column).display().map(str::to_string);
+        // GPUI Kit's one-line input drops line breaks and tabs, so text holding one is edited in the viewer.
+        if held.as_deref().is_some_and(|text| text.contains(['\n', '\r', '\t'])) {
+            return cx.emit(GridEvent::EditInViewer { row, column });
+        }
         let picker = self
             .overlay
             .as_ref()

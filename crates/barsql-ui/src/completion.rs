@@ -629,14 +629,6 @@ struct AtCursor<M: InputModeKind> {
     list: Option<AnyElement>,
 }
 
-impl<M: InputModeKind> IntoElement for AtCursor<M> {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl<M: InputModeKind> Element for AtCursor<M> {
     type RequestLayoutState = ();
     type PrepaintState = Option<AnyElement>;

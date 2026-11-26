@@ -811,7 +811,7 @@ fn the_bars_never_cover_the_last_row_or_column(cx: &mut TestAppContext) {
     assert_eq!(hit(corner - point(px(1.), px(1.)), cx), Some(Target::Cell { row: 499, col: 2 }));
 }
 
-// GPUI Kit's bar takes every button, so a right-click would scroll and the menu would act on the focused cell.
+// GPUI Kit's bar takes only the primary button, so a right-click would reach the grid and open the focused cell's menu.
 #[gpui_kit::test]
 fn a_right_click_in_a_lane_neither_scrolls_nor_opens_the_menu(cx: &mut TestAppContext) {
     let (_env, grid, cx) = scrolling_both_ways(cx);
@@ -873,6 +873,36 @@ fn a_wider_theme_track_stays_in_its_lane(cx: &mut TestAppContext) {
     let body = read(&grid, cx, |g| g.scroll.viewport());
     press(cx, point(body.right() - px(8.), body.center().y), MouseButton::Left);
     assert_eq!(read(&grid, cx, |g| g.scroll.position()), point(px(0.), px(0.)), "a click on the cells beside the lane");
+}
+
+// The one-line editor would drop the tab or line break, so the viewer edits those cells.
+#[gpui_kit::test]
+fn a_cell_holding_a_tab_or_line_break_is_edited_in_the_viewer(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let mut builder = ChunkBuilder::new(3, 3);
+    for text in ["plain", "a\tb", "a\r\nb"] {
+        builder.push_number(|s| s.push('1'));
+        builder.push_text(|s| s.push_str(text));
+        builder.push_null();
+        builder.end_row();
+    }
+    let (grid, cx) = mount(builder, cx);
+    grid.update(cx, |grid, cx| grid.set_overlay(TableOverlay { editable: true, ..Default::default() }, cx));
+    let viewed = Rc::new(RefCell::new(Vec::new()));
+    let sink = viewed.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&grid, move |_, event: &GridEvent, _| {
+            if let GridEvent::EditInViewer { row, column } = event {
+                sink.borrow_mut().push((*row, *column));
+            }
+        })
+        .detach()
+    });
+    cx.simulate_keystrokes("right enter");
+    assert!(read(&grid, cx, |g| g.editing.is_some()), "plain text edits in place");
+    cx.simulate_keystrokes("escape down enter down enter");
+    assert_eq!(*viewed.borrow(), [(1, 1), (2, 1)]);
+    assert!(read(&grid, cx, |g| g.editing.is_none()));
 }
 
 #[gpui_kit::test]

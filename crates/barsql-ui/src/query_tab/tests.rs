@@ -1,9 +1,12 @@
 use barsql_app::EditorTab;
 use gpui_kit::component::Theme;
 use gpui_kit::component::scroll::ScrollbarMode;
-use gpui_kit::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px};
+use gpui_kit::{Entity, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point, px};
 
-use super::{QueryTab, TxnState, char_offset, dotted_title, misspelt_range, new_tab_id, results_share, word_range};
+use super::{
+    GLYPH_INSET, QueryTab, TxnState, char_offset, dotted_title, glyph_strip, misspelt_range, new_tab_id, results_share,
+    word_range,
+};
 use crate::results::ResultStatus;
 use crate::schema;
 use crate::test_support::{Env, settle, type_slowly};
@@ -326,21 +329,66 @@ fn a_double_click_on_the_splitter_maximizes_the_results_and_restores_them(cx: &m
     assert_eq!(double_click(cx), 40., "back to where they were");
 }
 
+// The middle of the glyph strip on the line that starts at `line_start`, where a run glyph goes.
+fn glyph_spot(tab: &Entity<QueryTab>, line_start: usize, cx: &mut VisualTestContext) -> Point<Pixels> {
+    cx.update(|_, cx| {
+        let editor = tab.read(cx).editor.read(cx);
+        let line = editor.range_to_bounds(&(line_start..line_start)).unwrap();
+        point(editor.input_bounds().left() + GLYPH_INSET + glyph_strip(cx) / 2., line.center().y)
+    })
+}
+
+fn ran(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> Option<String> {
+    cx.update(|_, cx| tab.read(cx).run_origin.as_ref().map(|origin| origin.text.clone()))
+}
+
 #[gpui_kit::test]
 fn the_run_glyph_runs_its_statement(cx: &mut TestAppContext) {
     let env = Env::new(cx);
-    let (tab, cx) = open(&env, cx, "SELECT 1 AS one;\nSELECT 2 AS two;");
+    let sql = "SELECT 1 AS one;\nSELECT 2 AS two;";
+    let (tab, cx) = open(&env, cx, sql);
     cx.run_until_parked();
-    let (top, line_height) = cx.update(|_, cx| {
-        let state = tab.read(cx).editor.read(cx);
-        let start = "SELECT 1 AS one;\n".len();
-        (state.range_to_bounds(&(start..start)).unwrap().top(), state.line_height().unwrap())
-    });
-    cx.simulate_click(point(px(7.), top + line_height / 2.), Modifiers::default());
+    let start = "SELECT 1 AS one;\n".len();
+    let spot = glyph_spot(&tab, start, cx);
+    cx.simulate_click(spot, Modifiers::default());
+    let (flashed, second) = (cx.update(|_, cx| tab.read(cx).flash.get_ranges(cx)), start..sql.len());
+    assert_eq!(flashed, [second], "it marks the statement, as Mod+Enter does");
     settle(cx, idle(&tab));
-    let ran = cx.update(|_, cx| tab.read(cx).run_origin.as_ref().map(|origin| origin.text.clone()));
-    assert_eq!(ran.as_deref(), Some("SELECT 2 AS two;"));
+    assert_eq!(ran(&tab, cx).as_deref(), Some("SELECT 2 AS two;"));
     assert_eq!(status(&tab, cx).0, 1);
+}
+
+// GPUI Kit keeps room for three digits, but the glyph strip gives back what a shorter count leaves empty, so the gutter
+// grows one digit at a time and the numbers always start just after the glyphs.
+#[gpui_kit::test]
+fn the_gutter_grows_one_digit_at_a_time(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let mut gutters = Vec::new();
+    for lines in [1, 10, 100, 1000] {
+        let (tab, cx) = open(&env, cx, &vec!["SELECT 1;"; lines].join("\n"));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        gutters.push(cx.update(|_, cx| tab.read(cx).editor.read(cx).text_origin_offset().unwrap()));
+    }
+    let steps: Vec<Pixels> = gutters.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert!(steps[0] > px(0.) && steps.iter().all(|step| (*step - steps[0]).abs() < px(0.01)), "{gutters:?}");
+}
+
+// Comments before a statement don't start it, so its glyph is on the line where its code begins.
+#[gpui_kit::test]
+fn the_run_glyph_sits_where_the_code_starts(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let sql = "-- first\n/* second */\nSELECT 3 AS three;";
+    let (tab, cx) = open(&env, cx, sql);
+    cx.run_until_parked();
+    let comment = glyph_spot(&tab, 0, cx);
+    cx.simulate_click(comment, Modifiers::default());
+    cx.run_until_parked();
+    assert_eq!(ran(&tab, cx), None, "the comment's line has no glyph");
+    let code = glyph_spot(&tab, sql.find("SELECT").unwrap(), cx);
+    cx.simulate_click(code, Modifiers::default());
+    settle(cx, idle(&tab));
+    assert_eq!(ran(&tab, cx).as_deref(), Some(sql));
 }
 
 #[gpui_kit::test]

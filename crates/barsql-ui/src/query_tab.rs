@@ -55,8 +55,25 @@ const FLASH: Duration = Duration::from_millis(500);
 // Results pane share of the tab in percent, as (default, min, max).
 const RESULTS_SHARE: (f32, f32, f32) = (40., 15., 70.);
 
-// Room left of the line numbers for the run glyphs.
-const GLYPH_MARGIN_REM: f32 = 1.077;
+// The run glyphs' column, this far into the gutter, so a hovered glyph's square lines up with the Run button above.
+const GLYPH_INSET: Pixels = px(3.);
+
+// The run glyphs' column width. It grows with the editor's text.
+fn glyph_strip(cx: &App) -> Pixels {
+    px((theme::editor_font_size(cx) * 1.25).round())
+}
+
+// GPUI Kit keeps room for three digits of line numbers, right-aligned, so a shorter count leaves some of it empty.
+// The strip it reserves for the glyphs gives that back, so the numbers start just after the glyphs at any count.
+fn sync_glyph_strip(editor: &Entity<EditorState>, window: &Window, cx: &mut App) {
+    let digits = editor.read(cx).text().lines_len().max(1).ilog10() as usize + 1;
+    let text_system = window.text_system();
+    let font_id = text_system.resolve_font(&font(cx.theme().mono_font_family.clone()));
+    let size = px(theme::editor_font_size(cx));
+    let digit = ('0'..='9').map(|d| text_system.layout_width(font_id, size, d)).fold(px(0.), Pixels::max);
+    let strip = (GLYPH_INSET + glyph_strip(cx) - digit * 3usize.saturating_sub(digits) as f32).max(px(0.));
+    editor.update(cx, |state, cx| state.set_gutter_decorations_width(strip, cx));
+}
 
 // Shared by every query tab and kept for the session only.
 struct ResultsShare(f32);
@@ -181,8 +198,14 @@ impl QueryTab {
     pub fn new(tab: EditorTab, connection: ConnectionConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sql = tab.sql;
         let language = Rc::new(SqlLanguage::new(connection.id.clone(), connection.driver.clone()));
-        let editor = cx
-            .new(|cx| EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql));
+        let editor = cx.new(|cx| {
+            let mut state =
+                EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql);
+            // An empty collection still reserves the strip.
+            state.create_gutter_decorations_collection(Vec::new(), cx);
+            state
+        });
+        sync_glyph_strip(&editor, window, cx);
         let hover = cx.new(|cx| HoverCard::new(editor.clone(), language.clone(), cx));
         let this = cx.weak_entity();
         editor.update(cx, |state, _| {
@@ -210,6 +233,7 @@ impl QueryTab {
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |this, _, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::Change) {
+                    sync_glyph_strip(&this.editor, window, cx);
                     this.query_error = None;
                     this.schedule_diagnostics(window, cx);
                     cx.emit(QueryTabEvent::Edited);
@@ -631,55 +655,67 @@ impl QueryTab {
         if let Some(statement) = at_cursor {
             let base = statement.text.as_ptr() as usize - sql.as_ptr() as usize;
             let text = statement.text.to_string();
+            if self.running.is_none() {
+                self.flash(base..base + text.len(), cx);
+            }
             self.run_sql(text, base, window, cx);
         }
     }
 
-    // Glyphs go in paint because the editor lays itself out in paint and this sibling paints after it.
+    // A glyph sits in the gutter's strip before the line numbers, on the line where its statement's code starts. The
+    // editor comes first in the tree, so its prepaint has laid out this frame's lines.
     fn run_glyphs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let editor = self.editor.clone();
         let tab = cx.entity().downgrade();
         let running = self.running.is_some();
         let driver = self.connection.driver.clone();
         let accent = cx.theme().primary;
+        let (mono, font_size) = (font(cx.theme().mono_font_family.clone()), px(theme::editor_font_size(cx)));
+        let width = glyph_strip(cx);
         canvas(
-            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-            move |bounds, hitbox, window, cx| {
+            move |bounds, window, cx| {
                 let state = editor.read(cx);
-                let Some(line_height) = state.line_height() else { return };
-                let sql = state.value().to_string();
+                let line_height = state.line_height()?;
+                // The capitals' height, and their baseline's offset in a row, as GPUI places a line's text.
+                let text_system = window.text_system();
+                let font_id = text_system.resolve_font(&mono);
+                let (ascent, descent) =
+                    (text_system.ascent(font_id, font_size), text_system.descent(font_id, font_size).abs());
+                let caps = ((line_height - ascent - descent) / 2. + ascent, text_system.cap_height(font_id, font_size));
+                let left = state.input_bounds().left() + GLYPH_INSET;
+                let strip = Bounds::from_corners(point(left, bounds.top()), point(left + width, bounds.bottom()));
+                let (sql, text) = (state.value(), state.text());
                 let mut glyphs: Vec<(usize, Bounds<Pixels>)> = Vec::new();
                 for statement in lang::parse_statements(&sql, Some(&driver)) {
                     if glyphs.last().is_some_and(|(line, _)| *line == statement.run_line) {
                         continue;
                     }
-                    let offset = statement.text.as_ptr() as usize - sql.as_ptr() as usize;
-                    let Some(at) = state.range_to_bounds(&(offset..offset)) else { continue };
-                    let rect = Bounds::new(point(bounds.left(), at.top()), size(bounds.size.width, line_height));
-                    if rect.bottom() > bounds.top() && rect.top() < bounds.bottom() {
-                        glyphs.push((statement.run_line, rect));
+                    let start = text.line_start_offset(statement.run_line - 1);
+                    let Some(at) = state.range_to_bounds(&(start..start)) else { continue };
+                    let row = Bounds::new(point(strip.left(), at.top()), size(width, line_height));
+                    if row.bottom() > bounds.top() && row.top() < bounds.bottom() {
+                        glyphs.push((statement.run_line, row));
                     }
                 }
+                Some((window.insert_hitbox(strip, HitboxBehavior::Normal), glyphs, caps))
+            },
+            move |bounds, prepaint, window, _| {
+                let Some((hitbox, glyphs, caps)) = prepaint else { return };
                 let hovered = (!running && hitbox.is_hovered(window))
-                    .then(|| glyphs.iter().position(|(_, rect)| rect.contains(&window.mouse_position())))
+                    .then(|| glyphs.iter().position(|(_, row)| row.contains(&window.mouse_position())))
                     .flatten();
                 window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                    let (width, height) = (px(7.), px(8.));
-                    for (ix, (_, rect)) in glyphs.iter().enumerate() {
+                    for (ix, (_, row)) in glyphs.iter().enumerate() {
+                        let hover = hovered == Some(ix);
                         let opacity = if running {
                             0.2
-                        } else if hovered == Some(ix) {
+                        } else if hover {
                             1.
                         } else {
-                            0.35
+                            0.6
                         };
-                        let x = rect.right() - width - px(1.);
-                        let y = rect.top() + (rect.size.height - height) / 2.;
-                        let mut path = Path::new(point(x, y));
-                        path.line_to(point(x, y + height));
-                        path.line_to(point(x + width, y + height / 2.));
-                        path.line_to(point(x, y));
-                        window.paint_path(path, accent.opacity(opacity));
+                        let hover = hover.then(|| accent.opacity(0.16));
+                        paint_run_glyph(*row, caps, accent.opacity(opacity), hover, window);
                     }
                 });
                 if hovered.is_some() {
@@ -709,10 +745,7 @@ impl QueryTab {
             },
         )
         .absolute()
-        .top_0()
-        .bottom_0()
-        .left_0()
-        .w(rems(GLYPH_MARGIN_REM))
+        .inset_0()
     }
 
     fn run_sql(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -1190,6 +1223,55 @@ impl QueryTab {
 
 impl EventEmitter<QueryTabEvent> for QueryTab {}
 
+// A play triangle with rounded corners, centred in its row of the strip and on the line's capitals, on a faint square
+// while hovered. `caps` is their baseline's offset in the row and their height. It's placed in device pixels, as text
+// is: GPUI rounds a baseline to the nearest one, halves toward zero.
+fn paint_run_glyph(row: Bounds<Pixels>, caps: (Pixels, Pixels), color: Hsla, hover: Option<Hsla>, window: &mut Window) {
+    let scale = window.scale_factor();
+    let (device, logical) = (|value: Pixels| f32::from(value) * scale, |value: f32| px(value / scale));
+    let baseline = (device(row.top() + caps.0) - 0.5).ceil();
+    let height = device(row.size.height * 0.4).round();
+    let width = (height * 0.9).round();
+    let top = (baseline - device(caps.1) / 2. - height / 2.).round();
+    // The square is whole pixels, so its edges stay sharp. Of the room the triangle leaves across it, the odd pixel
+    // goes before the base, as the tip's side looks emptier.
+    let pad = (3. * scale).round();
+    let side = height + 2. * pad;
+    let back_left = (device(row.center().x) - side / 2.).round();
+    let left = back_left + ((side - width) / 2.).ceil();
+    if let Some(hover) = hover {
+        let back = Bounds::new(point(logical(back_left), logical(top - pad)), size(logical(side), logical(side)));
+        window.paint_quad(fill(back, hover).corner_radii(px(4.)));
+    }
+    let (left, right, top, bottom) = (logical(left), logical(left + width), logical(top), logical(top + height));
+    let middle = (top + bottom) / 2.;
+    let corners = [point(left, top), point(right, middle), point(left, bottom)];
+    if let Ok(path) = rounded_triangle(corners, f32::from(bottom - top) * 0.18).build() {
+        window.paint_path(path, color);
+    }
+}
+
+// One fill, so a translucent color stays even where the rounded corners meet the sides.
+fn rounded_triangle(corners: [Point<Pixels>; 3], radius: f32) -> PathBuilder {
+    let at = |p: Point<Pixels>| (f32::from(p.x), f32::from(p.y));
+    let toward = |(x, y): (f32, f32), (to_x, to_y): (f32, f32)| {
+        let t = (radius / (to_x - x).hypot(to_y - y)).min(0.5);
+        point(px(x + (to_x - x) * t), px(y + (to_y - y) * t))
+    };
+    let mut path = PathBuilder::fill();
+    for ix in 0..3 {
+        let (prev, corner, next) = (at(corners[(ix + 2) % 3]), at(corners[ix]), at(corners[(ix + 1) % 3]));
+        if ix == 0 {
+            path.move_to(toward(corner, prev));
+        } else {
+            path.line_to(toward(corner, prev));
+        }
+        path.curve_to(toward(corner, next), corners[ix]);
+    }
+    path.close();
+    path
+}
+
 // A toolbar tooltip with the action's current shortcut.
 fn hint(key: &str, shortcut: &str, cx: &App) -> SharedString {
     t_with(cx, key, &[("shortcut", &shortcuts::shown(shortcut, cx))])
@@ -1238,8 +1320,10 @@ fn editor_menu(
 }
 
 impl Render for QueryTab {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let font_size = px(theme::editor_font_size(cx));
+        // Before the editor lays out this frame, so a new text size moves its text once.
+        sync_glyph_strip(&self.editor, window, cx);
         v_flex()
             .size_full()
             .on_action(cx.listener(|this, _: &RunSelection, window, cx| this.run_selection(window, cx)))
@@ -1284,7 +1368,6 @@ impl Render for QueryTab {
                         Editor::new(&self.editor)
                             .size_full()
                             .bordered(false)
-                            .pl(rems(GLYPH_MARGIN_REM))
                             .text_size(font_size)
                             .context_menu(editor_menu(self.editor.clone(), self.can_analyze()))
                             .on_paste({

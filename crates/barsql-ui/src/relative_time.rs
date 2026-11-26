@@ -1,5 +1,5 @@
 use barsql_sql::lang::text::is_space;
-use jiff::{Timestamp, Zoned};
+use jiff::{Timestamp, ZonedDateTime};
 
 // CLDR phrases, with words like "yesterday" in place of "1 day ago".
 // Tested against `fixtures/golden/ui/relative_time.json`.
@@ -177,7 +177,7 @@ fn phrase(lang: &str, unit: Unit, value: i64) -> String {
 }
 
 // Local calendar days, then 7 and 30 days back from the start of today.
-pub fn time_bucket(iso: &str, now: &Zoned) -> TimeBucket {
+pub fn time_bucket(iso: &str, now: &ZonedDateTime) -> TimeBucket {
     let Ok(ts) = iso.parse::<Timestamp>() else { return TimeBucket::Older };
     let Ok(today) = now.start_of_day() else { return TimeBucket::Older };
     let start = today.timestamp().as_millisecond();
@@ -245,14 +245,14 @@ mod tests {
 
     #[test]
     fn unparsable_times_are_blank_and_older() {
-        let now: Zoned = "2026-06-15T12:00:00+03:00[Europe/Sofia]".parse().unwrap();
+        let now: ZonedDateTime = "2026-06-15T12:00:00+03:00[Europe/Sofia]".parse().unwrap();
         assert_eq!(format_relative_time("yesterday", "en", 0), "");
         assert_eq!(time_bucket("", &now), TimeBucket::Older);
     }
 
     #[test]
     fn buckets_follow_local_calendar_days() {
-        let now: Zoned = "2026-06-15T01:00:00+03:00[Europe/Sofia]".parse().unwrap();
+        let now: ZonedDateTime = "2026-06-15T01:00:00+03:00[Europe/Sofia]".parse().unwrap();
         let bucket = |iso: &str| time_bucket(iso, &now);
         assert_eq!(bucket("2026-06-15T00:00:00+03:00"), TimeBucket::Today);
         assert_eq!(bucket("2026-06-14T23:59:59+03:00"), TimeBucket::Yesterday);

@@ -154,6 +154,20 @@ fn table_views_restore_and_orphaned_tabs_stay_in_the_session(cx: &mut TestAppCon
     assert_eq!(saved.tabs[3].color, env.connection.color);
 }
 
+// The strip isn't laid out yet when the session comes back, and still scrolls to the active tab on its first frame.
+#[gpui_kit::test]
+fn a_restored_session_scrolls_to_its_active_tab(cx: &mut TestAppContext) {
+    let env = Env::new(cx);
+    let id = env.connection.id.clone();
+    let tabs: Vec<EditorTab> =
+        (0..40).map(|n| tab(&format!("a query with a long title {n}"), &id, "SELECT 1")).collect();
+    let active_tab = tabs[39].id.clone();
+    env.bar.save_editor_session(EditorSession { tabs, active_tab }).unwrap();
+    let (workspace, cx) = open(cx);
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.update(|_, cx| workspace.read(cx).tab_scroll.offset().x) < px(0.));
+}
+
 #[gpui_kit::test]
 fn a_session_that_opens_on_a_table_view_fills_the_sidebar_tree(cx: &mut TestAppContext) {
     let env = Env::new(cx);
