@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,
-    IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TableSize, TriggerInfo,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DatabaseInfo, FunctionInfo, FunctionKind, FunctionList,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, RoutineInfo, SchemaInfo, TableInfo, TableSize,
+    TriggerInfo,
 };
 use barsql_core::{StructColumn, StructIndex, TableStructure};
 use barsql_sql::ddl::{terminate_statement, unsupported_ddl};
@@ -128,6 +129,22 @@ impl ChEngine {
             )
             .await?;
         Ok(rows.iter().map(|r| text(r, 0)).collect())
+    }
+
+    pub async fn database_list(self: &Arc<Self>) -> Result<Vec<DatabaseInfo>, QueryError> {
+        let rows = self.rows("SELECT name FROM system.databases ORDER BY name", &[]).await?;
+        let info = |name: String| {
+            let system = matches!(name.as_str(), "system" | "INFORMATION_SCHEMA" | "information_schema");
+            DatabaseInfo { name, can_connect: true, system }
+        };
+        Ok(rows.iter().map(|r| info(text(r, 0))).collect())
+    }
+
+    pub async fn database_sizes(self: &Arc<Self>) -> Result<HashMap<String, u64>, QueryError> {
+        let rows = self
+            .rows("SELECT database, toString(sum(bytes_on_disk)) FROM system.parts WHERE active GROUP BY database", &[])
+            .await?;
+        Ok(rows.iter().filter_map(|r| Some((text(r, 0), text(r, 1).parse().ok()?))).collect())
     }
 
     pub async fn list_schemas(self: &Arc<Self>) -> Result<Vec<SchemaInfo>, QueryError> {

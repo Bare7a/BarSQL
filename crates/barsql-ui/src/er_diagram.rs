@@ -25,7 +25,7 @@ use crate::form;
 use crate::i18n::{I18n, compact, t, t_count, t_with};
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
-use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
+use crate::tokens::{ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
 use crate::{file_dialogs, theme, toast};
 
 // Tables a diagram loads.
@@ -342,7 +342,7 @@ impl ErDiagram {
         let modifier = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
         let hint = t_with(cx, "erDiagram.hint", &[("modifier", modifier)]);
         // The hit count sits inside the field, so typing moves nothing.
-        let search = form::filter_input(&self.search, window, cx).when_some(found, |input, found| {
+        let search = form::search_input(&self.search, window, cx).when_some(found, |input, found| {
             input.suffix(
                 div()
                     .debug_selector(|| "er-matches".into())
@@ -360,7 +360,6 @@ impl ErDiagram {
             .bg(theme.sidebar)
             .border_b_1()
             .border_color(theme.border)
-            .child(Icon::new(IconName::Search).size(ICON_SM).text_color(theme.muted_foreground))
             // Fills the bar, and shrinks alongside the note when the bar runs short.
             .child(
                 div()

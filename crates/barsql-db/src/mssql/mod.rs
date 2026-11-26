@@ -136,7 +136,7 @@ pub struct MsEngine {
 impl MsEngine {
     pub async fn connect(options: MsOptions) -> Result<Arc<Self>, QueryError> {
         capture::install();
-        let tunnel = options.ssh.clone().map(TunnelSlot::new);
+        let tunnel = options.ssh.clone().map(TunnelSlot::shared);
         let engine = Arc::new(Self {
             options,
             tunnel,

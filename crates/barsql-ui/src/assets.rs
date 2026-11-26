@@ -59,6 +59,7 @@ icon_assets!(
         Plug,
         Puzzle,
         Route,
+        Rows3,
         Save,
         Scan,
         Sheet,
@@ -268,6 +269,8 @@ mod tests {
             Lucide::PanelRight,
             Lucide::Bot,
             Lucide::ArrowUp,
+            Lucide::Ellipsis,
+            Lucide::Rows3,
         ] {
             let path = icon.path();
             assert!(AppAssets.load(&path).ok().flatten().is_some(), "{path}");

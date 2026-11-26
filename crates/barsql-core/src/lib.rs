@@ -6,6 +6,7 @@ pub mod dialect;
 pub mod paths;
 pub mod query;
 pub mod schema;
+pub mod scope;
 pub mod structure;
 
 pub use capabilities::Capabilities;
@@ -16,9 +17,9 @@ pub use query::{
     ServerMessage, TableDataRequest, Value,
 };
 pub use schema::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, FunctionInfo, FunctionKind, FunctionList, FunctionSignature,
-    IndexInfo, ObjectKind, ObjectRef, ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo, SchemaTables, TableInfo,
-    TableSize, TriggerInfo,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DatabaseInfo, FunctionInfo, FunctionKind, FunctionList,
+    FunctionSignature, IndexInfo, ObjectKind, ObjectRef, ReferencingKey, RoutineInfo, SchemaBundle, SchemaInfo,
+    SchemaTables, TableInfo, TableSize, TriggerInfo,
 };
 pub use structure::{
     Check, Dependent, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure,

@@ -8,6 +8,7 @@
 - **Read-only mode** with defense-in-depth - blocked in the app and again inside each driver session, and PostgreSQL, MySQL, SQLite and ClickHouse sessions refuse writes in the database too, so even a function that writes can't get through
 - **Ask before changes** for production connections - the editor confirms any statement that changes data or schema before it runs, and so does saving grid edits
 - **Pick the database from a list** - the button beside the database field asks the server for its databases with the credentials you've entered, so you don't have to remember the name
+- **Show all databases** - one connection for a whole PostgreSQL, SQL Server, MySQL / MariaDB or ClickHouse server. The sidebar lists its databases above the tree, and the database field becomes the one the connection opens by default. Each database you open gets its own pool of connections, closed again after ten idle minutes, and they all share one SSH tunnel
 - PostgreSQL SSL (`disable` / `require` / `verify-full`), MySQL TLS, SQL Server TLS including TDS 8.0 `strict`, ClickHouse over HTTPS, and Turso URLs with an auth token
 - SQL Server **named instances** - type `host\INSTANCE`, or fill in the Instance field
 - **SSH tunnel** to reach databases behind a bastion (see below)

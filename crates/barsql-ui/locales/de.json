@@ -47,6 +47,8 @@
     "columnCount_other": "{{count}} Spalten"
   },
   "editor": {
+    "moveToDatabase": "Datenbank wechseln",
+    "databaseBusy": "Erst Transaktion oder Änderungen abschließen",
     "sql": {
       "columnsCount_one": "{{count}} Spalte",
       "columnsCount_other": "{{count}} Spalten",
@@ -80,6 +82,9 @@
     "contextGoToDefinition": "Gehe zu Definition"
   },
   "connection": {
+    "showAllDatabases": "Alle Datenbanken anzeigen",
+    "showAllDatabasesHint": "Zeigt die Datenbanken des Servers in der Seitenleiste.",
+    "defaultDatabase": "Standarddatenbank",
     "pasteUrl": "Felder aus einer Verbindungs-URL in der Zwischenablage ausfüllen",
     "copyUrl": "Als URL kopieren, ohne Passwort",
     "clipboardNotUrl": "Die Zwischenablage enthält keine Verbindungs-URL, die BarSQL lesen kann",
@@ -165,6 +170,15 @@
     "discardConfirm": "Verwerfen und ausführen"
   },
   "sidebar": {
+    "newDatabase": "Neue Datenbank…",
+    "databaseInUse": "„{{tab}}“ hat auf dieser Datenbank unerledigte Arbeit.",
+    "databaseOptions": "Datenbankoptionen",
+    "databases": "Datenbanken",
+    "databaseDefault": "Standard",
+    "showSystemDatabases": "Systemdatenbanken",
+    "filterDatabases": "Datenbanken filtern",
+    "databaseNoAccess": "kein Zugriff",
+    "connectToListDatabases": "Verbinden, um Datenbanken zu sehen",
     "newTable": "Neue Tabelle…",
     "editStructure": "Struktur bearbeiten…",
     "viewStructure": "Struktur anzeigen",
@@ -514,6 +528,14 @@
     "zoomReset": "Zurück auf 100 %",
     "fitTooltip": "Das ganze Diagramm zeigen",
     "open": "Tabelle öffnen"
+  },
+  "schemaChange": {
+    "createDatabase": "Neue Datenbank",
+    "renameDatabase": "Datenbank umbenennen",
+    "dropDatabase": "Datenbank löschen",
+    "dropDatabaseDescription": "„{{name}}“ mit allen Daten löschen? Dies kann nicht rückgängig gemacht werden.",
+    "name": "Name",
+    "created": "„{{name}}“ erstellt"
   },
   "schemaDiff": {
     "menu": "Schema vergleichen…",

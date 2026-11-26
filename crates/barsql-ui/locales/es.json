@@ -47,6 +47,8 @@
     "columnCount_other": "{{count}} columnas"
   },
   "editor": {
+    "moveToDatabase": "Cambiar de base de datos",
+    "databaseBusy": "Termina primero la transacción o los cambios",
     "sql": {
       "columnsCount_one": "{{count}} columna",
       "columnsCount_other": "{{count}} columnas",
@@ -80,6 +82,9 @@
     "contextGoToDefinition": "Ir a la definición"
   },
   "connection": {
+    "showAllDatabases": "Mostrar todas las bases de datos",
+    "showAllDatabasesHint": "Muestra las bases de datos del servidor en la barra lateral.",
+    "defaultDatabase": "Base de datos predeterminada",
     "pasteUrl": "Rellenar los campos con una URL de conexión del portapapeles",
     "copyUrl": "Copiar como URL, sin la contraseña",
     "clipboardNotUrl": "El portapapeles no contiene una URL de conexión que BarSQL pueda leer",
@@ -165,6 +170,15 @@
     "discardConfirm": "Descartar y ejecutar"
   },
   "sidebar": {
+    "newDatabase": "Nueva base de datos…",
+    "databaseInUse": "\"{{tab}}\" tiene trabajo sin terminar en esta base de datos.",
+    "databaseOptions": "Opciones de bases de datos",
+    "databases": "Bases de datos",
+    "databaseDefault": "predeterminada",
+    "showSystemDatabases": "Bases de datos del sistema",
+    "filterDatabases": "Filtrar bases de datos",
+    "databaseNoAccess": "sin acceso",
+    "connectToListDatabases": "Conéctate para verlas",
     "newTable": "Nueva tabla…",
     "editStructure": "Editar la estructura…",
     "viewStructure": "Ver la estructura",
@@ -524,6 +538,14 @@
     "zoomReset": "Volver al 100 %",
     "fitTooltip": "Mostrar todo el diagrama",
     "open": "Abrir la tabla"
+  },
+  "schemaChange": {
+    "createDatabase": "Nueva base de datos",
+    "renameDatabase": "Renombrar la base de datos",
+    "dropDatabase": "Eliminar la base de datos",
+    "dropDatabaseDescription": "¿Eliminar \"{{name}}\" y todos sus datos? Esta acción no se puede deshacer.",
+    "name": "Nombre",
+    "created": "Se creó \"{{name}}\""
   },
   "schemaDiff": {
     "menu": "Comparar esquema…",

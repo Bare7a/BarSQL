@@ -10,7 +10,7 @@ use barsql_app::{
 };
 use barsql_core::capabilities::DefaultSchema;
 use barsql_core::config::path_parts;
-use barsql_core::{ConnectionConfig, DriverType, SavedQuery};
+use barsql_core::{ConnectionConfig, DriverType, SavedQuery, scope};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{AppMenuBar, ContextMenuExt, PopupMenu, PopupMenuItem};
@@ -32,6 +32,7 @@ use crate::json_panel::{JsonPanel, JsonPanelEvent, RowSource};
 use crate::query_tab::{QueryTab, QueryTabEvent, TxnState, new_tab_id};
 use crate::quick_search::{self, QuickSearchDialog, TabEntry, Target};
 use crate::relative_time::format_relative_time;
+use crate::schema_actions::{self, Applied, Change, Guard};
 use crate::schema_tree::{ActiveTable, TableChange};
 use crate::scrollbars;
 use crate::sidebar::{Sidebar, SidebarEvent};
@@ -590,8 +591,7 @@ impl Workspace {
                 }
                 SidebarEvent::ConnectionsChanged(connections) => {
                     for open in &this.tabs {
-                        let id = open.view.connection(cx).id.clone();
-                        if let Some(connection) = connections.iter().find(|c| c.id == id).cloned() {
+                        if let Some(connection) = remapped(open.view.connection(cx), connections) {
                             open.view.set_connection(connection, cx);
                         }
                     }
@@ -605,6 +605,9 @@ impl Workspace {
                 }
                 SidebarEvent::TableChanged { connection_id, schema, table, change } => {
                     this.table_changed(connection_id, schema, table, change, window, cx)
+                }
+                SidebarEvent::DatabaseChange { base, change } => {
+                    this.change_database(base.clone(), change.clone(), window, cx)
                 }
             }),
             // Quitting doesn't wait for the debounces.
@@ -698,7 +701,7 @@ impl Workspace {
         let session = state::bar(cx).editor_session();
         self.saved = Some(session.clone());
         for (ix, tab) in session.tabs.into_iter().enumerate() {
-            match self.sidebar.read(cx).connection(&tab.connection_id).cloned() {
+            match self.sidebar.read(cx).connection(&tab.connection_id) {
                 Some(connection) => self.add_tab(tab, connection, window, cx),
                 None => self.kept.push((ix, tab)),
             }
@@ -908,7 +911,7 @@ impl Workspace {
             let (workspace, connection_id, schema) = (cx.weak_entity(), connection.id.clone(), diagram.schema.clone());
             let on_open: er_diagram::OnOpen = Rc::new(move |table, window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
-                    let Some(connection) = this.sidebar.read(cx).connection(&connection_id).cloned() else { return };
+                    let Some(connection) = this.sidebar.read(cx).connection(&connection_id) else { return };
                     this.open_table(connection, schema.clone(), table, None, window, cx);
                 });
             });
@@ -986,6 +989,12 @@ impl Workspace {
                 QueryTabEvent::OpenTable { schema, table, filter } => {
                     let connection = view.read(cx).connection.clone();
                     this.open_table(connection, schema.clone(), table.clone(), filter.clone(), window, cx);
+                }
+                QueryTabEvent::Moved => {
+                    if this.active_query() == Some(view) {
+                        let id = view.read(cx).connection.id.clone();
+                        this.sidebar.update(cx, |sidebar, cx| sidebar.set_selected(&id, cx));
+                    }
                 }
             }),
         ];
@@ -1140,6 +1149,46 @@ impl Workspace {
         self.activate(self.tabs.len() - 1, window, cx);
     }
 
+    // New, Rename and Drop from the Databases list. A rename or drop closes that database's pool first, so it waits
+    // for any tab that would lose work by it.
+    fn change_database(&mut self, base: ConnectionConfig, change: Change, window: &mut Window, cx: &mut Context<Self>) {
+        let this = cx.weak_entity();
+        let guard = change.closes(&base).map(|pool| -> Guard {
+            let this = this.clone();
+            Rc::new(move |cx: &App| {
+                let busy = this.upgrade()?.read(cx).busy_tab(&pool, cx)?;
+                Some(t_with(cx, "sidebar.databaseInUse", &[("tab", busy.as_ref())]))
+            })
+        });
+        schema_actions::open_change(base, change, guard, window, cx, move |applied, cx| {
+            let _ = this.update(cx, |this, cx| this.database_changed(applied, cx));
+        });
+    }
+
+    fn busy_tab(&self, id: &str, cx: &App) -> Option<SharedString> {
+        let busy = |view: &TabView| view.holds_draft(cx) || view.query().is_some_and(|tab| !tab.read(cx).movable(cx));
+        self.tabs
+            .iter()
+            .find(|open| open.view.connection(cx).id == id && busy(&open.view))
+            .map(|open| open.view.title(cx))
+    }
+
+    // Tabs on a renamed database follow it. A dropped one's tabs stay, for the toolbar to move.
+    fn database_changed(&mut self, applied: &Applied, cx: &mut Context<Self>) {
+        if let Change::RenameDatabase { database } = &applied.change
+            && let Some(base) = self.sidebar.read(cx).connection(&applied.connection_id)
+        {
+            let (from, to) = (base.in_database(database).id, base.in_database(&applied.new_name));
+            for open in &self.tabs {
+                if open.view.connection(cx).id == from {
+                    open.view.set_connection(to.clone(), cx);
+                }
+            }
+            self.schedule_save(cx);
+        }
+        self.sidebar.update(cx, |sidebar, cx| sidebar.database_changed(applied, cx));
+    }
+
     fn table_changed(
         &mut self,
         connection_id: &str,
@@ -1202,7 +1251,7 @@ impl Workspace {
             .iter()
             .filter(|tab| {
                 let tab = tab.read(cx);
-                tab.connection.id == connection_id && tab.saved_query_id().is_empty()
+                scope::same_connection(&tab.connection.id, connection_id) && tab.saved_query_id().is_empty()
             })
             .count()
             + 1
@@ -1247,10 +1296,10 @@ impl Workspace {
     fn open_saved(&mut self, saved: SavedQuery, window: &mut Window, cx: &mut Context<Self>) {
         let fallback = self.active_tab().map(|tab| tab.connection(cx).id.clone());
         let sidebar = self.sidebar.read(cx);
-        let connection = [Some(saved.connection_id.clone()), sidebar.selected().map(|c| c.id.clone()), fallback]
+        let connection = [Some(saved.connection_id.clone()), sidebar.selected().map(|c| c.id), fallback]
             .into_iter()
             .flatten()
-            .find_map(|id| sidebar.connection(&id).cloned());
+            .find_map(|id| sidebar.connection(&id));
         let Some(connection) = connection else { return };
         let query = |ix: usize| self.tabs[ix].view.query().map(|tab| tab.read(cx));
         let found = (0..self.tabs.len())
@@ -1311,7 +1360,7 @@ impl Workspace {
     // Into the active query tab, or with a table view or nothing open, into the connection's plain query tab.
     fn insert_into_editor(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_query().is_none()
-            && let Some(connection) = self.sidebar.read(cx).selected().cloned()
+            && let Some(connection) = self.sidebar.read(cx).selected()
         {
             let plain = self.tabs.iter().position(|tab| {
                 tab.view.query().is_some_and(|tab| {
@@ -1388,7 +1437,7 @@ impl Workspace {
                 }
             }
             Target::Table { connection_id, schema, table } => {
-                if let Some(connection) = self.sidebar.read(cx).connection(&connection_id).cloned() {
+                if let Some(connection) = self.sidebar.read(cx).connection(&connection_id) {
                     self.open_table(connection, schema, table, None, window, cx);
                 }
             }
@@ -1506,8 +1555,11 @@ impl Workspace {
     }
 
     fn reopen_closed_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.closed.last().and_then(|tab| self.sidebar.read(cx).connection(&tab.connection_id))
+        else {
+            return;
+        };
         let Some(closed) = self.closed.pop() else { return };
-        let Some(connection) = self.sidebar.read(cx).connection(&closed.connection_id).cloned() else { return };
         self.add_tab(closed, connection, window, cx);
         self.activate(self.tabs.len() - 1, window, cx);
     }
@@ -1814,7 +1866,7 @@ impl Workspace {
         let theme = cx.theme().clone();
         let sidebar = self.sidebar.read(cx);
         let last = state::bar(cx).last_runs();
-        let used = last.iter().filter_map(|(id, at)| sidebar.connection(id).map(|c| (c.clone(), Some(at.clone()))));
+        let used = last.iter().filter_map(|(id, at)| sidebar.connection(id).map(|c| (c, Some(at.clone()))));
         let unused = sidebar.connections().iter().filter(|c| !last.iter().any(|(id, _)| *id == c.id));
         let recent: Vec<(ConnectionConfig, Option<String>)> =
             used.chain(unused.map(|c| (c.clone(), None))).take(RECENT_CONNECTIONS).collect();
@@ -1891,7 +1943,7 @@ impl Workspace {
     // A query tab on the selected connection, or the first one when none is picked yet.
     fn welcome_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let sidebar = self.sidebar.read(cx);
-        if let Some(connection) = sidebar.selected().or_else(|| sidebar.connections().first()).cloned() {
+        if let Some(connection) = sidebar.selected().or_else(|| sidebar.connections().first().cloned()) {
             self.open_query_tab(connection, window, cx);
         }
     }
@@ -1983,6 +2035,14 @@ impl Workspace {
                             .child(open.view.title(cx))
                             .test_support(),
                     )
+                    // A tab on another database of its connection names it.
+                    .children(open.view.connection(cx).scoped_database().map(|database| {
+                        div()
+                            .debug_selector(move || format!("tab-database-{ix}"))
+                            .max_w(rems(9.231))
+                            .truncate()
+                            .child(form::badge(database, color))
+                    }))
                     .child(
                         match open.pinned {
                             // A pinned tab shows its pin, which unpins it, in place of the close button.
@@ -2193,7 +2253,7 @@ impl Workspace {
     }
 
     fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(connection) = self.sidebar.read(cx).selected().cloned() {
+        if let Some(connection) = self.sidebar.read(cx).selected() {
             self.open_query_tab(connection, window, cx);
         }
     }
@@ -2203,7 +2263,7 @@ impl Workspace {
             let connected = state::bar(cx).is_connected(&connection.id);
             let status = schema::get(cx, &connection.id).and_then(|cached| cached.status()).filter(|_| connected);
             StatusConnection {
-                name: connection.name.clone().into(),
+                name: connection.label().into(),
                 engine: connection_dialog::engine_name(&connection.driver, cx),
                 connected,
                 product: status.and_then(|s| server::server_label(&connection.driver, &s.version)).map(Into::into),
@@ -2217,7 +2277,7 @@ impl Workspace {
             }
         };
         let Some(tab) = self.active_tab() else {
-            let connection = self.sidebar.read(cx).selected().map(named);
+            let connection = self.sidebar.read(cx).selected().as_ref().map(named);
             return StatusBarState {
                 connection,
                 sidebar_open: self.sidebar_open,
@@ -2489,6 +2549,16 @@ fn snapshot_update_state(panel: &str) -> update_dialog::UpdateState {
 
 fn panel_width(cx: &App, key: &str, (default, min, max): (f32, f32, f32)) -> Pixels {
     window_state::stored_width(cx, key, default, min, max)
+}
+
+// A tab takes its connection's new settings. Where the connection lists every database, a tab stays on the
+// database it was on, even once another one becomes the connection's own.
+fn remapped(before: &ConnectionConfig, connections: &[ConnectionConfig]) -> Option<ConnectionConfig> {
+    match connections.iter().find(|c| c.id == before.id) {
+        Some(saved) if saved.shows_all_databases() => Some(saved.in_database(&before.default_database())),
+        Some(saved) => Some(saved.clone()),
+        None => scope::resolve(connections, &before.id),
+    }
 }
 
 impl Render for Workspace {

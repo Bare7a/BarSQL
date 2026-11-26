@@ -25,7 +25,7 @@ pub mod turso;
 pub use barsql_core::QueryError;
 pub use cancel::{Cancel, join_error};
 pub use dump::DumpQuery;
-pub use engine::{Engine, Session, TableQuery};
+pub use engine::{Engine, Session, TableQuery, is_missing_database};
 pub use event::{BATCH_ROWS, MAX_MESSAGES, ScriptEvent, Sink, StatementResult};
 pub use result::{Cell, CellKind, ChunkBuilder, ColumnMeta, ColumnOrigin, ResultChunk, ResultSet};
 pub use script::{Buffered, StatementRun};

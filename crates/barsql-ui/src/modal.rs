@@ -206,14 +206,24 @@ impl Global for ShownSql {}
 pub struct SqlView {
     editor: Entity<EditorState>,
     text: String,
+    wrap: bool,
 }
 
 impl SqlView {
+    // One row per line, so the view's height matches its lines.
     pub fn new(window: &mut Window, cx: &mut App) -> Self {
-        // One row per line, so the view's height matches its lines.
+        Self::with_wrap(false, window, cx)
+    }
+
+    // A long statement wraps instead of scrolling sideways, and the view grows by its wrapped rows.
+    pub fn wrapped(window: &mut Window, cx: &mut App) -> Self {
+        Self::with_wrap(true, window, cx)
+    }
+
+    fn with_wrap(wrap: bool, window: &mut Window, cx: &mut App) -> Self {
         let editor =
-            cx.new(|cx| EditorState::new(window, cx).language("sql").line_number(true).folding(false).soft_wrap(false));
-        Self { editor, text: String::new() }
+            cx.new(|cx| EditorState::new(window, cx).language("sql").line_number(true).folding(false).soft_wrap(wrap));
+        Self { editor, text: String::new(), wrap }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -234,10 +244,13 @@ impl SqlView {
     pub fn element(&self, least: usize, most: f32, window: &Window, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let font = px(theme::editor_font_size(cx));
-        let lines = self.text.lines().count().max(least) as f32;
+        let rows = self.wrap.then(|| self.editor.read(cx).display_map().wrap_row_count());
+        let lines = self.text.lines().count().max(rows.unwrap_or(0)).max(least) as f32;
         let height = (font * 1.5 * lines + window.rem_size() * 1.231).min(window.viewport_size().height * most);
+        let editor = self.editor.clone();
         div()
             .debug_selector(|| "dialog-sql".into())
+            .relative()
             .h(height)
             .overflow_hidden()
             .rounded(RADIUS)
@@ -251,6 +264,21 @@ impl SqlView {
                     .text_size(font)
                     .scrollbars_on_hover(),
             )
+            // The editor wraps in its own layout, after this height was set, so a changed count draws again.
+            .when(self.wrap, |el| {
+                el.child(
+                    canvas(
+                        move |_, window, cx| {
+                            if Some(editor.read(cx).display_map().wrap_row_count()) != rows {
+                                window.defer(cx, |window, _| window.refresh());
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
     }
 }
 

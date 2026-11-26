@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use barsql_core::SavedQuery;
 use barsql_core::clock::now_rfc3339;
+use barsql_core::scope::same_connection;
 
 use crate::connections::upsert;
 use crate::{load_json_file, update};
@@ -25,7 +26,11 @@ impl SavedQueriesStore {
         let mut out: Vec<SavedQuery> = self
             .lock()
             .iter()
-            .filter(|q| connection_id.is_empty() || q.connection_id.is_empty() || q.connection_id == connection_id)
+            .filter(|q| {
+                connection_id.is_empty()
+                    || q.connection_id.is_empty()
+                    || same_connection(&q.connection_id, connection_id)
+            })
             .cloned()
             .collect();
         out.sort_by_cached_key(|q| q.name.to_lowercase());

@@ -38,6 +38,7 @@ const VIEW_KEY: &str = "barsql-json-view";
 // Long values show their first lines; the cell viewer has the rest.
 const VALUE_LINES: usize = 6;
 const JSON_LINES: usize = 12;
+// The filter's inset. The Fields view's rows start form::ICON_INSET further in, below the field's icon.
 const INSET: Rems = rems(0.769);
 
 // A table view's table, whose rows other tables' foreign keys point at.
@@ -339,7 +340,7 @@ impl JsonPanel {
         v_flex()
             .id(("json-field", ix))
             .gap(rems(0.231))
-            .pl(INSET)
+            .pl(INSET + form::ICON_INSET)
             .pr(end)
             .py(rems(0.538))
             .border_b_1()
@@ -385,7 +386,7 @@ impl JsonPanel {
         let element = h_flex()
             .id(("json-reference", ix))
             .debug_selector(move || format!("json-reference-{ix}"))
-            .ml(rems(0.385))
+            .ml(rems(0.385) + form::ICON_INSET)
             .mr(margin)
             .px(rems(0.385))
             .py(rems(0.385))
@@ -517,12 +518,11 @@ impl Render for JsonPanel {
                         .border_b_1()
                         .border_color(theme.border)
                         .debug_selector(|| "json-filter".into())
-                        .child(Icon::new(IconName::Search).size(ICON_SM).text_color(theme.muted_foreground))
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .child(form::filter_input(&self.filter, window, cx).cleanable(true)),
+                                .child(form::search_input(&self.filter, window, cx).cleanable(true)),
                         ),
                 )
                 .child(match self.view {
@@ -547,9 +547,13 @@ impl Render for JsonPanel {
                             (false, true) => Some("jsonViewer.allNull"),
                             (false, false) => None,
                         };
-                        let empty = note
-                            .filter(|_| self.fields.is_empty())
-                            .map(|key| div().p(rems(0.769)).text_color(theme.muted_foreground).child(t(cx, key)));
+                        let empty = note.filter(|_| self.fields.is_empty()).map(|key| {
+                            div()
+                                .p(INSET)
+                                .pl(INSET + form::ICON_INSET)
+                                .text_color(theme.muted_foreground)
+                                .child(t(cx, key))
+                        });
                         let references: Vec<AnyElement> = self
                             .references
                             .iter()
@@ -570,7 +574,8 @@ impl Render for JsonPanel {
                             .when(!references.is_empty(), |el| {
                                 el.child(
                                     div()
-                                        .px(rems(0.769))
+                                        .px(INSET)
+                                        .pl(INSET + form::ICON_INSET)
                                         .pt(rems(0.923))
                                         .pb(rems(0.308))
                                         .child(form::caption(t(cx, "jsonViewer.referencedBy"), cx)),

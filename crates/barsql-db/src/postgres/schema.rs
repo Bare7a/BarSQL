@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use barsql_core::schema::primary_keys;
 use barsql_core::{Check, ForeignKey, Identity, PrimaryKey, RefAction, StructColumn, StructIndex, TableStructure};
 use barsql_core::{
-    ColumnInfo, ConnectionStatus, ConstraintInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
+    ColumnInfo, ConnectionStatus, ConstraintInfo, DatabaseInfo, DriverType, FunctionInfo, FunctionKind, FunctionList,
     FunctionSignature, IndexInfo, ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, SchemaInfo,
     SqlDialect, TableInfo, TableSize, TriggerInfo,
 };
@@ -120,6 +120,41 @@ impl PgEngine {
             )
             .await?;
         rows.iter().map(|r| get(r, 0)).collect()
+    }
+
+    pub async fn database_list(self: &Arc<Self>) -> Result<Vec<DatabaseInfo>, QueryError> {
+        let rows = self
+            .rows(
+                "SELECT datname::text, has_database_privilege(oid, 'CONNECT'), datname = 'postgres'
+                FROM pg_catalog.pg_database
+                WHERE datallowconn AND NOT datistemplate
+                ORDER BY datname",
+                &[],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| Ok(DatabaseInfo { name: get(r, 0)?, can_connect: get(r, 1)?, system: get(r, 2)? }))
+            .collect()
+    }
+
+    // pg_database_size fails without CONNECT, and would fail the whole query.
+    pub async fn database_sizes(self: &Arc<Self>) -> Result<HashMap<String, u64>, QueryError> {
+        let rows = self
+            .rows(
+                "SELECT datname::text,
+                    CASE WHEN has_database_privilege(oid, 'CONNECT') THEN pg_database_size(oid) END
+                FROM pg_catalog.pg_database
+                WHERE datallowconn AND NOT datistemplate",
+                &[],
+            )
+            .await?;
+        let mut sizes = HashMap::new();
+        for row in &rows {
+            if let Some(size) = get::<Option<i64>>(row, 1)? {
+                sizes.insert(get(row, 0)?, size.max(0) as u64);
+            }
+        }
+        Ok(sizes)
     }
 
     pub(crate) async fn dump_columns(

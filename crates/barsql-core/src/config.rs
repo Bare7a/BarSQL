@@ -138,6 +138,9 @@ pub struct ConnectionConfig {
     pub instance: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub schema: String,
+    // The sidebar lists every database on the server. `database` is the one the connection opens.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub show_all_databases: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_only: bool,
     // Asks before the editor runs a statement that changes data or schema, as for a production database.
@@ -263,6 +266,9 @@ impl ConnectionConfig {
                 require(&self.host, ConfigError::HostRequired)?;
                 if caps.database == DatabaseField::Required {
                     require(&self.database, ConfigError::DatabaseRequired(self.driver.clone()))?;
+                }
+                if self.shows_all_databases() {
+                    require(&self.default_database(), ConfigError::DatabaseRequired(self.driver.clone()))?;
                 }
                 require(&self.username, ConfigError::UsernameRequired)?;
             }

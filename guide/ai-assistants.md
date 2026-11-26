@@ -8,7 +8,8 @@ AI apps such as Claude, Cursor or VS Code can look into your databases through t
   - Your AI app asks before each change unless you always allow it. With **Ask before running changes** on, BarSQL asks every time through the AI app, and refuses changes to an AI app that can't ask
   - Each change runs in one transaction where the database has them, and reports the rows it touched. A preview runs it and rolls it back. MySQL commits schema changes at once, so a change with CREATE, ALTER or DROP can't be previewed there
   - An UPDATE or DELETE without a WHERE needs the AI to say it means every row, and SQL that begins, commits or rolls back a transaction itself is refused
-- **Tools** - `list_connections`, `list_tables`, `describe_table`, `show_ddl`, `run_query`, `explain_query`, and `run_change`, which connections without **Allow changes** refuse
+- **Tools** - `list_connections`, `list_databases`, `list_tables`, `describe_table`, `show_ddl`, `run_query`, `explain_query`, and `run_change`, which connections without **Allow changes** refuse
+- **Other databases** - on a connection with **Show all databases** on, `list_databases` names the server's databases and the other tools take a `database`. Without it, the AI stays on the connection's own database. Within a database, your login's own rights decide what a query can reach
 - **Small answers** - at most 200 rows, long values shortened, and a query stops after 30 seconds
 - **No credentials** - the AI sees each connection's name, engine and database, never its password or token
 - **A log of every call** in `BarSQL-data/mcp.log`, with what each change did

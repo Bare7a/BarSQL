@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 
+use barsql_core::capabilities::DefaultSchema;
 use barsql_core::{ColumnInfo, ConnectionConfig, DriverType, ObjectKind, ObjectRef, SqlDialect, TableInfo};
 use barsql_sql::alter::ConstraintKind;
 use barsql_sql::dml::preview_select;
@@ -39,10 +40,12 @@ const BROWSE_INSET: Rems = rems(0.308);
 const SCHEMA_EXPANDED_KEY: &str = "barsql-schema-expanded";
 const TABLES_EXPANDED_KEY: &str = "barsql-schema-tables-expanded";
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(200);
-const ROW_HEIGHT_REM: f32 = 2.;
+pub(crate) const ROW_HEIGHT_REM: f32 = 2.;
 const INDENT_REM: f32 = 1.231;
 // A row's own inset, before its chevron.
-const ROW_PADDING: Rems = rems(0.462);
+pub(crate) const ROW_PADDING: Rems = rems(0.462);
+// Between a row's chevron, icon and name.
+pub(crate) const ROW_GAP: Rems = rems(0.308);
 // Enum values a column's tooltip lists before cutting off.
 const TIP_VALUES: usize = 12;
 const CONTEXT: &str = "SchemaTree";
@@ -134,6 +137,8 @@ struct TreeRow {
 // Each level loads on first expand. The whole tree is flattened into one virtualised list.
 pub struct SchemaTree {
     connection: Option<ConnectionConfig>,
+    // A MySQL or ClickHouse database picked from the Databases list: only its row shows.
+    only_schema: Option<String>,
     search: Entity<InputState>,
     needle: String,
     // Keyed `connection:schema` and `connection:schema:table`, and persisted.
@@ -182,6 +187,7 @@ impl SchemaTree {
         ];
         Self {
             connection: None,
+            only_schema: None,
             search,
             needle: String::new(),
             expanded_schemas: setting_json(cx, SCHEMA_EXPANDED_KEY),
@@ -205,6 +211,11 @@ impl SchemaTree {
 
     pub fn set_connection(&mut self, connection: Option<ConnectionConfig>, cx: &mut Context<Self>) {
         let same = self.connection.as_ref().map(|c| &c.id) == connection.as_ref().map(|c| &c.id);
+        self.only_schema = connection
+            .as_ref()
+            .filter(|c| c.shows_all_databases())
+            .filter(|c| c.driver.capabilities().default_schema == DefaultSchema::Database)
+            .map(|c| c.default_browse_schema());
         self.connection = connection;
         if !same {
             self.error = None;
@@ -242,11 +253,20 @@ impl SchemaTree {
         }
     }
 
-    // Toolbar import, into the connection's first schema.
+    // A database picked in the Databases list loads without a tab opening, as one would after Connect.
+    pub fn load_now(&mut self, cx: &mut Context<Self>) {
+        if let Some(conn) = self.connection.clone() {
+            self.load(&conn, false, cx);
+            self.schema_changed(cx);
+        }
+    }
+
+    // Toolbar import, into the connection's first schema, or the one database shown.
     pub fn import_default(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let schema = self.connection.as_ref().and_then(|c| {
+        let first = self.connection.as_ref().and_then(|c| {
             schema::get(cx, &c.id).and_then(|d| d.schemas()).and_then(|s| s.first()).map(|s| s.name.clone())
         });
+        let schema = self.only_schema.clone().or(first);
         self.import(schema.unwrap_or_default(), None, window, cx);
     }
 
@@ -345,7 +365,7 @@ impl SchemaTree {
         let mut tables_to_load = Vec::new();
         let mut columns_to_load = Vec::new();
         let mut sizes_to_load = Vec::new();
-        for sch in schemas {
+        for sch in schemas.iter().filter(|s| self.only_schema.as_ref().is_none_or(|only| *only == s.name)) {
             let key = format!("{}:{}", conn.id, sch.name);
             let open = self.expanded_schemas.get(&key) == Some(&true);
             let Some(tables) = data.tables(&sch.name) else {
@@ -487,7 +507,7 @@ impl SchemaTree {
         let Some(data) = schema::get(cx, &conn.id) else { return rows };
         let Some(schemas) = data.schemas() else { return rows };
         let needle = self.needle.as_str();
-        for sch in schemas {
+        for sch in schemas.iter().filter(|s| self.only_schema.as_ref().is_none_or(|only| *only == s.name)) {
             let key = format!("{}:{}", conn.id, sch.name);
             let all = data.tables(&sch.name).unwrap_or_default();
             let loading = data.tables_loading(&sch.name);
@@ -677,7 +697,7 @@ impl SchemaTree {
     fn open_change(&mut self, change: Change, window: &mut Window, cx: &mut Context<Self>) {
         let Some(connection) = self.connection.clone() else { return };
         let this = cx.entity().downgrade();
-        schema_actions::open_change(connection, change, window, cx, move |applied, cx| {
+        schema_actions::open_change(connection, change, None, window, cx, move |applied, cx| {
             let _ = this.update(cx, |tree, cx| tree.changed(applied, cx));
         });
     }
@@ -738,6 +758,8 @@ impl SchemaTree {
                 }
                 (&object.schema, &object.table, TableChange::Altered)
             }
+            // The Databases list makes these, and the sidebar catches up.
+            Change::CreateDatabase | Change::RenameDatabase { .. } | Change::DropDatabase { .. } => return,
         };
         cx.emit(SchemaTreeEvent::TableChanged {
             connection_id: id.to_string(),
@@ -1286,7 +1308,7 @@ impl SchemaTree {
             .h(rems(ROW_HEIGHT_REM))
             .w_full()
             .px(ROW_PADDING)
-            .gap(rems(0.308))
+            .gap(ROW_GAP)
             .rounded(RADIUS)
             .text_size(TEXT_BASE)
             .overflow_hidden()
@@ -1541,8 +1563,8 @@ impl SchemaTree {
         let loading = self.connection.as_ref().is_some_and(|c| schema::get(cx, &c.id).is_some_and(|d| d.loading()));
         let field = div()
             .debug_selector(|| "schema-search".into())
-            .child(form::filter_input(&self.search, window, cx).cleanable(true).disabled(!enabled));
-        form::filter_bar(field, cx)
+            .child(form::search_input(&self.search, window, cx).cleanable(true).disabled(!enabled));
+        form::filter_bar(field)
             .child(
                 form::filter_button("refresh-schema", Icon::new(Lucide::RefreshCw))
                     .debug_selector(|| "refresh-schema".into())
@@ -1562,7 +1584,7 @@ impl SchemaTree {
             .debug_selector(|| "schema-options".into())
             .tooltip(t(cx, "sidebar.schemaOptions"))
             .disabled(!enabled)
-            .dropdown_menu(move |menu: PopupMenu, window, cx| {
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu: PopupMenu, window, cx| {
                 let (collapse, import, views_for) = (this.clone(), this.clone(), this.clone());
                 let driver = driver.clone();
                 menu.item(

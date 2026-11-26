@@ -289,11 +289,9 @@ impl SavedPanel {
         let ring = self.nav.ringed(&query.id, window);
         let theme = cx.theme().clone();
         let pinned = saved_queries::pinned(cx).contains(&query.id);
-        let connection = (self.scope == Scope::All)
-            .then(|| self.connections.iter().find(|c| c.id == query.connection_id))
-            .flatten()
-            .map(|c| c.name.as_str());
-        let meta = row_meta(query, self.sort, connection, cx.global::<I18n>().lang(), now_ms);
+        let connection =
+            saved_queries::where_it_runs(&self.connections, &query.connection_id, self.scope == Scope::All);
+        let meta = row_meta(query, self.sort, connection.as_deref(), cx.global::<I18n>().lang(), now_ms);
         let menu = self.row_menu(query, pinned, cx);
         let (open, pin_id, rename, delete) = (query.clone(), query.id.clone(), query.clone(), query.clone());
         h_flex()
@@ -417,8 +415,8 @@ impl Render for SavedPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let field = div()
             .debug_selector(|| "saved-filter".into())
-            .child(form::filter_input(&self.filter, window, cx).cleanable(true));
-        let filter_bar = form::filter_bar(field, cx).child(self.options_menu(cx));
+            .child(form::search_input(&self.filter, window, cx).cleanable(true));
+        let filter_bar = form::filter_bar(field).child(self.options_menu(cx));
         let shown: Rc<[SavedQuery]> = self.visible(cx).into_iter().cloned().collect();
         let now_ms = Timestamp::now().as_millisecond();
         let body = if saved_queries::list(cx).is_empty() {

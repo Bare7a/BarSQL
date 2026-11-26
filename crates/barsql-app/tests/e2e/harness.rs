@@ -13,6 +13,7 @@ use tempfile::TempDir;
 use crate::support::{collect, import_outcome};
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(180);
+pub const SECOND_DATABASE: &str = "barsql_test_b";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -313,6 +314,25 @@ impl E2e {
 
     pub async fn exec(&self, sql: &str) {
         self.query(sql).await;
+    }
+
+    // Created once and kept, since the suites run side by side. template0, because another test connects to
+    // template1 and Postgres copies only an unused template.
+    pub async fn second_database(&self) -> String {
+        let name = SECOND_DATABASE;
+        let sql = match self.kind {
+            Kind::Postgres => format!("CREATE DATABASE {name} TEMPLATE template0"),
+            Kind::SqlServer => format!("IF DB_ID(N'{name}') IS NULL CREATE DATABASE [{name}]"),
+            Kind::MySql | Kind::MariaDb | Kind::ClickHouse => format!("CREATE DATABASE IF NOT EXISTS {name}"),
+            Kind::Turso => return name.into(),
+        };
+        match self.try_query(&sql).await {
+            // Postgres' duplicate_database and its catalog race, SQL Server's "already exists".
+            Err(err) if !matches!(err.code.as_str(), "42P04" | "23505" | "1801") => {
+                panic!("[{}] {sql:?}: {err:?}", self.kind.name())
+            }
+            _ => name.into(),
+        }
     }
 
     // Registers the matching DROP, so the shared database stays clean when an assertion fails.

@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::Duration;
 
 use barsql_core::config::{SSH_AUTH_AGENT, SSH_AUTH_KEY, SSH_AUTH_PASSWORD};
@@ -155,9 +156,24 @@ pub(crate) struct TunnelSlot {
     current: tokio::sync::Mutex<Option<Arc<SshTunnel>>>,
 }
 
+// Keyed by every tunnel setting, so a connection's databases share one bastion session.
+static SHARED_SLOTS: LazyLock<Mutex<HashMap<String, Weak<TunnelSlot>>>> = LazyLock::new(Default::default);
+
 impl TunnelSlot {
     pub(crate) fn new(options: SshOptions) -> Arc<Self> {
         Arc::new(Self { options, current: tokio::sync::Mutex::new(None) })
+    }
+
+    pub(crate) fn shared(options: SshOptions) -> Arc<Self> {
+        let key = format!("{options:?}");
+        let mut slots = SHARED_SLOTS.lock().unwrap_or_else(|e| e.into_inner());
+        slots.retain(|_, slot| slot.strong_count() > 0);
+        if let Some(slot) = slots.get(&key).and_then(Weak::upgrade) {
+            return slot;
+        }
+        let slot = Self::new(options);
+        slots.insert(key, Arc::downgrade(&slot));
+        slot
     }
 
     pub(crate) async fn get(&self) -> Result<Arc<SshTunnel>, QueryError> {
@@ -371,6 +387,25 @@ fn ssh_error(err: russh::Error) -> QueryError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engines_with_the_same_tunnel_share_one_bastion_session() {
+        let options = |host: &str| SshOptions {
+            host: host.into(),
+            port: 22,
+            username: "u".into(),
+            auth: SshAuth::Agent,
+            known_hosts: None,
+            ignore_host_key: false,
+        };
+        let a = TunnelSlot::shared(options("bastion-share-test"));
+        let b = TunnelSlot::shared(options("bastion-share-test"));
+        assert!(Arc::ptr_eq(&a, &b));
+        assert!(!Arc::ptr_eq(&a, &TunnelSlot::shared(options("other-bastion-share-test"))));
+        let weak = Arc::downgrade(&a);
+        drop((a, b));
+        assert!(weak.upgrade().is_none(), "the last engine closes the session");
+    }
 
     #[test]
     fn expands_home_paths() {

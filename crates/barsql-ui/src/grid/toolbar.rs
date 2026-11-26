@@ -14,7 +14,43 @@ use super::{copy_format, set_copy_format};
 use crate::form::{self, ToolButton};
 use crate::i18n::{t, t_with};
 use crate::scrollbars::HoverScrollbar as _;
-use crate::tokens::{ICON_XS, TEXT_SM};
+use crate::tokens::{ICON_SM, ICON_XS, TEXT_SM};
+
+const PAD_REM: f32 = 0.462;
+// Above its bottom border. The Databases list's header matches it, so the lines under a table view's toolbar and the
+// header meet.
+pub const TOOLBAR_REM: f32 = form::TOOL_REM + 2. * PAD_REM;
+
+// What a toolbar's row count lines up with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CountAlign {
+    // A table view's filter above: the icon under its funnel, the count under its text.
+    UnderFilter,
+    // Nothing above: the icon as far in from the left as the last button is from the right.
+    Edge,
+}
+
+// Under a filter it moves left to the funnel's rounded corner, which reaches 1/24 of an icon past this frame. Icons
+// snap to device pixels, so the move is in whole ones.
+#[derive(IntoElement)]
+struct CountIcon(CountAlign);
+
+impl RenderOnce for CountIcon {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let shift = match self.0 {
+            CountAlign::UnderFilter => {
+                let scale = window.scale_factor();
+                px((ICON_SM.to_pixels(window.rem_size()) / px(24.) * scale).round() / scale)
+            }
+            CountAlign::Edge => px(0.),
+        };
+        Icon::new(Lucide::Rows3)
+            .size(ICON_SM)
+            .text_color(cx.theme().muted_foreground)
+            .ml(-shift)
+            .mr(form::ICON_GAP + shift)
+    }
+}
 
 pub fn format_label(format: ExportFormat, cx: &App) -> SharedString {
     let key = match format {
@@ -35,6 +71,7 @@ pub fn toolbar(
     action: Option<AnyElement>,
     extra: Option<AnyElement>,
     grid_tools: bool,
+    align: CountAlign,
     cx: &mut App,
 ) -> impl IntoElement {
     let theme = cx.theme();
@@ -46,10 +83,11 @@ pub fn toolbar(
         format!(" · {}", t_with(cx, "tableView.selectionCells", &[("rows", &rows), ("cols", &cols)]))
     });
     let export = grid.clone();
+    let under_filter = align == CountAlign::UnderFilter;
     h_flex()
         .flex_none()
         .px(rems(0.769))
-        .py(rems(0.462))
+        .py(rems(PAD_REM))
         .gap(rems(0.615))
         .justify_between()
         .border_b_1()
@@ -62,7 +100,14 @@ pub fn toolbar(
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .child(meta)
+                .when(under_filter, |el| el.pl(form::ICON_INSET))
+                .child(CountIcon(align))
+                .child(
+                    div()
+                        .debug_selector(|| "results-meta".into())
+                        .when(under_filter, |el| el.ml(form::DIGIT_NUDGE))
+                        .child(meta),
+                )
                 .children(count.map(|count| div().text_color(accent).child(count)))
                 .children(action),
         )

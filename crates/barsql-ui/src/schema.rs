@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use barsql_core::{ColumnInfo, ConnectionStatus, DriverType, ReferencingKey, SchemaInfo, TableInfo, TableSize};
+use barsql_core::{
+    ColumnInfo, ConnectionConfig, ConnectionStatus, DriverType, ReferencingKey, SchemaInfo, TableInfo, TableSize, scope,
+};
 use barsql_sql::lang::quoting::column_cache_key;
 use barsql_sql::lang::{Catalog, FunctionCatalog};
 use barsql_sql::schema_diff::Tables;
@@ -240,6 +242,31 @@ pub fn reload(connection_id: &str, driver: DriverType, cx: &mut App) {
 pub fn forget(connection_id: &str, cx: &mut App) {
     let entry = entry(cx, connection_id);
     *entry = ConnectionSchema { generation: entry.generation + 1, ..Default::default() };
+}
+
+pub fn loaded_ids(cx: &App) -> Vec<String> {
+    let Some(schemas) = cx.try_global::<Schemas>() else { return Vec::new() };
+    schemas.connections.iter().filter(|(_, entry)| entry.schemas.is_some()).map(|(id, _)| id.clone()).collect()
+}
+
+// The databases opened under saved connections, as connections of their own.
+pub fn opened_databases(connections: &[ConnectionConfig], cx: &App) -> Vec<ConnectionConfig> {
+    let mut ids = loaded_ids(cx);
+    ids.sort();
+    ids.into_iter()
+        .filter(|id| !connections.iter().any(|c| c.id == *id))
+        .filter_map(|id| scope::resolve(connections, &id).filter(|c| c.id == id))
+        .collect()
+}
+
+// A saved connection and the databases opened under it.
+pub fn forget_family(connection_id: &str, cx: &mut App) {
+    let Some(schemas) = cx.try_global::<Schemas>() else { return };
+    let ids: Vec<String> =
+        schemas.connections.keys().filter(|id| scope::same_connection(id, connection_id)).cloned().collect();
+    for id in ids.iter().map(String::as_str).chain([connection_id]) {
+        forget(id, cx);
+    }
 }
 
 fn load(connection_id: &str, driver: DriverType, cx: &mut App) {

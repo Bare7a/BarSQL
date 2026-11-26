@@ -1356,7 +1356,7 @@ impl ResultsPanel {
         let edit_bar = set.editor.as_ref().filter(|editor| editor.has_pending() || editor.applying);
         v_flex()
             .size_full()
-            .child(grid::toolbar(grid, meta, None, Some(toggle), !set.charting, cx))
+            .child(grid::toolbar(grid, meta, None, Some(toggle), !set.charting, grid::CountAlign::Edge, cx))
             .child(div().flex_1().min_h_0().child(body))
             .children(edit_bar.map(|editor| self.edit_bar(editor, cx)))
             .into_any_element()

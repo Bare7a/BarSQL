@@ -1,6 +1,8 @@
 # 🗃️ Schema Explorer
 
 - Tree view: schemas → tables / views → columns, then **indexes**, **constraints** and **triggers**
+- **Databases list** - on a connection with **Show all databases** on, the server's databases sit above the tree with their size, a dot for the ones open, and a lock for the ones your login can't open. Click one to show it in the tree, double-click to open a query tab on it. Pin the ones you use, filter a long list, show the system databases from the list's menu, and drag the line below it or collapse it to one row that names the database the tree shows. On MySQL / MariaDB and ClickHouse the tree then shows just that database
+- **New, rename and drop databases** - **New database…** sits in the Databases list's menu, and **Rename…** and **Drop…** in a database's right-click menu, each showing the SQL it will run. The connection's own database and the server's system ones are left alone, and MySQL / MariaDB have no rename. BarSQL closes its own connections to the database first, holds back while a tab has an open transaction, a running query or unsaved edits on it, and moves tabs along with a renamed database
 - Views are called out with their own icon and badge; **functions and procedures** close each schema
 - Tables show their size on disk from the catalog's own figures (PostgreSQL, MySQL / MariaDB, SQL Server and ClickHouse): PostgreSQL's and MySQL 8's are estimates as of their last statistics update, which MySQL 8 caches for up to a day, and **Refresh** reads them again
 - Columns show an icon for their type, and gold primary-key and blue foreign-key icons, as the grid and ER diagram do. Hover one for its full type, foreign-key target, default, whether it's generated, and the values an enum allows

@@ -59,6 +59,7 @@ macro_rules! require {
 
 mod changes;
 mod connections;
+mod databases;
 mod explain;
 mod grid;
 mod query;

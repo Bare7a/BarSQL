@@ -20,8 +20,16 @@ use crate::{BarApp, ChangeOutcome, RunEvent, lock};
 
 // Newest first; other versions get the newest.
 const PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const TOOLS: [&str; 7] =
-    ["list_connections", "list_tables", "describe_table", "show_ddl", "run_query", "explain_query", "run_change"];
+const TOOLS: [&str; 8] = [
+    "list_connections",
+    "list_databases",
+    "list_tables",
+    "describe_table",
+    "show_ddl",
+    "run_query",
+    "explain_query",
+    "run_change",
+];
 const MAX_ROWS: usize = 200;
 const MAX_CELL_CHARS: usize = 2_000;
 // Rough cap on row bytes per answer, so wide rows can't flood the assistant's context.
@@ -223,6 +231,10 @@ impl Server {
             return Ok(list_connections(&shared));
         }
         let cfg = connection(&shared, args)?;
+        if tool == "list_databases" {
+            return self.list_databases(cfg).await;
+        }
+        let cfg = &in_database(cfg, args)?;
         match tool {
             "list_tables" => self.list_tables(cfg, args).await,
             "describe_table" => self.describe_table(cfg, args).await,
@@ -232,6 +244,19 @@ impl Server {
             "run_change" => self.run_change(cfg, args, tab, cancelled).await,
             _ => Err(format!("unknown tool: {tool}")),
         }
+    }
+
+    async fn list_databases(&self, cfg: &ConnectionConfig) -> Result<String, String> {
+        if !cfg.shows_all_databases() {
+            return Err(only_its_own(cfg));
+        }
+        let own = cfg.default_database();
+        let listed = self.bar.database_list(&cfg.id).await.map_err(failed)?;
+        let databases: Vec<Value> = listed
+            .iter()
+            .map(|db| json!({ "name": db.name, "default": db.name == own, "canConnect": db.can_connect, "system": db.system }))
+            .collect();
+        Ok(json!({ "databases": databases }).to_string())
     }
 
     async fn list_tables(&self, cfg: &ConnectionConfig, args: &Value) -> Result<String, String> {
@@ -388,9 +413,9 @@ impl Server {
         lock(&self.questions).insert(id.clone(), answer);
         let sql = shorten(sql.to_string(), MAX_CONFIRM_CHARS);
         let message = if preview {
-            format!("Try this change on {} and roll it back?\n\n{sql}", cfg.name)
+            format!("Try this change on {} and roll it back?\n\n{sql}", cfg.label())
         } else {
-            format!("Run this change on {}?\n\n{sql}", cfg.name)
+            format!("Run this change on {}?\n\n{sql}", cfg.label())
         };
         let approve = json!({ "type": "boolean", "title": "Approve", "default": false });
         let schema = json!({ "type": "object", "properties": { "approve": approve }, "required": ["approve"] });
@@ -541,6 +566,11 @@ fn initialize(params: &Value) -> Value {
 
 fn tools() -> Value {
     let connection = json!({ "type": "string", "description": "A connection id from list_connections." });
+    let database = json!({
+        "type": "string",
+        "description": "A database from list_databases, on a connection whose allDatabases is true. Defaults to the \
+                        connection's own."
+    });
     let schema =
         json!({ "type": "string", "description": "Schema name. Defaults to the connection's default schema." });
     let sql = json!({ "type": "string", "description": "One read-only statement in the connection's SQL dialect." });
@@ -556,11 +586,20 @@ fn tools() -> Value {
             &[],
         ),
         tool(
+            "list_databases",
+            "List databases",
+            Access::Reads,
+            "List the databases on the server of a connection whose allDatabases is true. Other tools reach one of \
+             them through their database argument.",
+            json!({ "connection": connection }),
+            &["connection"],
+        ),
+        tool(
             "list_tables",
             "List tables",
             Access::Reads,
             "List tables and views. Without a schema, it also lists the names of all schemas.",
-            json!({ "connection": connection, "schema": schema }),
+            json!({ "connection": connection, "database": database, "schema": schema }),
             &["connection"],
         ),
         tool(
@@ -569,7 +608,7 @@ fn tools() -> Value {
             Access::Reads,
             "Describe a table or view: its columns with types, nullability and defaults, and for a table its primary \
              key, indexes, foreign keys and checks.",
-            json!({ "connection": connection, "schema": schema, "table": { "type": "string" } }),
+            json!({ "connection": connection, "database": database, "schema": schema, "table": { "type": "string" } }),
             &["connection", "table"],
         ),
         tool(
@@ -579,6 +618,7 @@ fn tools() -> Value {
             "Show the CREATE statement of a table, view, function, procedure, trigger or index.",
             json!({
                 "connection": connection,
+                "database": database,
                 "schema": schema,
                 "name": { "type": "string" },
                 "kind": { "type": "string", "enum": kinds, "description": "Defaults to table." },
@@ -592,7 +632,7 @@ fn tools() -> Value {
             Access::Reads,
             "Run read-only SQL and return the rows of its last result, at most 200. Statements that change data or \
              schema are refused.",
-            json!({ "connection": connection, "sql": sql }),
+            json!({ "connection": connection, "database": database, "sql": sql }),
             &["connection", "sql"],
         ),
         tool(
@@ -601,7 +641,7 @@ fn tools() -> Value {
             Access::Reads,
             "Show how the database would run a read-only statement. With analyze, the statement runs and the plan \
              includes actual rows and timings.",
-            json!({ "connection": connection, "sql": sql, "analyze": { "type": "boolean" } }),
+            json!({ "connection": connection, "database": database, "sql": sql, "analyze": { "type": "boolean" } }),
             &["connection", "sql"],
         ),
         // Always listed, as some clients never fetch the list again.
@@ -614,6 +654,7 @@ fn tools() -> Value {
              it and roll it back. An UPDATE or DELETE without a WHERE needs allRows.",
             json!({
                 "connection": connection,
+                "database": database,
                 "sql": { "type": "string", "description": "The change in the connection's SQL dialect, with no \
                          BEGIN, COMMIT or ROLLBACK." },
                 "preview": { "type": "boolean", "description": "Run it, report what it would change, and roll back." },
@@ -658,6 +699,7 @@ fn list_connections(shared: &[ConnectionConfig]) -> String {
                 "engine": cfg.driver.as_str(),
                 "database": database_name(cfg),
                 "defaultSchema": cfg.default_browse_schema(),
+                "allDatabases": cfg.shows_all_databases(),
                 "canChange": cfg.mcp_changes,
             })
         })
@@ -669,6 +711,19 @@ fn connection<'a>(shared: &'a [ConnectionConfig], args: &Value) -> Result<&'a Co
     let id = required(args, "connection")?;
     (shared.iter().find(|cfg| cfg.id == id))
         .ok_or_else(|| format!("no shared connection has the id {id}; list_connections lists them"))
+}
+
+// Another database only where the user lists them all. Within it, the login's own rights decide what's reachable.
+fn in_database(cfg: &ConnectionConfig, args: &Value) -> Result<ConnectionConfig, String> {
+    match optional(args, "database") {
+        "" => Ok(cfg.clone()),
+        database if cfg.shows_all_databases() => Ok(cfg.in_database(database)),
+        _ => Err(only_its_own(cfg)),
+    }
+}
+
+fn only_its_own(cfg: &ConnectionConfig) -> String {
+    format!("{} shares only its own database. The user can turn on Show all databases for it in BarSQL.", cfg.name)
 }
 
 // Resolves on cancel; never once the call is unregistered.

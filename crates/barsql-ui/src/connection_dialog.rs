@@ -222,6 +222,7 @@ pub struct ConnectionForm {
     // Keeps the id, folder and unknown fields for the save.
     original: ConnectionConfig,
     driver: DriverType,
+    show_all_databases: bool,
     read_only: bool,
     confirm_changes: bool,
     mcp: bool,
@@ -292,6 +293,7 @@ impl ConnectionForm {
         };
         Self {
             driver: config.driver.clone(),
+            show_all_databases: config.show_all_databases,
             read_only: config.read_only,
             confirm_changes: config.confirm_changes,
             mcp: config.mcp,
@@ -454,6 +456,7 @@ impl ConnectionForm {
             instance: if self.driver == DriverType::SqlServer { value(&f.instance) } else { String::new() },
             ssl_mode: self.ssl_mode.clone(),
             schema: value(&f.schema),
+            show_all_databases: self.show_all_databases && self.driver.capabilities().all_databases,
             read_only: self.read_only,
             confirm_changes: self.confirm_changes,
             mcp: self.mcp,
@@ -612,7 +615,7 @@ impl ConnectionForm {
                     Some(Ok(saved)) => {
                         // That save closed the connection, so what was read through it may be stale.
                         if !this.original.id.is_empty() && !this.original.connects_like(&saved) {
-                            schema::forget(&saved.id, cx);
+                            schema::forget_family(&saved.id, cx);
                         }
                         window.close_dialog(cx);
                         (this.on_saved.clone())(saved, window, cx);
@@ -744,6 +747,13 @@ fn database_items(mut menu: PopupMenu, databases: &[String], form: &Entity<Conne
         }));
     }
     menu.scrollable(true)
+}
+
+#[cfg(test)]
+impl ConnectionForm {
+    pub(crate) fn editing_id(&self) -> &str {
+        &self.original.id
+    }
 }
 
 // Last opened dialog, for the scenario tests and the demo video.
@@ -891,6 +901,20 @@ impl Render for ConnectionForm {
         } else {
             let ssl_select = self.ssl_select(window, cx);
             let database_hint = driver_copy.database_hint;
+            let all_databases = self.driver.capabilities().all_databases.then(|| {
+                self.toggle(
+                    "conn-all-databases",
+                    self.show_all_databases,
+                    "connection.showAllDatabases",
+                    "connection.showAllDatabasesHint",
+                    |form| form.show_all_databases = !form.show_all_databases,
+                    cx,
+                )
+            });
+            let database_label = match all_databases.is_some() && self.show_all_databases {
+                true => "connection.defaultDatabase",
+                false => "connection.databaseName",
+            };
             let schema_label = driver_copy.schema_label;
             body = body
                 .child(form::row(
@@ -909,7 +933,7 @@ impl Render for ConnectionForm {
                 })
                 .child(
                     form::group(
-                        t(cx, "connection.databaseName"),
+                        t(cx, database_label),
                         h_flex()
                             .gap(rems(0.615))
                             .child(labelled("conn-database", form::input(&f.database, window, cx)).flex_1())
@@ -918,6 +942,7 @@ impl Render for ConnectionForm {
                     )
                     .child(form::hint(t(cx, database_hint), cx)),
                 )
+                .children(all_databases)
                 .child(form::row(
                     form::group(
                         t(cx, "connection.username"),
@@ -1868,6 +1893,39 @@ mod tests {
         assert!(drawn(cx));
         form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Postgres, window, cx));
         assert!(!drawn(cx));
+    }
+
+    #[gpui_kit::test]
+    fn engines_with_databases_offer_to_show_them_all(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let cx = window(cx);
+        let server = ConnectionConfig {
+            name: "Server".into(),
+            driver: DriverType::Postgres,
+            host: "127.0.0.1".into(),
+            database: "forum".into(),
+            username: "u".into(),
+            ..Default::default()
+        };
+        let (form, saved) = open_form(Some(server), cx);
+        let drawn = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.debug_bounds("conn-all-databases")
+        };
+        let at = drawn(cx).expect("Postgres offers it").center();
+        cx.simulate_click(at, gpui_kit::Modifiers::none());
+        cx.run_until_parked();
+        assert!(form.read_with(cx, |form, cx| form.config(cx).show_all_databases));
+        form.update_in(cx, |form, window, cx| form.save(window, cx));
+        settle(cx, |_| !saved.borrow().is_empty());
+        assert!(saved.borrow()[0].show_all_databases);
+
+        let (form, _) = open_form(None, cx);
+        assert!(drawn(cx).is_none(), "a SQLite file has no other databases");
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::Turso, window, cx));
+        assert!(drawn(cx).is_none());
+        form.update_in(cx, |form, window, cx| form.set_driver(DriverType::MySql, window, cx));
+        assert!(drawn(cx).is_some());
     }
 
     #[gpui_kit::test]

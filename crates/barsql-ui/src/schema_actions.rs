@@ -24,6 +24,8 @@ use crate::toast;
 use crate::tokens::{ICON_XS, TEXT_SM};
 
 type OnDone = Rc<dyn Fn(&Applied, &mut App)>;
+// Asked when the change is confirmed. A message keeps the dialog open and says why.
+pub type Guard = Rc<dyn Fn(&App) -> Option<SharedString>>;
 
 pub struct Applied {
     pub connection_id: String,
@@ -47,6 +49,9 @@ pub enum Change {
     RenameColumn { schema: String, table: String, column: String },
     DropColumn { schema: String, table: String, column: String },
     DropObject { object: ObjectRef, constraint: ConstraintKind },
+    CreateDatabase,
+    RenameDatabase { database: String },
+    DropDatabase { database: String },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -61,11 +66,37 @@ impl Change {
             Self::RenameTable { table, .. } | Self::DropTable { table, .. } | Self::Truncate { table, .. } => table,
             Self::RenameColumn { column, .. } | Self::DropColumn { column, .. } => column,
             Self::DropObject { object, .. } => &object.name,
+            Self::CreateDatabase => "",
+            Self::RenameDatabase { database } | Self::DropDatabase { database } => database,
         }
     }
 
     fn renames(&self) -> bool {
-        matches!(self, Self::RenameTable { .. } | Self::RenameColumn { .. })
+        matches!(self, Self::RenameTable { .. } | Self::RenameColumn { .. } | Self::RenameDatabase { .. })
+    }
+
+    // A new database's name is typed, as a rename's is.
+    fn named(&self) -> bool {
+        self.renames() || matches!(self, Self::CreateDatabase)
+    }
+
+    // Cascade and Restart identity are for tables and what hangs off them.
+    fn takes_options(&self) -> bool {
+        !self.named() && !matches!(self, Self::DropDatabase { .. })
+    }
+
+    fn destroys(&self) -> bool {
+        !self.named()
+    }
+
+    // The database's own pool closes first, since Postgres and SQL Server refuse while it has sessions.
+    pub(crate) fn closes(&self, connection: &ConnectionConfig) -> Option<String> {
+        match self {
+            Self::RenameDatabase { database } | Self::DropDatabase { database } => {
+                Some(connection.in_database(database).id)
+            }
+            _ => None,
+        }
     }
 
     // None where the engine has no statement for it.
@@ -84,6 +115,9 @@ impl Change {
                 Some(alter::drop_column(driver, schema, table, column, cascade))
             }
             Self::DropObject { object, constraint } => alter::drop_object(driver, object, *constraint, cascade),
+            Self::CreateDatabase => alter::create_database(driver, new_name),
+            Self::RenameDatabase { database } => alter::rename_database(driver, database, new_name),
+            Self::DropDatabase { database } => alter::drop_database(driver, database),
         }
     }
 
@@ -108,6 +142,9 @@ impl Change {
                 ObjectKind::Procedure => "dropProcedure",
                 _ => "dropFunction",
             },
+            Self::CreateDatabase => "createDatabase",
+            Self::RenameDatabase { .. } => "renameDatabase",
+            Self::DropDatabase { .. } => "dropDatabase",
         };
         t(cx, &format!("schemaChange.{key}"))
     }
@@ -115,7 +152,13 @@ impl Change {
     fn description(&self, cx: &App) -> Option<SharedString> {
         let name = self.name();
         Some(match self {
-            Self::RenameTable { .. } | Self::RenameColumn { .. } => return None,
+            Self::RenameTable { .. }
+            | Self::RenameColumn { .. }
+            | Self::CreateDatabase
+            | Self::RenameDatabase { .. } => {
+                return None;
+            }
+            Self::DropDatabase { .. } => t_with(cx, "schemaChange.dropDatabaseDescription", &[("name", name)]),
             Self::DropTable { kind: ObjectKind::View | ObjectKind::MaterializedView, .. } => {
                 t_with(cx, "schemaChange.dropViewDescription", &[("name", name)])
             }
@@ -130,7 +173,8 @@ impl Change {
 
     fn confirm(&self, cx: &App) -> SharedString {
         match self {
-            Self::RenameTable { .. } | Self::RenameColumn { .. } => t(cx, "common.rename"),
+            Self::CreateDatabase => t(cx, "common.create"),
+            _ if self.renames() => t(cx, "common.rename"),
             Self::Truncate { .. } => t(cx, "schemaChange.truncate"),
             _ => t(cx, "schemaChange.drop"),
         }
@@ -139,9 +183,8 @@ impl Change {
     fn done(&self, new_name: &str, cx: &App) -> SharedString {
         let name = self.name();
         match self {
-            Self::RenameTable { .. } | Self::RenameColumn { .. } => {
-                t_with(cx, "schemaChange.renamed", &[("name", name), ("newName", new_name)])
-            }
+            Self::CreateDatabase => t_with(cx, "schemaChange.created", &[("name", new_name)]),
+            _ if self.renames() => t_with(cx, "schemaChange.renamed", &[("name", name), ("newName", new_name)]),
             Self::Truncate { .. } => t_with(cx, "schemaChange.truncated", &[("name", name)]),
             _ => t_with(cx, "schemaChange.dropped", &[("name", name)]),
         }
@@ -156,6 +199,7 @@ struct ChangeDialog {
     running: bool,
     error: Option<SharedString>,
     job: String,
+    guard: Option<Guard>,
     on_done: OnDone,
     sql: SqlView,
     _subscriptions: Vec<Subscription>,
@@ -166,18 +210,21 @@ impl ChangeDialog {
         self.name.as_ref().map(|name| name.read(cx).value().trim().to_string()).unwrap_or_default()
     }
 
-    // None while a rename's new name is empty or unchanged.
+    // None while a typed name is empty or unchanged.
     fn sql(&self, cx: &App) -> Option<String> {
         let new_name = self.new_name(cx);
-        if self.change.renames() && (new_name.is_empty() || new_name == self.change.name()) {
+        if self.change.named() && (new_name.is_empty() || new_name == self.change.name()) {
             return None;
         }
         self.change.sql(&self.connection.driver, &new_name, self.options)
     }
 
-    // A rename previews with the current name until a new one is typed.
+    // A rename previews with the current name until a new one is typed. A new database waits for its name.
     fn preview(&self, cx: &App) -> Option<String> {
         let new_name = Some(self.new_name(cx)).filter(|n| !n.is_empty()).unwrap_or_else(|| self.change.name().into());
+        if new_name.is_empty() {
+            return None;
+        }
         self.change.sql(&self.connection.driver, &new_name, self.options).map(|sql| terminate_statement(&sql))
     }
 
@@ -192,12 +239,23 @@ impl ChangeDialog {
             return;
         }
         let Some(sql) = self.sql(cx) else { return };
+        if let Some(why) = self.guard.as_ref().and_then(|guard| guard(cx)) {
+            self.error = Some(why);
+            cx.notify();
+            return;
+        }
         self.running = true;
         self.error = None;
         cx.notify();
         let bar = state::bar(cx);
         let (id, job) = (self.connection.id.clone(), self.job.clone());
-        let task = state::spawn(cx, async move { bar.execute_statement(&id, &job, &sql).await });
+        let closes = self.change.closes(&self.connection);
+        let task = state::spawn(cx, async move {
+            if let Some(pool) = closes {
+                bar.disconnect(&pool).await;
+            }
+            bar.execute_statement(&id, &job, &sql).await
+        });
         let applied = Applied {
             connection_id: self.connection.id.clone(),
             driver: self.connection.driver.clone(),
@@ -274,9 +332,10 @@ impl Render for ChangeDialog {
         let mut body = modal::body().children(self.change.description(cx).map(|d| modal::description(d, cx)));
         if let Some(name) = &self.name {
             let field = div().debug_selector(|| "change-name".into()).child(form::input(name, window, cx));
-            body = body.child(form::group(t(cx, "schemaChange.newName"), field, cx));
+            let label = if self.change.renames() { "schemaChange.newName" } else { "schemaChange.name" };
+            body = body.child(form::group(t(cx, label), field, cx));
         }
-        if dialect.cascade && !self.change.renames() {
+        if dialect.cascade && self.change.takes_options() {
             let hint = if truncate { "schemaChange.cascadeTruncateHint" } else { "schemaChange.cascadeHint" };
             let cascade = self.option(
                 "change-cascade",
@@ -304,7 +363,7 @@ impl Render for ChangeDialog {
         let error = self.error.clone().map(|error| form::error(error, cx).debug_selector(|| "change-error".into()));
         let body = body.children(error);
         let ready = self.sql(cx).is_some() && !self.running;
-        let danger = !self.change.renames();
+        let danger = self.change.destroys();
         v_flex().child(body).child(
             modal::footer(cx)
                 .child(
@@ -330,14 +389,15 @@ impl Render for ChangeDialog {
 pub fn open_change(
     connection: ConnectionConfig,
     change: Change,
+    guard: Option<Guard>,
     window: &mut Window,
     cx: &mut App,
     on_done: impl Fn(&Applied, &mut App) + 'static,
 ) {
     let current = change.name().to_string();
-    let renames = change.renames();
+    let named = change.named();
     let dialog = cx.new(|cx| {
-        let name = renames.then(|| cx.new(|cx| InputState::new(window, cx).default_value(current.clone())));
+        let name = named.then(|| cx.new(|cx| InputState::new(window, cx).default_value(current.clone())));
         let subscriptions = name
             .iter()
             .map(|name| {
@@ -358,8 +418,9 @@ pub fn open_change(
             running: false,
             error: None,
             job: job_id("schema-change"),
+            guard,
             on_done: Rc::new(on_done),
-            sql: SqlView::new(window, cx),
+            sql: SqlView::wrapped(window, cx),
             _subscriptions: subscriptions,
         };
         dialog.refresh_sql(window, cx);
@@ -367,7 +428,7 @@ pub fn open_change(
     });
     let (title, danger) = {
         let dialog = dialog.read(cx);
-        (dialog.change.title(cx), !dialog.change.renames())
+        (dialog.change.title(cx), dialog.change.destroys())
     };
     let input = dialog.read(cx).name.clone();
     window.open_dialog(cx, move |modal_dialog, window, cx| {
@@ -718,7 +779,7 @@ pub fn open_backup(connection: ConnectionConfig, schema: String, table: String, 
 
 #[cfg(test)]
 mod tests {
-    use barsql_core::{DriverType, ObjectKind, ObjectRef};
+    use barsql_core::{ConnectionConfig, DriverType, ObjectKind, ObjectRef};
     use barsql_sql::alter::ConstraintKind;
 
     use super::{Change, Options};
@@ -739,5 +800,29 @@ mod tests {
         assert!(index.supported(&lite));
         let truncate = Change::Truncate { schema: "main".into(), table: "t".into() };
         assert_eq!(truncate.sql(&lite, "", Options::default()).as_deref(), Some(r#"DELETE FROM "t""#));
+    }
+
+    #[test]
+    fn a_database_rename_or_drop_closes_its_pool_first() {
+        let server = ConnectionConfig {
+            id: "server".into(),
+            driver: DriverType::Postgres,
+            database: "forum".into(),
+            show_all_databases: true,
+            ..Default::default()
+        };
+        let rename = Change::RenameDatabase { database: "sales".into() };
+        let drop = Change::DropDatabase { database: "sales".into() };
+        assert!(rename.supported(&DriverType::ClickHouse) && !rename.supported(&DriverType::MySql));
+        assert!(Change::CreateDatabase.supported(&DriverType::MySql) && !Change::CreateDatabase.supported(&lite()));
+        assert_eq!(rename.closes(&server).as_deref(), Some("server/sales"));
+        assert_eq!(drop.closes(&server).as_deref(), Some("server/sales"));
+        assert_eq!(Change::CreateDatabase.closes(&server), None);
+        assert!(drop.destroys() && !drop.takes_options(), "red, without Cascade");
+        assert!(!Change::CreateDatabase.destroys() && !rename.destroys());
+    }
+
+    fn lite() -> DriverType {
+        DriverType::Sqlite
     }
 }

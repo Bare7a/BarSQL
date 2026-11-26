@@ -5,9 +5,9 @@ use std::time::Duration;
 use barsql_core::TableStructure;
 use barsql_core::schema::primary_keys;
 use barsql_core::{
-    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DriverType, FunctionList, IndexInfo, ObjectKind,
-    ObjectRef, QueryError, ReferencingKey, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo, TableDataRequest,
-    TableInfo, TableSize, TriggerInfo, Value,
+    ColumnInfo, ConnectionConfig, ConnectionStatus, ConstraintInfo, DatabaseInfo, DriverType, FunctionList, IndexInfo,
+    ObjectKind, ObjectRef, QueryError, ReferencingKey, RoutineInfo, Row, RowDelete, RowUpdate, SchemaInfo,
+    TableDataRequest, TableInfo, TableSize, TriggerInfo, Value,
 };
 use barsql_sql::dml::{build_insert, build_insert_with, build_table_select};
 use barsql_sql::{
@@ -25,6 +25,12 @@ use crate::script::{Buffered, StatementRunner};
 use crate::sqlite::{SqliteConnectOptions, SqliteEngine, SqliteSession};
 use crate::turso::{TursoEngine, TursoOptions, TursoSession};
 use crate::{Cancel, ChunkBuilder, ResultChunk};
+
+// Postgres' invalid_catalog_name, MySQL's ER_BAD_DB_ERROR, ClickHouse's UNKNOWN_DATABASE, SQL Server's "Cannot open
+// database".
+pub fn is_missing_database(error: &QueryError) -> bool {
+    matches!(error.code.as_str(), "3D000" | "1049" | "81" | "4060")
+}
 
 // A pool for Postgres, MySQL and SQL Server, a single connection for SQLite, an HTTP client for Turso and
 // ClickHouse.
@@ -140,9 +146,7 @@ impl Engine {
             }
             .await;
             match listed {
-                // Postgres' invalid_catalog_name, MySQL's ER_BAD_DB_ERROR, ClickHouse's UNKNOWN_DATABASE, SQL Server's
-                // "Cannot open database".
-                Err(error) if matches!(error.code.as_str(), "3D000" | "1049" | "81" | "4060") => missing = Some(error),
+                Err(error) if is_missing_database(&error) => missing = Some(error),
                 other => return other,
             }
         }
@@ -297,6 +301,26 @@ impl Engine {
             Self::ClickHouse(e) => e.list_databases().await,
             Self::SqlServer(e) => e.list_databases().await,
             Self::Sqlite(_) | Self::Turso(_) => Ok(Vec::new()),
+        }
+    }
+
+    pub async fn database_list(&self) -> Result<Vec<DatabaseInfo>, QueryError> {
+        match self {
+            Self::Postgres(e) => e.database_list().await,
+            Self::MySql(e) => e.database_list().await,
+            Self::ClickHouse(e) => e.database_list().await,
+            Self::SqlServer(e) => e.database_list().await,
+            Self::Sqlite(_) | Self::Turso(_) => Ok(Vec::new()),
+        }
+    }
+
+    pub async fn database_sizes(&self) -> Result<HashMap<String, u64>, QueryError> {
+        match self {
+            Self::Postgres(e) => e.database_sizes().await,
+            Self::MySql(e) => e.database_sizes().await,
+            Self::ClickHouse(e) => e.database_sizes().await,
+            Self::SqlServer(e) => e.database_sizes().await,
+            Self::Sqlite(_) | Self::Turso(_) => Ok(HashMap::new()),
         }
     }
 

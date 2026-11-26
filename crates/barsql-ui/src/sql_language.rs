@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -26,26 +27,31 @@ const WORD_SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
 
 #[derive(Clone)]
 pub struct SqlLanguage {
-    connection_id: String,
+    // Swapped when the tab moves to another database of its connection.
+    connection_id: RefCell<String>,
     driver: DriverType,
 }
 
 impl SqlLanguage {
     pub fn new(connection_id: String, driver: DriverType) -> Self {
-        Self { connection_id, driver }
+        Self { connection_id: RefCell::new(connection_id), driver }
     }
 
-    pub fn connection_id(&self) -> &str {
-        &self.connection_id
+    pub fn set_connection_id(&self, id: String) {
+        *self.connection_id.borrow_mut() = id;
+    }
+
+    pub fn connection_id(&self) -> String {
+        self.connection_id.borrow().clone()
     }
 
     fn catalog(&self, cx: &App) -> Arc<Catalog> {
-        schema::catalog(cx, &self.connection_id)
+        schema::catalog(cx, &self.connection_id())
             .unwrap_or_else(|| Arc::new(Catalog::new(self.driver.clone(), Vec::new(), Vec::new())))
     }
 
     pub fn columns(&self, schema: &str, table: &str, cx: &mut App) -> ColumnsLoad {
-        schema::columns(&self.connection_id, schema, table, cx)
+        schema::columns(&self.connection_id(), schema, table, cx)
     }
 
     // The span of the name at `offset` and where Go to Definition takes it. A declaration's span is absolute.
@@ -166,9 +172,10 @@ impl CompletionProvider for SqlLanguage {
         }
         // So `sales.` lists the tables of a schema that hasn't loaded yet.
         let named = lang::qualifiers(&sql[range.clone()], Some(&self.driver));
-        let loading = schema::load_named_schemas(&self.connection_id, &named, cx);
+        let id = self.connection_id();
+        let loading = schema::load_named_schemas(&id, &named, cx);
         if !loading.is_empty() {
-            let loaded = schema::tables_loaded(&self.connection_id, loading, cx);
+            let loaded = schema::tables_loaded(&id, loading, cx);
             let (language, rope) = (self.clone(), text.clone());
             return cx.spawn(async move |cx| {
                 loaded.await;
@@ -202,7 +209,8 @@ impl SqlLanguage {
         let loads: Vec<_> = lang::bindings_needing_columns(&sql[range.start..offset], &parsed, Some(&catalog))
             .into_iter()
             .map(|b| {
-                (column_cache_key(&b.schema, &b.table), schema::columns(&self.connection_id, &b.schema, &b.table, cx))
+                let id = self.connection_id();
+                (column_cache_key(&b.schema, &b.table), schema::columns(&id, &b.schema, &b.table, cx))
             })
             .collect();
         let labels = cx.global::<I18n>().sql_labels();

@@ -1,10 +1,11 @@
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use barsql_app::ConnectionFolder;
-use barsql_core::{ConnectionConfig, DriverType, SavedQuery};
+use barsql_core::{ConnectionConfig, DriverType, SavedQuery, scope};
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::base::ElementExt as _;
+use gpui_kit::base::{ElementExt as _, resize_handle};
 use gpui_kit::component::button::{Button, ButtonRounded, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -13,10 +14,13 @@ use gpui_kit::*;
 use crate::assets::engine_icon;
 use crate::connection_dialog::{self, ConnectionForm};
 use crate::connections_panel::{ConnectionsEvent, ConnectionsPanel, connection_subtitle, parse_color};
+use crate::database_pane::{DatabasePane, DatabasePaneEvent};
 
 use crate::history_panel::{HistoryEvent, HistoryPanel};
 use crate::i18n::t;
 use crate::saved_panel::{SavedEvent, SavedPanel};
+use crate::schema;
+use crate::schema_actions::{Applied, Change};
 use crate::schema_tree::{ActiveTable, SchemaTree, SchemaTreeEvent, TableChange};
 use crate::state;
 use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM};
@@ -29,6 +33,17 @@ enum Panel {
 }
 
 const PANELS: [Panel; 3] = [Panel::Schema, Panel::Saved, Panel::Recent];
+// The database each connection that lists them all last showed, when it isn't the connection's own.
+const DATABASES_KEY: &str = "barsql-sidebar-databases";
+
+#[derive(Clone)]
+struct DatabasesDrag;
+
+impl Render for DatabasesDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
 
 pub enum SidebarEvent {
     Selected(ConnectionConfig),
@@ -46,18 +61,23 @@ pub enum SidebarEvent {
     // Open tabs pick up the new settings.
     ConnectionsChanged(Vec<ConnectionConfig>),
     TableChanged { connection_id: String, schema: String, table: String, change: TableChange },
+    // New, Rename or Drop on the selected connection's server, from the Databases list.
+    DatabaseChange { base: ConnectionConfig, change: Change },
 }
 
 pub struct Sidebar {
     connections: Vec<ConnectionConfig>,
     folders: Vec<ConnectionFolder>,
+    // The saved connection. `databases` holds the one its tree shows, if not its own.
     selected: Option<String>,
+    databases: HashMap<String, String>,
     switcher_open: bool,
     // Lets a click on the switcher toggle the menu instead of counting as a click outside.
     switcher_bounds: Rc<Cell<Bounds<Pixels>>>,
     menu_focus: FocusHandle,
     connections_panel: Entity<ConnectionsPanel>,
     panel: Panel,
+    database_pane: Entity<DatabasePane>,
     schema_tree: Entity<SchemaTree>,
     saved: Entity<SavedPanel>,
     history: Entity<HistoryPanel>,
@@ -71,6 +91,7 @@ impl Sidebar {
         let selected = connections.first().map(|c| c.id.clone());
         let connections_panel = cx.new(ConnectionsPanel::new);
         let schema_tree = cx.new(|cx| SchemaTree::new(window, cx));
+        let database_pane = cx.new(|cx| DatabasePane::new(window, cx));
         let saved = cx.new(|cx| SavedPanel::new(window, cx));
         let history = cx.new(|cx| HistoryPanel::new(window, cx));
         let subscriptions = vec![
@@ -78,23 +99,23 @@ impl Sidebar {
                 let event = match event {
                     SchemaTreeEvent::Insert(text) => SidebarEvent::Insert(text.clone()),
                     SchemaTreeEvent::Connected(id) => {
-                        let Some(connection) = this.connection(id).cloned() else { return };
+                        let Some(connection) = this.connection(id) else { return };
                         SidebarEvent::Selected(connection)
                     }
                     SchemaTreeEvent::OpenQuery { sql, title, run } => {
-                        let Some(connection) = this.selected().cloned() else { return };
+                        let Some(connection) = this.selected() else { return };
                         SidebarEvent::OpenQuery { connection, sql: sql.clone(), title: title.clone(), run: *run }
                     }
                     SchemaTreeEvent::Browse { schema, table } => {
-                        let Some(connection) = this.selected().cloned() else { return };
+                        let Some(connection) = this.selected() else { return };
                         SidebarEvent::Browse { connection, schema: schema.clone(), table: table.clone() }
                     }
                     SchemaTreeEvent::OpenDiagram { schema } => {
-                        let Some(connection) = this.selected().cloned() else { return };
+                        let Some(connection) = this.selected() else { return };
                         SidebarEvent::OpenDiagram { connection, schema: schema.clone() }
                     }
                     SchemaTreeEvent::OpenStructure { schema, table } => {
-                        let Some(connection) = this.selected().cloned() else { return };
+                        let Some(connection) = this.selected() else { return };
                         SidebarEvent::OpenStructure { connection, schema: schema.clone(), table: table.clone() }
                     }
                     SchemaTreeEvent::OpenScript { connection, sql, title } => SidebarEvent::OpenQuery {
@@ -114,6 +135,19 @@ impl Sidebar {
                 };
                 cx.emit(event);
             }),
+            cx.subscribe(&database_pane, |this, _, event: &DatabasePaneEvent, cx| match event {
+                DatabasePaneEvent::Select(name) => this.show_database(name.clone(), cx),
+                DatabasePaneEvent::Open(name) => {
+                    if let Some(base) = this.selected_base().filter(|base| base.shows_all_databases()) {
+                        cx.emit(SidebarEvent::Selected(base.in_database(name)));
+                    }
+                }
+                DatabasePaneEvent::Change(change) => {
+                    if let Some(base) = this.selected_base().cloned() {
+                        cx.emit(SidebarEvent::DatabaseChange { base, change: change.clone() });
+                    }
+                }
+            }),
             cx.subscribe(&saved, |_, _, event: &SavedEvent, cx| {
                 cx.emit(match event {
                     SavedEvent::Open(query) => SidebarEvent::OpenSaved(query.clone()),
@@ -127,7 +161,7 @@ impl Sidebar {
             }),
             cx.subscribe(&history, |this, _, event: &HistoryEvent, cx| {
                 let HistoryEvent::Open { connection_id, sql } = event;
-                if let Some(connection) = this.connection(connection_id).cloned() {
+                if let Some(connection) = this.connection(connection_id) {
                     cx.emit(SidebarEvent::OpenSql { connection, sql: sql.clone() });
                 }
             }),
@@ -136,11 +170,13 @@ impl Sidebar {
             connections,
             folders,
             selected,
+            databases: state::setting_json(cx, DATABASES_KEY),
             switcher_open: false,
             switcher_bounds: Rc::default(),
             menu_focus: cx.focus_handle(),
             connections_panel,
             panel: Panel::Schema,
+            database_pane,
             schema_tree,
             saved,
             history,
@@ -151,7 +187,10 @@ impl Sidebar {
     }
 
     fn sync_tree(&self, cx: &mut Context<Self>) {
-        let connection = self.selected().cloned();
+        let connection = self.selected();
+        let listing = self.selected_base().filter(|base| base.shows_all_databases()).cloned();
+        let shown = connection.as_ref().map(|c| c.scoped_database().unwrap_or_else(|| c.default_database()));
+        self.database_pane.update(cx, |pane, cx| pane.set_connection(listing, shown.unwrap_or_default(), cx));
         let (id, connections) = (self.selected.clone(), self.connections.clone());
         let (panel_connections, folders, selected) =
             (self.connections.clone(), self.folders.clone(), self.selected.clone());
@@ -164,6 +203,11 @@ impl Sidebar {
     #[cfg(test)]
     pub(crate) fn choose(&mut self, id: &str, cx: &mut Context<Self>) {
         self.select(id.to_string(), cx);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn database_pane(&self) -> Entity<DatabasePane> {
+        self.database_pane.clone()
     }
 
     #[cfg(any(test, feature = "snapshot"))]
@@ -182,7 +226,7 @@ impl Sidebar {
             "recent" => self.panel = Panel::Recent,
             "connections" => self.switcher_open = true,
             "connection-dialog" => {
-                self.edit_connection(self.selected().cloned(), window, cx);
+                self.edit_connection(self.selected_base().cloned(), window, cx);
             }
             "import" => self.schema_tree.update(cx, |tree, cx| tree.import_default(window, cx)),
             _ => self.panel = Panel::Schema,
@@ -194,7 +238,7 @@ impl Sidebar {
         let bar = state::bar(cx);
         self.connections = bar.list_connections();
         self.folders = bar.list_folders();
-        if self.selected.as_ref().is_none_or(|id| self.connection(id).is_none()) {
+        if self.selected_base().is_none() {
             self.selected = self.connections.first().map(|c| c.id.clone());
         }
         self.sync_tree(cx);
@@ -274,16 +318,18 @@ impl Sidebar {
         match event {
             ConnectionsEvent::Activate(id) => {
                 self.set_switcher_open(false, cx);
-                if state::bar(cx).is_connected(id) {
-                    self.select(id.clone(), cx);
+                let id = self.remembered(id);
+                if state::bar(cx).is_connected(&id) {
+                    self.select(id, cx);
                 } else {
-                    self.set_selected(id, cx);
+                    self.set_selected(&id, cx);
                 }
             }
             ConnectionsEvent::Connected(id) => {
                 self.set_switcher_open(false, cx);
                 self.panel = Panel::Schema;
-                self.select(id.clone(), cx);
+                let id = self.remembered(id);
+                self.select(id, cx);
             }
             ConnectionsEvent::Edit(connection) => {
                 self.set_switcher_open(false, cx);
@@ -294,7 +340,7 @@ impl Sidebar {
             ConnectionsEvent::Changed => self.reload_connections(cx),
             ConnectionsEvent::OpenQuery { connection_id, sql, title } => {
                 self.set_switcher_open(false, cx);
-                let Some(connection) = self.connection(connection_id).cloned() else { return };
+                let Some(connection) = self.connection(connection_id) else { return };
                 cx.emit(SidebarEvent::OpenQuery { connection, sql: sql.clone(), title: title.clone(), run: true });
             }
         }
@@ -321,6 +367,11 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ConnectionForm> {
+        // A database of a connection edits the saved connection, so saving never adds a copy under its id.
+        let config = config.map(|cfg| match cfg.scoped_database() {
+            Some(_) => self.connections.iter().find(|c| c.id == scope::base_id(&cfg.id)).cloned().unwrap_or(cfg),
+            None => cfg,
+        });
         let this = cx.entity().downgrade();
         connection_dialog::open(config, window, cx, move |_, _, cx| {
             let _ = this.update(cx, |sidebar, cx| sidebar.reload_connections(cx));
@@ -346,24 +397,103 @@ impl Sidebar {
         self.history.update(cx, |history, cx| history.reload(cx));
     }
 
-    pub fn selected(&self) -> Option<&ConnectionConfig> {
+    // The saved connection the header names.
+    pub fn selected_base(&self) -> Option<&ConnectionConfig> {
         self.selected.as_ref().and_then(|id| self.connections.iter().find(|c| &c.id == id))
+    }
+
+    // What the tree shows: the saved connection, or the database picked under it.
+    pub fn selected(&self) -> Option<ConnectionConfig> {
+        let base = self.selected_base()?;
+        Some(match self.databases.get(&base.id).filter(|_| base.shows_all_databases()) {
+            Some(database) => base.in_database(database),
+            None => base.clone(),
+        })
     }
 
     pub fn connections(&self) -> &[ConnectionConfig] {
         &self.connections
     }
 
-    pub fn connection(&self, id: &str) -> Option<&ConnectionConfig> {
-        self.connections.iter().find(|c| c.id == id)
+    // A saved connection or one of its databases.
+    pub fn connection(&self, id: &str) -> Option<ConnectionConfig> {
+        scope::resolve(&self.connections, id)
+    }
+
+    // The database the connection last showed, so the switcher returns to it.
+    fn remembered(&self, id: &str) -> String {
+        let shows_all = self.connections.iter().any(|c| c.id == id && c.shows_all_databases());
+        match self.databases.get(id).filter(|_| shows_all) {
+            Some(database) => scope::scoped_id(id, database),
+            None => id.to_string(),
+        }
     }
 
     // Follows the active tab without emitting Selected.
     pub fn set_selected(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.selected.as_deref() != Some(id) {
-            self.selected = Some(id.to_string());
+        let before = (self.selected.clone(), self.selected().map(|c| c.id));
+        self.point_at(id, cx);
+        if before != (self.selected.clone(), self.selected().map(|c| c.id)) {
             self.sync_tree(cx);
             cx.notify();
+        }
+    }
+
+    // Selects `id`'s saved connection, and its database where the connection lists them all.
+    fn point_at(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(cfg) = self.connection(id) else {
+            self.selected = Some(id.to_string());
+            return;
+        };
+        let (base, database) = match cfg.scoped_database() {
+            Some(database) => (scope::base_id(&cfg.id).to_string(), database),
+            None => (cfg.id.clone(), cfg.default_database()),
+        };
+        self.selected = Some(base.clone());
+        self.remember_database(&base, database, cx);
+    }
+
+    // The tree shows the database picked in the Databases list, and loads it without opening a tab.
+    fn show_database(&mut self, name: String, cx: &mut Context<Self>) {
+        let Some(base) = self.selected.clone() else { return };
+        self.remember_database(&base, name, cx);
+        self.sync_tree(cx);
+        self.schema_tree.update(cx, |tree, cx| tree.load_now(cx));
+        cx.notify();
+    }
+
+    // A new database opens in the tree. One renamed or dropped while shown gives way to its new name or the
+    // connection's own.
+    pub(crate) fn database_changed(&mut self, applied: &Applied, cx: &mut Context<Self>) {
+        let Some(base) = self.connections.iter().find(|c| c.id == applied.connection_id).cloned() else { return };
+        let selected = self.selected.as_deref() == Some(base.id.as_str());
+        let shown = self.databases.get(&base.id).cloned().unwrap_or_else(|| base.default_database());
+        let next = match &applied.change {
+            Change::CreateDatabase => selected.then(|| applied.new_name.clone()),
+            Change::RenameDatabase { database } | Change::DropDatabase { database } => {
+                schema::forget(&base.in_database(database).id, cx);
+                let renamed = matches!(applied.change, Change::RenameDatabase { .. });
+                (shown == *database).then(|| if renamed { applied.new_name.clone() } else { base.default_database() })
+            }
+            _ => None,
+        };
+        match next {
+            Some(next) if selected => self.show_database(next, cx),
+            Some(next) => self.remember_database(&base.id, next, cx),
+            None => {}
+        }
+        let (id, change, new_name) = (base.id.clone(), applied.change.clone(), applied.new_name.clone());
+        self.database_pane.update(cx, |pane, cx| pane.database_changed(&id, &change, &new_name, cx));
+    }
+
+    fn remember_database(&mut self, base: &str, database: String, cx: &mut Context<Self>) {
+        let Some(saved) = self.connections.iter().find(|c| c.id == base && c.shows_all_databases()) else { return };
+        let changed = match database == saved.default_database() {
+            true => self.databases.remove(base).is_some(),
+            false => self.databases.insert(base.to_string(), database.clone()).as_ref() != Some(&database),
+        };
+        if changed {
+            state::set_setting_json(cx, DATABASES_KEY, &self.databases);
         }
     }
 
@@ -372,9 +502,9 @@ impl Sidebar {
     }
 
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
-        self.selected = Some(id.clone());
+        self.point_at(&id, cx);
         self.sync_tree(cx);
-        if let Some(config) = self.connection(&id).cloned() {
+        if let Some(config) = self.connection(&id) {
             cx.emit(SidebarEvent::Selected(config));
         }
         cx.notify();
@@ -382,7 +512,7 @@ impl Sidebar {
 
     fn switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
-        let current = self.selected().cloned();
+        let current = self.selected_base().cloned();
         let connected = current.as_ref().is_some_and(|c| state::bar(cx).is_connected(&c.id));
         let detail: Option<SharedString> =
             current.as_ref().filter(|_| connected).map(|c| connection_subtitle(c).into());
@@ -479,6 +609,38 @@ impl Sidebar {
             }))
     }
 
+    // The Databases list, then the tree of the one picked, under a row naming it.
+    fn schema_with_databases(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let collapsed = self.database_pane.read(cx).collapsed();
+        v_flex()
+            .size_full()
+            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<DatabasesDrag>, window, cx| {
+                let height = event.event.position.y - event.bounds.top();
+                this.database_pane.update(cx, |pane, cx| pane.resize(height, window.rem_size(), cx));
+            }))
+            .child(self.database_pane.clone())
+            .child(
+                v_flex()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(div().flex_1().min_h_0().child(self.schema_tree.clone()))
+                    .when(!collapsed, |el| {
+                        el.child(
+                            resize_handle::<DatabasesDrag, DatabasesDrag>("databases-splitter", Axis::Vertical)
+                                .on_drag(DatabasesDrag, |drag, _, _, cx| {
+                                    cx.stop_propagation();
+                                    cx.new(|_| drag.clone())
+                                }),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn empty(&self, message: SharedString, cx: &App) -> impl IntoElement {
         div().p_4().text_color(cx.theme().muted_foreground).child(message)
     }
@@ -494,6 +656,9 @@ impl Render for Sidebar {
             self.empty(t(cx, "sidebar.noConnectionsYet"), cx).into_any_element()
         } else {
             match self.panel {
+                Panel::Schema if self.selected_base().is_some_and(|base| base.shows_all_databases()) => {
+                    self.schema_with_databases(cx)
+                }
                 Panel::Schema => self.schema_tree.clone().into_any_element(),
                 Panel::Saved => self.saved.clone().into_any_element(),
                 Panel::Recent => self.history.clone().into_any_element(),

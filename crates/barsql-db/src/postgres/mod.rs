@@ -156,7 +156,7 @@ fn notice_message(notice: &DbError) -> ServerMessage {
 impl PgEngine {
     pub async fn connect(options: PgConnectOptions) -> Result<Arc<Self>, QueryError> {
         let tls = TlsMode::postgres(&options.ssl_mode).map_err(QueryError::message)?;
-        let tunnel = options.ssh.clone().map(TunnelSlot::new);
+        let tunnel = options.ssh.clone().map(TunnelSlot::shared);
         let engine = Arc::new(Self {
             options,
             tls,

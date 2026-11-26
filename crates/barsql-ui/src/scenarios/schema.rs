@@ -137,6 +137,17 @@ fn a_renamed_table_is_followed_by_the_tree_and_its_view(cx: &mut TestAppContext)
     assert_eq!(app.query("SELECT COUNT(*) FROM e2e_new"), [[Value::Int(1)]]);
 }
 
+// A statement wider than the dialog wraps, and its box grows to show all of it.
+#[gpui_kit::test]
+fn a_long_statement_wraps_in_the_change_dialog(cx: &mut TestAppContext) {
+    let mut app = prepared(cx, "CREATE TABLE e2e_wrap (id INTEGER PRIMARY KEY)");
+    app.context_menu("tree:t:main.e2e_wrap", RENAME);
+    let short = app.bounds("dialog-sql").expect("the SQL shows").size.height;
+    app.type_text(&"a_much_longer_name".repeat(6));
+    let long = app.bounds("dialog-sql").expect("the SQL shows").size.height;
+    assert!(long > short, "the box grew from {short:?} to {long:?}");
+}
+
 #[gpui_kit::test]
 fn a_dropped_table_leaves_the_tree_and_closes_its_view(cx: &mut TestAppContext) {
     let mut app = prepared(cx, "CREATE TABLE e2e_gone (id INTEGER PRIMARY KEY)");

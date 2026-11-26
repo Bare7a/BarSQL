@@ -47,6 +47,8 @@
     "columnCount_other": "{{count}} columns"
   },
   "editor": {
+    "moveToDatabase": "Switch database",
+    "databaseBusy": "Finish the transaction or edits first",
     "sql": {
       "columnsCount_one": "{{count}} column",
       "columnsCount_other": "{{count}} columns",
@@ -80,6 +82,9 @@
     "contextGoToDefinition": "Go to definition"
   },
   "connection": {
+    "showAllDatabases": "Show all databases",
+    "showAllDatabasesHint": "Lists the server's databases in the sidebar.",
+    "defaultDatabase": "Default database",
     "pasteUrl": "Fill in the fields from a connection URL on the clipboard",
     "copyUrl": "Copy as a URL, without the password",
     "clipboardNotUrl": "The clipboard doesn't hold a connection URL BarSQL can read",
@@ -165,6 +170,15 @@
     "discardConfirm": "Discard and run"
   },
   "sidebar": {
+    "newDatabase": "New database…",
+    "databaseInUse": "\"{{tab}}\" has unfinished work on this database.",
+    "databaseOptions": "Database options",
+    "databases": "Databases",
+    "databaseDefault": "default",
+    "showSystemDatabases": "System databases",
+    "filterDatabases": "Filter databases",
+    "databaseNoAccess": "no access",
+    "connectToListDatabases": "Connect to see databases",
     "newTable": "New table…",
     "editStructure": "Edit structure…",
     "viewStructure": "View structure",
@@ -514,6 +528,14 @@
     "zoomReset": "Back to 100%",
     "fitTooltip": "Show the whole diagram",
     "open": "Open table"
+  },
+  "schemaChange": {
+    "createDatabase": "New database",
+    "renameDatabase": "Rename database",
+    "dropDatabase": "Drop database",
+    "dropDatabaseDescription": "Delete \"{{name}}\" and all its data? This cannot be undone.",
+    "name": "Name",
+    "created": "Created \"{{name}}\""
   },
   "schemaDiff": {
     "menu": "Compare schema…",
