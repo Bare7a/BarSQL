@@ -79,8 +79,7 @@ pub fn open(window: &mut Window, cx: &mut App) {
                         Button::new("about-copy-version")
                             .debug_selector(|| "about-copy-version".into())
                             .ghost()
-                            .xsmall()
-                            .icon(Icon::new(Lucide::Copy))
+                            .tool_icon(Icon::new(Lucide::Copy), ICON_XS)
                             .tooltip(t(cx, "about.copyVersion"))
                             .on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));

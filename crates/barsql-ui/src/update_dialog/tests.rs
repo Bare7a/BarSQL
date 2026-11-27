@@ -13,7 +13,7 @@ use gpui_kit::{AppContext as _, Context, Entity, IntoElement, Render, TestAppCon
 
 use super::{
     STARTUP_DELAY, Skipped, Transfer, UpdateChip, UpdateDialog, UpdateState, check_after, chip, chip_for, flow,
-    open_in, remember, reopen,
+    open_in, percent_done, remember, reopen,
 };
 use crate::test_support::{Env, settle};
 
@@ -176,6 +176,8 @@ fn the_chip_follows_the_update_flow() {
         chip_for(&UpdateState::Downloading(r.clone(), Some(half)), None),
         Some(UpdateChip::Downloading(Some(42)))
     );
+    assert_eq!(percent_done(6, 14), 42, "the dialog's label reads the same 42 as the chip");
+    assert_eq!(percent_done(999, 1000), 99);
     for busy in [
         UpdateState::Downloading(r.clone(), None),
         UpdateState::Verifying(r.clone()),

@@ -1,6 +1,7 @@
 use std::ops::Range;
 use std::rc::Rc;
 
+use barsql_app::ConnectionFolder;
 use barsql_core::capabilities::DefaultSchema;
 use barsql_core::{ConnectionConfig, SavedQuery, TableInfo, scope};
 use barsql_io::is_space;
@@ -12,13 +13,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::assets::engine_icon;
-use crate::connections_panel::parse_color;
+use crate::connections_panel::{connection_detail, parse_color};
 use crate::fuzzy::{fuzzy_match, rank_candidate};
 use crate::i18n::t;
-use crate::modal::AtTop as _;
+use crate::modal::{self, AtTop as _};
 use crate::scrollbars::HoverScrollbar as _;
 use crate::tokens::{ICON_SM, RADIUS_LG, TEXT_BASE, TEXT_XS};
-use crate::{form, saved_queries, schema};
+use crate::{form, saved_queries, schema, state};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TabEntry {
@@ -41,6 +42,7 @@ pub struct SchemaTables {
 pub struct Candidates {
     pub tabs: Vec<TabEntry>,
     pub connections: Vec<ConnectionConfig>,
+    pub folders: Vec<ConnectionFolder>,
     pub tables: Vec<SchemaTables>,
     pub saved: Vec<SavedQuery>,
 }
@@ -140,15 +142,10 @@ pub fn rank(query: &str, candidates: &Candidates) -> Vec<Item> {
 
     for conn in &candidates.connections {
         let Some(m) = rank_candidate(&q, &conn.name, &[&conn.host, &conn.database]) else { continue };
-        let detail = if conn.database.is_empty() {
-            conn.driver.to_string()
-        } else {
-            format!("{} · {}", conn.driver, conn.database)
-        };
         items.push(Item {
             kind: Kind::Connection,
             label: conn.name.clone(),
-            detail: Some(detail),
+            detail: Some(connection_detail(conn, &candidates.connections, &candidates.folders)),
             color: Some(conn.color.clone()),
             icon: Lucide::Database,
             score: m.score,
@@ -264,7 +261,7 @@ impl Row {
         let rem = window.rem_size();
         match self {
             Self::Heading(_) => (rem * 2.231).round(),
-            Self::Item(_) => (rem * 3.154).round(),
+            Self::Item(_) => (rem * modal::LAUNCHER_ROW_REM).round(),
         }
     }
 }
@@ -431,12 +428,7 @@ impl Render for QuickSearchDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let list = if self.items.is_empty() {
-            div()
-                .px(rems(0.923))
-                .py(rems(1.077))
-                .text_color(theme.muted_foreground)
-                .child(t(cx, "quickSearch.noResults"))
-                .into_any_element()
+            form::empty_state(None, t(cx, "quickSearch.noResults"), cx).into_any_element()
         } else {
             let sizes: Vec<Size<Pixels>> = self.rows.iter().map(|row| size(px(0.), row.height(window))).collect();
             let height = sizes.iter().map(|size| size.height).sum::<Pixels>();
@@ -510,6 +502,7 @@ pub fn open(
     let candidates = Candidates {
         tables: loaded_tables(&connections, cx),
         saved: saved_queries::list(cx).to_vec(),
+        folders: state::bar(cx).list_folders(),
         tabs,
         connections,
     };
@@ -518,7 +511,7 @@ pub fn open(
     window.open_dialog(cx, move |modal, window, cx| {
         let rem = window.rem_size();
         modal
-            .w(rem * 55.385)
+            .w(rem * modal::LAUNCHER_REM)
             .at_top(rem * 5.5, window)
             .p_0()
             .bg(cx.theme().sidebar)

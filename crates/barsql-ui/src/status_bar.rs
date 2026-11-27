@@ -6,7 +6,7 @@ use crate::i18n::{I18n, format_number, t, t_count, t_with};
 use crate::shortcuts;
 use crate::spinner::Spinner;
 use crate::toast;
-use crate::tokens::{ICON_XS, RADIUS_SM, TEXT_XS};
+use crate::tokens::{DOT, DOT_SM, ICON_XS, RADIUS_SM, TEXT_XS, TINT};
 use crate::update_dialog::UpdateChip;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -302,10 +302,14 @@ fn stats_segment(total: &Aggregate, visible: [bool; 5], cx: &App) -> AnyElement 
                         .debug_selector(|| "status-spread".into())
                         .ghost()
                         .xsmall()
-                        // The bar's 11px, where an xsmall label is 9.75px.
+                        // The bar's 11px label and 12px icon, where xsmall ones are 9.75px.
                         .accessibility_label(label.clone())
-                        .child(div().text_size(TEXT_XS).child(label))
-                        .dropdown_caret(true),
+                        .child(
+                            h_flex()
+                                .gap(rems(INNER_GAP))
+                                .child(div().text_size(TEXT_XS).child(label))
+                                .child(icon(Lucide::ChevronDown)),
+                        ),
                 )
                 .content(move |_, _, cx| spread_table(&columns, cx))
                 .into_any_element()
@@ -325,7 +329,7 @@ fn spread_table(columns: &[ColumnStats], cx: &App) -> impl IntoElement + use<> {
         .children(keys.map(|key| cell(t(cx, &format!("status.stat.{key}")))));
     v_flex()
         .debug_selector(|| "status-spread-table".into())
-        .gap_1()
+        .gap(rems(0.308))
         .text_size(TEXT_XS)
         .font_features(tabular())
         .child(header)
@@ -356,8 +360,8 @@ const CLICK_PAD: f32 = 0.25;
 const CHIP_PAD: f32 = 0.385;
 // The layout rounds each edge to a whole pixel, which measuring doesn't see.
 const SLACK: f32 = 0.25;
-const DOT: Pixels = px(8.);
-const TXN_DOT: Pixels = px(6.);
+// 22px at the default size, and taller with the UI zoom.
+const HEIGHT: f32 = 1.692;
 const STAT_KEYS: [&str; 5] = ["count", "sum", "avg", "min", "max"];
 
 fn stat_index(key: &str) -> usize {
@@ -485,7 +489,7 @@ fn draw_chip(chip: &Chip, words: bool, action: Option<StatusAction>, cx: &App) -
     let id = chip.id;
     let mark = match chip.mark {
         Some(name) => icon(name).into_any_element(),
-        None => div().flex_none().size(TXN_DOT).rounded_full().bg(chip.color).into_any_element(),
+        None => div().flex_none().size(DOT_SM).rounded_full().bg(chip.color).into_any_element(),
     };
     let el = h_flex()
         .id(id)
@@ -494,7 +498,7 @@ fn draw_chip(chip: &Chip, words: bool, action: Option<StatusAction>, cx: &App) -
         .gap(rems(INNER_GAP))
         .px(rems(CHIP_PAD))
         .rounded(RADIUS_SM)
-        .bg(chip.color.opacity(0.14))
+        .bg(chip.color.opacity(TINT))
         .text_color(chip.color)
         .child(mark)
         .map(|el| if words { el.child(chip.words.clone()) } else { el.children(chip.keep.clone()) });
@@ -523,14 +527,14 @@ fn measure(state: &StatusBarState, chips: &[Chip], ruler: &Ruler, cx: &App) -> f
                 true => px(0.),
                 false => r(ITEM_GAP) + ruler.text(&t(cx, "sidebar.notConnected")),
             };
-            click + DOT + r(ITEM_GAP) + ruler.text(&connection.name) + off
+            click + DOT.to_pixels(ruler.rem) + r(ITEM_GAP) + ruler.text(&connection.name) + off
         }
         None => ruler.text(&t(cx, "app.statusNoConnection")),
     };
     widths.base = r(PAD * 2. + SIDE_GAP + HALF_GAP + SLACK) + toggle * 2. + name;
     for chip in chips {
         let pad = if chip.tip.is_some() && state.actions.edit_connection.is_some() { CLICK_PAD } else { CHIP_PAD };
-        let shell = r(ITEM_GAP + pad * 2.) + if chip.mark.is_some() { icon } else { TXN_DOT };
+        let shell = r(ITEM_GAP + pad * 2.) + if chip.mark.is_some() { icon } else { DOT_SM.to_pixels(ruler.rem) };
         widths.chips += shell + r(INNER_GAP) + ruler.text(&chip.words);
         let keep = chip.keep.as_ref().map_or(px(0.), |keep| r(INNER_GAP) + ruler.text(keep));
         widths.chip_icons += shell + keep;
@@ -665,14 +669,14 @@ pub fn render(state: StatusBarState, window: &Window, cx: &App) -> impl IntoElem
             .child(div().min_w_0().when_some(live_cap, |el, cap| el.max_w(cap)).truncate().child(text))
             .when_some(actions.stop, |el, action| {
                 let stop = clickable(stop, Some(action), t(cx, "tooltip.stopQuery"), cx).child(t(cx, "editor.stop"));
-                el.child(div().flex_none().w(px(1.)).h(px(12.)).bg(theme.border)).child(stop)
+                el.child(div().flex_none().w(px(1.)).h(rems(0.923)).bg(theme.border)).child(stop)
             })
     });
     let update =
         state.update.as_ref().map(|update| update_chip(update, shown.update_words, actions.open_update.clone(), cx));
     // The right half keeps what it holds; the left gives up characters of the name when even the last step won't do.
     h_flex()
-        .h(px(22.))
+        .h(rems(HEIGHT))
         .flex_none()
         .px(rems(PAD))
         .gap(rems(HALF_GAP))

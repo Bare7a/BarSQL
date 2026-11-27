@@ -28,7 +28,7 @@ use crate::sql_language::FilterCompletion;
 use crate::state;
 use crate::table_edits::{Keys, Outcome, OwnedCell, Staging, changes_row, foreign_key_filter, key_row};
 use crate::toast;
-use crate::tokens::{ICON_SM, TEXT_SM};
+use crate::tokens::{ICON_SM, STRIP, TEXT_SM};
 
 // Next page loads on scroll.
 const PAGE_SIZE: usize = 100;
@@ -720,7 +720,7 @@ impl TableTab {
     fn filter_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         h_flex()
-            .h(rems(3.077))
+            .h(STRIP)
             .flex_none()
             .px(rems(0.769))
             .gap(rems(0.615))
@@ -793,7 +793,7 @@ impl TableTab {
                     .child(
                         Button::new("table-reset")
                             .debug_selector(|| "table-reset".into())
-                            .tool_label(t(cx, "tableView.reset"))
+                            .tool_label(t(cx, "structure.revert"))
                             .disabled(!pending || busy)
                             .on_click(cx.listener(|this, _, window, cx| this.reset(window, cx))),
                     )
@@ -887,9 +887,9 @@ impl TableTab {
         }
         if !self.shown {
             return div()
-                .p_4()
-                .text_color(cx.theme().muted_foreground)
-                .child(t(cx, "results.noResults"))
+                .size_full()
+                .flex()
+                .child(form::empty_state(None, t(cx, "results.noResults"), cx).m_auto())
                 .into_any_element();
         }
         let mut meta = self.rows_label(cx).to_string();

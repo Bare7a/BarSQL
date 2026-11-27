@@ -16,6 +16,7 @@ use lsp_types::{
 
 use crate::scrollbars::HoverScrollbar as _;
 use crate::sql_language::{continues_word, word_start};
+use crate::tokens::RADIUS;
 use crate::{form, theme};
 
 // GPUI Kit's completion menu uses tiny text, has no kind icons and can't be restyled, so the editors draw their
@@ -609,6 +610,9 @@ impl<M: InputModeKind> Render for Completion<M> {
             .debug_selector(|| "completion".into())
             .occlude()
             .w(WIDTH)
+            // Rounded like a menu. The padding keeps a highlighted first or last row off the corners.
+            .py(rems(0.231))
+            .rounded(RADIUS)
             .bg(background)
             .border_1()
             .border_color(border)

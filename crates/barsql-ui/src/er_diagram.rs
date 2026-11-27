@@ -21,11 +21,11 @@ use gpui_kit::*;
 
 use self::layout::{BOX_W, ErTable, HEADER_H, Layout, ROW_H, Spot, arrange, find, key_count};
 use crate::assets::AppAssets;
-use crate::form;
+use crate::form::{self, ToolButton as _};
 use crate::i18n::{I18n, compact, t, t_count, t_with};
 use crate::schema;
 use crate::scrollbars::HoverScrollbar as _;
-use crate::tokens::{ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
+use crate::tokens::{ICON_XS, RADIUS, STRIP, TEXT_SM, TEXT_XS, TINT};
 use crate::{file_dialogs, theme, toast};
 
 // Tables a diagram loads.
@@ -354,7 +354,7 @@ impl ErDiagram {
         h_flex()
             .debug_selector(|| "er-toolbar".into())
             .flex_none()
-            .h(rems(3.077))
+            .h(STRIP)
             .gap(rems(0.615))
             .px(rems(0.769))
             .bg(theme.sidebar)
@@ -488,7 +488,7 @@ impl ErDiagram {
                 Button::new("er-zoom-reset")
                     .debug_selector(|| "er-zoom-reset".into())
                     .small()
-                    .h(rems(2.308))
+                    .h(rems(form::FIELD_REM))
                     .w(rems(3.692))
                     .p_0()
                     .rounded(px(0.))
@@ -624,8 +624,7 @@ impl ErDiagram {
                     Button::new(("er-open", ix))
                         .debug_selector(move || format!("er-open-{ix}"))
                         .ghost()
-                        .xsmall()
-                        .icon(IconName::ExternalLink)
+                        .tool_icon(Icon::new(IconName::ExternalLink), ICON_XS)
                         .tooltip(t(cx, "erDiagram.open"))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
@@ -793,14 +792,9 @@ impl Render for ErDiagram {
         }
         let body = match &self.state {
             State::Ready(tables) => self.diagram(&tables.clone(), cx).into_any_element(),
-            state => {
-                let message = match state {
-                    State::Failed(error) => error.clone().into(),
-                    State::Empty => t(cx, "erDiagram.empty"),
-                    _ => t(cx, "erDiagram.loading"),
-                };
-                div().m_auto().text_color(theme.muted_foreground).child(message).into_any_element()
-            }
+            State::Failed(error) => form::error(error.clone(), cx).m_auto().max_w(rems(40.)).into_any_element(),
+            State::Empty => form::empty_state(None, t(cx, "erDiagram.empty"), cx).m_auto().into_any_element(),
+            _ => form::loading_state(t(cx, "erDiagram.loading"), cx).m_auto().into_any_element(),
         };
         let viewport = div()
             .id("er-diagram")

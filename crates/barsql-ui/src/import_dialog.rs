@@ -598,7 +598,7 @@ impl ImportDialog {
             ),
             Kind::Csv => (t_with(cx, "import.progressRows", &[("rows", &n(p.processed))]), p.bytes_read, p.total_bytes),
         };
-        form::progress(label, if max > 0 { value as f32 / max as f32 } else { 0. }, cx)
+        form::progress("import-progress", label, if max > 0 { value as f32 / max as f32 } else { 0. }, cx)
     }
 
     fn checkbox(
@@ -742,7 +742,8 @@ impl ImportDialog {
         let running = self.running.is_some();
         let mono = theme.mono_font_family.clone();
         let cell = || div().flex_1().min_w_0().px(rems(0.615)).py(rems(0.308));
-        let heading = |key: &str, cx: &App| cell().child(form::caption(t(cx, key), cx));
+        let heading =
+            |key: &str, cx: &App| cell().text_size(TEXT_XS).text_color(cx.theme().muted_foreground).child(t(cx, key));
         let header = h_flex()
             .bg(theme.secondary)
             .child(heading("import.sourceColumn", cx))
@@ -819,8 +820,7 @@ impl ImportDialog {
                     .bg(theme.secondary)
                     .border_b_1()
                     .border_color(theme.border)
-                    .text_size(TEXT_SM)
-                    .child(t(cx, "import.columnsHeading"))
+                    .child(form::caption(t(cx, "import.columnsHeading"), cx))
                     .child(div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(meta)),
             )
             .when(preview.not_utf8, |el| {
@@ -972,7 +972,7 @@ impl Render for ImportDialog {
         let path_field = div()
             .flex_1()
             .min_w_0()
-            .h(rems(2.308))
+            .h(rems(form::FIELD_REM))
             .flex()
             .items_center()
             .px(rems(0.769))

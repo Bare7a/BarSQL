@@ -1,14 +1,15 @@
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use barsql_app::{ApplyError, ResultTable, RunEvent, traced_beside_run, traced_select};
-use barsql_core::{ConnectionConfig, DriverType, QueryError, ResultSummary, SqlDialect};
+use barsql_core::{ConnectionConfig, DriverType, MessageLevel, QueryError, ResultSummary, SqlDialect};
 use barsql_db::{Cancel, ResultSet};
 use barsql_io::EXPORT_FORMATS;
-use barsql_sql::QueryPlan;
 use barsql_sql::lang::{self, UnknownKind, closest, find_name, unknown_name};
+use barsql_sql::{QueryPlan, first_keyword, strip_leading_comments};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
@@ -21,7 +22,7 @@ use crate::chart_view::ChartView;
 use crate::dialogs;
 use crate::form::{self, ToolButton};
 use crate::grid::{self, Grid, GridEvent, RowRef};
-use crate::i18n::{I18n, format_number, t, t_count, t_with};
+use crate::i18n::{self, I18n, format_number, t, t_count, t_with};
 use crate::list_nav::LIST_INSET;
 use crate::message_log::{self, Heading, Line, MessageLog};
 use crate::plan_view::PlanView;
@@ -29,11 +30,12 @@ use crate::result_edits::{self, ResultEditor};
 use crate::schema::{self, ColumnsLoad};
 use crate::scrollbars::{HoverScrollbar as _, system_bar};
 use crate::shortcuts;
+use crate::spinner::Spinner;
 use crate::state;
 use crate::table_edits::{Outcome, OwnedCell};
 use crate::table_tab::referenced_row;
 use crate::toast;
-use crate::tokens::{ICON_SM, ICON_XS, TEXT_MD, TEXT_SM, TEXT_XS};
+use crate::tokens::{ICON_SM, ICON_XS, STRIP, TEXT_MD, TEXT_SM, TEXT_XS, TOP_BAR};
 
 // How long a result's rows wait for its keys before they show without them.
 const KEYS_WAIT: Duration = Duration::from_secs(3);
@@ -106,12 +108,13 @@ impl ShownError {
         // Labelled, so a bare `1` doesn't read as a count.
         let code = info.filter(|i| !i.code.is_empty()).map(|i| t_with(cx, "errors.code", &[("code", &i.code)]));
         let quiet = [category.map(SharedString::from), code].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+        // Server text is mono, the app's own messages aren't.
         let message = div()
             .id("error-message")
             .max_h(rems(16.))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .font_family(theme.mono_font_family.clone())
+            .when(info.is_some_and(|info| !info.bug), |el| el.font_family(theme.mono_font_family.clone()))
             .text_color(theme.foreground)
             .child(SharedString::from(headline.to_string()));
         let card = form::alert(danger)
@@ -244,22 +247,44 @@ impl ResultSetView {
         self.grid.is_none() && self.plan.is_none() && self.error.is_none()
     }
 
-    // Row count for a grid, affected rows otherwise, and no badge for errors or plans.
+    // Row count for a grid, affected rows for a write, and no badge for errors, plans or DDL.
     fn count(&self, cx: &App) -> Option<i64> {
         if self.error.is_some() || self.plan.is_some() {
             return None;
         }
         let summary = self.summary.as_ref();
-        Some(match self.grid {
-            Some(_) => summary.map_or(self.rows(cx) as i64, |s| s.row_count),
-            None => summary.map_or(0, |s| s.affected_rows),
-        })
+        match self.grid {
+            Some(_) => Some(summary.map_or(self.rows(cx) as i64, |s| s.row_count)),
+            None => {
+                let affected = summary.map_or(0, |s| s.affected_rows);
+                (affected != 0 || self.statement.as_deref().is_some_and(counts_rows)).then_some(affected)
+            }
+        }
     }
 }
 
 fn statement_tooltip(statement: &str) -> SharedString {
-    let line = statement.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = code_of(statement).split_whitespace().collect::<Vec<_>>().join(" ");
     line.chars().take(120).collect::<String>().into()
+}
+
+// Leading comments would fill a preview, so it starts at the code unless there's none.
+fn code_of(statement: &str) -> &str {
+    let code = strip_leading_comments(statement);
+    if code.trim().is_empty() { statement } else { code }
+}
+
+// Servers report 0 affected rows for DDL too, so only these show a count.
+fn counts_rows(statement: &str) -> bool {
+    matches!(
+        first_keyword(code_of(statement)).as_str(),
+        "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "COPY" | "REPLACE" | "LOAD" | "WITH" | "SELECT"
+    )
+}
+
+// t_count, with the count grouped as the language writes numbers.
+fn counted(cx: &App, key: &str, n: usize, vars: &[(&str, &str)]) -> String {
+    t_count(cx, key, n as i64, vars).replace(&n.to_string(), &i18n::count(cx, n))
 }
 
 // Grids and plans get separate numbers, like Result 1, Plan 1, Result 2. A failed EXPLAIN has no plan, so
@@ -289,6 +314,7 @@ pub enum ResultsEvent {
     EditsApplied { failed: bool },
     // A foreign key's jump to the row it references.
     OpenTable { schema: String, table: String, filter: String },
+    Stop,
 }
 
 #[cfg(test)]
@@ -311,11 +337,21 @@ pub struct ResultsPanel {
     tab_id: String,
     // The Messages tab is showing, in place of the active result.
     messages_open: bool,
+    // A tab was picked during this run, so its end leaves the choice alone.
+    picked: bool,
     messages: MessageLog,
+    message_filter: Option<Entity<InputState>>,
+    _message_filter_subscriptions: Vec<Subscription>,
     tab_scroll: ScrollHandle,
+    running: Option<Instant>,
 }
 
 impl ResultsPanel {
+    pub fn set_running(&mut self, started: Option<Instant>, cx: &mut Context<Self>) {
+        self.running = started;
+        cx.notify();
+    }
+
     pub fn set_dialect(&mut self, dialect: Option<SqlDialect>) {
         self.dialect = dialect;
     }
@@ -403,35 +439,38 @@ impl ResultsPanel {
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.sets.clear();
-        self.active = 0;
-        self.forget_messages();
+        self.forget_run();
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
 
     fn show(&mut self, set: ResultSetView, cx: &mut Context<Self>) {
         self.sets = vec![set];
-        self.active = 0;
-        self.forget_messages();
+        self.forget_run();
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
 
-    fn forget_messages(&mut self) {
-        self.messages = MessageLog::default();
+    // The message filter stays for the next run, as its field still shows it.
+    fn forget_run(&mut self) {
+        self.active = 0;
+        self.messages = self.messages.fresh();
         self.messages_open = false;
+        self.picked = false;
     }
 
     pub(crate) fn select_result(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.active = ix;
         self.resolve_table(ix, cx);
         self.messages_open = false;
+        self.picked = true;
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
 
     pub(crate) fn open_messages(&mut self, cx: &mut Context<Self>) {
         self.messages_open = true;
+        self.picked = true;
         cx.emit(ResultsEvent::FocusedRowChanged);
         cx.notify();
     }
@@ -565,12 +604,18 @@ impl ResultsPanel {
                 self.sets = vec![ResultSetView { error: Some(error), ..Default::default() }];
                 self.active = 0;
             }
-            // A run that only said something opens on what it said, like a DO block's notices.
-            RunEvent::Done { .. } => {
+            // A run that only said something opens on what it said, like a DO block's notices. One that starts with
+            // setup, like DDL, opens on its first result with more to show than an outcome, or else its last.
+            RunEvent::Done { .. } if !self.picked => {
                 if self.messages.has_raised() && self.sets.iter().all(ResultSetView::is_plain) {
                     self.messages_open = true;
+                } else if self.sets.get(self.active).is_some_and(ResultSetView::is_plain) {
+                    let ix = self.sets.iter().position(|set| !set.is_plain()).unwrap_or(self.sets.len() - 1);
+                    self.active = ix;
+                    self.resolve_table(ix, cx);
                 }
             }
+            RunEvent::Done { .. } => {}
         }
         self.shown_changed(before, cx);
         failed
@@ -666,7 +711,7 @@ impl ResultsPanel {
                 };
                 let badge = set.count(cx).map(|count| {
                     let color = if active { theme.primary } else { theme.muted_foreground };
-                    form::badge(format_number(count as f64, 0, &lang), color).ml(rems(0.462))
+                    form::badge(format_number(count as f64, 0, &lang), color)
                 });
                 let tooltip = set.statement.as_deref().map(statement_tooltip).filter(|tip| !tip.is_empty());
                 h_flex()
@@ -674,9 +719,9 @@ impl ResultsPanel {
                     .debug_selector(move || format!("result-tab-{ix}"))
                     .relative()
                     .flex_none()
+                    .h_full()
                     .gap(rems(0.462))
-                    .pt(rems(0.462))
-                    .pb(rems(0.615))
+                    .pb(rems(0.154))
                     .px(rems(0.769))
                     .border_r_1()
                     .border_color(theme.border)
@@ -685,14 +730,9 @@ impl ResultsPanel {
                     .text_color(color)
                     .cursor_pointer()
                     .when(!failed, |el| el.hover(|style| style.text_color(theme.foreground)))
-                    .child(
-                        h_flex()
-                            .when(set.plan.is_some(), |el| {
-                                el.child(Icon::new(Lucide::Route).size(ICON_XS).opacity(0.75))
-                            })
-                            .child(t_with(cx, key, &[("n", &n.to_string())]))
-                            .children(badge),
-                    )
+                    .when(set.plan.is_some(), |el| el.child(Icon::new(Lucide::Route).size(ICON_XS).opacity(0.75)))
+                    .child(t_with(cx, key, &[("n", &n.to_string())]))
+                    .children(badge)
                     .when(failed, |el| el.child(Icon::new(Lucide::CircleAlert).size(ICON_XS)))
                     .when(active, |el| {
                         let underline = if failed { theme.danger } else { theme.primary };
@@ -726,10 +766,11 @@ impl ResultsPanel {
             .relative()
             .flex_none()
             .w_full()
+            .h(TOP_BAR)
             .child(
                 h_flex()
                     .id("result-tabs")
-                    .w_full()
+                    .size_full()
                     .border_b_1()
                     .border_color(theme.border)
                     .overflow_x_scroll()
@@ -757,9 +798,9 @@ impl ResultsPanel {
             .debug_selector(|| "result-tab-messages".into())
             .relative()
             .flex_none()
+            .h_full()
             .gap(rems(0.462))
-            .pt(rems(0.462))
-            .pb(rems(0.615))
+            .pb(rems(0.154))
             .px(rems(0.769))
             .border_r_1()
             .border_color(theme.border)
@@ -805,18 +846,32 @@ impl ResultsPanel {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        let hover = cx.theme().sidebar_accent;
         range
             .filter_map(|ix| {
                 let line = self.messages.row(ix)?;
-                let heading = match line {
-                    Line::Result(index) => Some(self.heading(index, cx)),
-                    _ => None,
+                let (heading, opens) = match line {
+                    Line::Result(index) => (Some(self.heading(index, cx)), (index < self.sets.len()).then_some(index)),
+                    _ => (None, None),
                 };
                 let text = match &line {
                     Line::Text { text, .. } | Line::Labeled { text, .. } => Some(text.to_string()),
                     _ => None,
                 };
                 let row = message_log::render_row(ix, line, heading, self.messages.has_codes(), cx);
+                if let Some(index) = opens {
+                    return Some(
+                        div()
+                            .id(("message-heading", ix))
+                            .debug_selector(move || format!("message-heading-{ix}"))
+                            .w_full()
+                            .cursor_pointer()
+                            .hover(move |style| style.bg(hover))
+                            .child(row)
+                            .on_click(cx.listener(move |this, _, _, cx| this.select_result(index, cx)))
+                            .into_any_element(),
+                    );
+                }
                 let Some(text) = text else { return Some(row) };
                 let panel = cx.entity().downgrade();
                 Some(
@@ -908,13 +963,87 @@ impl ResultsPanel {
         }
     }
 
-    fn messages_view(&self, cx: &mut Context<Self>) -> AnyElement {
+    // Made when the tab first shows, as it needs a window.
+    fn message_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
+        if let Some(filter) = &self.message_filter {
+            return filter.clone();
+        }
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(t(cx, "results.filterMessages")));
+        self._message_filter_subscriptions = vec![
+            cx.subscribe_in(&filter, window, |this, filter, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.messages.filter_by_text(&filter.read(cx).value());
+                    cx.notify();
+                }
+            }),
+            cx.observe_global_in::<I18n>(window, |this, window, cx| {
+                if let Some(filter) = this.message_filter.clone() {
+                    filter.update(cx, |state, cx| state.set_placeholder(t(cx, "results.filterMessages"), window, cx));
+                }
+            }),
+        ];
+        self.message_filter = Some(filter.clone());
+        filter
+    }
+
+    // A level's toggle shows once the log has two levels, or while it's picked.
+    fn level_toggles(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let picked = self.messages.level_filter();
+        if self.messages.level_kinds() < 2 && picked.is_none() {
+            return None;
+        }
+        let levels = [
+            (None, "message-level-all", "results.filterAll"),
+            (Some(MessageLevel::Warning), "message-level-warning", "results.filterWarnings"),
+            (Some(MessageLevel::Notice), "message-level-notice", "results.filterNotices"),
+            (Some(MessageLevel::Info), "message-level-info", "results.filterInfo"),
+        ];
+        let toggles = levels.into_iter().filter_map(|(level, id, key)| {
+            let n = level.map_or(self.messages.kept(), |level| self.messages.count(level));
+            (level.is_none() || n > 0 || level == picked).then(|| {
+                form::filter_toggle(id, format!("{} {}", t(cx, key), i18n::count(cx, n)), level == picked)
+                    .debug_selector(move || id.into())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.messages.filter_by_level(level);
+                        cx.notify();
+                    }))
+            })
+        });
+        Some(form::toggle_group().flex_none().children(toggles))
+    }
+
+    fn messages_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let filter = self.message_filter(window, cx);
         let theme = cx.theme().clone();
-        let lang = cx.global::<I18n>().lang().to_string();
-        let count = t_count(cx, "results.messagesCount", self.messages.total() as i64, &[]);
-        let count =
-            count.replace(&self.messages.total().to_string(), &format_number(self.messages.total() as f64, 0, &lang));
+        let total = self.messages.total();
+        let count = match self.messages.matched() {
+            Some(matched) => counted(cx, "results.messagesMatched", total, &[("matched", &i18n::count(cx, matched))]),
+            None => counted(cx, "results.messagesCount", total, &[]),
+        };
+        let warnings = self.messages.count(MessageLevel::Warning);
+        let warned = (warnings > 0 && self.messages.matched().is_none()).then(|| {
+            let text = counted(cx, "results.messagesWarnings", warnings, &[]);
+            div().text_color(theme.warning).child(format!(" · {text}"))
+        });
+        let strip = h_flex()
+            .flex_none()
+            .h(STRIP)
+            .px(rems(0.769))
+            .gap(rems(0.615))
+            .justify_between()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .debug_selector(|| "messages-filter".into())
+                    .flex_1()
+                    .min_w_0()
+                    .max_w(rems(24.))
+                    .child(form::search_input(&filter, window, cx).cleanable(true)),
+            )
+            .children(self.level_toggles(cx));
         let copy = cx.listener(|this, _, _, cx| this.copy_messages(cx));
+        // Its icon sits under the filter's, as a table view's row count does.
         let toolbar = h_flex()
             .flex_none()
             .px(rems(0.769))
@@ -925,7 +1054,22 @@ impl ResultsPanel {
             .border_color(theme.border)
             .text_size(TEXT_SM)
             .text_color(theme.muted_foreground)
-            .child(div().flex_1().min_w_0().truncate().child(count))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .pl(form::ICON_INSET)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(
+                        Icon::new(Lucide::MessageSquareText)
+                            .size(ICON_SM)
+                            .text_color(theme.muted_foreground)
+                            .mr(form::ICON_GAP),
+                    )
+                    .child(div().debug_selector(|| "messages-count".into()).child(count))
+                    .children(warned),
+            )
             .child(
                 Button::new("copy-messages")
                     .debug_selector(|| "copy-messages".into())
@@ -933,78 +1077,123 @@ impl ResultsPanel {
                     .tooltip(t(cx, "results.copyMessages"))
                     .on_click(copy),
             );
-        let scroll = self.messages.scroll.clone();
-        let list = uniform_list("messages", self.messages.rows(), cx.processor(Self::render_message_rows))
-            .debug_selector(|| "messages".into())
-            .track_scroll(&scroll)
-            .size_full()
-            .px(LIST_INSET)
-            .pb(LIST_INSET);
+        let area = div().relative().flex_1().min_h_0();
+        let body = match self.messages.rows() {
+            0 => area.child(form::empty_state(None, t(cx, "results.noMessagesMatch"), cx)).into_any_element(),
+            rows => {
+                let scroll = self.messages.scroll.clone();
+                let list = uniform_list("messages", rows, cx.processor(Self::render_message_rows))
+                    .debug_selector(|| "messages".into())
+                    .track_scroll(&scroll)
+                    .size_full()
+                    .pl(rems(0.769))
+                    .pr(LIST_INSET)
+                    .pb(LIST_INSET);
+                area.child(list).hover_scrollbar(&scroll, ScrollbarAxis::Vertical).into_any_element()
+            }
+        };
+        v_flex().size_full().child(strip).child(toolbar).child(body).into_any_element()
+    }
+
+    // Built like the grid's toolbar, with the icon where its row count's is, so switching tabs moves nothing.
+    fn header(&self, icon: Lucide, text: SharedString, cx: &App) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
+        h_flex()
+            .flex_none()
+            .px(rems(0.769))
+            .py(rems(0.462))
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .text_size(TEXT_SM)
+            .text_color(muted)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h(rems(form::TOOL_REM))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(Icon::new(icon).size(ICON_SM).text_color(muted).mr(form::ICON_GAP))
+                    .child(div().debug_selector(|| "results-outcome".into()).child(text)),
+            )
+    }
+
+    // What a result without rows did, over its statement. The app's own messages, like a typed BEGIN's, have none.
+    fn outcome(&self, set: &ResultSetView, summary: &ResultSummary, cx: &App) -> AnyElement {
+        let theme = cx.theme();
+        let ms = summary.duration_ms.to_string();
+        let (icon, text) = match (set.count(cx), set.statement.as_deref()) {
+            (Some(count), _) => (Lucide::Rows3, t_count(cx, "results.metaAffected", count, &[("ms", &ms)])),
+            (None, Some(_)) => (Lucide::Check, t_with(cx, "results.metaDone", &[("ms", &ms)])),
+            (None, None) => (Lucide::Check, summary.message.clone().into()),
+        };
+        let statement = set.statement.as_deref().map(|statement| {
+            div()
+                .min_w_0()
+                .truncate()
+                .font_family(theme.mono_font_family.clone())
+                .text_size(TEXT_SM)
+                .text_color(theme.muted_foreground)
+                .child(statement_tooltip(statement))
+        });
         v_flex()
             .size_full()
-            .child(toolbar)
-            .child(div().relative().flex_1().min_h_0().child(list).hover_scrollbar(&scroll, ScrollbarAxis::Vertical))
+            .child(self.header(icon, text, cx))
+            .child(div().flex_1().min_h_0().flex().items_center().justify_center().p(rems(1.231)).children(statement))
             .into_any_element()
     }
 
-    fn header(&self, left: SharedString, right: Option<SharedString>, cx: &App) -> impl IntoElement {
-        h_flex()
-            .h(px(28.))
-            .flex_none()
-            .px_3()
-            .justify_between()
-            .text_size(TEXT_SM)
+    fn running_state(&self, started: Instant, cx: &mut Context<Self>) -> AnyElement {
+        let seconds = format!("{:.1}", started.elapsed().as_secs_f64());
+        v_flex()
+            .debug_selector(|| "results-running".into())
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap(rems(0.923))
+            .p(rems(1.231))
             .text_color(cx.theme().muted_foreground)
-            .gap_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(div().flex_1().min_w_0().truncate().child(left))
-            .children(right.map(|right| div().flex_none().child(right)))
+            .child(h_flex().gap(rems(0.462)).child(Spinner::new(ICON_SM)).child(t_with(
+                cx,
+                "app.statusRunning",
+                &[("seconds", &seconds)],
+            )))
+            .child(
+                Button::new("results-stop")
+                    .debug_selector(|| "results-stop".into())
+                    .tool(Icon::new(Lucide::Square), ICON_XS, t(cx, "editor.stop"))
+                    .tooltip(t(cx, "tooltip.stopQuery"))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ResultsEvent::Stop))),
+            )
+            .into_any_element()
     }
 
-    fn empty(&self, set: Option<&ResultSetView>, cx: &App) -> AnyElement {
-        let summary = set.and_then(|s| s.summary.as_ref());
-        // Nothing has run yet. Instead of a header saying so, the shortcuts that run something.
-        if summary.is_none() {
-            let hint = |id: &str, key: &str| (shortcuts::shown(id, cx), t(cx, key));
-            return v_flex()
-                .debug_selector(|| "results-empty".into())
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap(rems(0.923))
-                .p(rems(1.231))
-                .text_color(cx.theme().muted_foreground)
-                .child(t(cx, "results.runQueryHint"))
-                .child(form::shortcut_hints(
-                    [
-                        hint("runSelection", "shortcuts.items.runSelection"),
-                        hint("runAll", "shortcuts.items.runAll"),
-                        hint("explainQuery", "shortcuts.items.explainQuery"),
-                    ],
-                    cx,
-                ))
-                .into_any_element();
+    fn empty(&self, set: Option<&ResultSetView>, cx: &mut Context<Self>) -> AnyElement {
+        if let Some((set, summary)) = set.and_then(|set| Some((set, set.summary.as_ref()?))) {
+            return self.outcome(set, summary, cx);
         }
-        let message = summary.map(|s| s.message.clone()).filter(|m| !m.is_empty());
-        let meta = summary.map(|s| {
-            let count = if s.affected_rows != 0 { s.affected_rows } else { s.row_count };
-            t_count(cx, "results.metaRowsShort", count, &[("ms", &s.duration_ms.to_string())])
-        });
-        let title = message.clone().map_or_else(|| t(cx, "results.noResults"), SharedString::from);
-        let body = message.map_or_else(|| t(cx, "results.runQueryHint"), SharedString::from);
+        if let Some(started) = self.running {
+            return self.running_state(started, cx);
+        }
+        // Nothing has run yet. Instead of a header saying so, the shortcuts that run something.
+        let hint = |id: &str, key: &str| (shortcuts::shown(id, cx), t(cx, key));
         v_flex()
+            .debug_selector(|| "results-empty".into())
             .size_full()
-            .child(self.header(title, meta, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(body),
-            )
+            .items_center()
+            .justify_center()
+            .gap(rems(0.923))
+            .p(rems(1.231))
+            .text_color(cx.theme().muted_foreground)
+            .child(t(cx, "results.runQueryHint"))
+            .child(form::shortcut_hints(
+                [
+                    hint("runSelection", "shortcuts.items.runSelection"),
+                    hint("runAll", "shortcuts.items.runAll"),
+                    hint("explainQuery", "shortcuts.items.explainQuery"),
+                ],
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1299,17 +1488,13 @@ impl ResultsPanel {
         let theme = cx.theme();
         let (edits, deletes) = editor.counts();
         let busy = editor.applying;
-        h_flex()
+        let actions = h_flex()
             .flex_none()
-            .px(rems(0.923))
-            .py(rems(0.615))
             .gap(rems(0.462))
-            .border_t_1()
-            .border_color(theme.border)
             .child(
                 Button::new("result-revert")
                     .debug_selector(|| "result-revert".into())
-                    .tool_label(t(cx, "tableView.reset"))
+                    .tool_label(t(cx, "structure.revert"))
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.revert_edits(cx))),
             )
@@ -1328,8 +1513,16 @@ impl ResultsPanel {
             .when(deletes > 0, |el| {
                 let text = t_with(cx, "tableView.pendingDeletes", &[("count", &deletes.to_string())]);
                 el.child(form::badge(text, theme.danger))
-            })
-            .child(div().flex_1())
+            });
+        h_flex()
+            .flex_none()
+            .justify_between()
+            .px(rems(0.769))
+            .py(rems(0.615))
+            .gap(rems(0.923))
+            .border_t_1()
+            .border_color(theme.border)
+            .child(actions)
             .child(div().min_w_0().truncate().text_size(TEXT_SM).text_color(theme.muted_foreground).child(t_with(
                 cx,
                 "results.editsTo",
@@ -1387,9 +1580,9 @@ impl ResultsPanel {
 impl EventEmitter<ResultsEvent> for ResultsPanel {}
 
 impl Render for ResultsPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match self.sets.get(self.active) {
-            _ if self.messages_open => self.messages_view(cx),
+            _ if self.messages_open => self.messages_view(window, cx),
             None => self.empty(None, cx),
             Some(set) => match (&set.error, &set.plan, &set.grid) {
                 (Some(error), ..) => self.error(error, set.statement.as_deref(), cx),
@@ -1411,7 +1604,17 @@ impl Render for ResultsPanel {
 
 #[cfg(test)]
 mod label_tests {
-    use super::{ordinals, split_message};
+    use super::{counts_rows, ordinals, split_message, statement_tooltip};
+
+    #[test]
+    fn previews_start_at_the_code_and_only_writes_count_rows() {
+        assert_eq!(statement_tooltip("-- why\n/* more */\nALTER TABLE t\n  ADD c int"), "ALTER TABLE t ADD c int");
+        assert_eq!(statement_tooltip("-- only a note"), "-- only a note");
+        assert!(counts_rows("-- backfill\nUPDATE t SET a = 1"));
+        assert!(counts_rows("WITH gone AS (DELETE FROM t RETURNING *) SELECT 1"));
+        assert!(!counts_rows("ALTER TABLE t ADD c int"));
+        assert!(!counts_rows("DO $$ BEGIN END $$"));
+    }
 
     #[test]
     fn grids_and_plans_are_numbered_apart() {
@@ -1442,10 +1645,12 @@ mod messages_tests {
     use barsql_core::{MessageLevel, ResultSummary, ServerMessage};
     use barsql_db::{ChunkBuilder, ColumnMeta};
     use gpui_kit::component::Root;
-    use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
+    use gpui_kit::{AppContext as _, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, px};
 
     use super::ResultsPanel;
+    use crate::form::{ICON_GAP, ICON_INSET};
     use crate::test_support::Env;
+    use crate::tokens::ICON_SM;
 
     pub(super) fn panel(cx: &mut TestAppContext) -> (Entity<ResultsPanel>, &mut VisualTestContext) {
         let mut panel = None;
@@ -1521,6 +1726,124 @@ mod messages_tests {
             copied,
             "-- Result 1: DO $$ BEGIN RAISE NOTICE 'hi'; END $$\nNotice: hi\nWarning 01000: careful\nHint: look closer"
         );
+    }
+
+    // A result's statement, its message and the message's detail and hint all start at one x.
+    #[gpui_kit::test]
+    fn message_texts_share_one_column(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let warning = ServerMessage {
+            level: MessageLevel::Warning,
+            code: "01000".into(),
+            text: "careful".into(),
+            detail: "why".into(),
+            hint: "look closer".into(),
+        };
+        let events = vec![
+            messages(0, vec![warning]),
+            done(0, "-- a note\nDO $$ BEGIN END $$", 0),
+            RunEvent::Done { result_count: 1, error: None },
+        ];
+        apply(&panel, events, cx);
+        let left = |selector: &'static str, cx: &mut VisualTestContext| {
+            cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is not drawn")).left()
+        };
+        let statement = left("message-statement-0", cx);
+        for selector in ["message-text-1", "message-text-2", "message-text-3"] {
+            assert_eq!(left(selector, cx), statement, "{selector}");
+        }
+    }
+
+    // A level's icon sits under the toolbar's, which sits under the filter's, and the count starts where level names do.
+    #[gpui_kit::test]
+    fn levels_line_up_under_the_filter(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let events = vec![
+            messages(0, vec![ServerMessage::new(MessageLevel::Notice, "hi")]),
+            done(0, "DO $$ BEGIN END $$", 0),
+            RunEvent::Done { result_count: 1, error: None },
+        ];
+        apply(&panel, events, cx);
+        let rem = cx.update(|window, _| window.rem_size());
+        let left = |selector: &'static str, cx: &mut VisualTestContext| {
+            cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is not drawn")).left()
+        };
+        // Layout rounds to whole pixels.
+        let near = |a: Pixels, b: Pixels| (a - b).abs() < px(0.5);
+        let icon = left("messages-filter", cx) + ICON_INSET.to_pixels(rem);
+        assert!(near(left("message-level-1", cx), icon));
+        assert!(near(left("messages-count", cx), icon + ICON_SM.to_pixels(rem) + ICON_GAP));
+        assert!(cx.debug_bounds("message-level-all").is_none(), "one level leaves nothing to pick");
+    }
+
+    #[gpui_kit::test]
+    fn the_filter_narrows_the_log_and_a_heading_opens_its_result(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let warning = ServerMessage {
+            level: MessageLevel::Warning,
+            code: "01000".into(),
+            text: "Slow path".into(),
+            hint: "Add an INDEX".into(),
+            ..Default::default()
+        };
+        let events = vec![
+            messages(0, vec![ServerMessage::new(MessageLevel::Notice, "skipping")]),
+            done(0, "ALTER TABLE t ADD c int", 0),
+            messages(1, vec![ServerMessage::new(MessageLevel::Notice, "checked"), warning]),
+            done(1, "DO $$ BEGIN END $$", 0),
+            RunEvent::Done { result_count: 2, error: None },
+        ];
+        apply(&panel, events, cx);
+        let texts = |cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| {
+                panel.message_texts().into_iter().map(|(_, _, text)| text).collect::<Vec<_>>()
+            })
+        };
+        click("message-level-notice", cx);
+        assert_eq!(texts(cx), ["skipping", "checked"]);
+        click("message-level-all", cx);
+        click("messages-filter", cx);
+        cx.simulate_input("index");
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(texts(cx), ["Slow path"], "its hint matched");
+
+        click("message-heading-0", cx);
+        assert_eq!(panel.read_with(cx, |panel, _| (panel.messages_shown(), panel.active)), (false, 1));
+
+        // The next run's log is filtered as this one was, as the field still says.
+        panel.update(cx, |panel, cx| panel.clear(cx));
+        let events = vec![
+            messages(0, vec![ServerMessage::new(MessageLevel::Notice, "no index used"), ServerMessage::default()]),
+            RunEvent::Done { result_count: 1, error: None },
+        ];
+        apply(&panel, events, cx);
+        assert_eq!(texts(cx), ["no index used"]);
+    }
+
+    // Until a result comes, a running tab says so in place of the hints, with a way to stop it.
+    #[gpui_kit::test]
+    fn a_run_without_results_yet_shows_it_runs(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let stopped = std::rc::Rc::new(std::cell::Cell::new(false));
+        let seen = stopped.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&panel, move |_, event: &super::ResultsEvent, _| {
+                seen.set(seen.get() || matches!(event, super::ResultsEvent::Stop))
+            })
+            .detach()
+        });
+        panel.update(cx, |panel, cx| panel.set_running(Some(std::time::Instant::now()), cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("results-running").is_some() && cx.debug_bounds("results-empty").is_none());
+        click("results-stop", cx);
+        assert!(stopped.get());
+        apply(&panel, vec![done(0, "CREATE TABLE t (x int)", 0)], cx);
+        assert!(cx.debug_bounds("results-running").is_none() && cx.debug_bounds("results-outcome").is_some());
     }
 
     #[gpui_kit::test]
@@ -1618,6 +1941,34 @@ mod editor_tests {
             RunEvent::Rows { result_index: index, chunk: Arc::new(rows.finish()) },
             done(index, statement, 1),
         ]
+    }
+
+    // A script that starts with setup opens on its first result with rows, or on its last when none has any, unless
+    // a tab was picked while it ran.
+    #[gpui_kit::test]
+    fn a_script_opens_past_its_setup(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let (panel, cx) = panel(cx);
+        let active = |cx: &mut VisualTestContext| panel.read_with(cx, |panel, _| panel.active);
+        let script = || {
+            let mut events = vec![done(0, "CREATE TABLE people (id int, name text)", 0)];
+            events.extend(people(1, "SELECT id, name FROM people"));
+            events
+        };
+        let end = || RunEvent::Done { result_count: 2, error: None };
+        apply(&panel, script().into_iter().chain([end()]).collect(), cx);
+        assert_eq!(active(cx), 1);
+
+        panel.update(cx, |panel, cx| panel.clear(cx));
+        apply(&panel, script(), cx);
+        panel.update(cx, |panel, cx| panel.select_result(0, cx));
+        apply(&panel, vec![end()], cx);
+        assert_eq!(active(cx), 0, "the picked tab stays");
+
+        panel.update(cx, |panel, cx| panel.clear(cx));
+        let events = vec![done(0, "CREATE TABLE t (x int)", 0), done(1, "INSERT INTO t VALUES (1), (2)", 2), end()];
+        apply(&panel, events, cx);
+        assert_eq!(active(cx), 1);
     }
 
     // A grid shows with its first rows, or once its result ends without any, never as headers waiting for rows.

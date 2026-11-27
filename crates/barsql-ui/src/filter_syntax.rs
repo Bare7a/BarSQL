@@ -18,7 +18,7 @@ const EXPRESSION_WORDS: &[&str] = &[
 ];
 
 // The theme's syntax names for a filter's tokens. A filter is a bare expression, which the SQL grammar can't
-// parse, so the lexer colors it. NULL takes the string color, as the grammar gives the editor's literals.
+// parse, so the lexer colors it.
 pub fn spans(text: &str, driver: &DriverType) -> Vec<(Range<usize>, &'static str)> {
     let words: HashSet<String> = filter_keywords(Some(driver))
         .into_iter()
@@ -30,8 +30,7 @@ pub fn spans(text: &str, driver: &DriverType) -> Vec<(Range<usize>, &'static str
     let calls = |ix: usize| tokens.get(ix + 1).is_some_and(|next| next.text == "(");
     let named = tokens.iter().enumerate().filter_map(|(ix, token)| {
         let name = match token.kind {
-            TokenKind::Ident if token.lower == "null" => "string",
-            TokenKind::Ident if token.lower == "true" || token.lower == "false" => "boolean",
+            TokenKind::Ident if matches!(token.lower.as_str(), "true" | "false" | "null") => "number",
             TokenKind::Ident if words.contains(&token.lower) => "keyword",
             TokenKind::Ident if calls(ix) => "function",
             TokenKind::String => "string",
@@ -120,10 +119,10 @@ mod tests {
             ("(", "punctuation.bracket"),
             (")", "punctuation.bracket"),
             ("IS", "keyword"),
-            ("NULL", "string"),
+            ("NULL", "number"),
             ("AND", "keyword"),
             ("=", "operator"),
-            ("TRUE", "boolean"),
+            ("TRUE", "number"),
         ];
         assert_eq!(named(text, DriverType::Postgres), expected);
     }

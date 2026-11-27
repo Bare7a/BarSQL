@@ -1232,7 +1232,7 @@ impl Render for Grid {
                 .w(ringed.size.width)
                 .h(ringed.size.height)
                 .border_2()
-                .border_color(theme.primary)
+                .border_color(theme.ring)
                 .bg(crate::theme::opaque(theme.background))
                 // Its own Cut/Copy/Paste menu, not the grid's, which would also take focus and commit the edit.
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())

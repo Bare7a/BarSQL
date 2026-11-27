@@ -8,7 +8,6 @@ use std::time::Duration;
 use barsql_app::update::{self, InstallEvent, Release, Stage, Staged};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, StyledExt, WindowExt, h_flex, v_flex};
@@ -100,7 +99,7 @@ pub(crate) fn chip_for(state: &UpdateState, skipped: Option<&str>) -> Option<Upd
             (skipped != Some(release.version.as_str())).then(|| UpdateChip::Available(release.version.clone()))
         }
         UpdateState::Downloading(_, Some(Transfer { written, total, .. })) if *total > 0 => {
-            Some(UpdateChip::Downloading(Some((written.saturating_mul(100) / total).min(100) as u8)))
+            Some(UpdateChip::Downloading(Some(percent_done(*written, *total))))
         }
         UpdateState::Downloading(..) | UpdateState::Verifying(_) | UpdateState::Installing(_) => {
             Some(UpdateChip::Downloading(None))
@@ -108,6 +107,11 @@ pub(crate) fn chip_for(state: &UpdateState, skipped: Option<&str>) -> Option<Upd
         UpdateState::Ready(..) => Some(UpdateChip::Ready),
         UpdateState::Failed { .. } => Some(UpdateChip::Failed),
     }
+}
+
+// Rounded down, so the dialog and the status bar show the same number and neither says 100% early.
+pub(crate) fn percent_done(written: u64, total: u64) -> u8 {
+    (written.saturating_mul(100) / total).min(100) as u8
 }
 
 pub fn chip(cx: &App) -> Option<UpdateChip> {
@@ -318,7 +322,8 @@ impl UpdateDialog {
                             ),
                     )
                     .child(
-                        h_flex().gap(rems(0.615)).child(close).child(
+                        // Keeps right on a row of its own when the footer wraps.
+                        h_flex().ml_auto().gap(rems(0.615)).child(close).child(
                             primary("update-install", &t(cx, "update.install"))
                                 .on_click(cx.listener(|this, _, _, cx| this.install(cx))),
                         ),
@@ -350,7 +355,7 @@ impl UpdateDialog {
             Some(Transfer { written, total, rate }) => {
                 let rate = if rate == 0 { String::new() } else { format!("{}/s", bytes(cx, rate as i64)) };
                 if total > 0 {
-                    let percent = (written as f64 / total as f64 * 100.).round();
+                    let percent = percent_done(written, total);
                     let (written, total) = (bytes(cx, written as i64), bytes(cx, total as i64));
                     let label = t_with(
                         cx,
@@ -375,10 +380,7 @@ impl UpdateDialog {
                     .child(div().font_medium().child(label))
                     .child(div().text_color(theme.muted_foreground).child(rate)),
             )
-            .child(match percent {
-                Some(percent) => Progress::new("update-progress").value(percent),
-                None => Progress::new("update-progress").loading(true),
-            })
+            .child(form::progress_bar("update-progress", percent.map(|percent| percent / 100.)))
             .into_any_element()
     }
 }

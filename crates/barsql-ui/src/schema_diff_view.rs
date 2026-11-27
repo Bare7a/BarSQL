@@ -9,7 +9,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, Sty
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::form::LargeButton as _;
+use crate::form::{self, LargeButton as _};
 use crate::i18n::{t, t_count, t_with};
 use crate::modal::{self, Modal};
 use crate::schema::{self, Schemas};
@@ -161,12 +161,8 @@ impl SchemaDiffView {
         let connections: Vec<(usize, SharedString)> =
             self.targets.iter().enumerate().map(|(ix, c)| (ix, SharedString::from(c.label()))).collect();
         let current = self.target;
-        let connection = Button::new("diff-target-connection")
+        let connection = form::select("diff-target-connection", self.target().label(), cx)
             .debug_selector(|| "diff-target-connection".into())
-            .small()
-            .outline()
-            .label(self.target().label())
-            .dropdown_caret(true)
             .dropdown_menu({
                 let this = this.clone();
                 move |mut menu: PopupMenu, _, _| {
@@ -183,14 +179,12 @@ impl SchemaDiffView {
             });
         let schemas = self.schemas(cx).unwrap_or_default();
         let picked = self.target_schema.clone();
-        let schema = Button::new("diff-target-schema")
-            .debug_selector(|| "diff-target-schema".into())
-            .small()
-            .outline()
-            .label(picked.clone().unwrap_or_else(|| t(cx, "schemaDiff.pickSchema").to_string()))
-            .dropdown_caret(true)
-            .disabled(schemas.is_empty())
-            .dropdown_menu(move |mut menu: PopupMenu, _, _| {
+        let schema = match &picked {
+            Some(name) => form::select("diff-target-schema", name.clone(), cx),
+            None => form::select_placeholder("diff-target-schema", t(cx, "schemaDiff.pickSchema"), cx),
+        };
+        let schema = schema.debug_selector(|| "diff-target-schema".into()).disabled(schemas.is_empty()).dropdown_menu(
+            move |mut menu: PopupMenu, _, _| {
                 for name in &schemas {
                     let (this, name) = (this.clone(), name.clone());
                     let checked = picked.as_deref() == Some(name.as_str());
@@ -203,7 +197,8 @@ impl SchemaDiffView {
                     }));
                 }
                 menu
-            });
+            },
+        );
         let theme = cx.theme();
         h_flex()
             .flex_none()
@@ -216,12 +211,11 @@ impl SchemaDiffView {
             .text_size(TEXT_SM)
             .child(div().font_semibold().child(format!("{} · {}", self.source.label(), self.source_schema)))
             .child(div().text_color(theme.muted_foreground).child(t(cx, "schemaDiff.with")))
-            .child(connection)
-            .child(schema)
+            .child(div().w(rems(13.846)).child(connection))
+            .child(div().w(rems(13.846)).child(schema))
             .child(
-                Button::new("diff-compare")
+                form::field_button("diff-compare")
                     .debug_selector(|| "diff-compare".into())
-                    .small()
                     .primary()
                     .label(t(cx, "schemaDiff.compare"))
                     .disabled(!self.can_compare())
@@ -231,12 +225,11 @@ impl SchemaDiffView {
 
     fn results(&self, cx: &App) -> AnyElement {
         let theme = cx.theme();
-        let note =
-            |text: SharedString| div().p(rems(1.231)).text_color(theme.muted_foreground).child(text).into_any_element();
+        let note = |text: SharedString| form::empty_state(None, text, cx).into_any_element();
         let Compare::Ready { diffs, .. } = &self.state else {
             return match &self.state {
-                Compare::Loading => note(t(cx, "schemaDiff.loading")),
-                Compare::Failed(error) => note(error.clone().into()),
+                Compare::Loading => form::loading_state(t(cx, "schemaDiff.loading"), cx).into_any_element(),
+                Compare::Failed(error) => form::error(error.clone(), cx).m(rems(1.231)).into_any_element(),
                 _ => note(t(cx, "schemaDiff.hint")),
             };
         };

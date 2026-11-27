@@ -132,8 +132,8 @@ pub const SHORTCUTS: [ShortcutDef; 21] = [
     def("zoomIn", VIEW, GLOBAL, "=", CTRL),
     def("zoomOut", VIEW, GLOBAL, "-", CTRL),
     def("resetZoom", VIEW, GLOBAL, "0", CTRL),
-    def("increaseEditorFontSize", VIEW, EDITOR, ".", CTRL_SHIFT),
-    def("decreaseEditorFontSize", VIEW, EDITOR, ",", CTRL_SHIFT),
+    def("increaseEditorFontSize", VIEW, GLOBAL, ".", CTRL_SHIFT),
+    def("decreaseEditorFontSize", VIEW, GLOBAL, ",", CTRL_SHIFT),
     def("toggleFullscreen", VIEW, GLOBAL, "F11", NONE),
 ];
 

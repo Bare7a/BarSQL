@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tree-sitter-json.workspace = true
+tree-sitter-sequel.workspace = true
 unicode-normalization.workspace = true
 uuid.workspace = true
 barsql-app.workspace = true

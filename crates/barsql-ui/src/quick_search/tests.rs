@@ -1,4 +1,4 @@
-use barsql_app::{EditorSession, EditorTab};
+use barsql_app::{ConnectionFolder, EditorSession, EditorTab};
 use barsql_core::{ConnectionConfig, DriverType, SavedQuery, TableInfo};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{Root, WindowExt};
@@ -51,12 +51,29 @@ fn labels(query: &str, candidates: &Candidates) -> Vec<(Kind, String)> {
     rank(query, candidates).into_iter().map(|item| (item.kind, item.label)).collect()
 }
 
+// Connections that share a name say which folder each is in.
+#[test]
+fn twin_connections_show_their_folders() {
+    let in_folder =
+        |id: &str, folder: &str| ConnectionConfig { folder_id: folder.into(), ..connection(id, "Postgres", "") };
+    let folder = |id: &str, name: &str| ConnectionFolder { id: id.into(), name: name.into() };
+    let candidates = Candidates {
+        connections: vec![in_folder("a", "f1"), in_folder("b", "f2"), connection("c", "Forum", "")],
+        folders: vec![folder("f1", "Production"), folder("f2", "Development")],
+        ..Default::default()
+    };
+    let details: Vec<Option<String>> = rank("", &candidates).into_iter().map(|item| item.detail).collect();
+    let expected = ["postgres · Production", "postgres · Development", "postgres"];
+    assert_eq!(details, expected.map(|detail| Some(detail.to_string())));
+}
+
 #[test]
 fn an_empty_query_lists_the_tabs_then_the_connections() {
     let candidates = Candidates {
         tabs: vec![tab("a", "Query 1 (Forum)", "pg"), tab("b", "posts", "gone")],
         connections: vec![connection("pg", "Forum", "forum_db"), connection("lite", "Local", "")],
         tables: vec![tables("pg", "public", &["posts"])],
+        folders: Vec::new(),
         saved: vec![saved("s", "Top posts", "pg")],
     };
     let items = rank("  ", &candidates);
@@ -76,6 +93,7 @@ fn tables_and_saved_queries_already_open_are_left_out() {
         tabs: vec![table_tab, linked, tab("u", "Post stats", "pg")],
         connections: vec![connection("pg", "Forum", "")],
         tables: vec![tables("pg", "public", &["posts", "post_tags"]), tables("pg", "archive", &["posts"])],
+        folders: Vec::new(),
         saved: vec![
             saved("s1", "Posts by day", "pg"),
             saved("s2", "Post stats", ""),
@@ -105,6 +123,7 @@ fn categories_break_ties_and_every_match_is_listed() {
         tabs: vec![tab("a", "users", "pg")],
         connections: vec![connection("pg", "users", "")],
         tables: vec![tables("pg", "public", &["users"]), tables("pg", "extra", &names)],
+        folders: Vec::new(),
         saved: vec![saved("s", "users", "other")],
     };
     let items = rank("users", &candidates);
@@ -126,6 +145,7 @@ fn tables_match_their_own_name_only() {
         tabs: vec![tab("t", "Query 1", "pg")],
         connections: vec![connection("pg", "Warehouse", "")],
         tables: vec![tables("pg", "sales", &["orders"]), tables("pg", "public", &["monthly_sales"])],
+        folders: Vec::new(),
         saved: vec![saved("s", "Top orders", "pg")],
     };
     assert_eq!(labels("sales", &candidates), [(Kind::Table, "monthly_sales".into())], "not by schema");

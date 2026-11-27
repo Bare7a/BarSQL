@@ -329,6 +329,15 @@ mod tests {
         }
     }
 
+    // A warning's hint line would read as one more notice.
+    #[test]
+    fn the_hint_label_differs_from_the_notice_level() {
+        for (lang, _) in LANGUAGES {
+            let i18n = I18n::new(lang);
+            assert_ne!(i18n.t("errors.hintLabel"), i18n.t("results.level.notice"), "{lang}");
+        }
+    }
+
     // Their keys are built from the ids, so no search for the literal key would find a missing one.
     #[test]
     fn every_system_view_has_a_title() {

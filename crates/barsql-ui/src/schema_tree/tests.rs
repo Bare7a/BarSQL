@@ -8,7 +8,7 @@ use gpui_kit::{Entity, Modifiers, MouseButton, MouseDownEvent, TestAppContext, V
 
 use super::{
     SchemaTree, SchemaTreeEvent, column_details, column_icon, column_matches, group_icon, match_ranges, relation_look,
-    search_mark, table_matches, type_label, type_needle,
+    search_mark, table_matches, type_label, type_needle, unbroken_paths,
 };
 use crate::assets::AppAssets;
 use crate::i18n::I18n;
@@ -58,6 +58,16 @@ fn pick_option(downs: usize, cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
     cx.simulate_keystrokes(&format!("{}enter", "down ".repeat(downs + 1)));
     cx.run_until_parked();
+}
+
+#[test]
+fn a_windows_path_stays_whole_in_an_error() {
+    let error = "ssh tunnel: cannot read private key C:\\Users\\me\\.ssh\\id_ed25519: not found (os error 3)";
+    assert_eq!(
+        unbroken_paths(error),
+        "ssh tunnel: cannot read private key C:\u{2060}\\Users\\me\\.ssh\\id_ed25519: not found (os error 3)"
+    );
+    assert_eq!(unbroken_paths("a:b\\c and 1:\\d"), "a:b\\c and 1:\\d", "only a drive letter's colon");
 }
 
 #[test]

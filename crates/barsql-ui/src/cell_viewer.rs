@@ -159,6 +159,7 @@ impl CellViewer {
         let array = self.array;
         let kinds = (!self.null).then(|| {
             form::select_small("cell-viewer-kind", t(cx, label_key(current, array)).to_uppercase(), cx)
+                .h(rems(form::FOOTER_REM))
                 .debug_selector(|| "cell-viewer-kind".into())
                 .tooltip(t(cx, "tooltip.cellViewerKind"))
                 .dropdown_menu(move |mut menu: PopupMenu, _, cx| {
@@ -179,6 +180,7 @@ impl CellViewer {
                 Button::new(id)
                     .debug_selector(move || id.into())
                     .tool(Icon::new(icon), ICON_XS, t(cx, key))
+                    .h(rems(form::FOOTER_REM))
                     .tooltip(t(cx, tooltip))
                     .on_click(cx.listener(move |viewer, _, window, cx| viewer.format(mode, window, cx)))
             };
@@ -208,6 +210,7 @@ impl CellViewer {
             .child(
                 Button::new("cell-viewer-copy")
                     .tool(Icon::new(Lucide::Copy), ICON_XS, t(cx, "common.copy"))
+                    .h(rems(form::FOOTER_REM))
                     .on_click(cx.listener(|viewer, _, _, cx| viewer.copy(cx))),
             );
         let right = h_flex()

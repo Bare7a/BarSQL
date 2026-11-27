@@ -32,7 +32,7 @@ use crate::context_menu::{self, Entry};
 use crate::database_pane;
 use crate::dialogs::{self, Confirm, Prompt};
 use crate::editor_commands::{self, CopyLine, CutLine, PasteLine, SelectAllOccurrences, ToggleComment};
-use crate::form::ToolButton;
+use crate::form::{self, ToolButton};
 use crate::grid::{Grid, RowRef, copy};
 use crate::hover_card::HoverCard;
 use crate::i18n::{I18n, t, t_count, t_with};
@@ -44,7 +44,7 @@ use crate::scrollbars::ScrollbarsOnHover as _;
 use crate::spinner::ProgressLine;
 use crate::sql_language::{self, SqlDefinitions, SqlLanguage, linked_table, lsp_range};
 use crate::status_bar::Caret;
-use crate::tokens::{ICON_XS, RADIUS, TEXT_XS, TINT, TINT_BORDER};
+use crate::tokens::{DOT_SM, ICON_XS, RADIUS, STRIP, TEXT_XS, TINT, TINT_BORDER};
 use crate::{params_dialog, shortcuts, state, theme};
 
 const EDITOR_CONTEXT: &str = "QueryEditor CodeEditor";
@@ -202,9 +202,10 @@ impl QueryTab {
     pub fn new(tab: EditorTab, connection: ConnectionConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sql = tab.sql;
         let language = Rc::new(SqlLanguage::new(connection.id.clone(), connection.driver.clone()));
+        let highlight = crate::syntax::sql_language(&connection.driver);
         let editor = cx.new(|cx| {
             let mut state =
-                EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql);
+                EditorState::new(window, cx).language(highlight).line_number(true).folding(true).default_value(sql);
             // An empty collection still reserves the strip.
             state.create_gutter_decorations_collection(Vec::new(), cx);
             state
@@ -261,6 +262,7 @@ impl QueryTab {
                     let (schema, table, filter) = (schema.clone(), table.clone(), Some(filter.clone()));
                     cx.emit(QueryTabEvent::OpenTable { schema, table, filter });
                 }
+                ResultsEvent::Stop => this.cancel(cx),
             }),
             cx.observe_global_in::<Schemas>(window, |this, window, cx| this.schedule_diagnostics(window, cx)),
             cx.observe_global_in::<I18n>(window, |this, window, cx| this.schedule_diagnostics(window, cx)),
@@ -968,12 +970,15 @@ impl QueryTab {
                 }
             }
         });
-        self.running = Some(Running { started: Instant::now(), _work: work, _tick: tick });
+        let started = Instant::now();
+        self.results.update(cx, |results, cx| results.set_running(Some(started), cx));
+        self.running = Some(Running { started, _work: work, _tick: tick });
         cx.notify();
     }
 
     fn finish_run(&mut self, failed: bool, cx: &mut Context<Self>) {
         self.running = None;
+        self.results.update(cx, |results, cx| results.set_running(None, cx));
         self.sync_transaction(failed, cx);
         cx.emit(QueryTabEvent::RunFinished);
         // A tab opened while the server was down gets its schema once a run gets through.
@@ -1094,10 +1099,13 @@ impl QueryTab {
         let work = cx.spawn_in(window, async move |this, cx| {
             let result = plan.await;
             let _ = this.update(cx, |this, cx| {
-                this.results.update(cx, |results, cx| match result {
-                    Some(Ok(plan)) => results.show_plan(plan, cx),
-                    Some(Err(error)) => results.show_error(error, cx),
-                    None => {}
+                this.results.update(cx, |results, cx| {
+                    match result {
+                        Some(Ok(plan)) => results.show_plan(plan, cx),
+                        Some(Err(error)) => results.show_error(error, cx),
+                        None => {}
+                    }
+                    results.set_running(None, cx);
                 });
                 this.running = None;
                 cx.notify();
@@ -1178,7 +1186,7 @@ impl QueryTab {
         h_flex()
             .debug_selector(|| "query-toolbar".into())
             .flex_none()
-            .h(rems(3.077))
+            .h(STRIP)
             .px(rems(0.769))
             .gap(rems(0.462))
             .justify_between()
@@ -1254,8 +1262,8 @@ impl QueryTab {
                 };
                 el.child(
                     h_flex()
-                        .gap_1p5()
-                        .h(rems(1.692))
+                        .gap(rems(0.385))
+                        .h(rems(form::TOOL_REM))
                         .px(rems(0.615))
                         .rounded(RADIUS)
                         .text_size(TEXT_XS)
@@ -1263,7 +1271,7 @@ impl QueryTab {
                         .bg(color.opacity(TINT))
                         .border_1()
                         .border_color(color.opacity(TINT_BORDER))
-                        .child(div().size(px(6.)).rounded_full().bg(color))
+                        .child(div().size(DOT_SM).rounded_full().bg(color))
                         .child(t(cx, key)),
                 )
                 .child(

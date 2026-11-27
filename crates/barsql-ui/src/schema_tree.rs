@@ -16,11 +16,11 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::form::LargeButton as _;
+use crate::form::{LargeButton as _, ToolButton as _};
 use crate::i18n::{I18n, bytes, count, t, t_count, t_with};
 use crate::list_nav::{self, BarClearance, LIST_INSET};
 use crate::schema::{self, Schemas};
@@ -1046,9 +1046,15 @@ impl SchemaTree {
                 .when(!foreign, |menu| {
                     menu.separator()
                         .when(is_table, |menu| {
-                            menu.item(Self::change_item(&this, "sidebar.truncate", truncate.clone(), writable, cx))
+                            menu.item(
+                                Self::change_item(&this, "sidebar.truncate", truncate.clone(), writable, cx)
+                                    .icon(crate::context_menu::danger_icon(Lucide::Eraser, cx)),
+                            )
                         })
-                        .item(Self::change_item(&this, "sidebar.drop", drop.clone(), writable, cx))
+                        .item(
+                            Self::change_item(&this, "sidebar.drop", drop.clone(), writable, cx)
+                                .icon(crate::context_menu::danger_icon(Lucide::Trash, cx)),
+                        )
                 })
         }
     }
@@ -1108,11 +1114,15 @@ impl SchemaTree {
             let (schema, table, column) = (schema.clone(), table.clone(), column.clone());
             let rename = Change::RenameColumn { schema: schema.clone(), table: table.clone(), column: column.clone() };
             let drop = Change::DropColumn { schema, table, column };
-            menu.separator()
-                .item(Self::change_item(&this, "sidebar.rename", rename, writable, cx))
-                .when(droppable, |menu| {
-                    menu.separator().item(Self::change_item(&this, "sidebar.drop", drop, writable, cx))
-                })
+            menu.separator().item(Self::change_item(&this, "sidebar.rename", rename, writable, cx)).when(
+                droppable,
+                |menu| {
+                    menu.separator().item(
+                        Self::change_item(&this, "sidebar.drop", drop, writable, cx)
+                            .icon(crate::context_menu::danger_icon(Lucide::Trash, cx)),
+                    )
+                },
+            )
         }
     }
 
@@ -1154,7 +1164,10 @@ impl SchemaTree {
             })
             .item(Self::copy_item(object.name.clone(), cx))
             .when_some(drop.clone(), |menu, drop| {
-                menu.separator().item(Self::change_item(&this, "sidebar.drop", drop, writable, cx))
+                menu.separator().item(
+                    Self::change_item(&this, "sidebar.drop", drop, writable, cx)
+                        .icon(crate::context_menu::danger_icon(Lucide::Trash, cx)),
+                )
             })
         }
     }
@@ -1613,41 +1626,70 @@ impl SchemaTree {
             })
     }
 
-    fn error_banner(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    // A failed connect names the connection and offers Connect again, in place of the Not connected page. A schema
+    // that failed to load keeps what the tree has under the card.
+    fn error_card(&self, conn: &ConnectionConfig, connected: bool, cx: &mut Context<Self>) -> Option<Div> {
         let error = self.error.clone()?;
         let theme = cx.theme();
+        let title = match connected {
+            true => t(cx, "sidebar.schemaFailed"),
+            false => t_with(cx, "sidebar.connectFailed", &[("name", &conn.name)]),
+        };
         let copy_text = error.clone();
-        Some(
-            form::alert(theme.danger)
-                .flex()
-                .flex_col()
-                .mx_2()
-                .mb_1()
-                .gap_1()
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .text_size(TEXT_XS)
-                        .child(Icon::new(Lucide::CircleAlert).size(ICON_XS).text_color(theme.danger))
-                        .child(div().flex_1().font_semibold().child(t(cx, "errors.generic")))
-                        .child(
-                            Button::new("copy-schema-error")
-                                .ghost()
-                                .xsmall()
-                                .icon(Icon::new(Lucide::Copy))
-                                .tooltip(t(cx, "common.copy"))
-                                .on_click(move |_, _, cx| {
-                                    Self::copy(copy_text.clone(), t(cx, "toast.copiedClipboard"), cx)
-                                }),
-                        ),
-                )
-                .child(div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(error)),
-        )
+        let card = form::alert(theme.danger)
+            .debug_selector(|| "schema-error".into())
+            .flex()
+            .flex_col()
+            .mx(LIST_INSET)
+            .mb(rems(0.308))
+            .gap(rems(0.308))
+            .child(
+                h_flex()
+                    .gap(rems(0.462))
+                    .text_size(TEXT_XS)
+                    .child(Icon::new(Lucide::CircleAlert).size(ICON_XS).text_color(theme.danger))
+                    .child(div().flex_1().min_w_0().font_semibold().child(title))
+                    .child(
+                        Button::new("copy-schema-error")
+                            .ghost()
+                            .tool_icon(Icon::new(Lucide::Copy), ICON_XS)
+                            .tooltip(t(cx, "common.copy"))
+                            .on_click(move |_, _, cx| {
+                                Self::copy(copy_text.clone(), t(cx, "toast.copiedClipboard"), cx)
+                            }),
+                    ),
+            )
+            .child(div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(unbroken_paths(&error)));
+        Some(card.when(!connected, |el| {
+            el.child(
+                h_flex().mt(rems(0.308)).child(
+                    Button::new("connect")
+                        .large_with_icon(Icon::new(Lucide::Plug), t(cx, "sidebar.connectButton"))
+                        .disabled(self.connecting)
+                        .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
+                ),
+            )
+        }))
     }
 
     fn message(&self, icon: Option<Lucide>, text: SharedString, cx: &App) -> Div {
         form::empty_state(icon.map(Icon::new), text, cx)
     }
+}
+
+// A line may break between a drive's colon and the backslash after it, which splits a path at "C:". A word joiner
+// there keeps the path whole.
+fn unbroken_paths(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let (mut before, mut last) = (None, None);
+    for c in text.chars() {
+        if c == '\\' && last == Some(':') && before.is_some_and(|d: char| d.is_ascii_alphabetic()) {
+            out.push('\u{2060}');
+        }
+        out.push(c);
+        (before, last) = (last, Some(c));
+    }
+    out
 }
 
 fn note(parent: &str, depth: usize, text: SharedString, spinner: bool) -> TreeRow {
@@ -1786,26 +1828,23 @@ impl Render for SchemaTree {
         let data = schema::get(cx, &conn.id);
         let loading = data.is_some_and(|d| d.loading());
         let schemas_empty = data.and_then(|d| d.schemas()).is_some_and(<[_]>::is_empty);
+        let connected = self.connected(cx);
         let body = if loading {
-            h_flex()
-                .px_3()
-                .py_2()
-                .gap_2()
-                .text_size(TEXT_SM)
-                .text_color(cx.theme().muted_foreground)
-                .child(Spinner::new(ICON_SM))
-                .child(t(cx, "sidebar.loadingSchemasTables"))
-                .into_any_element()
-        } else if !self.connected(cx) {
-            self.message(Some(Lucide::Plug), t(cx, "sidebar.notConnected"), cx)
-                .child(
-                    Button::new("connect")
-                        .primary()
-                        .large_with_icon(Icon::new(Lucide::Plug), t(cx, "sidebar.connectButton"))
-                        .disabled(self.connecting)
-                        .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
-                )
-                .into_any_element()
+            form::loading_state(t(cx, "sidebar.loadingSchemasTables"), cx).into_any_element()
+        } else if !connected {
+            match self.error_card(&conn, false, cx) {
+                Some(card) => card.into_any_element(),
+                None => self
+                    .message(Some(Lucide::Plug), t(cx, "sidebar.notConnected"), cx)
+                    .child(
+                        Button::new("connect")
+                            .primary()
+                            .large_with_icon(Icon::new(Lucide::Plug), t(cx, "sidebar.connectButton"))
+                            .disabled(self.connecting)
+                            .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
+                    )
+                    .into_any_element(),
+            }
         } else if schemas_empty && self.error.is_none() {
             self.message(None, t(cx, "sidebar.noSchemasRefresh"), cx).into_any_element()
         } else if self.rows.is_empty() && !self.needle.is_empty() {
@@ -1838,7 +1877,7 @@ impl Render for SchemaTree {
         v_flex()
             .size_full()
             .child(self.filter_bar(window, cx))
-            .children(self.error_banner(cx))
+            .children(connected.then(|| self.error_card(&conn, true, cx)).flatten())
             .child(div().flex_1().min_h_0().child(body))
     }
 }

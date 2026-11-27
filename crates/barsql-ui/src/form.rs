@@ -6,6 +6,7 @@ use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Editor, EditorState, Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu};
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -20,6 +21,11 @@ use crate::tokens::{
 
 // A toolbar's buttons, toggles and selects.
 pub const TOOL_REM: f32 = 1.692;
+// A dialog footer's buttons: GPUI Kit's large ones, and icon_button.
+pub const FOOTER_REM: f32 = 2.;
+// A field, and a sidebar filter bar around one.
+pub const FIELD_REM: f32 = 2.308;
+pub const FILTER_BAR_REM: f32 = FIELD_REM + 2. * LIST_INSET.0;
 
 // 30px tall with body-size text.
 pub fn input(state: &Entity<InputState>, window: &Window, cx: &App) -> Input {
@@ -44,7 +50,7 @@ fn field(state: &Entity<InputState>, text: Rems, padding: Rems, window: &Window,
         true => input.border_2().border_color(theme.ring).px(padding.to_pixels(window.rem_size()) - px(1.)),
         false => input.px(padding),
     };
-    Styled::h(input, rems(2.308))
+    Styled::h(input, rems(FIELD_REM))
 }
 
 // filter_input's frame around a one-line SQL editor, with `icon` inside as search_input has its own. Callers add
@@ -74,7 +80,7 @@ pub fn filter_editor(state: &Entity<EditorState>, icon: impl Into<Icon>, window:
             true
         });
     let frame = h_flex()
-        .h(rems(2.308))
+        .h(rems(FIELD_REM))
         .pl(ICON_INSET.to_pixels(rem) - px(1.) - thicker)
         .pr(rems(0.677).to_pixels(rem) - thicker)
         .rounded(theme.radius)
@@ -112,18 +118,18 @@ pub fn search_input(state: &Entity<InputState>, window: &Window, cx: &App) -> In
 }
 
 pub fn filter_button(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Button {
-    Button::new(id).small().size(rems(2.308)).p_0().child(icon.into().size(ICON_XS))
+    Button::new(id).small().size(rems(FIELD_REM)).p_0().child(icon.into().size(ICON_XS))
 }
 
 // A footer button with only an icon, as tall as the large ones beside it.
 pub fn icon_button(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Button {
     let label = label.into();
-    named(Button::new(id).large().size(rems(2.)).p_0(), &label).tooltip(label).child(icon.into().size(ICON_SM))
+    named(Button::new(id).large().size(rems(FOOTER_REM)).p_0(), &label).tooltip(label).child(icon.into().size(ICON_SM))
 }
 
 // A text button beside a field, as tall as it.
 pub fn field_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id).large().h(rems(2.308))
+    Button::new(id).large().h(rems(FIELD_REM))
 }
 
 // 22px tall with an 11px label. GPUI Kit's small button is 19.5px and shrinks its icon to 11.4px, so the icon
@@ -209,33 +215,40 @@ pub fn toggle_group() -> Div {
 
 // Among a dialog's fields, as tall as an input. A toolbar takes `toggle_small`, as tall as a tool button.
 pub fn toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
-    segment(Button::new(id).h(rems(2.308)), label, TEXT_BASE, active)
+    segment(Button::new(id).h(rems(FIELD_REM)), label, TEXT_BASE, active)
 }
 
 pub fn toggle_small(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
     segment(Button::new(id).small().h(rems(TOOL_REM)), label, TEXT_SM, active)
 }
 
+// Beside a filter field, as tall as it and with its text size.
+pub fn filter_toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, active: bool) -> Button {
+    segment(Button::new(id).h(rems(FIELD_REM)), label, TEXT_SM, active)
+}
+
+// The picked one is outlined in the accent, since a filled one reads as a button to press.
 fn segment(button: Button, label: impl Into<SharedString>, size: Rems, active: bool) -> Button {
     let label = label.into();
     named(button.flex_1(), &label)
         .child(div().min_w_0().truncate().text_size(size).child(label))
-        .when(active, |button| button.primary())
+        .when(active, |button| button.primary().outline())
 }
 
-pub fn progress(label: impl Into<SharedString>, fraction: f32, cx: &App) -> Div {
-    let theme = cx.theme();
+pub fn progress(id: impl Into<ElementId>, label: impl Into<SharedString>, fraction: f32, cx: &App) -> Div {
     v_flex()
-        .child(div().mt(rems(0.308)).text_size(TEXT_SM).text_color(theme.muted_foreground).child(label.into()))
-        .child(
-            div()
-                .mt(rems(0.462))
-                .h(rems(0.25))
-                .w_full()
-                .rounded_full()
-                .bg(theme.secondary_hover)
-                .child(div().h_full().w(relative(fraction.clamp(0., 1.))).rounded_full().bg(theme.primary)),
-        )
+        .gap(rems(0.462))
+        .child(div().mt(rems(0.308)).text_size(TEXT_SM).text_color(cx.theme().muted_foreground).child(label.into()))
+        .child(progress_bar(id, Some(fraction)))
+}
+
+// GPUI Kit's bar, which screen readers announce. None while the total isn't known.
+pub fn progress_bar(id: impl Into<ElementId>, fraction: Option<f32>) -> Progress {
+    let bar = Progress::new(id).small();
+    match fraction {
+        Some(fraction) => bar.value(fraction.clamp(0., 1.) * 100.),
+        None => bar.loading(true),
+    }
 }
 
 pub fn section(cx: &App) -> Div {
@@ -257,7 +270,7 @@ pub fn select_placeholder(id: impl Into<ElementId>, placeholder: impl Into<Share
 
 fn labeled_select(id: impl Into<ElementId>, icon: Option<Icon>, label: SharedString, color: Hsla, cx: &App) -> Button {
     let theme = cx.theme();
-    Button::new(id).outline().w_full().h(rems(2.308)).pl(rems(0.769)).pr(rems(0.615)).bg(theme.background).child(
+    Button::new(id).outline().w_full().h(rems(FIELD_REM)).pl(rems(0.769)).pr(rems(0.615)).bg(theme.background).child(
         h_flex()
             .w_full()
             .gap(rems(0.462))
@@ -424,6 +437,14 @@ pub fn error(text: impl Into<SharedString>, cx: &App) -> Div {
 }
 
 pub fn badge(text: impl Into<SharedString>, color: Hsla) -> Div {
+    badge_frame(color).child(text.into())
+}
+
+pub fn icon_badge(icon: impl Into<Icon>, text: impl Into<SharedString>, color: Hsla) -> Div {
+    badge_frame(color).flex().items_center().gap(rems(0.154)).child(icon.into().size(ICON_2XS)).child(text.into())
+}
+
+fn badge_frame(color: Hsla) -> Div {
     div()
         .flex_none()
         .px(rems(0.385))
@@ -432,7 +453,6 @@ pub fn badge(text: impl Into<SharedString>, color: Hsla) -> Div {
         .font_semibold()
         .text_color(color)
         .bg(color.opacity(TINT))
-        .child(text.into())
 }
 
 pub fn caption(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -497,30 +517,44 @@ pub fn shortcut_hints(hints: impl IntoIterator<Item = (String, SharedString)>, c
     // Both columns share a row height and gap, so each label stays level with its keys.
     let row = || h_flex().h(rems(1.846));
     let column = || v_flex().gap(rems(0.462));
-    let keys = |shortcut: &str| {
-        row().gap(rems(0.308)).children(key_parts(shortcut).into_iter().enumerate().flat_map(|(ix, key)| {
-            let plus = (ix > 0).then(|| div().child("+").into_any_element());
-            plus.into_iter().chain([keycap(key.to_string(), cx).into_any_element()])
-        }))
-    };
     h_flex()
         .items_start()
         .gap(rems(1.231))
         .text_size(TEXT_SM)
         .text_color(muted)
         .child(column().items_end().children(hints.iter().map(|(_, label)| row().child(label.clone()))))
-        .child(column().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut))))
+        .child(column().items_start().children(hints.iter().map(|(shortcut, _)| keys(shortcut, cx).h(rems(1.846)))))
+}
+
+// A shortcut as key caps, "+" between them.
+pub fn keys(shortcut: &str, cx: &App) -> Div {
+    h_flex().gap(rems(0.308)).children(key_parts(shortcut).into_iter().enumerate().flat_map(|(ix, key)| {
+        let plus = (ix > 0).then(|| div().child("+").into_any_element());
+        plus.into_iter().chain([keycap(key.to_string(), cx).into_any_element()])
+    }))
 }
 
 pub fn empty_state(icon: Option<Icon>, text: impl Into<SharedString>, cx: &App) -> Div {
     v_flex()
-        .p_4()
-        .gap_2()
+        .p(rems(1.))
+        .gap(rems(0.462))
         .items_center()
         .text_center()
         .text_size(TEXT_BASE)
         .text_color(cx.theme().muted_foreground)
         .when_some(icon, |el, icon| el.child(icon.size(ICON_XL)))
+        .child(text.into())
+}
+
+// empty_state's frame with a spinner before the text.
+pub fn loading_state(text: impl Into<SharedString>, cx: &App) -> Div {
+    h_flex()
+        .justify_center()
+        .p(rems(1.))
+        .gap(rems(0.462))
+        .text_size(TEXT_BASE)
+        .text_color(cx.theme().muted_foreground)
+        .child(Spinner::new(ICON_SM))
         .child(text.into())
 }
 

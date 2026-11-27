@@ -12,9 +12,9 @@ use crate::editor_commands::{SelectAllOccurrences, ToggleComment};
 use crate::form;
 use crate::fuzzy::rank_candidate;
 use crate::i18n::t;
-use crate::modal::AtTop as _;
+use crate::modal::{self, AtTop as _};
 use crate::scrollbars::HoverScrollbar as _;
-use crate::tokens::{RADIUS_LG, RADIUS_SM, TEXT_BASE, TEXT_XS};
+use crate::tokens::{RADIUS_LG, TEXT_BASE, TEXT_XS};
 
 pub struct Command {
     pub label: String,
@@ -225,9 +225,9 @@ impl CommandPalette {
         h_flex()
             .id(("command-palette-item", row))
             .debug_selector(move || format!("command-palette-item-{row}"))
+            .h(rems(modal::LAUNCHER_ROW_REM))
             .gap(rems(0.923))
             .px(rems(0.923))
-            .py(rems(0.462))
             .cursor_pointer()
             .when(active, |el| el.bg(theme.accent))
             .hover(|style| style.bg(theme.accent))
@@ -242,18 +242,12 @@ impl CommandPalette {
                 this.confirm(window, cx);
             }))
             .child(div().flex_1().min_w_0().truncate().text_size(TEXT_BASE).child(label))
-            .when_some(command.shortcut.clone().or_else(|| command.tag.clone()), |el, shortcut| {
-                el.child(
-                    div()
-                        .flex_none()
-                        .px(rems(0.462))
-                        .rounded(RADIUS_SM)
-                        .border_1()
-                        .border_color(theme.border)
-                        .text_size(TEXT_XS)
-                        .text_color(theme.muted_foreground)
-                        .child(shortcut),
-                )
+            // Key caps, as the app shows shortcuts everywhere. A tag is a word, so it's plain text.
+            .when_some(command.shortcut.clone(), |el, shortcut| {
+                el.child(form::keys(&shortcut, cx).flex_none().text_size(TEXT_XS).text_color(theme.muted_foreground))
+            })
+            .when_some(command.tag.clone().filter(|_| command.shortcut.is_none()), |el, tag| {
+                el.child(div().flex_none().text_size(TEXT_XS).text_color(theme.muted_foreground).child(tag))
             })
     }
 }
@@ -265,12 +259,7 @@ impl Render for CommandPalette {
         let max_height = (rem * 32.308).min(window.viewport_size().height - rem * 16.923).max(px(0.));
         let active = self.active_ix();
         let list = if self.items.is_empty() {
-            div()
-                .px(rems(0.923))
-                .py(rems(1.077))
-                .text_color(theme.muted_foreground)
-                .child(t(cx, "quickSearch.noResults"))
-                .into_any_element()
+            form::empty_state(None, t(cx, "quickSearch.noResults"), cx).into_any_element()
         } else {
             let rows: Vec<_> = (0..self.items.len()).map(|row| self.row(row, row == active, cx)).collect();
             let list = v_flex()
@@ -324,7 +313,7 @@ pub fn open_with(
         let rem = window.rem_size();
         let on_dismiss = on_dismiss.clone();
         modal
-            .w(rem * 46.154)
+            .w(rem * modal::LAUNCHER_REM)
             .at_top(rem * 5.5, window)
             .p_0()
             .bg(cx.theme().sidebar)

@@ -58,8 +58,9 @@ tokio-postgres-rustls = { version = "0.14", features = ["ring"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
-# Same version as GPUI Kit's JSON grammar, since only its highlight query is replaced.
+# Same versions as GPUI Kit's JSON and SQL grammars, since only their highlight queries are replaced.
 tree-sitter-json = "=0.24.8"
+tree-sitter-sequel = "=0.3.13"
 unicode-normalization = "0.1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 url = "2"

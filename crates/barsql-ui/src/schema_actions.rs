@@ -722,7 +722,7 @@ pub fn open_structure_apply(
     on_done: impl Fn(&mut App) + 'static,
 ) {
     let dialog = cx.new(|cx| {
-        let mut sql = SqlView::new(window, cx);
+        let mut sql = SqlView::wrapped(window, cx);
         sql.show(&plan.script(&connection.driver), window, cx);
         ApplyDialog {
             connection,

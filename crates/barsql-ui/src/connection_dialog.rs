@@ -993,12 +993,7 @@ impl Render for ConnectionForm {
                         .large()
                         .debug_selector(|| "connection-save".into())
                         .primary()
-                        .child(
-                            h_flex()
-                                .gap(rems(0.462))
-                                .child(t(cx, "common.save"))
-                                .child(form::key_chip("Enter", theme.primary_foreground)),
-                        )
+                        .label(t(cx, "common.save"))
                         .disabled(busy)
                         .on_click(cx.listener(|form, _, window, cx| form.save(window, cx))),
                 ),

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use barsql_sql::QueryPlan;
 use barsql_sql::plan::PlanNode;
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollbarAxis;
 use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, StyledExt, h_flex, v_flex};
@@ -18,11 +18,15 @@ use crate::plan_tree::{
 };
 use crate::scrollbars::HoverScrollbar as _;
 use crate::toast;
-use crate::tokens::{ICON_2XS, ICON_XS, RADIUS, RADIUS_SM, TEXT_2XS, TEXT_SM, TEXT_XS, TINT, TINT_BORDER};
+use crate::tokens::{ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT};
 
 const CONTEXT: &str = "PlanTree";
 const INDENT_REM: f32 = 1.077;
 const METRIC_REM: f32 = 10.;
+const NODE_REM: f32 = 18.;
+const DETAILS_REM: f32 = 23.;
+const STAT_GAP_REM: f32 = 0.308;
+const STATS_GAP_REM: f32 = 0.923;
 
 actions!(plan, [SelectPrevious, SelectNext, Collapse, Expand, SelectFirst, SelectLast]);
 
@@ -49,6 +53,8 @@ pub struct PlanView {
     raw: bool,
     // Whether the details show the fields at zero or false too.
     all_fields: bool,
+    fit: Fit,
+    stats_room: Option<Pixels>,
     focus: FocusHandle,
     scroll: ScrollHandle,
     details_scroll: ScrollHandle,
@@ -65,6 +71,8 @@ impl PlanView {
             selected: Some("0".into()),
             raw: false,
             all_fields: false,
+            fit: Fit::All,
+            stats_room: None,
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             details_scroll: ScrollHandle::new(),
@@ -149,7 +157,27 @@ impl PlanView {
         toast::success(t(cx, "toast.copiedClipboard"), cx);
     }
 
-    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn fit_for(&self, width: Pixels, rem: Pixels) -> Fit {
+        let need = |columns: usize, details: f32| rem * (NODE_REM + METRIC_REM * columns as f32 + details);
+        let columns = self.metrics.len();
+        if width >= need(columns, DETAILS_REM) {
+            Fit::All
+        } else if width >= need(columns.min(1), DETAILS_REM) {
+            Fit::Picked
+        } else {
+            Fit::TreeOnly
+        }
+    }
+
+    pub(crate) fn columns(&self) -> Vec<Metric> {
+        let picked = self.metric.or(self.metrics.first().copied());
+        [Metric::Rows, Metric::Time, Metric::Cost]
+            .into_iter()
+            .filter(|&metric| self.metrics.contains(&metric) && (self.fit == Fit::All || Some(metric) == picked))
+            .collect()
+    }
+
+    fn toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let lang = cx.global::<I18n>().lang();
         let (badge, color) = if self.plan.analyzed {
@@ -157,45 +185,60 @@ impl PlanView {
         } else {
             (t(cx, "results.planEstimated"), theme.muted_foreground)
         };
-        let stat = |label: SharedString, value: String| {
+        // Each with how long it stays when they don't all fit: the total cost goes first, the execution time last.
+        let mut stats: Vec<(u8, &'static str, SharedString, SharedString)> = Vec::new();
+        if self.plan.planning_ms.is_some() {
+            let value = format_ms(self.plan.planning_ms, lang).into();
+            stats.push((1, "plan-stat-planning", t(cx, "results.planPlanning"), value));
+        }
+        if self.plan.execution_ms.is_some() {
+            let value = format_ms(self.plan.execution_ms, lang).into();
+            stats.push((2, "plan-stat-execution", t(cx, "results.planExecution"), value));
+        }
+        if self.plan.total_cost.is_some() {
+            let value = format_cost(self.plan.total_cost, lang).into();
+            stats.push((0, "plan-stat-cost", t(cx, "results.planTotalCost"), value));
+        }
+        if let Some(room) = self.stats_room {
+            let (rem, ui) = (window.rem_size(), font(theme.font_family.clone()));
+            let width = |(_, _, label, value): &(u8, &str, SharedString, SharedString)| {
+                text_width(window, label.clone(), &ui, TEXT_XS.to_pixels(rem))
+                    + rem * STAT_GAP_REM
+                    + text_width(window, value.clone(), &ui, TEXT_SM.to_pixels(rem))
+            };
+            // A quarter rem spare, as the layout rounds each edge to a whole pixel.
+            let gaps = |count: usize| rem * (STATS_GAP_REM * count.saturating_sub(1) as f32 + 0.25);
+            let total = |stats: &[(u8, &str, SharedString, SharedString)]| {
+                stats.iter().map(width).fold(gaps(stats.len()), |sum, width| sum + width)
+            };
+            while !stats.is_empty() && total(&stats) > room {
+                let first = (0..stats.len()).min_by_key(|&i| stats[i].0).unwrap_or(0);
+                stats.remove(first);
+            }
+        }
+        let stat = |id: &'static str, label: SharedString, value: SharedString| {
             h_flex()
-                .gap(rems(0.308))
+                .debug_selector(move || id.into())
+                .gap(rems(STAT_GAP_REM))
                 .text_size(TEXT_SM)
                 .whitespace_nowrap()
                 .child(div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(label))
                 .child(value)
         };
-        let mut stats = Vec::new();
-        if self.plan.planning_ms.is_some() {
-            stats.push(stat(t(cx, "results.planPlanning"), format_ms(self.plan.planning_ms, lang)));
-        }
-        if self.plan.execution_ms.is_some() {
-            stats.push(stat(t(cx, "results.planExecution"), format_ms(self.plan.execution_ms, lang)));
-        }
-        if self.plan.total_cost.is_some() {
-            stats.push(stat(t(cx, "results.planTotalCost"), format_cost(self.plan.total_cost, lang)));
-        }
         let metrics = self.metrics.clone();
         let current = self.metric;
         let switch = (metrics.len() > 1 && !self.raw).then(|| {
-            ButtonGroup::new("plan-metric")
-                .small()
-                .outline()
-                .children(metrics.iter().map(|&metric| {
-                    let name = t(cx, &format!("results.planMetric.{}", metric.key()));
-                    Button::new(SharedString::from(format!("plan-metric-{}", metric.key())))
-                        .debug_selector(move || format!("plan-metric-{}", metric.key()))
-                        .h(rems(1.692))
-                        .label(name.clone())
-                        .selected(current == Some(metric))
-                        .tooltip(t_with(cx, "results.planHeatByMetric", &[("metric", &name)]))
-                }))
-                .on_click(cx.listener(move |view, clicked: &Vec<usize>, _, cx| {
-                    if let Some(metric) = clicked.first().and_then(|ix| metrics.get(*ix)) {
-                        view.metric = Some(*metric);
+            form::toggle_group().flex_none().children(metrics.iter().map(|&metric| {
+                let name = t(cx, &format!("results.planMetric.{}", metric.key()));
+                let id = SharedString::from(format!("plan-metric-{}", metric.key()));
+                form::toggle_small(id, name.clone(), current == Some(metric))
+                    .debug_selector(move || format!("plan-metric-{}", metric.key()))
+                    .tooltip(t_with(cx, "results.planHeatByMetric", &[("metric", &name)]))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.metric = Some(metric);
                         cx.notify();
-                    }
-                }))
+                    }))
+            }))
         });
         let parents = collect_parent_keys(&self.plan.nodes, "");
         let all_collapsed = !parents.is_empty() && parents.iter().all(|key| self.collapsed.contains(key));
@@ -203,26 +246,22 @@ impl PlanView {
         h_flex()
             .flex_none()
             .gap(rems(0.615))
-            .px(rems(0.615))
-            .py(rems(0.308))
+            .px(rems(0.769))
+            .py(rems(0.462))
             .border_b_1()
             .border_color(theme.border)
             .overflow_hidden()
+            .child(form::badge(badge.to_uppercase(), color))
             .child(
-                div()
-                    .flex_none()
-                    .px(rems(0.538))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(color.opacity(TINT_BORDER))
-                    .bg(color.opacity(if self.plan.analyzed { TINT } else { 0. }))
-                    .text_size(TEXT_2XS)
-                    .font_semibold()
-                    .text_color(color)
-                    .child(badge.to_uppercase()),
+                h_flex()
+                    .debug_selector(|| "plan-stats".into())
+                    .flex_1()
+                    .min_w_0()
+                    .gap(rems(STATS_GAP_REM))
+                    .overflow_hidden()
+                    .children(stats.into_iter().map(|(_, id, label, value)| stat(id, label, value)))
+                    .child(watch_width(cx.entity(), |view, width, _| view.stats_room.replace(width) != Some(width))),
             )
-            .child(h_flex().gap(rems(0.923)).min_w_0().overflow_hidden().children(stats))
-            .child(div().flex_1())
             .children(switch)
             .when(!self.raw && !parents.is_empty(), |el| {
                 el.child(
@@ -254,7 +293,7 @@ impl PlanView {
             )
     }
 
-    fn row(&self, row: &PlanRow, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&self, row: &PlanRow, columns: &[Metric], cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let lang = cx.global::<I18n>().lang();
         let node = row.node;
@@ -280,7 +319,7 @@ impl PlanView {
         let main = h_flex()
             .id(SharedString::from(format!("plan-node-{key}")))
             .flex_1()
-            .min_w(rems(18.))
+            .min_w(rems(NODE_REM))
             .gap(rems(0.462))
             .pl(rems(0.308 + row.depth as f32 * INDENT_REM))
             .pr(rems(0.615))
@@ -303,18 +342,8 @@ impl PlanView {
             })
             .when(estimate_off, |el| {
                 el.child(
-                    h_flex()
+                    form::icon_badge(Lucide::TriangleAlert, format_factor(row.estimate_factor, lang), theme.warning)
                         .id(SharedString::from(format!("plan-estimate-{key}")))
-                        .gap(rems(0.154))
-                        .flex_none()
-                        .px(rems(0.385))
-                        .rounded(RADIUS_SM)
-                        .text_size(TEXT_2XS)
-                        .font_semibold()
-                        .text_color(theme.warning)
-                        .bg(theme.warning.opacity(TINT))
-                        .child(Icon::new(Lucide::TriangleAlert).size(ICON_2XS))
-                        .child(format_factor(row.estimate_factor, lang))
                         .tooltip({
                             let hint = t(cx, "results.planEstimateOffHint");
                             move |window, cx| gpui_kit::component::tooltip::Tooltip::new(hint.clone()).build(window, cx)
@@ -349,7 +378,7 @@ impl PlanView {
                         div().text_size(TEXT_XS).text_color(theme.muted_foreground).child(format!("/ {sub}"))
                     }))
             };
-        let shown = |metric: Metric| self.metrics.contains(&metric);
+        let shown = |metric: Metric| columns.contains(&metric);
         let rows = node.rows_actual.or(node.rows_planned);
         let rows_sub = node.rows_actual.and(node.rows_planned).map(|planned| format_rows(Some(planned), lang));
         let time_sub = match (node.time_ms, node.self_time_ms) {
@@ -443,7 +472,7 @@ impl PlanView {
         .item(PopupMenuItem::new(t(cx, "results.planCopy")).on_click(run(Box::new(|view, cx| view.copy_raw(cx)))))
     }
 
-    fn details(&self, node: &PlanNode, cx: &Context<Self>) -> AnyElement {
+    fn details(&self, node: &PlanNode, window: &Window, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let lang = cx.global::<I18n>().lang();
         let mut stats: Vec<(SharedString, String)> = Vec::new();
@@ -459,27 +488,31 @@ impl PlanView {
         push("results.planTotalTime", node.time_ms.map(|v| format_ms(Some(v), lang)));
         push("results.planSelfCost", node.cost_self.map(|v| format_cost(Some(v), lang)));
         push("results.planTotalCost", node.cost_total.map(|v| format_cost(Some(v), lang)));
-        let grid = |entries: Vec<(SharedString, String)>, mono: bool| {
-            v_flex().gap(rems(0.231)).text_size(TEXT_XS).children(entries.into_iter().map(move |(label, value)| {
-                h_flex()
-                    .gap(rems(0.615))
-                    .items_start()
-                    .child(div().flex_none().w(rems(8.)).text_color(theme.muted_foreground).child(label))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .when(mono, |el| el.font_family(theme.mono_font_family.clone()))
-                            .child(value),
-                    )
-            }))
-        };
         let fields: Vec<(SharedString, String)> = node
             .fields
             .iter()
             .filter(|field| self.all_fields || !quiet(&field.value))
             .map(|field| (field.key.clone().into(), field.value.clone()))
             .collect();
+        // As wide as the longest label shown, so labels like "Shared Read Blocks" stay on one line.
+        let rem = window.rem_size();
+        let label_font = font(theme.font_family.clone());
+        let label_width = stats
+            .iter()
+            .chain(&fields)
+            .map(|(label, _)| text_width(window, label.clone(), &label_font, TEXT_XS.to_pixels(rem)))
+            .fold(px(0.), |widest, width| if width > widest { width } else { widest })
+            .min(rem * 11.);
+        // Values are mono, measured or straight from EXPLAIN, so their digits line up.
+        let grid = |entries: Vec<(SharedString, String)>| {
+            v_flex().gap(rems(0.231)).text_size(TEXT_XS).children(entries.into_iter().map(move |(label, value)| {
+                h_flex()
+                    .gap(rems(0.615))
+                    .items_start()
+                    .child(div().flex_none().w(label_width).text_color(theme.muted_foreground).child(label))
+                    .child(div().flex_1().min_w_0().font_family(theme.mono_font_family.clone()).child(value))
+            }))
+        };
         let hidden = node.fields.iter().filter(|field| quiet(&field.value)).count();
         let more = (hidden > 0).then(|| {
             let label = match self.all_fields {
@@ -507,7 +540,7 @@ impl PlanView {
             .gap(rems(0.615))
             .border_l_1()
             .border_color(theme.border)
-            .bg(theme.background)
+            .bg(theme.sidebar)
             .child(
                 h_flex()
                     .flex_wrap()
@@ -543,7 +576,7 @@ impl PlanView {
                         .child(node.detail.clone()),
                 )
             })
-            .when(!stats.is_empty(), |el| el.child(grid(stats, false)))
+            .when(!stats.is_empty(), |el| el.child(grid(stats)))
             .when(!fields.is_empty() || more.is_some(), |el| {
                 el.child(
                     v_flex()
@@ -552,19 +585,51 @@ impl PlanView {
                         .pt(rems(0.769))
                         .border_t_1()
                         .border_color(theme.border)
-                        .child(grid(fields, true))
+                        .child(grid(fields))
                         .children(more),
                 )
             });
         div()
             .relative()
             .flex_none()
-            .w(rems(21.))
+            .w(rems(DETAILS_REM))
             .h_full()
             .child(details)
             .hover_scrollbar(&self.details_scroll, ScrollbarAxis::Vertical)
             .into_any_element()
     }
+}
+
+// Up to a whole pixel, as a text element lays itself out.
+fn text_width(window: &Window, text: SharedString, font: &Font, size: Pixels) -> Pixels {
+    let run = TextRun {
+        len: text.len(),
+        font: font.clone(),
+        color: Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window.text_system().shape_line(text, size, &[run], None).width().ceil()
+}
+
+// Paints nothing. Hands `store` its width and the rem at each paint, and draws again when `store` says the layout
+// changes, since only the paint knows the width.
+fn watch_width(
+    view: Entity<PlanView>,
+    store: impl FnOnce(&mut PlanView, Pixels, Pixels) -> bool + 'static,
+) -> impl IntoElement {
+    canvas(
+        move |bounds, window, cx| {
+            let rem = window.rem_size();
+            if view.update(cx, |view, _| store(view, bounds.size.width, rem)) {
+                window.defer(cx, |window, _| window.refresh());
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .size_full()
 }
 
 // A field that only says nothing happened: no blocks hit, a feature off. They wait behind Show more, so the few that
@@ -591,12 +656,6 @@ impl PlanView {
         self.metrics.clone()
     }
 
-    // Same order as the table's metric columns.
-    #[cfg(feature = "e2e")]
-    pub(crate) fn columns(&self) -> Vec<Metric> {
-        [Metric::Rows, Metric::Time, Metric::Cost].into_iter().filter(|metric| self.metrics.contains(metric)).collect()
-    }
-
     // Visible rows as (key, label, heat).
     pub(crate) fn rows(&self) -> Vec<(String, String, f64)> {
         flatten(&self.plan, self.metric, &self.collapsed)
@@ -610,6 +669,16 @@ impl PlanView {
     }
 }
 
+// What fits beside the tree at the view's width when it was last painted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Fit {
+    All,
+    // Only the column of the metric the switch picked. The details still give every number.
+    Picked,
+    // The details step aside too, as the JSON viewer does in a narrow window.
+    TreeOnly,
+}
+
 #[derive(Clone, Copy)]
 enum Step {
     Previous,
@@ -621,7 +690,7 @@ enum Step {
 }
 
 impl Render for PlanView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let notes: Vec<SharedString> = self
             .plan
@@ -659,12 +728,13 @@ impl Render for PlanView {
             let head = |key: &str, width: Option<f32>| {
                 div()
                     .when_some(width, |el, width| el.flex_none().w(rems(width)).text_right())
-                    .when(width.is_none(), |el| el.flex_1().min_w(rems(18.)))
+                    .when(width.is_none(), |el| el.flex_1().min_w(rems(NODE_REM)))
                     .px(rems(0.615))
                     .py(rems(0.385))
                     .child(t(cx, key))
             };
-            let shown = |metric: Metric| self.metrics.contains(&metric);
+            let columns = self.columns();
+            let shown = |metric: Metric| columns.contains(&metric);
             let header = h_flex()
                 .flex_none()
                 .border_b_1()
@@ -676,7 +746,7 @@ impl Render for PlanView {
                 .when(shown(Metric::Rows), |el| el.child(head("results.planColRows", Some(METRIC_REM))))
                 .when(shown(Metric::Time), |el| el.child(head("results.planColTime", Some(METRIC_REM))))
                 .when(shown(Metric::Cost), |el| el.child(head("results.planColCost", Some(METRIC_REM))));
-            let items: Vec<AnyElement> = rows.iter().map(|row| self.row(row, cx)).collect();
+            let items: Vec<AnyElement> = rows.iter().map(|row| self.row(row, &columns, cx)).collect();
             let tree = v_flex()
                 .id("plan-tree")
                 .key_context(CONTEXT)
@@ -705,13 +775,17 @@ impl Render for PlanView {
                         .child(tree)
                         .hover_scrollbar(&self.scroll, ScrollbarAxis::Both),
                 )
-                .children(selected.map(|node| self.details(&node, cx)))
+                .children(selected.filter(|_| self.fit != Fit::TreeOnly).map(|node| self.details(&node, window, cx)))
                 .into_any_element()
         };
         v_flex()
             .size_full()
             .bg(theme.sidebar)
-            .child(self.toolbar(cx))
+            .child(watch_width(cx.entity(), |view, width, rem| {
+                let fit = view.fit_for(width, rem);
+                std::mem::replace(&mut view.fit, fit) != fit
+            }))
+            .child(self.toolbar(window, cx))
             .when(!notes.is_empty(), |el| {
                 el.child(
                     h_flex()
@@ -741,9 +815,10 @@ impl Render for PlanView {
 mod tests {
     use barsql_sql::QueryPlan;
     use barsql_sql::plan::PlanNode;
-    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+    use gpui_kit::{Entity, TestAppContext, VisualTestContext, px, size};
 
-    use super::{PlanView, Step, quiet};
+    use super::{DETAILS_REM, METRIC_REM, NODE_REM, PlanView, Step, quiet};
+    use crate::plan_tree::Metric;
     use crate::test_support::Env;
 
     #[test]
@@ -792,5 +867,54 @@ mod tests {
         assert_eq!(view.read_with(cx, |view, _| view.collapsed.len()), 2);
         view.update(cx, |view, cx| view.toggle_all(cx));
         assert!(view.read_with(cx, |view, _| view.collapsed.is_empty()));
+    }
+
+    // Short of room, the table keeps only the metric the switch picked, then the details step aside. The toolbar's
+    // numbers go whole, the total cost first and the execution time last.
+    #[gpui_kit::test]
+    fn a_narrow_plan_keeps_the_picked_column_then_drops_the_details(cx: &mut TestAppContext) {
+        let _env = Env::new(cx);
+        let node = PlanNode {
+            label: "Seq Scan".into(),
+            rows_actual: Some(5.),
+            self_time_ms: Some(0.1),
+            cost_self: Some(1.),
+            ..Default::default()
+        };
+        let plan = QueryPlan {
+            nodes: vec![node],
+            analyzed: true,
+            planning_ms: Some(0.5),
+            execution_ms: Some(0.4),
+            total_cost: Some(48.34),
+            ..Default::default()
+        };
+        let (view, cx) = cx.add_window_view(|_, cx| PlanView::new(plan, cx));
+        let rem = cx.update(|window, _| window.rem_size());
+        let (all, picked) = (NODE_REM + 3. * METRIC_REM + DETAILS_REM, NODE_REM + METRIC_REM + DETAILS_REM);
+        let mut counts = Vec::new();
+        for (width, columns, details) in [
+            (all, &[Metric::Rows, Metric::Time, Metric::Cost][..], true),
+            (all - 1., &[Metric::Time][..], true),
+            (picked - 1., &[Metric::Time][..], false),
+            (NODE_REM + METRIC_REM, &[Metric::Time][..], false),
+        ] {
+            cx.simulate_resize(size(rem * width, px(600.)));
+            // One frame measures the widths, the next draws for them.
+            for _ in 0..2 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert_eq!(view.read_with(cx, |view, _| view.columns()), columns, "{width} rem");
+            assert_eq!(cx.debug_bounds("plan-details").is_some(), details, "{width} rem");
+            let room = cx.debug_bounds("plan-stats").expect("the toolbar's numbers");
+            let stats =
+                ["plan-stat-cost", "plan-stat-planning", "plan-stat-execution"].map(|stat| cx.debug_bounds(stat));
+            for bounds in stats.iter().flatten() {
+                assert!(bounds.right() <= room.right(), "{width} rem: a number is cut at {bounds:?} in {room:?}");
+            }
+            assert!(stats.windows(2).all(|pair| pair[0].is_none() || pair[1].is_some()), "{width} rem: {stats:?}");
+            counts.push(stats.iter().flatten().count());
+        }
+        assert!(counts[0] == 3 && counts[3] < 3, "{counts:?}");
     }
 }

@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
 use gpui_kit::component::menu::AppMenuBar;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, TITLE_BAR_HEIGHT, TitleBar, h_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, TITLE_BAR_HEIGHT, TitleBar, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::assets::{MARK_DARK, MARK_LIGHT, vector_img};
-use crate::tokens::TEXT_SM;
+use crate::tokens::{ICON_XS, TEXT_SM};
 
 // macOS has traffic lights and the system menu bar, so its bar only shows the title.
 // README screenshots draw the Windows bar on macOS too, where GPUI Kit leaves out the window controls.
@@ -27,7 +27,7 @@ pub fn render(
         Some(menu_bar) => h_flex()
             .debug_selector(|| "title-bar-menus".into())
             .size_full()
-            .gap_1()
+            .gap(rems(0.231))
             .when(window.is_fullscreen(), |bar| bar.ml(rems(-0.75)))
             .child(vector_img(if theme.is_dark() { MARK_DARK } else { MARK_LIGHT }, px(16.)).flex_none())
             .child(menu_bar.clone())
@@ -109,7 +109,7 @@ fn window_controls(cx: &App) -> impl IntoElement {
             .flex()
             .items_center()
             .justify_center()
-            .child(Icon::new(icon).small().text_color(color))
+            .child(Icon::new(icon).size(ICON_XS).text_color(color))
     };
     h_flex()
         .h_full()

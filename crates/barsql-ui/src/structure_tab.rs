@@ -18,7 +18,7 @@ use barsql_sql::structure::{
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{EditorState, InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -35,7 +35,7 @@ use crate::schema_actions;
 use crate::schema_tree::TableChange;
 use crate::state;
 use crate::toast;
-use crate::tokens::{ICON_MD, ICON_SM, TEXT_MD, TEXT_SM};
+use crate::tokens::{ICON_MD, ICON_SM, STRIP, TEXT_MD, TEXT_SM};
 
 const CONTEXT: &str = "StructureTab";
 
@@ -113,7 +113,8 @@ impl StructureTab {
         let target = tab.structure.unwrap_or_default();
         let draft = Draft::new_table(&connection.driver, &target.schema);
         let load = if target.table.is_empty() { Load::Ready } else { Load::Loading };
-        let preview = cx.new(|cx| EditorState::new(window, cx).language("sql").line_number(false));
+        let highlight = crate::syntax::sql_language(&connection.driver);
+        let preview = cx.new(|cx| EditorState::new(window, cx).language(highlight).line_number(false));
         let name_field = target
             .table
             .is_empty()
@@ -686,9 +687,9 @@ impl StructureTab {
             .debug_selector(|| "structure-header".into())
             .flex_none()
             .justify_between()
-            .gap(rems(0.923))
-            .px(rems(1.231))
-            .h(rems(3.077))
+            .gap(rems(0.615))
+            .px(rems(0.769))
+            .h(STRIP)
             .border_b_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
@@ -737,12 +738,12 @@ impl StructureTab {
         if self.gone {
             let text = t(cx, "structure.gone");
             return Some(
-                form::error(text, cx).mx(rems(1.231)).mt(rems(0.615)).debug_selector(|| "structure-gone".into()),
+                form::error(text, cx).mx(rems(0.769)).mt(rems(0.615)).debug_selector(|| "structure-gone".into()),
             );
         }
         self.stale.then(|| {
             form::alert(theme.warning)
-                .mx(rems(1.231))
+                .mx(rems(0.769))
                 .mt(rems(0.615))
                 .debug_selector(|| "structure-stale".into())
                 .child(
@@ -752,9 +753,8 @@ impl StructureTab {
                         .child(div().flex_1().min_w_0().child(t(cx, "structure.stale")))
                         .child(
                             Button::new("structure-reload")
-                                .small()
                                 .debug_selector(|| "structure-reload".into())
-                                .label(t(cx, "structure.reload"))
+                                .tool_label(t(cx, "structure.reload"))
                                 .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
                         ),
                 )
@@ -765,7 +765,7 @@ impl StructureTab {
         let waiting = div().flex_1().min_h_0();
         match &self.load {
             Load::Loading => {
-                waiting.child(form::empty_state(None, t(cx, "tableView.loading"), cx).m_auto()).into_any_element()
+                waiting.child(form::loading_state(t(cx, "tableView.loading"), cx).m_auto()).into_any_element()
             }
             Load::Failed(error) => waiting
                 .child(
@@ -776,9 +776,8 @@ impl StructureTab {
                         .child(form::error(format!("{}\n{error}", t(cx, "structure.loadFailed")), cx))
                         .child(
                             Button::new("structure-retry")
-                                .small()
                                 .debug_selector(|| "structure-retry".into())
-                                .label(t(cx, "structure.retry"))
+                                .tool_label(t(cx, "structure.retry"))
                                 .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
                         ),
                 )
@@ -827,7 +826,7 @@ impl StructureTab {
             .debug_selector(|| "structure-footer".into())
             .flex_none()
             .justify_between()
-            .px(rems(0.923))
+            .px(rems(0.769))
             .py(rems(0.615))
             .gap(rems(0.923))
             .border_t_1()
