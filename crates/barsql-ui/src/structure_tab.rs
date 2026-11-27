@@ -113,7 +113,8 @@ impl StructureTab {
         let target = tab.structure.unwrap_or_default();
         let draft = Draft::new_table(&connection.driver, &target.schema);
         let load = if target.table.is_empty() { Load::Ready } else { Load::Loading };
-        let preview = cx.new(|cx| EditorState::new(window, cx).language("sql").line_number(false));
+        let highlight = crate::syntax::sql_language(&connection.driver);
+        let preview = cx.new(|cx| EditorState::new(window, cx).language(highlight).line_number(false));
         let name_field = target
             .table
             .is_empty()

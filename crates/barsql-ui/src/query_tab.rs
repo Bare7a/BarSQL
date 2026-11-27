@@ -202,9 +202,10 @@ impl QueryTab {
     pub fn new(tab: EditorTab, connection: ConnectionConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sql = tab.sql;
         let language = Rc::new(SqlLanguage::new(connection.id.clone(), connection.driver.clone()));
+        let highlight = crate::syntax::sql_language(&connection.driver);
         let editor = cx.new(|cx| {
             let mut state =
-                EditorState::new(window, cx).language("sql").line_number(true).folding(true).default_value(sql);
+                EditorState::new(window, cx).language(highlight).line_number(true).folding(true).default_value(sql);
             // An empty collection still reserves the strip.
             state.create_gutter_decorations_collection(Vec::new(), cx);
             state

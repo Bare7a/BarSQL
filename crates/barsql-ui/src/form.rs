@@ -227,11 +227,12 @@ pub fn filter_toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, a
     segment(Button::new(id).h(rems(FIELD_REM)), label, TEXT_SM, active)
 }
 
+// The picked one is outlined in the accent, since a filled one reads as a button to press.
 fn segment(button: Button, label: impl Into<SharedString>, size: Rems, active: bool) -> Button {
     let label = label.into();
     named(button.flex_1(), &label)
         .child(div().min_w_0().truncate().text_size(size).child(label))
-        .when(active, |button| button.primary())
+        .when(active, |button| button.primary().outline())
 }
 
 pub fn progress(id: impl Into<ElementId>, label: impl Into<SharedString>, fraction: f32, cx: &App) -> Div {

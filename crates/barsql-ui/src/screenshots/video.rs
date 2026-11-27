@@ -47,6 +47,8 @@ const BLINK: Duration = Duration::from_millis(530);
 const FADE_OUT: Duration = Duration::from_millis(150);
 const FADE_IN: Duration = Duration::from_millis(200);
 const CROSSFADE_FRAMES: usize = 9;
+// Captions end this far above the window's bottom edge, clear of a table tab's scrollbar and footer.
+const CAPTION_BOTTOM: f32 = 92.;
 // The query tabs' results split, set once so it never moves on camera.
 const RESULTS_SHARE: f32 = 60.;
 // Column indexes in `public.posts`, and its rows in a Structure tab.
@@ -78,10 +80,18 @@ impl Global for Stage {}
 #[derive(Clone)]
 struct Caption {
     text: SharedString,
-    // Lifts the caption above this element, off the rows under it.
-    above: Option<&'static str>,
+    spot: Spot,
     // When its fade starts: in while showing, out once leaving.
     fade_from: Duration,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Spot {
+    Bottom,
+    // Between the compare dialog and the status bar, as the dialog reaches down past the bottom spot's top.
+    UnderDialog,
+    // Above this element, off the rows under it.
+    Above(&'static str),
 }
 
 // From launch, so the inputs the window opens with are watched too.
@@ -201,14 +211,20 @@ pub fn overlay(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     Some(overlay.into_any_element())
 }
 
-// Laid out in prepaint, once this frame has placed `above`. Moves beside a dialog it would cover.
+// Laid out in prepaint, once this frame has placed what it sits above. Moves beside a dialog it would cover.
 fn caption(caption: Caption, opacity: f32) -> Canvas<AnyElement> {
     canvas(
         move |_, window, cx| {
             let viewport = window.viewport_size();
-            // A tab switch leaves the old pane registered for a frame, in the same place.
-            let above = caption.above.and_then(|id| window.find_all(id).first().map(|pane| pane.bounds()));
-            let bottom = above.map_or(viewport.height - px(40.), |above| above.top() - px(22.));
+            let bottom = match caption.spot {
+                Spot::Bottom => viewport.height - px(CAPTION_BOTTOM),
+                Spot::UnderDialog => viewport.height - px(36.),
+                // A tab switch leaves the old pane registered for a frame, in the same place.
+                Spot::Above(id) => match window.find_all(id).first() {
+                    Some(pane) => pane.bounds().top() - px(22.),
+                    None => viewport.height - px(CAPTION_BOTTOM),
+                },
+            };
             let (mut pill, mut measured) = caption_pill(&caption.text, opacity, None, window, cx);
             let mut origin = point((viewport.width - measured.width) / 2., bottom - measured.height);
             // Only dialogs register a surface.
@@ -554,7 +570,7 @@ async fn edit(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
     let copied = cam.robot.cell(cx, 1, POST_TITLE)?;
     cam.click(cx, copied).await?;
     cam.keys(cx, "mod-c").await?;
-    let pasted = cam.robot.cell(cx, 2, POST_TITLE)?;
+    let pasted = cam.robot.cell(cx, 3, POST_TITLE)?;
     cam.click(cx, pasted).await?;
     cam.keys(cx, "mod-v").await?;
     cam.hold(cx, 400).await?;
@@ -612,10 +628,11 @@ async fn schema(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
         cam.robot.act(cx, |workspace, _, cx| workspace.read(cx).diagram_tab()?.read(cx).table_index("posts"))?;
     cam.click_on(cx, ("er-table", posts.ok_or("no posts table in the diagram")?)).await?;
     cam.hold(cx, 1500).await?;
+    cam.caption(cx, None);
     let (public, compare) = (cam.robot.tree_row(cx, "s:public")?, label(cx, "schemaDiff.menu"));
     cam.context_pick(cx, public, &compare).await?;
     cam.until(cx, "the schema compare", |_, _, cx| diff_view(cx).is_some()).await?;
-    cam.caption(cx, Some("Compare two schemas and get a sync script"));
+    cam.caption_under_dialog(cx, "Compare two schemas and get a sync script");
     cam.hold(cx, 500).await?;
     cam.click_on(cx, "diff-target-schema").await?;
     cam.hold(cx, 500).await?;
@@ -636,6 +653,7 @@ async fn schema(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
 }
 
 async fn structure(cam: &Camera<'_>, cx: &mut AsyncApp) -> Res<()> {
+    cam.caption(cx, None);
     let (posts, edit) = (cam.robot.tree_row(cx, "t:public.posts")?, label(cx, "sidebar.editStructure"));
     cam.context_pick(cx, posts, &edit).await?;
     cam.until(cx, "the posts structure", |workspace, _, cx| workspace.read(cx).structure_tab().is_some()).await?;
@@ -1084,26 +1102,30 @@ impl<'a> Camera<'a> {
     }
 
     fn caption(&self, cx: &mut AsyncApp, text: Option<&'static str>) {
-        self.set_caption(cx, text, None);
+        self.set_caption(cx, text, Spot::Bottom);
     }
 
     // A caption over the empty end of the editor, clear of the results.
     fn caption_over_results(&self, cx: &mut AsyncApp, text: &'static str) {
-        self.set_caption(cx, Some(text), Some("results-pane"));
+        self.set_caption(cx, Some(text), Spot::Above("results-pane"));
+    }
+
+    fn caption_under_dialog(&self, cx: &mut AsyncApp, text: &'static str) {
+        self.set_caption(cx, Some(text), Spot::UnderDialog);
     }
 
     // The caption showing fades out, then `text` fades in.
-    fn set_caption(&self, cx: &mut AsyncApp, text: Option<&'static str>, above: Option<&'static str>) {
+    fn set_caption(&self, cx: &mut AsyncApp, text: Option<&'static str>, spot: Spot) {
         let now = self.recorder.borrow().elapsed;
         self.stage(cx, |stage| {
-            let showing = stage.caption.as_ref().map(|caption| (caption.text.as_ref(), caption.above));
-            if showing == text.map(|text| (text, above)) {
+            let showing = stage.caption.as_ref().map(|caption| (caption.text.as_ref(), caption.spot));
+            if showing == text.map(|text| (text, spot)) {
                 return;
             }
             let leaving = stage.caption.take().map(|caption| Caption { fade_from: now, ..caption });
             let fade_from = if leaving.is_some() { now + FADE_OUT } else { now };
             stage.leaving = leaving;
-            stage.caption = text.map(|text| Caption { text: text.into(), above, fade_from });
+            stage.caption = text.map(|text| Caption { text: text.into(), spot, fade_from });
         });
     }
 
