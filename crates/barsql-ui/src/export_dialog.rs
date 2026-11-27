@@ -304,7 +304,8 @@ impl Render for ExportDialog {
             Some(done) => {
                 let total = target.rows.len();
                 let label = t_with(cx, "export.progress", &[("done", &count(cx, done)), ("total", &count(cx, total))]);
-                form::progress(label, if total == 0 { 1. } else { done as f32 / total as f32 }, cx).into_any_element()
+                form::progress("export-progress", label, if total == 0 { 1. } else { done as f32 / total as f32 }, cx)
+                    .into_any_element()
             }
         };
         v_flex()

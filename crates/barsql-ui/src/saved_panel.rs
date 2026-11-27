@@ -248,7 +248,10 @@ impl SavedPanel {
                 toast::success(t(cx, "toast.copiedClipboard"), cx);
             }))
             .separator()
-            .item(PopupMenuItem::new(t(cx, "sidebar.deleteEllipsis")).on_click(with(Self::delete)))
+            .item(
+                crate::context_menu::danger_item(t(cx, "sidebar.deleteEllipsis"), Lucide::Trash, cx)
+                    .on_click(with(Self::delete)),
+            )
         }
     }
 
@@ -301,9 +304,9 @@ impl SavedPanel {
             .relative()
             .w_full()
             .px(ROW_INSET)
-            .py_1()
+            .py(rems(0.231))
             .rounded(RADIUS)
-            .gap_2()
+            .gap(rems(0.462))
             .cursor_pointer()
             .hover(|s| s.bg(theme.sidebar_accent))
             .child(
@@ -313,7 +316,7 @@ impl SavedPanel {
                     .min_w_0()
                     .child(
                         h_flex()
-                            .gap_1()
+                            .gap(rems(0.231))
                             .when(pinned, |el| {
                                 el.child(Icon::new(Lucide::Pin).size(ICON_2XS).text_color(theme.primary))
                             })

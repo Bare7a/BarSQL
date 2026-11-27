@@ -39,8 +39,8 @@ impl Render for ConnectionDrag {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         div()
-            .px_2()
-            .py_1()
+            .px(rems(0.462))
+            .py(rems(0.231))
             .rounded(RADIUS)
             .border_1()
             .border_color(theme.border)
@@ -71,6 +71,16 @@ pub enum ConnectionsEvent {
     Changed,
     // A server view to open in a new tab for the connection, and run.
     OpenQuery { connection_id: String, sql: String, title: String },
+}
+
+// The subtitle, then the folder for a connection whose name another one shares, so the two can be told apart.
+pub fn connection_detail(c: &ConnectionConfig, all: &[ConnectionConfig], folders: &[ConnectionFolder]) -> String {
+    let subtitle = connection_subtitle(c);
+    let twin = all.iter().any(|other| other.id != c.id && other.name.eq_ignore_ascii_case(&c.name));
+    match folders.iter().find(|folder| twin && folder.id == c.folder_id) {
+        Some(folder) => format!("{subtitle} · {}", folder.name),
+        None => subtitle,
+    }
 }
 
 pub fn connection_subtitle(c: &ConnectionConfig) -> String {
@@ -425,7 +435,7 @@ impl ConnectionsPanel {
                 });
             }
             menu.separator().item(
-                PopupMenuItem::new(t(cx, "sidebar.deleteEllipsis"))
+                crate::context_menu::danger_item(t(cx, "sidebar.deleteEllipsis"), Lucide::Trash, cx)
                     .on_click(with(Box::new(move |panel, window, cx| panel.delete(delete.clone(), window, cx)))),
             )
         }
@@ -604,11 +614,13 @@ impl ConnectionsPanel {
                     let _ = this_rename.update(cx, |panel, cx| panel.rename_folder(rename.clone(), window, cx));
                 }))
                 .separator()
-                .item(PopupMenuItem::new(t(cx, "sidebar.deleteEllipsis")).on_click(
-                    move |_, window, cx| {
-                        let _ = this_delete.update(cx, |panel, cx| panel.delete_folder(delete.clone(), window, cx));
-                    },
-                ))
+                .item(
+                    crate::context_menu::danger_item(t(cx, "sidebar.deleteEllipsis"), Lucide::Trash, cx).on_click(
+                        move |_, window, cx| {
+                            let _ = this_delete.update(cx, |panel, cx| panel.delete_folder(delete.clone(), window, cx));
+                        },
+                    ),
+                )
             });
         let body = (!collapsed).then(|| {
             if members.is_empty() {

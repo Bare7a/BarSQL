@@ -26,7 +26,7 @@ use crate::saved_queries;
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state;
 use crate::toast;
-use crate::tokens::{RADIUS, TEXT_2XS, TEXT_XS};
+use crate::tokens::{DOT_SM, RADIUS, TEXT_2XS, TEXT_XS};
 
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -265,8 +265,7 @@ impl HistoryPanel {
                 )
                 .separator()
                 .item(
-                    PopupMenuItem::new(t(cx, "sidebar.clearHistory"))
-                        .icon(Icon::new(Lucide::Trash))
+                    crate::context_menu::danger_item(t(cx, "sidebar.clearHistory"), Lucide::Trash, cx)
                         .disabled(empty)
                         .on_click(move |_, window, cx| {
                             let _ = clear.update(cx, |this, cx| this.clear_all(window, cx));
@@ -302,9 +301,11 @@ impl HistoryPanel {
                 toast::success(t(cx, "toast.copiedClipboard"), cx);
             }))
             .separator()
-            .item(PopupMenuItem::new(t(cx, "common.delete")).on_click(move |_, _, cx| {
-                let _ = delete.update(cx, |this, cx| this.delete(&delete_id, cx));
-            }))
+            .item(crate::context_menu::danger_item(t(cx, "common.delete"), Lucide::Trash, cx).on_click(
+                move |_, _, cx| {
+                    let _ = delete.update(cx, |this, cx| this.delete(&delete_id, cx));
+                },
+            ))
         }
     }
 
@@ -357,9 +358,11 @@ impl HistoryPanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let element = match self.rows.get(row) {
-            Some(Row::Day(bucket)) => {
-                form::caption(t(cx, bucket.label_key()), cx).px_2().pt_2().pb_1().into_any_element()
-            }
+            Some(Row::Day(bucket)) => form::caption(t(cx, bucket.label_key()), cx)
+                .px(rems(0.462))
+                .pt(rems(0.462))
+                .pb(rems(0.231))
+                .into_any_element(),
             Some(&Row::Entry { entry, ix }) => {
                 self.render_entry(ix, &self.entries[entry], now_ms, clearance, window, cx)
             }
@@ -396,13 +399,13 @@ impl HistoryPanel {
             .relative()
             .w_full()
             .px(ROW_INSET)
-            .py_1()
+            .py(rems(0.231))
             .rounded(RADIUS)
-            .gap_2()
+            .gap(rems(0.462))
             .items_start()
             .cursor_pointer()
             .hover(|s| s.bg(theme.sidebar_accent))
-            .child(div().flex_none().mt(px(6.)).size(px(6.)).rounded_full().bg(if entry.success {
+            .child(div().flex_none().mt(rems(0.462)).size(DOT_SM).rounded_full().bg(if entry.success {
                 theme.success
             } else {
                 theme.danger

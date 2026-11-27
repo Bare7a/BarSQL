@@ -13,20 +13,20 @@ use gpui_kit::component::input::{
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarAxis};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt, TITLE_BAR_HEIGHT, h_flex, v_flex,
+    ActiveTheme, Disableable, Icon, IconName, Selectable, StyledExt, TITLE_BAR_HEIGHT, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::actions::{ToggleJsonPanel, shortcut_label};
-use crate::form;
+use crate::form::{self, ToolButton as _};
 use crate::grid::RowRef;
 use crate::i18n::{I18n, count, t, t_with};
 use crate::schema::{self, Reference, References, Schemas};
 use crate::scrollbars::{HoverScrollbar as _, ScrollbarsOnHover as _};
 use crate::state::{set_setting, set_setting_bool, setting, setting_bool};
 use crate::table_edits::foreign_key_filter;
-use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_SM, TEXT_XS, TINT_BORDER};
+use crate::tokens::{ICON_SM, ICON_XS, RADIUS, STRIP, TEXT_SM, TEXT_XS, TINT_BORDER, TOP_BAR};
 use crate::{theme, toast};
 
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -423,14 +423,9 @@ impl JsonPanel {
         view: View,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
-        let (active, bright) = (self.view == view, cx.theme().foreground);
-        form::caption(label, cx)
-            .id(id)
+        form::toggle_small(id, label, self.view == view)
             .debug_selector(move || id.into())
-            .when(active, |el| el.text_color(bright))
-            .when(!active, |el| el.cursor_pointer().hover(move |style| style.text_color(bright)))
             .on_click(cx.listener(move |this, _, window, cx| this.set_view(view, window, cx)))
-            .test_support()
     }
 }
 
@@ -448,7 +443,7 @@ impl Render for JsonPanel {
         let reference_margin = end - rems(0.385).to_pixels(window.rem_size());
         let header = h_flex()
             .debug_selector(|| "json-panel-header".into())
-            .h(rems(2.769))
+            .h(TOP_BAR)
             .flex_none()
             .pl(rems(0.769))
             .justify_between()
@@ -458,8 +453,12 @@ impl Render for JsonPanel {
                 h_flex()
                     .min_w_0()
                     .gap(rems(0.615))
-                    .child(self.switch("json-view-fields", t(cx, "jsonViewer.fields"), View::Fields, cx))
-                    .child(self.switch("json-view-json", t(cx, "jsonViewer.json"), View::Json, cx))
+                    .child(
+                        form::toggle_group()
+                            .flex_none()
+                            .child(self.switch("json-view-fields", t(cx, "jsonViewer.fields"), View::Fields, cx))
+                            .child(self.switch("json-view-json", t(cx, "jsonViewer.json"), View::Json, cx)),
+                    )
                     .children(number.map(|number| {
                         form::badge(number.to_uppercase(), theme.foreground).font_family(theme.mono_font_family.clone())
                     })),
@@ -471,8 +470,7 @@ impl Render for JsonPanel {
                         el.child(column(
                             Button::new("json-hide-nulls")
                                 .ghost()
-                                .small()
-                                .icon(Icon::new(Lucide::EyeOff))
+                                .tool_icon(Icon::new(Lucide::EyeOff), ICON_XS)
                                 .selected(self.hide_nulls)
                                 .tooltip(nulls_tip)
                                 .on_click(cx.listener(|this, _, window, cx| this.toggle_nulls(window, cx))),
@@ -480,8 +478,7 @@ impl Render for JsonPanel {
                         .child(column(
                             Button::new("json-panel-copy")
                                 .ghost()
-                                .small()
-                                .icon(Icon::new(Lucide::Copy))
+                                .tool_icon(Icon::new(Lucide::Copy), ICON_XS)
                                 .tooltip(t(cx, "jsonViewer.copy"))
                                 .disabled(!self.matched)
                                 .on_click(cx.listener(|this, _, _, cx| this.copy(cx))),
@@ -490,8 +487,7 @@ impl Render for JsonPanel {
                     .child(column(
                         Button::new("json-panel-close")
                             .ghost()
-                            .small()
-                            .icon(Icon::new(IconName::Close))
+                            .tool_icon(Icon::new(IconName::Close), ICON_XS)
                             .tooltip(close)
                             .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleJsonPanel), cx)),
                     )),
@@ -500,18 +496,14 @@ impl Render for JsonPanel {
             None => div()
                 .flex_1()
                 .flex()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .text_color(theme.muted_foreground)
-                .child(t(cx, "jsonViewer.emptySelectRow"))
+                .child(form::empty_state(None, t(cx, "jsonViewer.emptySelectRow"), cx).m_auto())
                 .into_any_element(),
             Some(row) => v_flex()
                 .flex_1()
                 .min_h_0()
                 .child(
                     h_flex()
-                        .h(rems(3.077))
+                        .h(STRIP)
                         .flex_none()
                         .gap(rems(0.615))
                         .px(rems(0.769))
@@ -547,13 +539,8 @@ impl Render for JsonPanel {
                             (false, true) => Some("jsonViewer.allNull"),
                             (false, false) => None,
                         };
-                        let empty = note.filter(|_| self.fields.is_empty()).map(|key| {
-                            div()
-                                .p(INSET)
-                                .pl(INSET + form::ICON_INSET)
-                                .text_color(theme.muted_foreground)
-                                .child(t(cx, key))
-                        });
+                        let empty =
+                            note.filter(|_| self.fields.is_empty()).map(|key| form::empty_state(None, t(cx, key), cx));
                         let references: Vec<AnyElement> = self
                             .references
                             .iter()

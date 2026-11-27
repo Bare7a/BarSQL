@@ -37,6 +37,7 @@ icon_assets!(
         Database,
         DatabaseZap,
         Download,
+        Eraser,
         FileCode,
         FingerprintPattern,
         FolderPlus,

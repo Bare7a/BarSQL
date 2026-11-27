@@ -16,6 +16,7 @@ use crate::connection_dialog::{self, ConnectionForm};
 use crate::connections_panel::{ConnectionsEvent, ConnectionsPanel, connection_subtitle, parse_color};
 use crate::database_pane::{DatabasePane, DatabasePaneEvent};
 
+use crate::form;
 use crate::history_panel::{HistoryEvent, HistoryPanel};
 use crate::i18n::t;
 use crate::saved_panel::{SavedEvent, SavedPanel};
@@ -23,7 +24,7 @@ use crate::schema;
 use crate::schema_actions::{Applied, Change};
 use crate::schema_tree::{ActiveTable, SchemaTree, SchemaTreeEvent, TableChange};
 use crate::state;
-use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_BASE, TEXT_SM};
+use crate::tokens::{DOT, ICON_SM, ICON_XS, RADIUS, STRIP, TEXT_BASE, TEXT_SM, TOP_BAR};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Panel {
@@ -287,13 +288,6 @@ impl Sidebar {
                 .border_1()
                 .border_color(theme.border)
                 .rounded(RADIUS)
-                .shadow(vec![BoxShadow {
-                    color: hsla(0., 0., 0., 0.35),
-                    offset: point(px(0.), px(8.)),
-                    blur_radius: px(24.),
-                    spread_radius: px(0.),
-                    inset: false,
-                }])
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                     if event.keystroke.key == "escape" {
                         cx.stop_propagation();
@@ -413,6 +407,10 @@ impl Sidebar {
 
     pub fn connections(&self) -> &[ConnectionConfig] {
         &self.connections
+    }
+
+    pub fn folders(&self) -> &[ConnectionFolder] {
+        &self.folders
     }
 
     // A saved connection or one of its databases.
@@ -551,7 +549,7 @@ impl Sidebar {
                     .text_color(theme.foreground)
                     .child(engine_icon(&current.driver).size(ICON_SM).text_color(color))
                     .child(div().flex_1().min_w_0().truncate().font_semibold().child(current.name.clone()))
-                    .child(div().flex_none().size(rems(0.538)).rounded_full().bg(if connected {
+                    .child(div().flex_none().size(DOT).rounded_full().bg(if connected {
                         theme.success
                     } else {
                         theme.danger
@@ -576,7 +574,7 @@ impl Sidebar {
         h_flex()
             .debug_selector(|| "sidebar-tabs".into())
             .flex_none()
-            .h(rems(3.077))
+            .h(STRIP)
             .border_b_1()
             .border_color(theme.border)
             .children(tabs.into_iter().enumerate().map(|(ix, (key, icon))| {
@@ -642,7 +640,7 @@ impl Sidebar {
     }
 
     fn empty(&self, message: SharedString, cx: &App) -> impl IntoElement {
-        div().p_4().text_color(cx.theme().muted_foreground).child(message)
+        form::empty_state(Some(Icon::new(Lucide::Database)), message, cx)
     }
 }
 
@@ -675,7 +673,7 @@ impl Render for Sidebar {
                 div()
                     .relative()
                     .flex_none()
-                    .h(rems(2.769))
+                    .h(TOP_BAR)
                     .border_b_1()
                     .border_color(theme.border)
                     .child(self.switcher(cx))

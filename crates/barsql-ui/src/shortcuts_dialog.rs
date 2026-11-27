@@ -3,7 +3,7 @@ use gpui_kit::component::{ActiveTheme, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::form;
+use crate::form::{self, ToolButton as _};
 use crate::i18n::{t, t_with};
 use crate::modal::{self, Modal};
 use crate::shortcuts::{self, Binding, Category, SHORTCUTS, ShortcutDef};
@@ -77,8 +77,7 @@ impl ShortcutsDialog {
             .when(!is_default, |el| {
                 el.child(
                     Button::new(SharedString::from(format!("reset-{}", def.id)))
-                        .small()
-                        .label(t(cx, "shortcuts.reset"))
+                        .tool_label(t(cx, "shortcuts.reset"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             shortcuts::reset_binding(def.id, cx);
                             this.error = None;
@@ -92,7 +91,7 @@ impl ShortcutsDialog {
                     .flex_none()
                     .min_w(rems(11.))
                     .px(rems(0.769))
-                    .py(rems(0.308))
+                    .py(rems(0.154))
                     .rounded(RADIUS_SM)
                     .border_1()
                     .border_color(if recording { theme.primary } else { theme.border })
@@ -106,11 +105,10 @@ impl ShortcutsDialog {
                         }])
                     })
                     .bg(theme.background)
-                    .font_family(theme.mono_font_family.clone())
-                    .text_size(TEXT_SM)
-                    .text_center()
+                    .flex()
+                    .justify_center()
                     .cursor_pointer()
-                    .child(shortcuts::format(&binding))
+                    .child(form::keys(&shortcuts::format(&binding), cx))
                     .on_click(cx.listener(move |this, _, _, cx| this.record(def.id, cx))),
             )
     }

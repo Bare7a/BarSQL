@@ -1,6 +1,8 @@
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{Copy, Cut, EditorState, InputState, Paste, SelectAll};
-use gpui_kit::component::menu::PopupMenu;
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::native_menu::NativeMenu;
+use gpui_kit::component::{ActiveTheme, Icon};
 use gpui_kit::*;
 
 use crate::i18n::t;
@@ -8,6 +10,16 @@ use crate::workspace::Workspace;
 
 // Same as gpui_base::POPUP_PRIORITY.
 const PRIORITY: usize = 100;
+
+// An item that deletes or empties something. Its icon is red, as the dialog it opens is, and screen readers still
+// get its label, which a custom-drawn item would lose.
+pub fn danger_item(label: impl Into<SharedString>, icon: Lucide, cx: &App) -> PopupMenuItem {
+    PopupMenuItem::new(label).icon(danger_icon(icon, cx))
+}
+
+pub fn danger_icon(icon: Lucide, cx: &App) -> Icon {
+    Icon::new(icon).text_color(cx.theme().danger)
+}
 
 pub enum Entry {
     Item { label: SharedString, action: Box<dyn Action>, disabled: bool },

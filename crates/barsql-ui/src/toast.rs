@@ -1,7 +1,8 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::tokens::{ICON_SM, RADIUS, TEXT_LG, TEXT_SM};
+use crate::form;
+use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_SM};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{ActiveTheme, Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -133,7 +134,6 @@ pub fn render(window: &Window, cx: &App) -> Option<AnyElement> {
             .border_1()
             .border_color(theme.border)
             .rounded(RADIUS)
-            .shadow_lg()
             .occlude()
             .child(div().w(px(3.)).h_full().absolute().left_0().top_0().bottom_0().rounded_l(RADIUS).bg(stripe))
             .child(icon.size(ICON_SM).flex_none().text_color(stripe))
@@ -161,16 +161,15 @@ pub fn render(window: &Window, cx: &App) -> Option<AnyElement> {
                 div()
                     .id(("toast-dismiss", id as usize))
                     .flex_none()
-                    .size(rems(1.692))
+                    .size(rems(form::TOOL_REM))
                     .flex()
                     .items_center()
                     .justify_center()
                     .rounded(RADIUS)
-                    .text_size(TEXT_LG)
                     .text_color(theme.muted_foreground)
                     .cursor_pointer()
                     .hover(|style| style.bg(theme.accent).text_color(theme.foreground))
-                    .child("×")
+                    .child(Icon::new(IconName::Close).size(ICON_XS))
                     .on_click(move |_, _, cx| dismiss(id, cx)),
             )
     });

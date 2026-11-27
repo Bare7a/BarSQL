@@ -55,7 +55,7 @@ fn problems(
         .size_full()
         .overflow_y_scroll()
         .track_scroll(&tab.problems_scroll)
-        .px(rems(0.923))
+        .px(rems(0.769))
         .py(rems(0.462))
         .gap(rems(0.308))
         .text_size(TEXT_SM)
@@ -106,10 +106,16 @@ pub(super) fn panel(tab: &StructureTab, cx: &mut Context<StructureTab>) -> impl 
             h_flex()
                 .h(rems(LABEL_ROW))
                 .justify_between()
-                .px(rems(0.923))
+                .px(rems(0.769))
                 .text_size(TEXT_XS)
                 .text_color(theme.muted_foreground)
-                .child(h_flex().gap(rems(0.462)).child(t(cx, "structure.preview")).children(statements).children(count))
+                .child(
+                    h_flex()
+                        .gap(rems(0.462))
+                        .child(form::caption(t(cx, "structure.preview"), cx))
+                        .children(statements)
+                        .children(count),
+                )
                 .child(toggle),
         )
         .when(open, |panel| {

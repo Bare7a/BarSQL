@@ -425,12 +425,13 @@ fn result_tabs_count_rows_affected_rows_or_nothing(cx: &mut TestAppContext) {
     let (tab, cx) = open(
         &env,
         cx,
-        "SELECT 1 AS a UNION ALL SELECT 2;\nUPDATE things SET name = name WHERE id <= 3;\nSELECT nope FROM nowhere;",
+        "SELECT 1 AS a UNION ALL SELECT 2;\nUPDATE things SET name = name WHERE id <= 3;\nCREATE TABLE more (x INTEGER);\n\
+         SELECT nope FROM nowhere;",
     );
     cx.dispatch_action(crate::actions::RunAll);
     settle(cx, idle(&tab));
     let counts = cx.update(|_, cx| tab.read(cx).results.read(cx).tab_counts(cx));
-    assert_eq!(counts, [Some(2), Some(3), None]);
+    assert_eq!(counts, [Some(2), Some(3), None, None], "DDL counts no rows");
 }
 
 fn hover_lines(tab: &Entity<QueryTab>, cx: &mut VisualTestContext) -> Vec<String> {

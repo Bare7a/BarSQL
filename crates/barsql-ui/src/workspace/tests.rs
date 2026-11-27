@@ -531,6 +531,21 @@ fn the_side_panels_keep_their_widths_when_the_window_resizes(cx: &mut TestAppCon
     }
 }
 
+// Without room for the editor beside both side panels, the JSON panel steps aside, and comes back at its own width.
+#[gpui_kit::test]
+fn the_json_panel_steps_aside_on_a_narrow_window(cx: &mut TestAppContext) {
+    let _env = Env::new(cx);
+    let (workspace, cx) = open(cx);
+    workspace.update_in(cx, |workspace, window, cx| workspace.toggle_json_panel(window, cx));
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    let given = panel_widths(cx);
+    assert!(given.1.is_some(), "the JSON panel is open");
+    cx.simulate_resize(size(px(800.), px(600.)));
+    assert_eq!(panel_widths(cx), (given.0, None), "no room for it at 800px");
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    assert_eq!(panel_widths(cx), given, "back at its own width");
+}
+
 // Closing the sidebar leaves the JSON panel as wide as it was, and opening it again, by its toggle or the connection
 // switcher, brings back both widths.
 #[gpui_kit::test]

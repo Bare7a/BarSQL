@@ -26,7 +26,7 @@ use crate::schema_tree::{ROW_GAP, ROW_HEIGHT_REM, ROW_PADDING};
 use crate::scrollbars::HoverScrollbar as _;
 use crate::state::{self, set_setting_bool, set_setting_json, setting_bool, setting_json};
 use crate::toast;
-use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_2XS, TEXT_BASE, TEXT_SM};
+use crate::tokens::{ICON_SM, ICON_XS, RADIUS, TEXT_2XS, TEXT_BASE};
 
 const PINS_KEY: &str = "barsql-database-pins";
 const COLLAPSED_KEY: &str = "barsql-databases-collapsed";
@@ -37,8 +37,7 @@ const ROW_REM: f32 = ROW_HEIGHT_REM;
 const HEADER_REM: f32 = grid::TOOLBAR_REM;
 // The tree's filter bar: its padding and its buttons' width, so the options buttons share a column.
 const BAR_PADDING: Rems = rems(0.615);
-const BAR_BUTTON: Rems = rems(2.308);
-const FILTER_REM: f32 = 3.231;
+const BAR_BUTTON: Rems = rems(form::FIELD_REM);
 // The list's height in rows as it opens, and the fewest and most a drag leaves. Kept for the session only.
 const ROWS: (f32, f32, f32) = (6., 2., 40.);
 
@@ -191,7 +190,7 @@ impl DatabasePane {
 
     // `height` runs from the pane's top to the pointer.
     pub fn resize(&mut self, height: Pixels, rem: Pixels, cx: &mut Context<Self>) {
-        let filter = if self.filtered() { FILTER_REM } else { 0. };
+        let filter = if self.filtered() { form::FILTER_BAR_REM } else { 0. };
         let rows = (height / rem - HEADER_REM - filter) / ROW_REM;
         self.rows = rows.clamp(ROWS.1, ROWS.2);
         cx.notify();
@@ -525,9 +524,12 @@ impl DatabasePane {
             (true, true) => Lucide::Pin,
             (true, false) => Lucide::Database,
         };
+        // A size is mono, as the tree's are.
         let detail = match (db.can_connect, self.sizes.get(&db.name)) {
-            (false, _) => Some(t(cx, "sidebar.databaseNoAccess").to_string()),
-            (true, size) => size.map(|size| bytes(cx, *size as i64)),
+            (false, _) => Some(div().child(t(cx, "sidebar.databaseNoAccess"))),
+            (true, size) => {
+                size.map(|size| div().font_family(theme.mono_font_family.clone()).child(bytes(cx, *size as i64)))
+            }
         };
         let name = db.name.clone();
         let (select, double, pick, point) = (name.clone(), name.clone(), name.clone(), name.clone());
@@ -582,24 +584,16 @@ impl DatabasePane {
     }
 
     fn body(&self, shown: Rc<[DatabaseInfo]>, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let note = |text: SharedString| {
-            div()
-                .h(rems(ROW_REM))
-                .flex()
-                .items_center()
-                // Under the rows' names, past their dot and icon.
-                .pl(LIST_INSET + ROW_PADDING + ICON_SM + ROW_GAP + ICON_SM + ROW_GAP)
-                .text_size(TEXT_SM)
-                .text_color(theme.muted_foreground)
-                .child(text)
-                .into_any_element()
-        };
         match &self.listed {
-            Listed::Waiting => note(t(cx, "sidebar.connectToListDatabases")),
-            Listed::Loading(_) => note(t(cx, "connection.loadingDatabases")),
-            Listed::Failed(error) => note(format!("{} - {error}", t(cx, "connection.databasesFailed")).into()),
-            Listed::Ready(_) if shown.is_empty() => note(t(cx, "sidebar.noMatches")),
+            Listed::Waiting => form::empty_state(None, t(cx, "sidebar.connectToListDatabases"), cx).into_any_element(),
+            Listed::Loading(_) => form::loading_state(t(cx, "connection.loadingDatabases"), cx).into_any_element(),
+            Listed::Failed(error) => {
+                let text = format!("{}\n{error}", t(cx, "connection.databasesFailed"));
+                form::error(text, cx).m(LIST_INSET).into_any_element()
+            }
+            Listed::Ready(_) if shown.is_empty() => {
+                form::empty_state(None, t(cx, "sidebar.noMatches"), cx).into_any_element()
+            }
             Listed::Ready(_) => {
                 let height = rems(ROW_REM * (shown.len() as f32).min(self.rows) + 0.308);
                 div()

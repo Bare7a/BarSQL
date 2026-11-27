@@ -396,7 +396,7 @@ impl InsertRowForm {
 impl Render for InsertRowForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = if self.loading {
-            modal::body().child(div().text_size(TEXT_SM).child(t(cx, "tableView.addRowDialog.loading")))
+            modal::body().child(form::loading_state(t(cx, "tableView.addRowDialog.loading"), cx))
         } else {
             let message = self.invalid.map(|invalid| match invalid {
                 Invalid::Required => t(cx, "tableView.addRowDialog.errorRequired"),

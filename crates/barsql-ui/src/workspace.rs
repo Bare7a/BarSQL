@@ -22,7 +22,7 @@ use gpui_kit::*;
 
 use crate::actions::*;
 use crate::assets::{LOGO, engine_icon, vector_img};
-use crate::connections_panel::{connection_subtitle, parse_color};
+use crate::connections_panel::{connection_detail, parse_color};
 use crate::dialogs::{self, Confirm};
 use crate::er_diagram::{self, ErDiagram};
 use crate::form::LargeButton as _;
@@ -42,7 +42,9 @@ use crate::structure_tab::{StructureTab, StructureTabEvent};
 use crate::table_tab::{TableTab, TableTabEvent};
 use crate::theme::ThemeChoice;
 use crate::toast;
-use crate::tokens::{ICON_2XS, ICON_MD, ICON_XL, ICON_XS, RADIUS, RADIUS_LG, TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS};
+use crate::tokens::{
+    DOT_SM, ICON_MD, ICON_XL, ICON_XS, RADIUS, RADIUS_LG, TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS, TOP_BAR,
+};
 use crate::window_state::{self, WindowState};
 use crate::{
     LaunchOptions, about_dialog, command_palette, connection_dialog, context_menu, file_dialogs, form, grid, schema,
@@ -55,6 +57,8 @@ const SIDEBAR_WIDTH_KEY: &str = "barsql-sidebar-w";
 const JSON_WIDTH_KEY: &str = "barsql-json-w";
 const SIDEBAR_WIDTHS: (f32, f32, f32) = (280., 200., 520.);
 const JSON_WIDTHS: (f32, f32, f32) = (320., 220., 640.);
+// Below this the JSON viewer steps aside until the window widens again.
+const CENTER_MIN: f32 = 400.;
 const CLOSED_TABS_LIMIT: usize = 10;
 const RECENT_CONNECTIONS: usize = 5;
 const SESSION_SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -240,8 +244,8 @@ impl Render for TabDrag {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         div()
-            .px_2()
-            .py_1()
+            .px(rems(0.462))
+            .py(rems(0.231))
             .rounded(RADIUS)
             .border_1()
             .border_color(theme.border)
@@ -785,7 +789,8 @@ impl Workspace {
             self.sidebar_width = width;
             store(SIDEBAR_WIDTH_KEY, width);
         }
-        if self.json_open
+        // The JSON panel is in the group only while it's open and has room.
+        if sizes.len() == usize::from(self.sidebar_open) + 2
             && let Some(&width) = sizes.last()
         {
             self.json_width = width;
@@ -1868,13 +1873,18 @@ impl Workspace {
         let last = state::bar(cx).last_runs();
         let used = last.iter().filter_map(|(id, at)| sidebar.connection(id).map(|c| (c, Some(at.clone()))));
         let unused = sidebar.connections().iter().filter(|c| !last.iter().any(|(id, _)| *id == c.id));
-        let recent: Vec<(ConnectionConfig, Option<String>)> =
-            used.chain(unused.map(|c| (c.clone(), None))).take(RECENT_CONNECTIONS).collect();
+        let recent: Vec<(ConnectionConfig, Option<String>, String)> = used
+            .chain(unused.map(|c| (c.clone(), None)))
+            .take(RECENT_CONNECTIONS)
+            .map(|(c, at)| {
+                let subtitle = connection_detail(&c, sidebar.connections(), sidebar.folders());
+                (c, at, subtitle)
+            })
+            .collect();
         let (lang, now) = (cx.global::<I18n>().lang(), jiff::Timestamp::now().as_millisecond());
-        let rows = recent.into_iter().enumerate().map(|(ix, (connection, at))| {
+        let rows = recent.into_iter().enumerate().map(|(ix, (connection, at, subtitle))| {
             let color = parse_color(&connection.color).unwrap_or(theme.primary);
             let when = at.map(|at| format_relative_time(&at, lang, now));
-            let subtitle = connection_subtitle(&connection);
             h_flex()
                 .id(("welcome-connection", ix))
                 .debug_selector(move || format!("welcome-connection-{ix}"))
@@ -1934,10 +1944,12 @@ impl Workspace {
                 .test_support()
         });
         v_flex()
+            .w_full()
+            .max_w(rems(36.))
             .items_center()
             .gap(rems(0.615))
             .child(form::caption(t(cx, "app.pickEngine"), cx))
-            .child(h_flex().w(rems(36.)).flex_wrap().justify_center().gap(rems(0.615)).children(engines))
+            .child(h_flex().w_full().flex_wrap().justify_center().gap(rems(0.615)).children(engines))
     }
 
     // A query tab on the selected connection, or the first one when none is picked yet.
@@ -1988,11 +2000,11 @@ impl Workspace {
                     let color = if active { theme.foreground } else { theme.muted_foreground };
                     div()
                         .debug_selector(move || format!("unsaved-tab-{ix}"))
-                        .size(ICON_2XS)
+                        .size(ICON_XS)
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(div().size(rems(0.462)).rounded_full().bg(color))
+                        .child(div().size(DOT_SM).rounded_full().bg(color))
                         .into_any_element()
                 };
                 h_flex()
@@ -2020,11 +2032,11 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(Icon::new(open.view.icon(cx)).size(ICON_2XS).text_color(color)),
+                            .child(Icon::new(open.view.icon(cx)).size(ICON_XS).text_color(color)),
                     )
                     .when(read_only, |el| {
                         let lock = if active { theme.foreground.opacity(0.7) } else { theme.muted_foreground };
-                        el.child(Icon::new(Lucide::Lock).size(ICON_2XS).text_color(lock))
+                        el.child(Icon::new(Lucide::Lock).size(ICON_XS).text_color(lock))
                     })
                     // The title, as the tab's context menu hides the tab from test lookups.
                     .child(
@@ -2055,7 +2067,7 @@ impl Workspace {
                                 .opacity(if close_hovered || unsaved { 1. } else { 0.7 })
                                 .child(match unsaved {
                                     true => dot(),
-                                    false => Icon::new(Lucide::Pin).size(ICON_2XS).into_any_element(),
+                                    false => Icon::new(Lucide::Pin).size(ICON_XS).into_any_element(),
                                 })
                                 .on_click(cx.listener({
                                     let id = id.clone();
@@ -2074,7 +2086,7 @@ impl Workspace {
                                 .child(match unsaved {
                                     true => dot(),
                                     false => Icon::new(IconName::Close)
-                                        .size(ICON_2XS)
+                                        .size(ICON_XS)
                                         .when(close_hovered, |icon| icon.text_color(theme.danger))
                                         .into_any_element(),
                                 })
@@ -2137,7 +2149,7 @@ impl Workspace {
             .debug_selector(|| "tab-bar".into())
             .relative()
             .flex_none()
-            .h(rems(2.769))
+            .h(TOP_BAR)
             .bg(theme.tab_bar)
             .border_b_1()
             .border_color(theme.border)
@@ -2565,6 +2577,8 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let title = SharedString::from("BarSQL");
+        let sidebar = if self.sidebar_open { self.sidebar_width } else { px(0.) };
+        let json_shown = self.json_open && window.viewport_size().width - sidebar - self.json_width >= px(CENTER_MIN);
         let main = match self.active_tab() {
             Some(tab) => v_flex()
                 .size_full()
@@ -2708,7 +2722,7 @@ impl Render for Workspace {
                             )
                         })
                         .child(resizable_panel().child(main))
-                        .when(self.json_open, |panels| {
+                        .when(json_shown, |panels| {
                             panels.child(
                                 resizable_panel()
                                     .size(self.json_width)

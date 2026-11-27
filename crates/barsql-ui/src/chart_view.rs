@@ -197,14 +197,14 @@ impl ChartView {
                     .debug_selector(|| "chart-title".into())
                     .child(title(&self.settings, data, columns, cx)),
             )
-            .child(
+            .children(meta(data, cx).map(|meta| {
                 div()
                     .flex_none()
                     .text_size(TEXT_XS)
                     .text_color(theme.muted_foreground)
                     .debug_selector(|| "chart-meta".into())
-                    .child(meta(data, cx)),
-            );
+                    .child(meta)
+            }));
         let legend = (names.len() > 1).then(|| {
             h_flex()
                 .flex_none()
@@ -548,12 +548,9 @@ fn title(settings: &Settings, data: &ChartData, columns: &[Column], cx: &App) ->
 }
 
 // The rows read, and which labels were left out.
-fn meta(data: &ChartData, cx: &App) -> String {
-    let rows = match (data.rows_cut, data.rows) {
-        (true, _) => t_with(cx, "chart.cappedRows", &[("count", &count(cx, MAX_ROWS))]),
-        (false, 1) => t_with(cx, "chart.rowCount_one", &[("count", &count(cx, 1))]),
-        (false, rows) => t_with(cx, "chart.rowCount_other", &[("count", &count(cx, rows))]),
-    };
+// The toolbar under the chart counts the rows, so this says only what the chart leaves out.
+fn meta(data: &ChartData, cx: &App) -> Option<String> {
+    let rows = data.rows_cut.then(|| t_with(cx, "chart.cappedRows", &[("count", &count(cx, MAX_ROWS))]));
     let cut = data.cut.map(|cut| {
         let key = match cut {
             Cut::Top => "chart.cappedTop",
@@ -561,7 +558,10 @@ fn meta(data: &ChartData, cx: &App) -> String {
         };
         t_with(cx, key, &[("shown", &count(cx, data.labels.len())), ("total", &count(cx, data.groups))])
     });
-    std::iter::once(rows).chain(cut).map(|part| part.to_string()).collect::<Vec<_>>().join(" · ")
+    let text = rows.into_iter().chain(cut).map(|part| part.to_string()).collect::<Vec<_>>().join(" · ");
+    // Its parts were written to follow the count, so the first letter goes up.
+    let mut chars = text.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect())
 }
 
 fn series_name(series: &Series, columns: &[Column], cx: &App) -> SharedString {

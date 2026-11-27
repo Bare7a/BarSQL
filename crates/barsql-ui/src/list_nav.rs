@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::tokens::RADIUS;
+use crate::tokens::{ICON_XS, RADIUS};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle};
@@ -171,12 +171,13 @@ fn scrolls(handle: &impl ScrollbarHandle) -> bool {
 
 // Added as the last child so the row's hover actions don't cover it.
 pub fn ring<E: ParentElement + Styled>(el: E, cx: &App) -> E {
-    el.relative().child(div().absolute().inset_0().rounded(RADIUS).border_2().border_color(cx.theme().primary))
+    el.relative().child(div().absolute().inset_0().rounded(RADIUS).border_2().border_color(cx.theme().ring))
 }
 
-// A button for `hover_actions`. Keeps the row's pointing hand instead of GPUI Kit's arrow.
+// A button for `hover_actions`: GPUI Kit's small icon button with the app's 12px icon. Keeps the row's pointing
+// hand instead of GPUI Kit's arrow.
 pub fn row_button(id: impl Into<ElementId>, icon: Lucide) -> Button {
-    Button::new(id).small().icon(Icon::new(icon)).cursor_pointer()
+    Button::new(id).small().size(rems(1.5)).p_0().child(Icon::new(icon).size(ICON_XS)).cursor_pointer()
 }
 
 // Buttons over the end of a row, shown while `group` is hovered. Absolute, so the text keeps its full width. `inset`

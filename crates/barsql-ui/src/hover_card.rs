@@ -255,8 +255,8 @@ impl HoverCard {
                         .flex_1()
                         .min_w_0()
                         .gap(m.badge_gap)
-                        .when(row.pk, |el| el.child(form::badge(style.pk.clone(), style.primary)))
-                        .when(row.fk, |el| el.child(form::badge(style.fk.clone(), style.warning)))
+                        .when(row.pk, |el| el.child(form::badge(style.pk.clone(), style.warning)))
+                        .when(row.fk, |el| el.child(form::badge(style.fk.clone(), style.primary)))
                         .children(row.note.clone().map(|note| {
                             div().min_w_0().truncate().text_size(m.small).text_color(style.muted).child(note)
                         })),
@@ -703,7 +703,6 @@ impl Render for HoverCard {
                     .border_1()
                     .border_color(border)
                     .rounded(RADIUS)
-                    .shadow_md()
                     .font_family(theme.mono_font_family.clone())
                     .text_size(m.size)
                     .text_color(theme.foreground)

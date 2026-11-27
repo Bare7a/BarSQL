@@ -1,24 +1,24 @@
 {
   "update": {
-    "checking": "Checking for Updates…",
+    "checking": "Checking for updates…",
     "contacting": "Contacting update server…",
-    "available": "Update Available",
-    "upToDate": "You're Up to Date",
-    "failed": "Update Failed",
-    "skip": "Skip This Version",
-    "remind": "Remind Me Later",
-    "retry": "Try Again",
-    "install": "Install Update",
-    "restart": "Restart & Apply",
-    "downloading": "Downloading Update",
+    "available": "Update available",
+    "upToDate": "You're up to date",
+    "failed": "Update failed",
+    "skip": "Skip this version",
+    "remind": "Remind me later",
+    "retry": "Try again",
+    "install": "Install update",
+    "restart": "Restart & apply",
+    "downloading": "Downloading update",
     "starting": "Starting download…",
     "progress": "{{percent}}% · {{written}} of {{total}}",
     "downloaded": "Downloaded {{written}}",
-    "verifying": "Verifying Update",
+    "verifying": "Verifying update",
     "checksum": "Checking the checksum…",
-    "installing": "Installing Update",
+    "installing": "Installing update",
     "unpacking": "Unpacking and staging…",
-    "ready": "Update Ready",
+    "ready": "Update ready",
     "adminPrompt": "BarSQL needs your password to install the update.",
     "during": "During {{stage}}: {{message}}",
     "stage": {
@@ -47,6 +47,13 @@
     "columnCount_other": "{{count}} columns"
   },
   "editor": {
+    "runAll": "Run all",
+    "replaceAll": "Replace all",
+    "findNext": "Find next",
+    "actionSaveQuery": "Save query",
+    "actionRunSelection": "Run selection",
+    "actionRunAll": "Run all",
+    "actionRenameSaved": "Rename saved query",
     "moveToDatabase": "Switch database",
     "databaseBusy": "Finish the transaction or edits first",
     "sql": {
@@ -82,6 +89,21 @@
     "contextGoToDefinition": "Go to definition"
   },
   "connection": {
+    "tabColor": "Tab color",
+    "sslMode": "SSL mode",
+    "sshUsername": "SSH username",
+    "sshPort": "SSH port",
+    "sshPassword": "SSH password",
+    "sshPassphrase": "Key passphrase",
+    "sshKnownHosts": "known_hosts file",
+    "sshKeyPath": "Private key file",
+    "sshHost": "SSH host",
+    "newTitle": "New connection",
+    "namePlaceholder": "My database",
+    "file": "Database file",
+    "editTitle": "Edit connection",
+    "driver": "Database type",
+    "defaultSchema": "Default schema",
     "showAllDatabases": "Show all databases",
     "showAllDatabasesHint": "Lists the server's databases in the sidebar.",
     "defaultDatabase": "Default database",
@@ -136,6 +158,16 @@
     "messagesCount": "{{count}} message",
     "messagesCount_other": "{{count}} messages",
     "copyMessages": "Copy all messages",
+    "messagesMatched_one": "{{matched}} of {{count}} message",
+    "messagesMatched_other": "{{matched}} of {{count}} messages",
+    "messagesWarnings_one": "{{count}} warning",
+    "messagesWarnings_other": "{{count}} warnings",
+    "filterMessages": "Filter messages",
+    "filterAll": "All",
+    "filterWarnings": "Warnings",
+    "filterNotices": "Notices",
+    "filterInfo": "Info",
+    "noMessagesMatch": "No message matches the filter",
     "outcomeRows": "{{count}} row",
     "outcomeRows_other": "{{count}} rows",
     "outcomeAffected": "{{count}} row affected",
@@ -157,8 +189,9 @@
     "copyMessage": "Copy message",
     "metaRows_one": "{{count}} row · {{ms}} ms",
     "metaRows_other": "{{count}} rows · {{ms}} ms",
-    "metaRowsShort_one": "{{ms}} ms · {{count}} row",
-    "metaRowsShort_other": "{{ms}} ms · {{count}} rows",
+    "metaAffected_one": "{{count}} row affected · {{ms}} ms",
+    "metaAffected_other": "{{count}} rows affected · {{ms}} ms",
+    "metaDone": "Done · {{ms}} ms",
     "copyAs": "Copy as {{format}}",
     "planShowQuiet_one": "Show 1 more (0 or false)",
     "planShowQuiet_other": "Show {{count}} more (0 or false)",
@@ -170,6 +203,8 @@
     "discardConfirm": "Discard and run"
   },
   "sidebar": {
+    "schemaFailed": "Could not load the schema",
+    "connectFailed": "Could not connect to {{name}}",
     "newDatabase": "New database…",
     "databaseInUse": "\"{{tab}}\" has unfinished work on this database.",
     "databaseOptions": "Database options",
@@ -331,6 +366,10 @@
     "exportStopped_other": "Export stopped - {{fileName}} holds only the first {{count}} rows"
   },
   "menu": {
+    "quickSearch": "Quick search",
+    "reopenClosedTab": "Reopen closed tab",
+    "closeTab": "Close tab",
+    "newTab": "New tab",
     "editTableStructure": "Edit table structure",
     "newTable": "New table",
     "toggleSidebar": "Sidebar",
@@ -340,7 +379,7 @@
     "cut": "Cut",
     "copy": "Copy",
     "paste": "Paste",
-    "selectAll": "Select All",
+    "selectAll": "Select all",
     "services": "Services",
     "hideApp": "Hide BarSQL",
     "hideOthers": "Hide Others",
@@ -353,7 +392,7 @@
     "stripedRows": "Striped rows",
     "typeColors": "Color values by type",
     "enterAcceptsSuggestions": "Accept suggestions with Enter",
-    "commandPalette": "Command Palette…"
+    "commandPalette": "Command palette…"
   },
   "errors": {
     "pathNotText": "Can't use {{path}}: its path isn't valid UTF-8. Rename it and try again.",
@@ -495,8 +534,6 @@
     "rowsBy": "Rows by {{label}}",
     "valuesBy": "{{values}} by {{label}}",
     "nothingToCombine": "Each label has one row, so there's nothing to combine",
-    "rowCount_one": "{{count}} row",
-    "rowCount_other": "{{count}} rows",
     "cappedTop": "the largest {{shown}} of {{total}} labels",
     "cappedFirst": "the first {{shown}} of {{total}} labels",
     "cappedRows": "first {{count}} rows",
@@ -642,7 +679,7 @@
     "foreignKeys": "Foreign keys",
     "checks": "Checks",
     "loadFailed": "Couldn't load the table's structure",
-    "retry": "Try Again",
+    "retry": "Try again",
     "name": "Name",
     "type": "Type",
     "nullable": "Nullable",
@@ -662,6 +699,7 @@
     }
   },
   "quickSearch": {
+    "title": "Quick search",
     "groupTabs": "Open tabs",
     "groupTables": "Tables",
     "groupSaved": "Saved queries",
@@ -669,5 +707,8 @@
     "navigate": "Navigate",
     "open": "Open",
     "close": "Close"
+  },
+  "uiZoom": {
+    "label": "UI zoom"
   }
 }
